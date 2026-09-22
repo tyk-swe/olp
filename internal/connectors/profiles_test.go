@@ -2,11 +2,15 @@ package connectors
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -124,6 +128,7 @@ func TestProfileWrappersKeepNativeStateAndVersionBeforeSigning(t *testing.T) {
 			if err != nil || !strings.Contains(r.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || r.Header.Get("X-Amz-Date") == "" {
 				t.Fatalf("unsigned completed native request: %v", err)
 			}
+			assertProfileSignature(t, r, body, "fixture-secret-access-key-value")
 		}
 	}
 }
@@ -145,6 +150,14 @@ func TestSemanticConfigurationSurvivesSecretRotationAndRefusesReservedControls(t
 		c.SemanticHeaders = map[string]string{name: "forbidden"}
 		if err := c.Validate(&egress.Policy{}); err == nil {
 			t.Fatalf("accepted reserved semantic control %s", name)
+		}
+	}
+	for _, value := range []string{"bad\x01value", "bad\x7fvalue", "bad\r\nvalue"} {
+		c.SemanticHeaders = map[string]string{"Anthropic-Beta": value}
+		if err := c.Validate(&egress.Policy{}); err == nil {
+			t.Fatal("invalid HTTP semantic header admitted")
+		} else if strings.Contains(err.Error(), value) {
+			t.Fatal("header diagnostic echoed value")
 		}
 	}
 	c.SemanticHeaders = map[string]string{"Anthropic-Beta": "a", "anthropic-beta": "b"}
@@ -260,5 +273,79 @@ func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {
 	}
 	if _, err := io.ReadAll(config.StreamPayload(bytes.NewReader(encode("chunk", payload)), 32)); err == nil {
 		t.Fatal("oversized event accepted")
+	}
+}
+
+func TestBedrockHostingEnvelopeRejectsAmbiguousMembers(t *testing.T) {
+	cfg := profileConfig(t, "bedrock-anthropic-invoke")
+	native := base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))
+	valid := `{"bytes":"` + native + `"}`
+	for _, tc := range []struct {
+		name, payload string
+		duplicate     bool
+	}{
+		{"duplicate body member", `{"bytes":"` + native + `","bytes":"` + native + `"}`, false},
+		{"trailing document", valid + `{}`, false},
+		{"duplicate reserved header", valid, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}
+			if tc.duplicate {
+				headers = append(headers, eventstream.Header{Name: ":event-type", Value: eventstream.StringValue("chunk")})
+			}
+			var frame bytes.Buffer
+			if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(tc.payload)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.ReadAll(cfg.StreamPayload(&frame, 4096)); err == nil {
+				t.Fatal("ambiguous hosting envelope accepted")
+			}
+		})
+	}
+}
+
+// Independent SigV4 verification proves the hosting/body/header construction
+// was finalized before signing; it does not reuse the maintained SDK signer.
+func assertProfileSignature(t *testing.T, request *http.Request, body []byte, secret string) {
+	t.Helper()
+	parts := strings.Split(strings.TrimPrefix(request.Header.Get("Authorization"), "AWS4-HMAC-SHA256 "), ", ")
+	values := map[string]string{}
+	for _, part := range parts {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			t.Fatal("invalid signature fields")
+		}
+		values[key] = value
+	}
+	credential := strings.Split(values["Credential"], "/")
+	if len(credential) != 5 {
+		t.Fatal("invalid credential scope")
+	}
+	var canonical strings.Builder
+	for _, name := range strings.Split(values["SignedHeaders"], ";") {
+		value := request.Header.Get(name)
+		if name == "host" {
+			value = request.URL.Host
+		}
+		if name == "content-length" {
+			value = strconv.FormatInt(request.ContentLength, 10)
+		}
+		canonical.WriteString(name + ":" + strings.Join(strings.Fields(value), " ") + "\n")
+	}
+	hash := func(value []byte) string { sum := sha256.Sum256(value); return hex.EncodeToString(sum[:]) }
+	canonicalRequest := request.Method + "\n" + request.URL.EscapedPath() + "\n" + request.URL.RawQuery + "\n" + canonical.String() + "\n" + values["SignedHeaders"] + "\n" + hash(body)
+	scope := strings.Join(credential[1:], "/")
+	toSign := "AWS4-HMAC-SHA256\n" + request.Header.Get("X-Amz-Date") + "\n" + scope + "\n" + hash([]byte(canonicalRequest))
+	sign := func(key []byte, value string) []byte {
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(value))
+		return mac.Sum(nil)
+	}
+	key := []byte("AWS4" + secret)
+	for _, value := range credential[1:] {
+		key = sign(key, value)
+	}
+	if hex.EncodeToString(sign(key, toSign)) != values["Signature"] {
+		t.Fatal("signature does not cover final native body, path and headers")
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/oif"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 )
 
@@ -48,12 +50,33 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	if total < 16 || uint64(total) > uint64(r.limit) {
 		return 0, errors.New("Bedrock event exceeds the configured event limit")
 	}
-	message, err := eventstream.NewDecoder().Decode(io.MultiReader(bytes.NewReader(prelude[:]), io.LimitReader(r.reader, int64(total)-12)), nil)
+	// Inspect original header entries before the SDK decoder's map-like Set
+	// operation can collapse duplicate pseudo-headers.
+	headerBytes := binary.BigEndian.Uint32(prelude[4:8])
+	if headerBytes > total-16 {
+		return 0, errors.New("malformed Bedrock event headers")
+	}
+	frameBytes := make([]byte, int(total))
+	copy(frameBytes, prelude[:])
+	if _, err := io.ReadFull(r.reader, frameBytes[12:]); err != nil {
+		return 0, err
+	}
+	if err := validateBedrockHeaderMembers(frameBytes[12 : 12+headerBytes]); err != nil {
+		return 0, err
+	}
+	message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frameBytes), nil)
 	if err != nil {
 		return 0, errors.New("malformed Bedrock event framing")
 	}
 	messageType, eventType := "", ""
+	seenHeaders := map[string]bool{}
 	for _, header := range message.Headers {
+		if header.Name == ":message-type" || header.Name == ":event-type" {
+			if seenHeaders[header.Name] {
+				return 0, errors.New("ambiguous Bedrock event header")
+			}
+			seenHeaders[header.Name] = true
+		}
 		if header.Name == ":message-type" {
 			messageType = header.Value.String()
 		}
@@ -64,12 +87,15 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	if messageType != "event" || eventType != "chunk" {
 		return 0, errors.New("unexpected Bedrock event or upstream exception")
 	}
+	if _, err := oif.ParseJSON(message.Payload, oif.Limits{MaxBytes: r.limit}); err != nil {
+		return 0, errors.New("invalid or ambiguous Bedrock chunk envelope")
+	}
 	var envelope struct {
 		Bytes string `json:"bytes"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(message.Payload))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&envelope); err != nil || envelope.Bytes == "" {
+	if err := decoder.Decode(&envelope); err != nil || envelope.Bytes == "" || decoder.Decode(new(any)) != io.EOF {
 		return 0, errors.New("invalid Bedrock chunk envelope")
 	}
 	payload, err := base64.StdEncoding.Strict().DecodeString(envelope.Bytes)
@@ -96,4 +122,51 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	}
 	r.frame = bytes.NewReader(frame)
 	return r.frame.Read(p)
+}
+
+func validateBedrockHeaderMembers(data []byte) error {
+	seen := map[string]bool{}
+	invalid := errors.New("malformed or ambiguous Bedrock event headers")
+	for len(data) > 0 {
+		length := int(data[0])
+		data = data[1:]
+		if length == 0 || len(data) < length+1 {
+			return invalid
+		}
+		name := string(data[:length])
+		kind := data[length]
+		data = data[length+1:]
+		if name == ":message-type" || name == ":event-type" {
+			if seen[name] || kind != 7 {
+				return invalid
+			}
+			seen[name] = true
+		}
+		width := 0
+		switch kind {
+		case 0, 1:
+		case 2:
+			width = 1
+		case 3:
+			width = 2
+		case 4:
+			width = 4
+		case 5, 8:
+			width = 8
+		case 9:
+			width = 16
+		case 6, 7:
+			if len(data) < 2 {
+				return invalid
+			}
+			width = 2 + int(binary.BigEndian.Uint16(data[:2]))
+		default:
+			return invalid
+		}
+		if len(data) < width {
+			return invalid
+		}
+		data = data[width:]
+	}
+	return nil
 }

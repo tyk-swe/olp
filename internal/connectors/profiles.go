@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http/httpguts"
+
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -191,7 +193,7 @@ func (c Config) ValidateProfile() error {
 	seen := map[string]bool{}
 	for name, value := range c.SemanticHeaders {
 		key := textproto.CanonicalMIMEHeaderKey(name)
-		if seen[key] || !slices.Contains(p.SemanticHeaders, key) || len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") {
+		if seen[key] || !slices.Contains(p.SemanticHeaders, key) || len(value) > 2048 || !httpguts.ValidHeaderFieldValue(value) {
 			return errors.New("semantic header is duplicated, malformed or outside the profile allowlist")
 		}
 		seen[key] = true
@@ -228,10 +230,14 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	if err != nil {
 		return "", err
 	}
-	if !slices.Contains(p.Operations, source.Operation()) {
+	operation := source.Operation()
+	if source == openai.Family("bedrock_count") {
+		operation = "token_count"
+	}
+	if !slices.Contains(p.Operations, operation) {
 		return "", errors.New("operation is outside the selected provider profile")
 	}
-	switch source.Operation() {
+	switch operation {
 	case "generation":
 		switch p.Dialect {
 		case "openai-chat":
@@ -271,6 +277,8 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 		return openai.FamilyModeration, nil
 	case "rerank":
 		return openai.FamilyRerank, nil
+	case "bedrock_invoke":
+		return openai.FamilyBedrockInvoke, nil
 	}
 	return "", errors.New("operation has no codec in the selected profile")
 }
@@ -402,15 +410,23 @@ func (p Profile) OperationDialect(operation string) string {
 		case "direct-gemini":
 			return "gemini-embeddings"
 		case "vertex-google":
-			return "vertex-predict-embeddings"
+			return "vertex-embeddings"
 		case "bedrock-converse":
-			return "bedrock-invoke-embeddings"
+			return "bedrock-embeddings"
 		}
 		return "openai-embeddings"
 	case "token_count":
-		return p.Dialect + "-token-count"
+		switch p.Dialect {
+		case "anthropic-messages":
+			return "anthropic-count-tokens"
+		case "gemini-generate-content":
+			return "gemini-count-tokens"
+		case "bedrock-converse":
+			return "bedrock-count-tokens"
+		}
+		return "openai-input-tokens"
 	case "rerank":
-		return "native-rerank"
+		return "rerank"
 	case "bedrock_invoke":
 		return "bedrock-invoke"
 	}

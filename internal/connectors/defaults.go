@@ -59,9 +59,9 @@ func defaultFields(dialect, operation string) []string {
 		switch dialect {
 		case "gemini-embeddings":
 			return strings.Fields("outputDimensionality taskType title")
-		case "vertex-predict-embeddings":
+		case "vertex-embeddings":
 			return []string{"parameters"}
-		case "bedrock-invoke-embeddings":
+		case "bedrock-embeddings":
 			return strings.Fields("dimensions normalize embeddingTypes")
 		}
 		return strings.Fields("dimensions encoding_format")

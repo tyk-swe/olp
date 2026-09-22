@@ -91,10 +91,11 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
-	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
+	if _, err = h.Pool.Exec(t.Context(), `DROP TABLE IF EXISTS olp_go.provider_network_credentials;
+	    ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.route_revisions DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.requests DROP COLUMN policy_decisions;
-	    DELETE FROM olp_go.migrations WHERE version='0021_content_policies.sql'`); err != nil {
+	    DELETE FROM olp_go.migrations WHERE version>='0021_content_policies.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.Installation(t.Context(), h.Pool); err == nil {

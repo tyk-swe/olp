@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -21,15 +22,19 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 	defer file.Close()
 	var document struct {
 		Providers []struct {
-			ProviderID     string        `json:"provider_id"`
-			Configuration  Configuration `json:"configuration"`
-			Model          *string       `json:"model"`
-			CredentialFile *string       `json:"credential_file"`
+			ProviderID            string        `json:"provider_id"`
+			Configuration         Configuration `json:"configuration"`
+			Model                 *string       `json:"model"`
+			CredentialFile        *string       `json:"credential_file"`
+			NetworkCredentialFile *string       `json:"network_credential_file"`
 		} `json:"providers"`
 	}
 	data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
 	if err != nil || len(data) > 4<<20 {
 		return nil, errors.New("mounted connector configuration exceeds its bound")
+	}
+	if _, err := oif.ParseJSON(data, oif.Limits{MaxBytes: 4 << 20}); err != nil {
+		return nil, errors.New("ambiguous mounted connector configuration")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -52,6 +57,20 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 		if required != (entry.CredentialFile != nil) {
 			return nil, errors.New("mounted credential file does not match authentication mode")
 		}
+		var networkSecret []byte
+		networkRequired := entry.Configuration.Options.Network != nil && entry.Configuration.Options.Network.CredentialID != ""
+		if networkRequired != (entry.NetworkCredentialFile != nil) {
+			return nil, errors.New("mounted network credential file must match a configured reference")
+		}
+		if networkRequired {
+			networkSecret, err = secrets.ReadFile(*entry.NetworkCredentialFile)
+			if err != nil {
+				return nil, err
+			}
+			if err := egress.ValidateConnectionSecret(networkSecret); err != nil {
+				return nil, err
+			}
+		}
 		var secret []byte
 		if required {
 			secret, err = secrets.ReadFile(*entry.CredentialFile)
@@ -69,7 +88,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 		if err = json.Unmarshal(data, &config); err != nil {
 			return nil, err
 		}
-		out[entry.ProviderID] = runtime.MountedProvider{Configuration: config, Credential: secret}
+		out[entry.ProviderID] = runtime.MountedProvider{Configuration: config, Credential: secret, NetworkCredential: networkSecret}
 	}
 	return out, nil
 }

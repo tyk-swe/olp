@@ -198,6 +198,12 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
 	case openai.FamilyVertexEmbeddings:
 		path = "/models/" + url.PathEscape(model) + ":predict"
+	case openai.FamilyBedrockInvoke:
+		operation := "invoke"
+		if stream {
+			operation = "invoke-with-response-stream"
+		}
+		path = "/model/" + url.PathEscape(model) + "/" + operation
 	case openai.FamilyBedrockEmbeddings:
 		path = "/model/" + url.PathEscape(model) + "/invoke"
 	case openai.FamilyRerank:

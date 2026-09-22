@@ -27,6 +27,9 @@ func Prepare(request *openai.Request, config connectors.Config, model string, le
 	defaults := legacyDefaults
 	var origins []connectors.DefaultProvenance
 	if config.ProfileID != "" {
+		if err := config.ValidateProfile(); err != nil {
+			return Invocation{}, profileError(err)
+		}
 		var err error
 		wire, err = config.TargetFamily(request.Family)
 		if err != nil {
