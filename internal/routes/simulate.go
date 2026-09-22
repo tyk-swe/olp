@@ -12,19 +12,25 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type simulateDraftRequest struct {
-	Operation            string       `json:"operation"`
-	Surface              string       `json:"surface"`
-	Mode                 string       `json:"mode"`
-	Seed                 string       `json:"seed"`
-	Preferences          *Preferences `json:"preferences"`
-	EstimatedInputTokens *int64       `json:"estimated_input_tokens"`
-	MaxOutputTokens      *int64       `json:"max_output_tokens"`
+	Operation            string            `json:"operation"`
+	Surface              string            `json:"surface"`
+	Mode                 string            `json:"mode"`
+	Seed                 string            `json:"seed"`
+	Preferences          *Preferences      `json:"preferences"`
+	EstimatedInputTokens *int64            `json:"estimated_input_tokens"`
+	MaxOutputTokens      *int64            `json:"max_output_tokens"`
+	Request              json.RawMessage   `json:"request"`
+	Dialect              string            `json:"dialect"`
+	SemanticHeaders      map[string]string `json:"semantic_headers"`
+	QuerySettings        map[string]string `json:"query_settings"`
+	APIKeyID             *string           `json:"api_key_id"`
 }
 
 func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
@@ -67,7 +73,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input simulateDraftRequest
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if err = validTuple(input.Operation, input.Surface, input.Mode); err != nil {
@@ -87,9 +93,6 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, pgx.ErrNoRows
 	}
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
-		return access.Reply{}, err
-	}
-	if err := requireFidelityExecution(d.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	live, err := resolve(r.Context(), s.Access.Pool, d.Targets)
@@ -114,6 +117,13 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	route.ProjectID = d.ProjectID
+	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
+		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
+		if err != nil {
+			return access.Reply{}, err
+		}
+	}
 	route.Policy, _, err = loadPolicy(r.Context(), tx, "route-draft", d.ID, false)
 	if err != nil {
 		return access.Reply{}, err
@@ -131,12 +141,33 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), runtime.SelectionOptions{Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked})
+	key, err := s.inspectionKey(r, tx, p, input.APIKeyID, route)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	parsed, err := inspectorRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	accept, inspections := inspectionAccept(route, parsed, context)
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept}
+	if key.reason != "" {
+		options.Accept = nil
+	}
+	if parsed != nil {
+		options.Parameters = protocols.ParameterNames(parsed)
+	}
+	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	targets := []map[string]any{}
-	for _, decision := range plan.Decisions {
+	applyInspectionKeyReason(plan.Decisions, key.reason)
+	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed, inspections) {
 		var name string
 		for _, t := range d.Targets {
 			if t.ID == decision.TargetID {
@@ -163,6 +194,9 @@ type simulationRequest struct {
 	Seed                 string                     `json:"seed"`
 	EstimatedInputTokens *int64                     `json:"estimated_input_tokens"`
 	MaxOutputTokens      *int64                     `json:"max_output_tokens"`
+	Dialect              string                     `json:"dialect"`
+	SemanticHeaders      map[string]string          `json:"semantic_headers"`
+	QuerySettings        map[string]string          `json:"query_settings"`
 }
 
 // simulateRouting answers the console's routing simulator against the routes
@@ -173,7 +207,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input simulationRequest
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	operation := "generation"
@@ -207,34 +241,6 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if !access.RouteSlug.MatchString(slug) {
 		return access.Reply{}, access.Invalid("operation.request.route", "Name the route to simulate.")
 	}
-	var keyReason string
-	var keyID string
-	var keyProject *string
-	if input.APIKeyID != nil {
-		var err error
-		keyID, err = access.ParseUUID(*input.APIKeyID)
-		if err != nil {
-			return access.Reply{}, access.Invalid("api_key_id", "Use an API key identifier.")
-		}
-		var authority access.Authority
-		var raw []byte
-		if err = s.Access.Pool.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp_go.api_keys WHERE id=$1", keyID).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &keyProject); err != nil {
-			return access.Reply{}, err
-		}
-		if !p.CanProject(keyProject, false) {
-			return access.Reply{}, pgx.ErrNoRows
-		}
-		if err = json.Unmarshal(raw, &authority.Policy); err != nil {
-			return access.Reply{}, err
-		}
-		authority.ProjectID = keyProject
-		if !authority.Allows("inference", slug, keyProject, time.Now()) {
-			keyReason = "api_key_not_authorized"
-			if len(authority.Policy.AllowedRoutes) > 0 && !slices.Contains(authority.Policy.AllowedRoutes, slug) {
-				keyReason = "route_not_allowed_for_key"
-			}
-		}
-	}
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
 		return access.Reply{}, err
@@ -244,13 +250,15 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if route, ok := snapshot.Routes[slug]; ok {
+	route := snapshot.Routes[slug]
+	if _, ok := snapshot.Routes[slug]; ok {
 		if !p.CanProject(route.ProjectID, false) {
 			return access.Reply{}, pgx.ErrNoRows
 		}
-		if input.APIKeyID != nil && !sameProject(keyProject, route.ProjectID) {
-			return access.Reply{}, access.Invalid("api_key_id", "The API key and route must belong to the same project.")
-		}
+	}
+	key, err := s.inspectionKey(r, tx, p, input.APIKeyID, route)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	inputs, err := s.routingInputs(r, tx)
 	if err != nil {
@@ -260,35 +268,34 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	options := runtime.SelectionOptions{KeyID: keyID, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked}
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked}
 	options.TokenDemand, err = tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, err := protocols.SimulationRequest(input.Operation["request"], operation, input.Surface, input.Mode, slug)
+	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
-		return access.Reply{}, access.Invalid("operation.request", err.Error())
+		return access.Reply{}, err
 	}
-	options.Parameters = protocols.ParameterNames(parsed)
-	options.Accept = func(p runtime.Provider, t runtime.Target) error {
-		_, _, err := protocols.Encode(parsed, p.Kind, p.VendorID, p.Connector().Model(t.ProviderModel), p.ParameterDefaults)
-		return err
+	parsed, err := inspectorRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if parsed != nil {
+		options.Parameters = protocols.ParameterNames(parsed)
+	}
+	accept, inspections := inspectionAccept(route, parsed, context)
+	options.Accept = accept
+	if key.reason != "" {
+		options.Accept = nil
 	}
 
 	plan, err := runtime.PlanRequest(snapshot, slug, operation, input.Surface, input.Mode, []byte(input.Seed), options)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	decisions := plan.Decisions
-	if keyReason != "" {
-		for i := range decisions {
-			d := &decisions[i]
-			d.Eligible = false
-			d.Attempt = nil
-			d.Reason = &keyReason
-		}
-	}
-	return access.OK(decisions), nil
+	applyInspectionKeyReason(plan.Decisions, key.reason)
+	return access.OK(inspectedDecisions(plan.Decisions, route, parsed, inspections)), nil
 }
 
 // Register mounts the route surface.
@@ -301,7 +308,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v3/route-drafts/{draft_id}", h(s.deleteDraft))
 	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/validate", h(s.validateDraft))
 	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/activate", h(s.activateDraft))
-	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/simulate", h(s.simulateDraft))
+	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/simulate", s.Access.HandleWith(1<<20, s.simulateDraft))
 	mux.HandleFunc("GET /api/v3/routes", h(s.routes))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}", h(s.route))
 	mux.HandleFunc("POST /api/v3/routes/{route_id}/retire", h(s.retireRoute))
@@ -333,7 +340,11 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.Routin
 func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) bool, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
-		for _, slot := range snapshot.Providers[target.ProviderID].Slots {
+		provider := snapshot.Providers[target.ProviderID]
+		if provider.Network != nil && provider.Network.CredentialID != "" {
+			ids = append(ids, provider.Network.CredentialID)
+		}
+		for _, slot := range provider.Slots {
 			if slot.CredentialID != nil {
 				ids = append(ids, *slot.CredentialID)
 			}
@@ -341,7 +352,7 @@ func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.S
 	}
 	revoked := map[string]bool{}
 	if len(ids) > 0 {
-		rows, err := q.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
+		rows, err := q.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp_go.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
 		if err != nil {
 			return nil, err
 		}
