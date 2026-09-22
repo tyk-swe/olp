@@ -260,6 +260,12 @@ func TestPublicProviderNativeConfigurationRetainsNegativeZero(t *testing.T) {
 func TestNativeConfigurationForwardMigrationPreservesHistoryAndDigests(t *testing.T) {
 	pool, databaseURL := accessDatabase(t)
 	applyMigrationPrefix(t, pool, "0024_native_configuration_sources.sql")
+	// The current route writer seals strict identity in 0027. Give this test's
+	// current handler that temporary column while it seeds historical jsonb
+	// rows, then remove it before forward migration so the prefix is genuine.
+	if _, err := pool.Exec(t.Context(), "ALTER TABLE olp_go.routes ADD COLUMN strict_contract boolean NOT NULL DEFAULT false"); err != nil {
+		t.Fatal(err)
+	}
 	installation := uuid.NewString()
 	if _, err := pool.Exec(t.Context(), "INSERT INTO olp_go.installation(singleton,id,authority_id) VALUES(true,$1,$2)", installation, uuid.NewString()); err != nil {
 		t.Fatal(err)
@@ -303,6 +309,9 @@ func TestNativeConfigurationForwardMigrationPreservesHistoryAndDigests(t *testin
 		t.Fatal("migration fixture did not preserve multiple prior releases")
 	}
 	previousDigest := h.Runtime.Release().Digest
+	if _, err := pool.Exec(t.Context(), "ALTER TABLE olp_go.routes DROP COLUMN strict_contract"); err != nil {
+		t.Fatal(err)
+	}
 	// Fail on the second source-column alteration, after the first alteration
 	// has run, so rollback must restore both data types and migration history.
 	if _, err := pool.Exec(t.Context(), `CREATE FUNCTION public.fail_native_source_migration() RETURNS event_trigger
