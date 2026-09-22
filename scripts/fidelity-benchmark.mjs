@@ -5,6 +5,7 @@ import { cpus, totalmem, release, arch, platform } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 const schema = 'openllmproxy.dev/fidelity-performance/v1';
 const workloadNames = ['native_unary', 'native_stream_256', 'native_slow_stream_64', 'native_asset_png', 'translated_unary', 'rejected_extension'];
@@ -91,7 +92,7 @@ function record(path) {
   const routeContract = process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT) : null;
   const providerContract = process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT) : null;
   if (providerContract && !routeContract) throw new Error('A provider contract requires explicit route contracts');
-  const run = spawnSync('go', args, { encoding: 'utf8', maxBuffer: 16 << 20, env: { ...process.env, GOMAXPROCS: '4' } });
+  const run = spawnSync('go', args, { encoding: 'utf8', maxBuffer: 16 << 20, env: { ...process.env, GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' } });
   process.stdout.write(run.stdout ?? '');
   process.stderr.write(run.stderr ?? '');
   if (run.status !== 0) throw new Error(`Benchmark failed (${run.status}); no passing artifact written`);
@@ -106,8 +107,8 @@ function record(path) {
     schema, contract_mode: routeContract ? 'explicit' : 'legacy', route_contract: routeContract, provider_contract: providerContract, started_at: startedAt, completed_at: new Date().toISOString(), source_revision: command('git', ['rev-parse', 'HEAD']), working_tree: command('git', ['status', '--short']),
     harness_sha256: digest('internal/gateway/fidelity_benchmark_test.go'), runner_sha256: digest('scripts/fidelity-benchmark.mjs'), command: ['go', ...args],
     hardware: { os: platform(), architecture: arch(), kernel: release(), cpu: cpus()[0]?.model, logical_cpus: cpus().length, total_memory_bytes: totalmem(), cpu_quota: optionalFile('/sys/fs/cgroup/cpu.max'), memory_limit: optionalFile('/sys/fs/cgroup/memory.max'), load_before: loadBefore, load_after: optionalFile('/proc/loadavg') },
-    toolchain: command('go', ['version']), gomaxprocs: 4, concurrency: [1, 8], repetitions: 3, target_time_per_repetition: '2s',
-    conditions: { network: 'IPv4 loopback; two HTTP/1.1 hops; keep-alive; warm connection; no injected provider delay', tls: 'none; explicit loopback-only egress exception', authority: 'in-memory published runtime and credential slots; authenticated fixed-route native relay; no PostgreSQL/Valkey', resources: 'Whole-process client + local provider + gateway/relay + independent fixture validation + instrumentation; sampled heap growth, not absolute RSS or exact peak', stream: '256 x 128-byte text events; slow workload 64 x 16384-byte events and 100us requested sleep after each read (OS timer may be coarser); exact content count and terminal markers validated', asset: '512x512 deterministic RGB PNG, approximately 1MiB JSON/base64 request; original provider-bound document checked', ordering: 'Workloads sequential in fixed declaration order; repetitions serial; randomized model-quality trials are separate', scope: 'Legacy runtime performance baseline only; no intelligence claim, external network/TLS, durable state barrier or realtime jitter measurement' },
+    toolchain: command('go', ['version']), gomaxprocs: 4, runtime_environment: { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' }, go_build_environment: command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS']), concurrency: [1, 8], repetitions: 3, target_time_per_repetition: '2s',
+    conditions: { network: 'IPv4 loopback; two HTTP/1.1 hops; keep-alive; warm connection; no injected provider delay', tls: 'none; explicit loopback-only egress exception', authority: 'in-memory published runtime and credential slots; authenticated fixed-route native relay; no PostgreSQL/Valkey', resources: 'Whole-process client + local provider + gateway/relay + independent fixture validation + instrumentation; sampled heap growth, not absolute RSS or exact peak', stream: '256 x 128-byte text events; slow workload 64 x 16384-byte events and 100us requested sleep after each read (OS timer may be coarser); exact content count and terminal markers validated', asset: '512x512 deterministic RGB PNG, approximately 1MiB JSON/base64 request; original provider-bound document checked', ordering: 'Workloads sequential in fixed declaration order; repetitions serial; randomized model-quality trials are separate', scope: 'Configured gateway runtime performance only; no intelligence claim, external network/TLS, durable state barrier or realtime jitter measurement' },
     runs, summary, median_gateway_minus_relay: relayDifferences,
     unmeasured: ['durable continuation barrier', 'duplex realtime jitter', 'WAN/TLS', 'isolated gateway RSS', 'live-model quality'],
     raw_output: run.stdout
@@ -117,7 +118,7 @@ function record(path) {
 }
 
 export function freezeBudgets(artifact) {
-  if (artifact.schema !== schema || artifact.repetitions !== 3) throw new Error('Expected a complete v1 baseline with three repetitions');
+  if (artifact.schema !== schema || artifact.repetitions !== 3 || artifact.contract_mode !== 'legacy' || artifact.route_contract || artifact.provider_contract) throw new Error('Expected a complete v1 baseline with three repetitions');
   const summary = summarize(artifact.runs, artifact.repetitions);
   const workloads = {};
   for (const name of expectedNames) {
@@ -131,16 +132,19 @@ export function freezeBudgets(artifact) {
     }
     workloads[name] = { maxima, exact: { 'request-bytes': metrics['request-bytes'].median, 'content-events/op': metrics['content-events/op'].median }, minimum_samples: Math.min(20, ...summary[name].iterations) };
   }
-  return { schema: 'openllmproxy.dev/fidelity-performance-budget/v1', declared_at: new Date().toISOString(), baseline_revision: artifact.source_revision, baseline_harness_sha256: artifact.harness_sha256, baseline_runner_sha256: artifact.runner_sha256, hardware: structuredClone(artifact.hardware), gomaxprocs: 4, repetitions: 3, method: 'Before replacement: per-workload maximum of 3 baseline runs ×1.5 plus 1ms timing/CPU allowance, 16KiB allocation allowance or 8MiB sampled heap allowance. Allocation counts ×1.25 +64. These tolerances are change-regression budgets, not service SLOs. Never auto-rebase budgets on candidate results.', workloads };
+  return { schema: 'openllmproxy.dev/fidelity-performance-budget/v1', declared_at: new Date().toISOString(), baseline_revision: artifact.source_revision, baseline_harness_sha256: artifact.harness_sha256, baseline_runner_sha256: artifact.runner_sha256, measurement: { command: artifact.command, conditions: artifact.conditions, target_time_per_repetition: artifact.target_time_per_repetition, toolchain: artifact.toolchain, runtime_environment: artifact.runtime_environment, go_build_environment: artifact.go_build_environment }, hardware: structuredClone(artifact.hardware), gomaxprocs: 4, repetitions: 3, method: 'Before replacement: per-workload maximum of 3 baseline runs ×1.5 plus 1ms timing/CPU allowance, 16KiB allocation allowance or 8MiB sampled heap allowance. Allocation counts ×1.25 +64. These tolerances are change-regression budgets, not service SLOs. Never auto-rebase budgets on candidate results.', workloads };
 }
 
 export function compareBudgets(candidate, budgets, mode = 'legacy') {
   if (candidate.schema !== schema || budgets.schema !== 'openllmproxy.dev/fidelity-performance-budget/v1') throw new Error('Unknown evidence or budget schema');
   if (candidate.harness_sha256 !== budgets.baseline_harness_sha256) throw new Error('Benchmark harness/oracle differs; use a reviewed versioned extension, never weaken frozen workloads');
+  if (!candidate.runner_sha256 || candidate.runner_sha256 !== budgets.baseline_runner_sha256) throw new Error('Benchmark runner differs; use a reviewed versioned extension');
+  const measurement = { command: candidate.command, conditions: candidate.conditions, target_time_per_repetition: candidate.target_time_per_repetition, toolchain: candidate.toolchain, runtime_environment: candidate.runtime_environment, go_build_environment: candidate.go_build_environment };
+  if (!isDeepStrictEqual(measurement, budgets.measurement)) throw new Error('Benchmark command, toolchain, runtime configuration or measurement conditions differ');
   if (candidate.contract_mode !== mode) throw new Error(`Expected ${mode} contract evidence, got ${candidate.contract_mode}`);
   if (mode === 'explicit' && (!candidate.route_contract || ['native', 'translated', 'rejected'].some((name) => !Object.keys(candidate.route_contract[name] ?? {}).length))) throw new Error('All explicit route contracts must be recorded');
   if (candidate.gomaxprocs !== budgets.gomaxprocs || candidate.repetitions !== budgets.repetitions) throw new Error('Measurement configuration differs from the frozen budget');
-  for (const key of ['cpu', 'logical_cpus', 'architecture', 'cpu_quota']) {
+  for (const key of ['cpu', 'logical_cpus', 'architecture', 'cpu_quota', 'os', 'kernel', 'total_memory_bytes', 'memory_limit']) {
     if (candidate.hardware[key] !== budgets.hardware[key]) throw new Error(`Hardware differs (${key}); results require separate qualification`);
   }
   const summary = summarize(candidate.runs, candidate.repetitions);

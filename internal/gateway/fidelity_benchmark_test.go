@@ -320,75 +320,159 @@ func (f *fidelityFixture) request(w fidelityWorkload, relay bool) (fidelitySampl
 			if problem["code"] != "unsupported_parameter" {
 				return sample, fmt.Errorf("wrong rejection: %s", body)
 			}
-		} else if relay && w.kind == "anthropic" {
-			if !bytes.Contains(body, []byte(`"text":"hello"`)) || response["stop_reason"] != "end_turn" {
-				return sample, fmt.Errorf("incomplete native response: %s", body)
-			}
 		} else {
-			choices, _ := response["choices"].([]any)
-			if len(choices) != 1 {
-				return sample, fmt.Errorf("wrong choice count: %s", body)
+			want := w.response
+			if !relay {
+				want = strings.Replace(want, `"model-a"`, `"team-chat"`, 1)
+				if w.kind == "anthropic" {
+					want = `{"id":"msg-bench","object":"chat.completion","created":0,"model":"team-chat","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`
+				}
 			}
-			choice, _ := choices[0].(map[string]any)
-			message, _ := choice["message"].(map[string]any)
-			if message["content"] != "hello" || choice["finish_reason"] != "stop" {
-				return sample, fmt.Errorf("incomplete response: %s", body)
+			var expected any
+			if err := json.Unmarshal([]byte(want), &expected); err != nil || !reflect.DeepEqual(expected, any(response)) {
+				return sample, fmt.Errorf("response differs from complete independent fixture: %s", body)
 			}
 		}
 	} else {
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 4096), 64<<10)
+		oracle := newFidelityStreamOracle(w, relay)
 		var previous time.Time
-		done, stopped := false, false
+		pending := ""
 		for scanner.Scan() {
 			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
+			if line != "" {
+				if pending != "" || !strings.HasPrefix(line, "data: ") {
+					return sample, fmt.Errorf("unexpected SSE framing: %q", line)
+				}
+				pending = strings.TrimPrefix(line, "data: ")
 				continue
 			}
-			payload := strings.TrimPrefix(line, "data: ")
-			if payload == "[DONE]" {
-				done = true
+			if pending == "" {
 				continue
 			}
-			var chunk struct {
-				Choices []struct {
-					Delta        struct{ Content string } `json:"delta"`
-					FinishReason *string                  `json:"finish_reason"`
-				} `json:"choices"`
-			}
-			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			content, err := oracle.observe(pending)
+			pending = ""
+			if err != nil {
 				return sample, err
 			}
-			for _, choice := range chunk.Choices {
-				if choice.FinishReason != nil && *choice.FinishReason == "stop" {
-					stopped = true
-				}
-				if choice.Delta.Content == "" {
-					continue
-				}
-				now := time.Now()
-				if sample.events == 0 {
-					sample.first = now.Sub(start)
-				} else {
-					sample.maximumGap = max(sample.maximumGap, now.Sub(previous))
-				}
-				previous = now
-				sample.events++
-				sample.textBytes += len(choice.Delta.Content)
-				if w.readDelay > 0 {
-					time.Sleep(w.readDelay)
-				}
+			if !content {
+				continue
+			}
+			now := time.Now()
+			if sample.events == 0 {
+				sample.first = now.Sub(start)
+			} else {
+				sample.maximumGap = max(sample.maximumGap, now.Sub(previous))
+			}
+			previous = now
+			sample.events++
+			sample.textBytes += w.eventTextBytes
+			if w.readDelay > 0 {
+				time.Sleep(w.readDelay)
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			return sample, err
 		}
-		if !done || !stopped || sample.events != w.events || sample.textBytes != w.events*w.eventTextBytes {
-			return sample, fmt.Errorf("incomplete stream: done=%t stop=%t events=%d bytes=%d", done, stopped, sample.events, sample.textBytes)
+		if pending != "" || !oracle.done {
+			return sample, fmt.Errorf("incomplete stream: done=%t pending=%t", oracle.done, pending != "")
 		}
 	}
 	sample.elapsed = time.Since(start)
 	return sample, nil
+}
+
+// This deliberately small grammar is the scripted benchmark contract, not a
+// replacement protocol decoder. Complete JSON comparison catches same-size text,
+// identity, usage and unknown-field mutations without production-codec oracles.
+type fidelityStreamOracle struct {
+	content, terminal any
+	events, expected  int
+	stopped, done     bool
+}
+
+func newFidelityStreamOracle(w fidelityWorkload, relay bool) *fidelityStreamOracle {
+	model := "team-chat"
+	if relay {
+		model = "model-a"
+	}
+	o := &fidelityStreamOracle{expected: w.events}
+	content := fmt.Sprintf(`{"id":"bench","object":"chat.completion.chunk","created":1,"model":%q,"choices":[{"index":0,"delta":{"content":%q},"finish_reason":null}]}`, model, strings.Repeat("x", w.eventTextBytes))
+	terminal := fmt.Sprintf(`{"id":"bench","object":"chat.completion.chunk","created":1,"model":%q,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":256,"total_tokens":258}}`, model)
+	if json.Unmarshal([]byte(content), &o.content) != nil || json.Unmarshal([]byte(terminal), &o.terminal) != nil {
+		panic("invalid benchmark fixture")
+	}
+	return o
+}
+
+func (o *fidelityStreamOracle) observe(payload string) (bool, error) {
+	if o.done {
+		return false, fmt.Errorf("event after DONE")
+	}
+	if payload == "[DONE]" {
+		if !o.stopped || o.events != o.expected {
+			return false, fmt.Errorf("DONE before complete content and stop/usage")
+		}
+		o.done = true
+		return false, nil
+	}
+	var actual any
+	if err := json.Unmarshal([]byte(payload), &actual); err != nil {
+		return false, err
+	}
+	if reflect.DeepEqual(actual, o.content) {
+		if o.stopped || o.events >= o.expected {
+			return false, fmt.Errorf("unexpected content event")
+		}
+		o.events++
+		return true, nil
+	}
+	if reflect.DeepEqual(actual, o.terminal) {
+		if o.stopped || o.events != o.expected {
+			return false, fmt.Errorf("duplicate or premature stop/usage")
+		}
+		o.stopped = true
+		return false, nil
+	}
+	return false, fmt.Errorf("stream content, identity, usage or frame shape differs from independent fixture")
+}
+
+func TestFidelityBenchmarkOracleDetectsCorruption(t *testing.T) {
+	const content = `{"id":"bench","object":"chat.completion.chunk","created":1,"model":"team-chat","choices":[{"index":0,"delta":{"content":"xxxx"},"finish_reason":null}]}`
+	const terminal = `{"id":"bench","object":"chat.completion.chunk","created":1,"model":"team-chat","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":256,"total_tokens":258}}`
+	check := func(frames []string) bool {
+		o := newFidelityStreamOracle(fidelityWorkload{events: 1, eventTextBytes: 4}, false)
+		for _, frame := range frames {
+			if _, err := o.observe(frame); err != nil {
+				return false
+			}
+		}
+		return o.done
+	}
+	if !check([]string{content, terminal, "[DONE]"}) {
+		t.Fatal("independent positive stream rejected")
+	}
+	for name, frames := range map[string][]string{
+		"same-size text":  {strings.Replace(content, "xxxx", "yyyy", 1), terminal, "[DONE]"},
+		"model":           {strings.Replace(content, "team-chat", "different", 1), terminal, "[DONE]"},
+		"choice identity": {strings.Replace(content, `"index":0`, `"index":1`, 1), terminal, "[DONE]"},
+		"usage omitted":   {content, strings.Replace(terminal, `,"usage":{"prompt_tokens":2,"completion_tokens":256,"total_tokens":258}`, "", 1), "[DONE]"},
+		"unknown field":   {strings.TrimSuffix(content, "}") + `,"unknown":true}`, terminal, "[DONE]"},
+		"early DONE":      {"[DONE]", content, terminal},
+		"duplicate DONE":  {content, terminal, "[DONE]", "[DONE]"},
+		"after DONE":      {content, terminal, "[DONE]", content},
+		"early stop":      {terminal, content, "[DONE]"},
+		"duplicate stop":  {content, terminal, terminal, "[DONE]"},
+		"after stop":      {content, terminal, content, "[DONE]"},
+		"missing DONE":    {content, terminal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if check(frames) {
+				t.Fatal("corrupt stream accepted")
+			}
+		})
+	}
 }
 
 func fidelityCPU() time.Duration {

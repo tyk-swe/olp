@@ -22,7 +22,7 @@ function evidence() {
       }
     }
   }
-  return { schema: 'openllmproxy.dev/fidelity-performance/v1', source_revision: 'baseline', contract_mode: 'legacy', route_contract: null, harness_sha256: 'fixture-hash', repetitions: 3, gomaxprocs: 4, hardware: { cpu: 'fixture', logical_cpus: 8, architecture: 'amd64', cpu_quota: 'max 100000' }, runs };
+  return { schema: 'openllmproxy.dev/fidelity-performance/v1', source_revision: 'baseline', contract_mode: 'legacy', route_contract: null, harness_sha256: 'fixture-hash', runner_sha256: 'fixture-runner', command: ['go', 'test'], conditions: { network: 'fixture' }, target_time_per_repetition: '2s', toolchain: 'fixture Go', runtime_environment: { GOGC: '100' }, go_build_environment: 'fixture flags', repetitions: 3, gomaxprocs: 4, hardware: { cpu: 'fixture', logical_cpus: 8, architecture: 'amd64', cpu_quota: 'max 100000' }, runs };
 }
 
 test('complete measured inventory retains successful and rejected workloads', () => {
@@ -76,7 +76,7 @@ test('parser rejects incomplete metrics instead of treating partial output as ev
   assert.throws(() => summarize([], 3), /expected 3 repetitions/);
 });
 
-test('changed harness and implicit legacy cannot masquerade as strict evidence', () => {
+test('changed harness and implicit legacy cannot masquerade as explicit contract evidence', () => {
   const candidate = evidence();
   const budgets = freezeBudgets(candidate);
   candidate.harness_sha256 = 'weakened-oracle';
@@ -87,4 +87,20 @@ test('changed harness and implicit legacy cannot masquerade as strict evidence',
   assert.throws(() => compareBudgets(candidate, budgets, 'explicit'), /contracts must be recorded/);
   candidate.route_contract = { native: { fidelity: 'native_identity' }, translated: { fidelity: 'qualified_interaction' }, rejected: { fidelity: 'qualified_interaction' } };
   assert.deepEqual(compareBudgets(candidate, budgets, 'explicit'), []);
+});
+
+test('changed runner or measurement conditions cannot reuse frozen budgets', () => {
+  const original = evidence();
+  const budgets = freezeBudgets(original);
+  for (const mutate of [
+    (candidate) => { candidate.runner_sha256 = 'changed'; },
+    (candidate) => { candidate.command = ['different']; },
+    (candidate) => { candidate.conditions = { network: 'one fewer hop' }; },
+    (candidate) => { candidate.runtime_environment = { GOGC: 'off' }; },
+    (candidate) => { candidate.hardware.memory_limit = 'unlimited'; }
+  ]) {
+    const candidate = structuredClone(original);
+    mutate(candidate);
+    assert.throws(() => compareBudgets(candidate, budgets));
+  }
 });

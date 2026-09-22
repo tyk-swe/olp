@@ -3,8 +3,8 @@
 This harness records an authenticated native relay and the current gateway before
 replacement of its dispatch representation. It sends HTTP requests through the
 real gateway to an independently scripted local provider and validates every final
-provider request, complete unary response or content-event count and terminal
-marker. A rejected translation must dispatch zero provider requests. Performance
+provider request, complete unary document or exact stream content, identity, usage and terminal
+grammar. A rejected translation must dispatch zero provider requests. Performance
 cannot pass by dropping the successful or rejected workloads.
 
 The baseline measures the legacy runtime at its recorded commit. It does not
@@ -34,7 +34,7 @@ node --test scripts/fidelity-benchmark.test.mjs
 The record command invokes exactly:
 
 ```sh
-GOMAXPROCS=4 go test -mod=readonly -run '^$' -bench '^BenchmarkFidelity$' -benchmem -benchtime=2s -count=3 -cpu=4 -timeout=15m ./internal/gateway
+GOMAXPROCS=4 GOGC=100 GOMEMLIMIT=off GODEBUG='' go test -mod=readonly -run '^$' -bench '^BenchmarkFidelity$' -benchmem -benchtime=2s -count=3 -cpu=4 -timeout=15m ./internal/gateway
 ```
 
 For the initial baseline only, before replacement implementation:
@@ -62,7 +62,7 @@ gateway encoder. It does not perform gateway planning or Attempt accounting.
 | Workload | Native reference and client-visible validation |
 | --- | --- |
 | `native_unary` | Chat request and one complete text result with stop reason. |
-| `native_stream_256` | 256 content events of 128 bytes; exact content count, stop and DONE. |
+| `native_stream_256` | 256 content events of 128 bytes; exact content, identity and usage, ordered stop and DONE. |
 | `native_slow_stream_64` | 64 content events of 16 KiB; client requests a 100 µs sleep after each event. Actual OS timer granularity can be larger. |
 | `native_asset_png` | Deterministic valid 512 × 512 PNG; approximately 1 MiB base64/JSON request; exact original image content reaches provider. |
 | `translated_unary` | Chat to Anthropic Messages with explicit max_tokens and stream=false; independent native Messages request and complete response. |
@@ -119,7 +119,8 @@ that result must be reported separately.
 
 ## Later strict-contract qualification with an unchanged harness
 
-Normal `compare` requires a legacy candidate and the exact baseline harness hash.
+Normal `compare` requires a legacy candidate and the exact baseline harness and
+runner hashes, command, toolchain, runtime settings and measurement conditions.
 An edited payload, oracle, measurement loop or fixture cannot be accepted merely
 because its byte/event counts match. Reviewed harness changes need a new evidence
 version; keep the old baseline and numeric budgets as historical evidence.
