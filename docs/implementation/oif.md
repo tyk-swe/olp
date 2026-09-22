@@ -42,6 +42,10 @@ graph TD
   baseline --> lifecycle_baseline
   profiles --> lifecycle_baseline
   lifecycle_baseline --> qualification
+  barrier_baseline["#225 encrypted barrier baseline"]
+  planning --> barrier_baseline
+  native_config_storage --> barrier_baseline
+  barrier_baseline --> qualification
   lifecycle --> qualification
   console --> qualification
 ```
@@ -65,6 +69,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
+| [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Active; #213 and #224 integrated | Independent native two-turn reference and encrypted claim/journal/ready transactions; translated candidate qualification remains #214/#218 |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
