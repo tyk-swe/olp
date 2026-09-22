@@ -525,3 +525,21 @@ describe('Route Studio content policy', () => {
     ).toContain('RE2 pattern');
   });
 });
+
+describe('route fidelity migration', () => {
+  it('preserves historical omissions during unrelated edits', () => {
+    expect(
+      buildReplaceRouteDraftInput({ ...validEditor, fidelity: null })
+    ).not.toHaveProperty('fidelity');
+  });
+  it.each(['legacy', 'strict', 'transformed'] as const)(
+    'persists an explicit %s choice on create and edit',
+    (mode) => {
+      const values = { ...validEditor, fidelity: { mode } };
+      expect(buildCreateRouteDraftInput(values, modelOptions).fidelity).toEqual(
+        { mode }
+      );
+      expect(buildReplaceRouteDraftInput(values).fidelity).toEqual({ mode });
+    }
+  );
+});

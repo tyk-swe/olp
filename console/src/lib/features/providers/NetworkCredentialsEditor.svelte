@@ -26,7 +26,10 @@
     disabled: boolean;
     run: RunProviderAction;
     onChange: () => void;
-    onProviderChanged: () => Promise<void>;
+    onProviderChanged: (mutation?: {
+      previousEtag: string;
+      etag: string;
+    }) => Promise<void>;
   } = $props();
   let secret = $state('');
   const credentials = createQuery(() => ({
@@ -52,7 +55,10 @@
       secret = '';
       draft.set(['options', 'network', 'credential_id'], created.credential_id);
       onChange();
-      await onProviderChanged();
+      await onProviderChanged({
+        previousEtag: provider.etag,
+        etag: created.etag
+      });
       await credentials.refetch();
     });
   }
@@ -64,8 +70,15 @@
     )
       return;
     await run('revoke-network-credential', async () => {
-      await revokeNetworkCredential(provider.id, provider.etag, id);
-      await onProviderChanged();
+      const revoked = await revokeNetworkCredential(
+        provider.id,
+        provider.etag,
+        id
+      );
+      await onProviderChanged({
+        previousEtag: provider.etag,
+        etag: revoked.etag
+      });
       await credentials.refetch();
     });
   }

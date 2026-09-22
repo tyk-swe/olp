@@ -30,7 +30,6 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     acceptRemote,
-    beginReload,
     conflictNotice,
     initialConcurrentEdit,
     markConflict,
@@ -127,11 +126,25 @@
 
   guardUnsavedChanges(() => sync.dirty);
 
-  async function providerChanged() {
+  async function providerChanged(mutation?: {
+    previousEtag: string;
+    etag: string;
+  }) {
+    const acknowledged =
+      mutation &&
+      !sync.conflict &&
+      sync.snapshotEtag === mutation.previousEtag &&
+      sync.remoteEtag === mutation.previousEtag;
     const result = await snapshot.refetch();
     if (result.error) throw result.error;
     if (!result.data) throw new Error('The provider snapshot is unavailable.');
-    sync = acceptRemote(sync, result.data.provider.etag);
+    // A successful owned credential mutation advances the provider ETag. Query
+    // effects may observe it while refetching; acknowledge only the exact
+    // returned version, retaining any local configuration edits.
+    sync =
+      acknowledged && result.data.provider.etag === mutation?.etag
+        ? markSaved(mutation.etag, sync.dirty)
+        : acceptRemote(sync, result.data.provider.etag);
     await queryClient.invalidateQueries({
       queryKey: providerKeys.modelCatalog
     });
@@ -171,8 +184,8 @@
       if (result.error) throw result.error;
       if (!result.data)
         throw new Error('The provider snapshot is unavailable.');
-      sync = beginReload(sync);
-      sync = acceptRemote(sync, result.data.provider.etag);
+      // An explicit successful reload discards the local draft and conflict.
+      sync = markSaved(result.data.provider.etag, false);
       if (providerSpec)
         editValues = providerEditValues(result.data.provider, providerSpec);
       reloadVersion += 1;

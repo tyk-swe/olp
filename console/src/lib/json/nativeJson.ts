@@ -335,15 +335,6 @@ export function parseManagementJSON(source: string): unknown {
   return normalize(parsed);
 }
 
-/** Keep the real Response and its headers/auth lifecycle; change only how its
- * JSON body is decoded before generated-client/query-cache consumers see it. */
-export function preserveNativeConfiguration(response: Response): Response {
-  if (response.headers.get('content-type')?.includes('application/json')) {
-    response.json = async () => parseManagementJSON(await response.text());
-  }
-  return response;
-}
-
 /** An unfinished field edit is part of the one draft tree, never a second
  * unsynchronized form value. It can be rendered but cannot be sent as JSON. */
 export class IncompleteJSON {
@@ -423,7 +414,7 @@ function renderJSON(
       result = join(
         '[',
         ']',
-        node.map((item) =>
+        Array.from(node, (item) =>
           item === undefined ? 'null' : render(item, depth + 1)
         )
       );

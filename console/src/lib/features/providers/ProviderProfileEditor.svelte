@@ -23,7 +23,10 @@
     disabled?: boolean;
     provider?: Provider;
     run?: RunProviderAction;
-    onProviderChanged?: () => Promise<void>;
+    onProviderChanged?: (mutation?: {
+      previousEtag: string;
+      etag: string;
+    }) => Promise<void>;
     onChange: () => void;
   } = $props();
   const profiles = createQuery(() => ({

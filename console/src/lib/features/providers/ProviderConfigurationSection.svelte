@@ -34,7 +34,10 @@
     onTouch: () => void;
     dirty?: boolean;
     onSave: () => void;
-    onProviderChanged: () => Promise<void>;
+    onProviderChanged: (mutation?: {
+      previousEtag: string;
+      etag: string;
+    }) => Promise<void>;
     onRefetchProvider: () => Promise<boolean>;
     onNotice: (message: string) => void;
   } = $props();

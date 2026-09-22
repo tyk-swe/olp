@@ -182,7 +182,8 @@ test('configuration forms retain native source through real saves, conflicts and
   expect(beforeProbe.requests).toEqual([]);
   await page.screenshot({
     path: info.outputPath('native-configuration-editor.png'),
-    fullPage: true
+    fullPage: true,
+    animations: 'disabled'
   });
 
   // A competing public write must not replace the local document or its ETag.
@@ -288,9 +289,10 @@ test('configuration forms retain native source through real saves, conflicts and
     .getByRole('button', { name: 'Activate route', exact: true })
     .click();
   await expect(page.getByText('Revision 1 active')).toBeVisible();
+  await page.getByLabel('Fidelity mode').scrollIntoViewIfNeeded();
   await page.screenshot({
     path: info.outputPath('strict-route-migration.png'),
-    fullPage: true
+    animations: 'disabled'
   });
   await page.goto('/routes/new');
   await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
@@ -359,7 +361,7 @@ test('profile migration, schema fields and write-only network credentials share 
     .getByLabel('generation native options: fixture_ordered', { exact: true })
     .fill('[false,0,"",null]');
   await page.getByText('Network connection', { exact: true }).click();
-  await page.getByLabel('Max conns per host', { exact: true }).fill('0');
+  await page.getByLabel('Max conns per host', { exact: true }).fill('2');
   await page
     .getByText('Add or revoke network credentials', { exact: true })
     .click();
@@ -404,7 +406,7 @@ test('profile migration, schema fields and write-only network credentials share 
   const wire = saved.request().postData()!;
   expect(wire).toContain('"seed":9007199254740993');
   expect(wire).toContain('"fixture_ordered":[false,0,"",null]');
-  expect(wire).toContain('"max_conns_per_host":0');
+  expect(wire).toContain('"max_conns_per_host":2');
   expect(wire).not.toContain('credential_id');
   expect(wire).not.toContain('parameter_defaults');
   await expect(
@@ -417,7 +419,8 @@ test('profile migration, schema fields and write-only network credentials share 
   await expect(page.getByText(/Version 1 · .* · revoked/)).toBeVisible();
   await page.screenshot({
     path: info.outputPath('profile-network-forms.png'),
-    fullPage: true
+    fullPage: true,
+    animations: 'disabled'
   });
   const upstream = await request
     .get('http://127.0.0.1:4187/__test__/requests')

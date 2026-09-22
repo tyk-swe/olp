@@ -903,6 +903,7 @@ it('preserves the unified native draft and its original ETag across provider ref
   await vi.waitFor(() => {
     flushSync();
     expect(JSON.parse(options.value)).toEqual(remote.configuration);
+    expect(navigationBlocked()).toBe(false);
   });
 });
 
