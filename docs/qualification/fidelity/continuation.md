@@ -1,0 +1,69 @@
+# Continuation interaction qualification
+
+This evidence covers the `chat-anthropic-tools-v1` negotiated OpenAI Chat to
+direct Anthropic Messages tool workflow and strict native retained Responses.
+It is scoped to the pinned public profile, controls, SDK versions and scripts;
+it is not a provider-wide compatibility claim. No paid inference was used.
+
+The translated workflow sends the frozen native reasoning-enabled first
+request, consumes all 19 native events with thinking/signature, text before and
+after two parallel tool calls, then sends the exact frozen native next request
+with both ordered tool results. JavaScript OpenAI SDK 7.4.0 and Python OpenAI
+SDK 3.8.0 each assembled and serialized their actual next request through the
+public gateway; the independent provider fixture accepted exactly two requests
+per client. Both clients rejected a missing carrier before dispatch, verified
+ordered observations and no exposed signature, read a committed recovery
+delivery, replayed the same submission without another Attempt and completed
+the next turn. The helpers reject unqualified SDK versions before sending.
+
+The resource authority stores bounded complete native dependencies encrypted
+under the existing KeyRing. An API key must explicitly allow provider state.
+The gateway atomically commits the owner-unique submission claim and dispatch
+journal before provider Do, and commits complete ready payload and state in one
+later transaction before emitting ordinary tool chunks. An authenticated
+recovery GET can independently decrypt that ready state. An incomplete accepted
+request is outcome-unknown and cannot become new inference through an SDK or
+network retry. A ready replay never dispatches provider work or debits a new
+Attempt. Handles are scoped to the owner, route, historical provider/slot,
+serving identity and contract; current key, provider and network credential
+authority is checked on every use. Branches retain separate complete children,
+and expiry and key revocation refuse lookups synchronously.
+
+Public PostgreSQL tests blocked the ready commit while the provider streamed
+and observed no actionable tool bytes until another reader saw committed
+ciphertext. Fault tests removed the terminal event, changed stop reason, lost
+the late signature and overflowed event bounds; none produced a ready replay
+or duplicate dispatch. Real gateway processes were killed before ready and
+after ready but before a handle was consumed. After restart, accepted unknown
+work remained unknown and committed work recovered without inference. Canceled
+pre-send and incomplete ingress uploads left no journal; cancellation after
+provider acceptance stayed non-replayable. Eight concurrent resource claims
+selected one creator, and a failed encryption rolled back the combined
+dispatch journal. A compatible provider revision publication and fresh gateway
+instance kept the historical endpoint/defaults for the active handle; revoking
+that historical credential then refused recovery. Public branch, cross-key,
+cross-route, tamper, expiry and live key-policy/revocation checks passed.
+Native strict public results separately preserved citation boundaries,
+refusal structure and ordered Gemini candidates.
+
+Focused validation after the combined claim/journal change: public workflow,
+barrier, fault, branch, policy, revision and JS/Python SDK tests passed in
+18.527 s; relevant race tests passed in 18.280 s; fresh binary process loss
+and accepted-cancellation tests passed in 3.493 s; failed-encryption zero-call
+and eight-claim journal tests passed in 2.524 s. The recovery helper update
+passed both official SDK journeys in 8.130 s. These are focused checks; the
+repository-wide release gates still run on the integrated PR branch.
+
+The [frozen native encrypted barrier](../../evidence/fidelity-performance/barrier-v1/README.md)
+was not changed. The first clean [translated candidate capture](../../evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json)
+at source `4e086098` completed all 12 repetitions: 288 workflows, 576 exact
+provider dispatches, 5,472 native events, 3,744 first-turn and 576 final-turn
+observations, 576 enabled actions, 288 authenticated ready reads and zero
+rejections. Its unchanged frozen comparison **failed six small-history
+metrics**: concurrency 1 `ns/op`, CPU/op and workflow p50/p95/p99; concurrency
+8 workflow p50. All other matched metrics, including every large-history and
+action-ready metric, passed. The artifact remains in the repository for review.
+The later one-resolution and combined claim/journal optimizations preserve
+semantics but have no clean full candidate capture yet; they do not erase the
+recorded failure. A new quiet capture must pass the same frozen limits before
+the performance portion of qualification can be called complete.
