@@ -35,12 +35,14 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := make(chan error, 1)
+	secondReady := make(chan struct{})
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		tx, err := h.Pool.Begin(ctx)
 		if err == nil {
 			defer tx.Rollback(context.Background())
+			close(secondReady)
 			err = ring.Store(ctx, tx, installation, ids[1], "provider_continuation", []byte("private-"+ids[1]), &expires)
 			if err == nil {
 				err = tx.Commit(ctx)
@@ -49,11 +51,16 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		second <- err
 	}()
 	select {
+	case <-secondReady:
+	case err := <-second:
+		t.Fatal(err)
+	}
+	select {
 	case err := <-second:
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		if err := tx1.Commit(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -82,12 +89,15 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		err   error
 	}
 	rotationDone := make(chan rotation, 1)
+	rotationStarted := make(chan struct{})
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		close(rotationStarted)
 		count, err := rotated.Rotate(ctx, h.Pool, installation)
 		rotationDone <- rotation{count, err}
 	}()
+	<-rotationStarted
 	select {
 	case outcome := <-rotationDone:
 		t.Fatalf("rotation passed an uncommitted secret store: %+v", outcome)
