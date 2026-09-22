@@ -30,6 +30,10 @@ graph TD
   console["#217 console"]
   planning --> console
   qualification["#218 qualification"]
+  lifecycle_baseline["#222 lifecycle baseline"]
+  baseline --> lifecycle_baseline
+  profiles --> lifecycle_baseline
+  lifecycle_baseline --> qualification
   lifecycle --> qualification
   console --> qualification
 ```
@@ -50,6 +54,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Pending | — |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Pending | — |
+| [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Harness validated; capture pending | [Supplemental measurement scope](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
