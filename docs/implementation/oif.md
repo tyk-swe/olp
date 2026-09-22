@@ -14,6 +14,9 @@ graph TD
   planning["#213 planning"]
   oif --> planning
   profiles --> planning
+  route_contracts["#220 route contracts"]
+  oif --> route_contracts
+  route_contracts --> planning
   continuation["#214 continuation"]
   planning --> continuation
   operations["#215 operations"]
@@ -37,6 +40,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Integrated; replacement qualification pending | Fixture commit `a541fd31`; [fixture validation](../qualification/fidelity/baseline-validation.md); [legacy performance baseline and frozen budgets](../evidence/fidelity-performance/README.md), measured at `8e52f775` and captured in `cff8c753` |
 | [#211](https://github.com/tyk-swe/olp/issues/211) Introduce source-preserving OIF and registered identity plans | D01-D07, D14, D19-D20; T01, T07, T10 | Source layer integrated; full G6 qualification pending in #218 | Source branch `f687cdc5`; [source contracts and validation](../qualification/fidelity/oif-source.md); [both performance captures and unresolved relay-control limit](../evidence/fidelity-performance/oif-source-v1/README.md) |
 | [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | In progress; secure connection transports integrated | Transport merge `eea89261`; provider-authority connection isolation merge `f1360852`; typed profile work remains ongoing |
+| [#220](https://github.com/tyk-swe/olp/issues/220) Persist route fidelity contracts and policy invariants | D02, D18, D21, D23 | In progress | Independent route foundation; strict execution remains gated by #213. |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Pending | — |
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Pending | — |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Pending | — |
