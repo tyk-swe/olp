@@ -29,7 +29,15 @@ graph TD
   operations --> lifecycle
   console["#217 console"]
   planning --> console
+  console_forms["#223 console forms"]
+  profiles --> console_forms
+  route_contracts --> console_forms
+  console_forms --> console
   qualification["#218 qualification"]
+  lifecycle_baseline["#222 lifecycle baseline"]
+  baseline --> lifecycle_baseline
+  profiles --> lifecycle_baseline
+  lifecycle_baseline --> qualification
   lifecycle --> qualification
   console --> qualification
 ```
@@ -49,7 +57,9 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Pending | — |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Pending | — |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
+| [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Ready; #212 and #220 integrated | Independent configuration-editor slice; inspector, evidence and operation playgrounds remain #217 |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Pending | — |
+| [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
@@ -91,6 +101,13 @@ admission, preserving the budget for eligible siblings with both API-key and
 credential-free provider authentication. The combined gateway revocation tests
 passed with race detection after its merge. These checks do not provide strict
 admission (#213), complete G2, or G6.
+
+The #222 merge passed the lifecycle artifact self-comparison, all five runner
+tests and the short public-service conservation/corruption suite. Recorded
+source, harness and runner identities match the frozen capture; current
+inventory regeneration retained the original v1 evidence and all independent
+fixtures. This qualifies baseline integrity and integration, not replacement
+timings, encrypted translated-tool recovery or full G6.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
