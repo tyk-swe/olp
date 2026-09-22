@@ -65,7 +65,6 @@ func validateFidelity(f *RouteFidelity) error {
 }
 
 var ErrFidelityPolicyConflict = errors.New("redaction requires a transformed route; strict routes preserve input and output")
-var ErrStrictExecutionUnavailable = errors.New("strict interaction planning is not available in this release")
 
 func ValidateRouteFidelity(f *RouteFidelity, policy *contentpolicy.Policy) error {
 	if err := validateFidelity(f); err != nil {
@@ -84,15 +83,8 @@ func ValidateRouteFidelity(f *RouteFidelity, policy *contentpolicy.Policy) error
 	return nil
 }
 
-// RequireRouteExecution fails closed until the interaction planner compiles
-// the complete strict contract. #213 replaces this availability boundary;
-// publishing a mode alone must never enable legacy execution under that claim.
+// RequireRouteExecution validates the mode. Snapshot compilation additionally
+// requires a compiled strict interaction template for every route target.
 func RequireRouteExecution(f *RouteFidelity) error {
-	if err := validateFidelity(f); err != nil {
-		return err
-	}
-	if FidelityMode(f) == FidelityStrict {
-		return ErrStrictExecutionUnavailable
-	}
-	return nil
+	return validateFidelity(f)
 }

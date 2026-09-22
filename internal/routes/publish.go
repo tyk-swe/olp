@@ -79,6 +79,9 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err = check(current, live); err != nil {
 		return access.Reply{}, err
 	}
+	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
+		return access.Reply{}, err
+	}
 	if len(current.ContentPolicy) > 0 {
 		var policy contentpolicy.Policy
 		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
@@ -139,6 +142,9 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if err = requireFidelityExecution(current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
+	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
 		return access.Reply{}, err
 	}
 	for i := range current.Targets {

@@ -66,3 +66,35 @@ func requireFidelityExecution(raw json.RawMessage) error {
 	}
 	return nil
 }
+
+// compileDraftExecution checks the same configured links used by release
+// installation. It is read-only and never performs provider inference or probes.
+func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
+	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
+	if err != nil || runtime.FidelityMode(fidelity) != runtime.FidelityStrict {
+		return err
+	}
+	snapshot, err := runtime.Compile(ctx, tx)
+	if err != nil {
+		return err
+	}
+	route := simulationRoute(d.ID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
+	route.Fidelity = fidelity
+	if len(d.ContentPolicy) > 0 {
+		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
+		if err != nil {
+			return err
+		}
+	}
+	if err = snapshot.CompileRouteExecution(route); err != nil {
+		var failure interface {
+			Incompatibility() (code, field, requirement, message string)
+		}
+		if errors.As(err, &failure) {
+			code, _, _, message := failure.Incompatibility()
+			return access.Fail(422, code, message)
+		}
+		return err
+	}
+	return nil
+}

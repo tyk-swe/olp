@@ -128,6 +128,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 			BillingUncertain: fact.BillingUncertain,
 		},
 		Routing: &usage.Routing{
+			Interaction:         fact.Interaction,
 			Mode:                optionalText(fact.Mode),
 			CredentialSlotID:    optionalText(fact.SlotID),
 			CredentialVersionID: optionalText(fact.CredentialID),

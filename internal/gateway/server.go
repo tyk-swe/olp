@@ -12,15 +12,18 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -30,6 +33,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Config bounds the inference surface.
@@ -381,6 +385,17 @@ func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
 }
 
 func requestError(err error) *Error {
+	var contract interface {
+		Incompatibility() (code, field, requirement, message string)
+	}
+	if errors.As(err, &contract) {
+		code, field, _, message := contract.Incompatibility()
+		var param *string
+		if field != "" {
+			param = &field
+		}
+		return invalidRequest(code, message, param)
+	}
 	if re, ok := errors.AsType[*openai.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
@@ -409,6 +424,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeError := func(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, family.Surface()) }
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		x.semanticHeaders = r.Header.Clone()
+		query, queryErr := url.ParseQuery(r.URL.RawQuery)
+		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 		status := http.StatusInternalServerError
 		var out *outcome
 		defer func() {
@@ -455,7 +473,13 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
-		parsed, err := protocols.Parse(family, body, r.PathValue("model"))
+		var parsed *openai.Request
+		var err error
+		if family == openai.FamilyBedrock {
+			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
+		} else {
+			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+		}
 		if err != nil {
 			e = requestError(err)
 			x.failure, status = e, e.Status
@@ -560,6 +584,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
 		x.facts[len(x.facts)-1].Committed = true
+		if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+			fact.Interaction.ClientState = usage.ClientPartial
+		}
 		_, err = w.Write(out.completion.Body)
 		if err == nil {
 			// Flush buffered responses before recording successful delivery.
@@ -570,6 +597,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			out.cancelled = true
 		} else {
 			x.delivered(s.now())
+			if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+				fact.Interaction.ClientState = usage.ClientTerminal
+			}
 		}
 	}
 }
@@ -587,10 +617,28 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		return modelNotFound(x.parsed.Route)
 	}
 	x.route = &route
+	if x.strict() {
+		if x.semanticQueryInvalid {
+			param := "query"
+			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
+		}
+		if x.family.Surface() == "gemini" {
+			if keys, present := x.semanticQuery["key"]; present {
+				if len(keys) != 1 || keys[0] == "" {
+					param := "key"
+					return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
+				}
+				// Authentication already resolved the gateway key. It is neither
+				// native semantics nor an upstream query/default/receipt value.
+				delete(x.semanticQuery, "key")
+			}
+		}
+	}
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	var semantic error
+	var policyDecisions []contentpolicy.Decision
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
@@ -614,8 +662,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				}
 			}
 			var e error
-			if p.ProfileID != "" {
-				_, e = x.preparedProvider(&p, t.ProviderModel)
+			if p.ProfileID != "" || x.strict() {
+				var prepared preparedProvider
+				prepared, e = x.preparedProvider(&p, t.ProviderModel)
+				if e != nil {
+					policyDecisions = prepared.policyDecisions
+				}
 			} else {
 				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
 			}
@@ -637,6 +689,9 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	x.budget = plan.Budget
 	if len(plan.Attempts) == 0 {
 		if semantic != nil {
+			for _, decision := range policyDecisions {
+				recordDecision(x, decision)
+			}
 			return requestError(semantic)
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
@@ -734,6 +789,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 	if !sw.committed {
 		h := sw.w.Header()
 		h.Set("Content-Type", "text/event-stream; charset=utf-8")
+		if sw.family == openai.FamilyBedrock {
+			h.Set("Content-Type", "application/vnd.amazon.eventstream")
+		}
 		h.Set("X-Accel-Buffering", "no")
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
@@ -765,6 +823,16 @@ func (sw *streamWriter) finish(out *outcome) int {
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion
 	// marker so the client cannot mistake it for success.
+	if sw.family == openai.FamilyBedrock {
+		headers := eventstream.Headers{}
+		headers.Set(":message-type", eventstream.StringValue("exception"))
+		headers.Set(":exception-type", eventstream.StringValue("modelStreamErrorException"))
+		payload, _ := json.Marshal(map[string]string{"message": out.err.Message, "code": out.err.Code})
+		http.NewResponseController(sw.w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = eventstream.NewEncoder().Encode(sw.w, eventstream.Message{Headers: headers, Payload: payload})
+		_ = http.NewResponseController(sw.w).Flush()
+		return http.StatusOK
+	}
 	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
 	if sw.family == openai.FamilyResponses || sw.family.Surface() == "anthropic" {
 		frame = "event: error\n" + frame

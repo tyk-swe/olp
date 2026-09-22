@@ -330,9 +330,9 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	return eventstream.NewDecoder().Decode(io.MultiReader(bytes.NewReader(prelude[:]), io.LimitReader(r, int64(size)-12)), nil)
 }
 func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamBedrockEvents(r, limit, route, emit, nil)
+	return streamBedrockEvents(r, limit, route, emit, nil, false)
 }
-func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
+func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, native bool) (*openai.Completion, error) {
 	c := &openai.Completion{ProviderModel: route}
 	started, stopped := false, false
 	blocks := map[int64]*contentBlock{}
@@ -447,8 +447,18 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 				return c, &openai.UpstreamError{Code: kind, Message: "Bedrock stream failed"}
 			}
 		}
-		f["type"] = raw(kind)
-		if e := emit(eventFrame(kind, f)); e != nil {
+		var frame []byte
+		if native {
+			var encoded bytes.Buffer
+			if err := eventstream.NewEncoder().Encode(&encoded, message); err != nil {
+				return c, err
+			}
+			frame = encoded.Bytes()
+		} else {
+			f["type"] = raw(kind)
+			frame = eventFrame(kind, f)
+		}
+		if e := emit(frame); e != nil {
 			return c, e
 		}
 	}

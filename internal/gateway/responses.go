@@ -40,6 +40,11 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if raw := parsed.Field("store"); raw != nil {
 		_ = json.Unmarshal(raw, &store)
 	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && parsed.Field("store") == nil {
+		// Native Responses omission requests provider retention. Strict admission
+		// cannot silently inject store:false to avoid the caller's state policy.
+		store = true
+	}
 	if previous == "" && !background && !store {
 		return nil
 	}
