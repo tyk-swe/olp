@@ -2,6 +2,7 @@ package interaction
 
 import (
 	"bytes"
+	"golang.org/x/net/http/httpguts"
 	"maps"
 	"net/http"
 	"net/textproto"
@@ -18,6 +19,17 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	if request == nil || !request.OIF().Document().Valid() || request.Family.Operation() != "generation" {
 		return nil, incompatible("target_capability", "/operation", "operation_contract", "This template admits generation requests only.")
 	}
+	descriptor := request.OIF().Descriptor()
+	expected := openai.Descriptor(request.Family, request.Stream)
+	if descriptor.Operation != expected.Operation || descriptor.Dialect != expected.Dialect || descriptor.Execution.Delivery != expected.Execution.Delivery {
+		return nil, incompatible("target_capability", "/request", "source_identity_consistency", "The request adapter disagrees with its immutable source contract.")
+	}
+	if request.Family == openai.FamilyChat || request.Family == openai.FamilyResponses || request.Family == openai.FamilyAnthropic {
+		stream := member(request.OIF().Document().Root(), "stream")
+		if (stream.Raw() == "true") != request.Stream {
+			return nil, incompatible("target_capability", "/stream", "source_delivery_consistency", "The selected delivery mode disagrees with the native source.")
+		}
+	}
 	if request.OIF().Document().Len() > t.config.MaxBodyBytes {
 		return nil, incompatible("target_capability", "/request", "bounded_buffering", "The request exceeds the compiled body limit.")
 	}
@@ -30,7 +42,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	}
 	native := request.OIF().Descriptor().Dialect == openai.Descriptor(t.wire, request.Stream).Dialect
 	receipt := Receipt{Class: NativeIdentity, Operation: "generation", SourceDialect: request.OIF().Descriptor().Dialect.ID, TargetDialect: openai.Descriptor(t.wire, request.Stream).Dialect.ID, ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Evidence: []string{evidenceNative}}
-	receipt.Obligations = Obligations{Delivery: "unary", Lifetime: "request", Continuation: "client_native_history", Retry: "same_serving_before_send_or_definitive_rejection", MaxBodyBytes: t.config.MaxBodyBytes, MaxEventBytes: t.config.MaxEventBytes, RejectAmbiguousFailover: true, GuardResults: true}
+	receipt.Obligations = Obligations{Delivery: "unary", Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}, Continuation: "client_native_history", Retry: "same_serving_before_send_or_definitive_rejection", MaxBodyBytes: t.config.MaxBodyBytes, MaxEventBytes: t.config.MaxEventBytes, RejectAmbiguousFailover: true, GuardResults: true}
 	if request.Stream {
 		receipt.Obligations.Delivery = "incremental"
 	}
@@ -49,7 +61,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
 		return nil, err
 	}
-	if t.policy != nil && t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || t.wire == openai.FamilyBedrock) {
+	if t.policy != nil && t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == openai.FamilyBedrock) {
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
 	}
 	if t.policy != nil && len(t.policy.Input) > 0 {
@@ -59,39 +71,56 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	}
 	// Hosting wrappers may only perform the reviewed address/model/API-revision
 	// binding. Semantic preparation is already complete and its document retained.
-	wrapped, err := config.WrapBody(effective.Bytes(), t.wire)
-	if err != nil {
-		return nil, incompatible("target_capability", "/profile", "hosting_wrapper", "The hosting wrapper conflicts with native request requirements.")
-	}
-	if !bytes.Equal(wrapped, effective.Bytes()) {
-		document, err := oif.ParseJSON(wrapped, oif.Limits{MaxBytes: t.config.MaxBodyBytes})
+	if t.profile.Hosting == "vertex-anthropic" || t.profile.Hosting == "bedrock-anthropic-invoke" {
+		wrapped, err := config.WrapBody(effective.Bytes(), t.wire)
 		if err != nil {
-			return nil, incompatible("target_capability", "/request", "bounded_buffering", "The hosted invocation exceeds its compiled bounds.")
+			return nil, incompatible("target_capability", "/profile", "hosting_wrapper", "The hosting wrapper conflicts with native request requirements.")
 		}
-		hosted, err := oif.PrepareDestination(request.OIF(), prepared.Descriptor(), document, oif.IdentityBinding, "qualified hosting model and native API revision binding")
-		if err != nil {
-			return nil, err
+		if !bytes.Equal(wrapped, effective.Bytes()) {
+			document, err := oif.ParseJSON(wrapped, oif.Limits{MaxBytes: t.config.MaxBodyBytes})
+			if err != nil {
+				return nil, incompatible("target_capability", "/request", "bounded_buffering", "The hosted invocation exceeds its compiled bounds.")
+			}
+			hosted, err := oif.PrepareDestination(request.OIF(), prepared.Descriptor(), document, oif.IdentityBinding, "qualified hosting model and native API revision binding")
+			if err != nil {
+				return nil, err
+			}
+			prepared = hosted.WithProvenance(prepared.Provenance()...)
+			receipt.Dispositions = append(receipt.Dispositions, Disposition{"/profile", "introduced", "hosting_identity_binding", evidenceNative})
 		}
-		prepared = hosted.WithProvenance(prepared.Provenance()...)
-		receipt.Dispositions = append(receipt.Dispositions, Disposition{"/profile", "introduced", "hosting_identity_binding", evidenceNative})
 	}
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
 	receipt.Dispositions = append(receipt.Dispositions, headerReceipt...)
 	receipt.Dispositions = compactDispositions(receipt.Dispositions)
-	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, receipt: receipt}, nil
+	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, route: request.Route, receipt: receipt}, nil
 }
 
 func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {
+	for _, entry := range request.OIF().Provenance() {
+		if entry.Origin == oif.ExplicitTransform || entry.Origin == oif.LegacyMapping {
+			return oif.Prepared{}, incompatible("policy_conflict", "/request", "semantic_preservation", "Strict execution cannot consume a semantically transformed source.")
+		}
+	}
 	prepared, err := protocols.PrepareIdentity(request, t.serving.Model)
 	if err != nil {
 		return oif.Prepared{}, incompatible("resource_affinity", "/request", "authorized_identity_overlays", "The source contains changes outside its registered native identity contract.")
 	}
 	for _, member := range request.OIF().Document().Root().Members() {
-		receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(member.Name), "preserved", "native_source_identity", evidenceNative})
+		disposition, rule := "preserved", "native_source_identity"
+		if member.Name == "model" {
+			disposition, rule = "bound", "published_model_binding"
+		}
+		if member.Name == "stream_options" && request.Stream && request.Family == openai.FamilyChat {
+			disposition, rule = "transport_bound", "native_usage_observation"
+		}
+		receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(member.Name), disposition, rule, evidenceNative})
+	}
+	for _, entry := range prepared.Provenance() {
+		receipt.Dispositions = append(receipt.Dispositions, Disposition{entry.Pointer, "bound", string(entry.Origin), evidenceNative})
 	}
 	changes := []oif.Change{}
 	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
-		if _, present := prepared.Document().Root().Lookup(name); present {
+		if _, present := request.OIF().Document().Root().Lookup(name); present {
 			continue
 		}
 		raw := t.defaults[name]
@@ -110,15 +139,22 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 		receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(name), "introduced", rule, evidenceNative})
 	}
 	if len(changes) > 0 {
-		document, err := oif.Apply(prepared.Document(), changes)
+		document, err := oif.Apply(request.OIF().Document(), changes)
 		if err != nil {
 			return oif.Prepared{}, incompatible("target_capability", "/defaults", "native_default_overlay", "Native defaults exceed the source bounds or conflict with its structure.")
 		}
-		next, err := oif.PrepareDestination(request.OIF(), prepared.Descriptor(), document, oif.ProviderDefault, "qualified native omission defaults; source members remain authoritative")
+		// Defaults are resolved against caller presence before transport usage
+		// overlays, so an added stream_options object cannot hide a default.
+		native := openai.NewSourceEnvelope(request.Family, request.Route, request.Stream, document)
+		bound, err := protocols.PrepareIdentity(native, t.serving.Model)
+		if err != nil {
+			return oif.Prepared{}, incompatible("target_capability", "/defaults", "native_default_overlay", "The declared default cannot satisfy native identity and transport obligations.")
+		}
+		next, err := oif.PrepareDestination(request.OIF(), prepared.Descriptor(), bound.Document(), oif.ProviderDefault, "qualified native omission defaults; source members remain authoritative")
 		if err != nil {
 			return oif.Prepared{}, err
 		}
-		next = next.WithProvenance(prepared.Provenance()...)
+		next = next.WithProvenance(bound.Provenance()...)
 		for _, change := range changes {
 			next = next.WithProvenance(oif.Provenance{Pointer: change.Pointer, Origin: change.Origin, Reason: change.Reason})
 		}
@@ -133,7 +169,9 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 }
 
 func (t *Template) bindSemantic(request *openai.Request, context Context) (connectors.Config, []Disposition, error) {
-	config, _ := copyConfig(t.config.Provider)
+	config := t.config.Provider
+	config.SemanticHeaders = maps.Clone(config.SemanticHeaders)
+	config.QuerySettings = maps.Clone(config.QuerySettings)
 	if config.SemanticHeaders == nil {
 		config.SemanticHeaders = map[string]string{}
 	}
@@ -158,6 +196,9 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 		if seen[name] || len(values) != 1 || !native || !slices.Contains(t.profile.SemanticHeaders, name) {
 			return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_header", "A caller semantic header has no unambiguous mapping in the selected profile.")
 		}
+		if len(values[0]) > 2048 || !httpguts.ValidHeaderFieldValue(values[0]) || name == "Anthropic-Version" && values[0] != t.profile.DialectRevision {
+			return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_configuration", "Caller semantic settings are malformed or outside the profile revision.")
+		}
 		seen[name] = true
 		for configured, value := range config.SemanticHeaders {
 			if strings.EqualFold(configured, name) {
@@ -179,14 +220,14 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 		if len(values) != 1 || !native || !slices.Contains(t.profile.QuerySettings, name) {
 			return connectors.Config{}, nil, incompatible("target_capability", "/query", "semantic_query", "A caller query setting has no mapping in the selected profile.")
 		}
+		if len(values[0]) > 2048 || !httpguts.ValidHeaderFieldValue(values[0]) || name == "$xgafv" && values[0] != "1" && values[0] != "2" || name == "api-version" && values[0] != config.APIVersion {
+			return connectors.Config{}, nil, incompatible("target_capability", "/query", "semantic_configuration", "Caller semantic settings are malformed or outside the profile revision.")
+		}
 		if value, present := config.QuerySettings[name]; present && value != values[0] {
 			return connectors.Config{}, nil, incompatible("target_capability", "/query", "semantic_query_conflict", "A caller query setting conflicts with the published profile.")
 		}
 		config.QuerySettings[name] = values[0]
 		receipts = append(receipts, Disposition{"/query/" + name, "preserved", "caller_semantic_query", evidenceNative})
-	}
-	if err := config.ValidateProfile(); err != nil {
-		return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_configuration", "Caller semantic settings are malformed or outside the profile revision.")
 	}
 	for name := range t.config.Provider.SemanticHeaders {
 		if !seen[http.CanonicalHeaderKey(name)] {
@@ -214,24 +255,111 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 		store, present := root.Lookup("store")
 		retained = !present || store.Kind() == oif.Null || store.Raw() != "false"
 	}
+	referenced := false
 	for _, name := range []string{"previous_response_id", "conversation", "cachedContent"} {
 		value, present := root.Lookup(name)
 		if !present || value.Kind() == oif.Null {
 			continue
 		}
-		retained = true
+		referenced = true
+		if name == "conversation" {
+			retained = true
+		}
 		if context.RequiredServing == nil {
 			return incompatible("resource_affinity", "/"+name, "resolved_resource_affinity", "Provider resources require resolved historical serving authority.")
 		}
 	}
-	if retained && !context.AllowProviderState {
-		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains provider state but the caller does not permit it.")
+	if (retained || referenced) && !context.AllowProviderState {
+		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
+	}
+	if referenced {
+		obligations.Effects = append(obligations.Effects, "resource_read")
 	}
 	if retained {
 		obligations.Lifetime = "provider_resource"
 		obligations.Continuation = "authorized_provider_resource"
+		obligations.Effects = append(obligations.Effects, "resource_mutation")
+	}
+	tools, err := declaredClientTools(root, wire)
+	if err != nil {
+		return err
+	}
+	if tools {
+		obligations.Effects = append(obligations.Effects, "client_tool_call")
 	}
 	return nil
+}
+func declaredClientTools(root oif.Value, wire openai.Family) (bool, error) {
+	client := false
+	reject := func() (bool, error) {
+		return false, incompatible("state_carrier", "/tools", "hosted_tool_effects", "Provider-hosted or unregistered tool effects require a separately qualified lifecycle contract.")
+	}
+	if tools, present := root.Lookup("tools"); present && tools.Kind() != oif.Null {
+		if tools.Kind() != oif.Array {
+			return reject()
+		}
+		for _, tool := range tools.Elements() {
+			kind := valueText(member(tool, "type"))
+			switch wire {
+			case openai.FamilyChat, openai.FamilyResponses:
+				if kind != "function" {
+					return reject()
+				}
+			case openai.FamilyAnthropic:
+				if kind != "" && kind != "custom" || member(tool, "name").Kind() != oif.String || member(tool, "input_schema").Kind() != oif.Object {
+					return reject()
+				}
+			case openai.FamilyGemini:
+				if !onlyMembers(tool, "functionDeclarations") || member(tool, "functionDeclarations").Kind() != oif.Array {
+					return reject()
+				}
+			default:
+				return reject()
+			}
+			client = true
+		}
+	}
+	if config, present := root.Lookup("toolConfig"); present && config.Kind() != oif.Null {
+		if wire == openai.FamilyBedrock {
+			if tools, present := config.Lookup("tools"); present {
+				if tools.Kind() != oif.Array {
+					return reject()
+				}
+				for _, tool := range tools.Elements() {
+					if !onlyMembers(tool, "toolSpec") || member(tool, "toolSpec").Kind() != oif.Object {
+						return reject()
+					}
+					client = true
+				}
+			}
+		}
+	}
+	var history func(oif.Value) bool
+	history = func(value oif.Value) bool {
+		for _, field := range value.Members() {
+			if slices.Contains([]string{"tool_calls", "function_call", "functionCall", "functionResponse", "toolUse", "toolResult"}, field.Name) {
+				return true
+			}
+			if field.Name == "type" && slices.Contains([]string{"tool_use", "tool_result", "function_call", "function_call_output"}, valueText(field.Value)) {
+				return true
+			}
+			if history(field.Value) {
+				return true
+			}
+		}
+		for _, element := range value.Elements() {
+			if history(element) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, name := range []string{"messages", "contents", "input"} {
+		if history(member(root, name)) {
+			client = true
+		}
+	}
+	return client, nil
 }
 
 // Only schema-owned names are observable receipt fields. Arbitrary native

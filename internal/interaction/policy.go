@@ -32,6 +32,26 @@ func checkInputCoverage(wire openai.Family, document oif.Document) error {
 			return incompatible("policy_conflict", safeField(field.Name), "input_policy_coverage", "The input policy cannot inspect an unknown or opaque native control.")
 		}
 	}
+	for name, allowed := range map[string]string{
+		"generationConfig": "temperature topP topK candidateCount maxOutputTokens stopSequences presencePenalty frequencyPenalty seed responseMimeType responseSchema responseJsonSchema responseLogprobs logprobs",
+		"inferenceConfig":  "maxTokens temperature topP stopSequences",
+		"stream_options":   "include_usage include_obfuscation",
+	} {
+		if value, present := document.Root().Lookup(name); present && value.Kind() != oif.Null && !onlyMembers(value, allowed) {
+			return incompatible("policy_conflict", "/"+name, "input_policy_coverage", "A native control contains a member without a policy inspection contract.")
+		}
+	}
+	if format, present := document.Root().Lookup("response_format"); present && format.Kind() != oif.Null && !inspectableFormat(format, false) {
+		return incompatible("policy_conflict", "/response_format", "input_policy_coverage", "The response format has no complete policy inspection contract.")
+	}
+	if text, present := document.Root().Lookup("text"); present && text.Kind() != oif.Null {
+		if !onlyMembers(text, "format verbosity") {
+			return incompatible("policy_conflict", "/text", "input_policy_coverage", "The text format contains an unknown native control.")
+		}
+		if format, present := text.Lookup("format"); present && !inspectableFormat(format, true) {
+			return incompatible("policy_conflict", "/text/format", "input_policy_coverage", "The text schema has no complete policy inspection contract.")
+		}
+	}
 	// Tool schemas and argument/result JSON are declared data, not opaque native
 	// state. Outside those positions, unknown message/part members fail closed.
 	for _, name := range []string{"messages", "contents", "input", "system", "systemInstruction"} {
@@ -108,7 +128,7 @@ func (p *Plan) CheckInput() ([]contentpolicy.Decision, error) {
 		return nil, nil
 	}
 	texts := []string{}
-	for _, name := range []string{"messages", "input", "contents", "system", "systemInstruction", "instructions", "tools", "toolConfig", "response_format", "text", "generationConfig"} {
+	for _, name := range []string{"messages", "input", "contents", "system", "systemInstruction", "instructions", "tools", "toolConfig", "tool_choice", "response_format", "text", "generationConfig"} {
 		if value, present := p.effective.Root().Lookup(name); present {
 			collectPolicyText(value, &texts, name == "tools" || name == "toolConfig" || name == "response_format" || name == "text" || name == "generationConfig")
 		}
@@ -215,4 +235,20 @@ func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
 		}
 	}
 	return true
+}
+
+func inspectableFormat(value oif.Value, responses bool) bool {
+	if value.Kind() != oif.Object {
+		return false
+	}
+	switch valueText(member(value, "type")) {
+	case "text", "json_object":
+		return onlyMembers(value, "type")
+	case "json_schema":
+		if responses {
+			return onlyMembers(value, "type name description schema strict") && member(value, "schema").Kind() == oif.Object
+		}
+		return onlyMembers(value, "type json_schema") && onlyMembers(member(value, "json_schema"), "name description schema strict") && member(member(value, "json_schema"), "schema").Kind() == oif.Object
+	}
+	return false
 }

@@ -4,7 +4,9 @@
 package interaction
 
 import (
+	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -50,9 +52,10 @@ func incompatible(code, field, requirement, message string) *Error {
 
 type Disposition struct{ Field, Disposition, Rule, Evidence string }
 type Obligations struct {
-	Delivery, Lifetime, Continuation, Retry string
-	MaxBodyBytes, MaxEventBytes             int
-	RejectAmbiguousFailover, GuardResults   bool
+	Delivery, Lifetime, Submission, Continuation, Retry string
+	Effects                                             []string
+	MaxBodyBytes, MaxEventBytes                         int
+	RejectAmbiguousFailover, GuardResults               bool
 }
 type Receipt struct {
 	Class, Operation, SourceDialect, TargetDialect, ProfileID, ProfileRevision string
@@ -77,6 +80,7 @@ type Plan struct {
 	effective    oif.Document
 	sourceFamily openai.Family
 	stream       bool
+	route        string
 	receipt      Receipt
 }
 
@@ -141,14 +145,62 @@ func Compile(config Config) (*Template, error) {
 	return &Template{config: config, profile: profile, wire: wire, policy: compiled, defaults: defaults, origins: origins, serving: serving}, nil
 }
 func copyConfig(config connectors.Config) (connectors.Config, error) {
-	raw, err := json.Marshal(config)
-	if err != nil {
-		return connectors.Config{}, err
+	out := config
+	out.SemanticHeaders = maps.Clone(config.SemanticHeaders)
+	out.QuerySettings = maps.Clone(config.QuerySettings)
+	out.CredentialHeaders = slices.Clone(config.CredentialHeaders)
+	out.Models = copyValues(config.Models)
+	out.OperationDefaults = copyDefaults(config.OperationDefaults)
+	if config.Bindings != nil {
+		out.Bindings = make(map[string]connectors.Binding, len(config.Bindings))
+		for name, binding := range config.Bindings {
+			binding.Defaults = copyDefaults(binding.Defaults)
+			out.Bindings[name] = binding
+		}
 	}
-	var out connectors.Config
-	err = json.Unmarshal(raw, &out)
-	return out, err
+	if config.Network != nil {
+		network := *config.Network
+		network.ConnectTimeoutMS = copyPointer(network.ConnectTimeoutMS)
+		network.TLSHandshakeTimeoutMS = copyPointer(network.TLSHandshakeTimeoutMS)
+		network.ResponseHeaderTimeoutMS = copyPointer(network.ResponseHeaderTimeoutMS)
+		network.IdleConnTimeoutMS = copyPointer(network.IdleConnTimeoutMS)
+		network.MaxIdleConns = copyPointer(network.MaxIdleConns)
+		network.MaxIdleConnsPerHost = copyPointer(network.MaxIdleConnsPerHost)
+		network.MaxConnsPerHost = copyPointer(network.MaxConnsPerHost)
+		out.Network = &network
+	}
+	return out, nil
 }
+func copyValues(values map[string]json.RawMessage) map[string]json.RawMessage {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(values))
+	for name, value := range values {
+		out[name] = bytes.Clone(value)
+	}
+	return out
+}
+func copyDefaults(values map[string]connectors.DefaultSet) map[string]connectors.DefaultSet {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]connectors.DefaultSet, len(values))
+	for name, value := range values {
+		value.Values = copyValues(value.Values)
+		value.NativeOptions = copyValues(value.NativeOptions)
+		out[name] = value
+	}
+	return out
+}
+func copyPointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
 func copyPolicy(policy *contentpolicy.Policy) (*contentpolicy.Policy, error) {
 	if policy == nil {
 		return nil, nil
@@ -164,13 +216,18 @@ func (p *Plan) Body() []byte              { return p.prepared.Document().Bytes()
 func (p *Plan) Wire() openai.Family       { return p.template.wire }
 func (p *Plan) Config() connectors.Config { out, _ := copyConfig(p.config); return out }
 func (p *Plan) EffectiveRequest() *openai.Request {
-	return openai.NewSourceEnvelope(p.Wire(), "strict-effective", p.stream, p.effective)
+	return openai.NewSourceEnvelope(p.Wire(), p.route, p.stream, p.effective)
 }
 func (p *Plan) Receipt() Receipt {
 	out := p.receipt
 	out.Dispositions = slices.Clone(out.Dispositions)
 	out.Evidence = slices.Clone(out.Evidence)
+	out.Obligations.Effects = slices.Clone(out.Obligations.Effects)
 	return out
 }
 func (p *Plan) Serving() ServingIdentity { return p.receipt.Serving }
-func (p *Plan) Obligations() Obligations { return p.receipt.Obligations }
+func (p *Plan) Obligations() Obligations {
+	out := p.receipt.Obligations
+	out.Effects = slices.Clone(out.Effects)
+	return out
+}
