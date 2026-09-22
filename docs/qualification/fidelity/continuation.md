@@ -51,8 +51,15 @@ dispatch journal. A compatible provider revision publication and fresh gateway
 instance kept the historical endpoint/defaults for the active handle; revoking
 that historical credential then refused recovery. Public branch, cross-key,
 cross-route, tamper, expiry and live key-policy/revocation checks passed.
+An active handle created over a real mTLS connection with a private trust root
+also refused GET recovery, same-submission replay and a child turn after its
+historical network credential was revoked; the provider accepted no new work.
 Native strict public results separately preserved citation boundaries,
 refusal structure and ordered Gemini candidates.
+Translated requests asking for multiple candidates, citation projection,
+structured output, an unqualified parallel-tool switch or a foreign reasoning
+budget each returned a precise pre-dispatch reason with zero provider calls
+and zero continuation claims.
 The no-inference inspector showed the negotiated carrier, 4 MiB dependency
 bound and encrypted actionability obligation to an authorized key; it rejected
 a state-disabled key and unsupported carrier without a provider call or claim.
@@ -65,6 +72,9 @@ and eight-claim journal tests passed in 2.524 s. The recovery helper update
 passed both official SDK journeys in 8.130 s. Actual automatic JavaScript SDK
 retry passed in 1.750 s and its race check in 4.511 s. These are focused checks; the
 repository-wide release gates still run on the integrated PR branch.
+The mTLS handle-revocation case passed in 1.429 s and under race detection in
+4.017 s; the five public pre-dispatch rejections passed in 1.192 s and their
+combined network/rejection race run in 5.779 s.
 
 The [frozen native encrypted barrier](../../evidence/fidelity-performance/barrier-v1/README.md)
 was not changed. The first clean [translated candidate capture](../../evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json)
@@ -90,3 +100,6 @@ failures remain reviewable at their recorded source revisions. The
 optimization needs a controlled same-condition differential and further
 hot-path diagnosis. A new clean capture must pass the unchanged frozen
 limits before the performance portion of qualification can be called complete.
+The scoped functional continuation implementation can be integrated for
+T02/T03/T07 review; final G6 performance qualification remains a separate
+open gate and no passing claim is made for either failed capture.
