@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -122,25 +121,50 @@ func TestHandleStreamResponseController(t *testing.T) {
 		t.Fatal("flush did not reach the underlying writer")
 	}
 	s := &Server{Origin: "https://console.test"}
-	var flushed atomic.Bool
+	const expected = "event: frame\ndata: {}\n\n"
+	flushed := make(chan error, 1)
+	release := make(chan struct{})
 	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
-		if _, err := fmt.Fprintf(w, "event: frame\ndata: {}\n\n"); err != nil {
+		if _, err := io.WriteString(w, expected); err != nil {
+			flushed <- err
 			return err
 		}
-		if err := http.NewResponseController(w).Flush(); err != nil {
+		err := http.NewResponseController(w).Flush()
+		flushed <- err
+		if err != nil {
 			return err
 		}
-		flushed.Store(true)
+		// The client must observe the frame while the handler remains open;
+		// returning here would let net/http flush it implicitly.
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
 		return nil
 	}))
 	defer server.Close()
-	resp, err := http.Get(server.URL)
+	defer close(release)
+	client := server.Client()
+	client.Timeout = 2 * time.Second
+	resp, err := client.Get(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if !flushed.Load() {
-		t.Fatal("ResponseController flush did not reach the underlying writer")
+	defer resp.Body.Close()
+	frame := make([]byte, len(expected))
+	if _, err := io.ReadFull(resp.Body, frame); err != nil {
+		t.Fatal(err)
+	}
+	if string(frame) != expected {
+		t.Fatalf("flushed frame changed: %q", frame)
+	}
+	select {
+	case err := <-flushed:
+		if err != nil {
+			t.Fatalf("flush through the handler failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not report its flush result")
 	}
 }
 
