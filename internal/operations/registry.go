@@ -48,6 +48,7 @@ type Dialect struct {
 	Defaults                      map[string]Field
 	Request                       func(oif.Request) (oif.View, error)
 	Result                        func(oif.Request, oif.Result) (oif.View, error)
+	ValidateRoute                 func(oif.Request, string) error
 	BindModel                     func(oif.Document, string) ([]oif.Change, error)
 	BindResultModel               func(oif.Document, string) ([]oif.Change, error)
 	Estimate                      func(oif.View) int64
