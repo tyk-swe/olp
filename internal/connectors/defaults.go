@@ -71,12 +71,13 @@ func defaultFields(dialect, operation string) []string {
 	return nil
 }
 
-func reservedOption(name string) bool {
+func reservedOption(operation,name string) bool {
+	if name=="background" && (operation=="image_generation"||operation=="image_edit") {return false}
 	if name == "" || len(name) > 128 || strings.HasPrefix(name, "/") || strings.ContainsAny(name, "\x00\r\n") {
 		return true
 	}
 	switch strings.ToLower(name) {
-	case "model", "stream", "messages", "input", "contents", "system", "systeminstruction", "generatecontentrequest", "routing", "provider", "route", "headers", "query", "url", "base_url", "endpoint", "authorization", "api_key", "credential", "credentials", "previous_response_id", "conversation", "background", "store", "file", "file_id", "input_file_id", "image", "mask", "anthropic_version", "cachedcontent":
+	case "model", "stream", "messages", "input", "contents", "system", "systeminstruction", "generatecontentrequest", "routing", "provider", "route", "headers", "query", "url", "base_url", "endpoint", "authorization", "api_key", "credential", "credentials", "previous_response_id", "conversation", "background", "store", "file", "file_id", "input_file_id", "image", "mask", "anthropic_version", "cachedcontent", "private_key", "client_key_pem", "client_certificate_pem", "proxy_password", "proxy_username":
 		return true
 	}
 	return false
@@ -96,12 +97,12 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		if _, collision := defaults.NativeOptions[name]; collision {
 			return fmt.Errorf("control %s collides with native_options", name)
 		}
-		if err := validateDefaultValue(name, raw); err != nil {
+		if err := validateDefaultValue(operation,name, raw); err != nil {
 			return err
 		}
 	}
 	for name, raw := range defaults.NativeOptions {
-		if err := validateDefaultValue(name, raw); err != nil {
+		if err := validateDefaultValue(operation,name, raw); err != nil {
 			return err
 		}
 	}
@@ -115,12 +116,15 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 	return nil
 }
 
-func validateDefaultValue(name string, raw json.RawMessage) error {
-	if reservedOption(name) || len(raw) == 0 || len(raw) > 256<<10 || !json.Valid(raw) {
+func validateDefaultValue(operation,name string, raw json.RawMessage) error {
+	if reservedOption(operation,name) || len(raw) == 0 || len(raw) > 256<<10 || !json.Valid(raw) {
 		return fmt.Errorf("default %s is reserved, malformed or exceeds 256 KiB", name)
 	}
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
+	}
+	if name=="response_format" && operation!="generation" {
+		var format string;if json.Unmarshal(raw,&format)!=nil{return errors.New("media response_format must be a string or native null")};return nil
 	}
 	switch name {
 	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
