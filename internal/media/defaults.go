@@ -134,15 +134,15 @@ func configuredFailure(name, detail string) *Error {
 // sourceMediaFields owns exact native member bytes independently of the caller.
 // The shared OIF parser rejects ambiguity anywhere in the document, including
 // nested duplicate names and malformed Unicode that encoding/json would repair.
-func sourceMediaFields(body []byte) (map[string]json.RawMessage, error) {
+func sourceMediaFields(body []byte) (oif.Document, map[string]json.RawMessage, error) {
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
-		return nil, err
+		return oif.Document{}, nil, err
 	}
 	if doc.Root().Kind() != oif.Object {
-		return nil, errors.New("expected media object")
+		return oif.Document{}, nil, errors.New("expected media object")
 	}
-	return doc.Fields(), nil
+	return doc, doc.Fields(), nil
 }
 
 func configuredFields(r *Request) (map[string]json.RawMessage, *Error) {
