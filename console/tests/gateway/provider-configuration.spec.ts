@@ -3,6 +3,9 @@ import { expect, test, type Page } from '../playwright';
 
 const endpoint = 'http://127.0.0.1:4187/v1';
 const model = 'compatible-e2e-model';
+// Keep unrelated sticky navigation outside the focused editor captures.
+const screenshotStyle =
+  '.topbar { position: static !important; } .skip-link { visibility: hidden !important; }';
 // These are native number tokens, not JavaScript numbers. Integer-like schema
 // member order and __proto__ are intentional parts of the independent oracle.
 const corpus =
@@ -180,9 +183,13 @@ test('configuration forms retain native source through real saves, conflicts and
     .get('http://127.0.0.1:4187/__test__/requests')
     .then((response) => response.json());
   expect(beforeProbe.requests).toEqual([]);
+  await json.evaluate((element) => {
+    element.scrollTop = 0;
+  });
   await page.locator('.profile-editor').screenshot({
     path: info.outputPath('native-configuration-editor.png'),
-    animations: 'disabled'
+    animations: 'disabled',
+    style: screenshotStyle
   });
 
   // A competing public write must not replace the local document or its ETag.
@@ -290,7 +297,8 @@ test('configuration forms retain native source through real saves, conflicts and
   await expect(page.getByText('Revision 1 active')).toBeVisible();
   await page.locator('.fidelity-editor').screenshot({
     path: info.outputPath('strict-route-migration.png'),
-    animations: 'disabled'
+    animations: 'disabled',
+    style: screenshotStyle
   });
   await page.goto('/routes/new');
   await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
@@ -420,7 +428,8 @@ test('profile migration, schema fields and write-only network credentials share 
     .filter({ has: page.getByText('Network connection', { exact: true }) })
     .screenshot({
       path: info.outputPath('profile-network-forms.png'),
-      animations: 'disabled'
+      animations: 'disabled',
+      style: screenshotStyle
     });
   const upstream = await request
     .get('http://127.0.0.1:4187/__test__/requests')
