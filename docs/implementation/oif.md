@@ -19,6 +19,9 @@ graph TD
   route_contracts --> planning
   continuation["#214 continuation"]
   planning --> continuation
+  native_sdk["#221 native SDK"]
+  oif --> native_sdk
+  native_sdk --> continuation
   operations["#215 operations"]
   planning --> operations
   lifecycle["#216 lifecycle"]
@@ -42,6 +45,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | In progress; secure connection transports integrated | Transport merge `eea89261`; provider-authority connection isolation merge `f1360852`; typed profile work remains ongoing |
 | [#220](https://github.com/tyk-swe/olp/issues/220) Persist route fidelity contracts and policy invariants | D02, D18, D21, D23 | In progress | Independent route foundation; strict execution remains gated by #213. |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Pending | — |
+| [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | In progress | Full strict/translated/recovery qualification remains #214. |
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Pending | — |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Pending | — |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
