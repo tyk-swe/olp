@@ -39,6 +39,16 @@ cases. The per-phase claim/journal/ready timings from the native reference have
 no candidate metric because production code does not expose those internal
 timers.
 
+The reference artifact pins shared fixture and harness files at its recorded
+source revision. The production continuation candidate necessarily has a newer
+`access_test.go` that installs encrypted gateway resources and a newer
+`strict_generation_test.go` with native retained Responses positives. The
+runner verifies the original source hashes from the reference Git revision,
+then records and verifies the candidate's complete current shared-source hash
+inventory separately. The frozen reference harness, runner and provider corpus
+remain byte-for-byte unchanged. These current test setup and assertion changes
+do not change the scripted provider or independent first/next request oracle.
+
 Each candidate repetition requires 24 complete workflows, 48 exact provider
 dispatches, 456 served native events, 312 ordered first-turn projected
 observations, 48 final-turn text boundary observations, 48 enabled tool actions,

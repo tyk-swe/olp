@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { metricNames, validateRuns, parseRuns, compareCandidate, sharedSources, commandArgs, runtimeEnvironment, conditions, comparisonScope } from './continuation-candidate-benchmark.mjs';
+import { metricNames, validateRuns, parseRuns, compareCandidate, referenceEvidence, sharedSources, commandArgs, runtimeEnvironment, conditions, comparisonScope } from './continuation-candidate-benchmark.mjs';
 
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const baselinePath = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
@@ -92,6 +92,7 @@ test('candidate parser accepts only recorded measurement markers', () => {
   assert.deepEqual(parseRuns('other {"x":1}\nCANDIDATE_MEASUREMENT {"name":"small"}\n'), [{ name: 'small' }]);
 });
 test('frozen runtime identity and source inventory are required before comparison', () => {
+  assert.equal(referenceEvidence().baseline.source_revision, baseline.source_revision);
   assert.deepEqual(compareCandidate(completeEvidence(), baseline, budgets), []);
   for (const change of [
     (evidence) => { evidence.hardware.total_memory_bytes--; },
