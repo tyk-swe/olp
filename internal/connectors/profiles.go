@@ -290,7 +290,13 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID != "" {
 		if p, err := c.Profile(); err == nil {
 			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
-				return mode == "unary" && operationregistry.Default.Supports(operation, surface, mode)
+				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
+					return true
+				}
+				if _, dedicated := operationregistry.Lookup(p.Dialect); dedicated {
+					return false
+				}
+				return Supports(c.Kind, c.VendorID, operation, surface, mode)
 			}
 		}
 	}

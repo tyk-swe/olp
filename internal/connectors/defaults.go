@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 )
 
 // DefaultSet is owned by one operation/dialect contract. NativeOptions remains
@@ -112,35 +113,13 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		if _, collision := defaults.NativeOptions[name]; collision {
 			return fmt.Errorf("control %s collides with native_options", name)
 		}
-		if err := validateDefaultValue(operation, name, raw); err != nil {
+		if err := validateDialectDefaultValue(defaults.Dialect, operation, name, raw); err != nil {
 			return err
-		}
-		if codec, ok := operationregistry.Lookup(defaults.Dialect); ok {
-			if field, exists := codec.Defaults[name]; exists && field.Validate != nil {
-				doc, err := oif.ParseJSON(raw, oif.Limits{})
-				if err != nil {
-					return errors.New("operation default is ambiguous or malformed")
-				}
-				if err := field.Validate(doc.Root()); err != nil {
-					return errors.New("operation default violates the registered native schema")
-				}
-			}
 		}
 	}
 	for name, raw := range defaults.NativeOptions {
-		if err := validateDefaultValue(operation, name, raw); err != nil {
+		if err := validateDialectDefaultValue(defaults.Dialect, operation, name, raw); err != nil {
 			return err
-		}
-		if codec, ok := operationregistry.Lookup(defaults.Dialect); ok {
-			if field, exists := codec.Defaults[name]; exists && field.Validate != nil {
-				doc, err := oif.ParseJSON(raw, oif.Limits{})
-				if err != nil {
-					return errors.New("operation default is ambiguous or malformed")
-				}
-				if err := field.Validate(doc.Root()); err != nil {
-					return errors.New("operation default violates the registered native schema")
-				}
-			}
 		}
 	}
 	for _, pair := range [][2]string{{"max_tokens", "max_completion_tokens"}, {"dimensions", "output_dimension"}} {
@@ -153,9 +132,31 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 	return nil
 }
 
+func validateDialectDefaultValue(dialect, operation, name string, raw json.RawMessage) error {
+	if codec, ok := operationregistry.Lookup(dialect); ok {
+		if field, present := codec.Defaults[name]; present && field.Validate != nil {
+			if len(raw) == 0 || len(raw) > 256<<10 {
+				return errors.New("operation default exceeds its bounded schema")
+			}
+			doc, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 256 << 10})
+			if err != nil {
+				return errors.New("operation default is ambiguous or malformed")
+			}
+			if field.Validate(doc.Root()) != nil {
+				return errors.New("operation default violates the registered native schema")
+			}
+			return nil
+		}
+	}
+	return validateDefaultValue(operation, name, raw)
+}
+
 func validateDefaultValue(operation, name string, raw json.RawMessage) error {
-	if reservedOption(operation, name) || len(raw) == 0 || len(raw) > 256<<10 || !json.Valid(raw) {
+	if reservedOption(operation, name) || len(raw) == 0 || len(raw) > 256<<10 {
 		return fmt.Errorf("default %s is reserved, malformed or exceeds 256 KiB", name)
+	}
+	if _, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 256 << 10}); err != nil {
+		return fmt.Errorf("default %s is malformed or ambiguous", name)
 	}
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil

@@ -1,9 +1,10 @@
 package operationregistry
 
 import (
+	"strconv"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
-	"strconv"
 )
 
 func mappings() []operations.Mapping {

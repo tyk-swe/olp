@@ -5,15 +5,17 @@ package operationregistry
 import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/classification"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
 	"github.com/tyk-swe/olp/internal/operations/rerank"
+	"github.com/tyk-swe/olp/internal/operations/tokenization"
 )
 
 var Default = builtins()
 
 func builtins() *operations.Registry {
 	r := operations.NewRegistry()
-	for _, definitions := range [][]operations.Dialect{embeddings.Definitions(), rerank.Definitions()} {
+	for _, definitions := range [][]operations.Dialect{embeddings.Definitions(), rerank.Definitions(), classification.Definitions(), tokenization.Definitions()} {
 		for _, d := range definitions {
 			if err := r.Register(d); err != nil {
 				panic(err)

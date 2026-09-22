@@ -40,6 +40,7 @@ const (
 	classUpstreamClient = "upstream_client"
 	classCredential     = "credential"
 	classProtocol       = "protocol"
+	classPolicy         = "policy"
 	classCancelled      = "cancelled"
 	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
 	// gateway cannot prove; it never fails over.
@@ -165,6 +166,7 @@ type attemptFailure struct {
 	dispatched   bool   // the request reached the upstream before the failure
 	quota        string // a quota this gateway enforces rejected the attempt
 	contractCode string // safe runtime interaction guard violation
+	policyCode   string // local output policy refusal after upstream completion
 	noRetry      bool   // strict outcome uncertainty must not suggest client retries
 }
 
@@ -201,6 +203,13 @@ func (f *attemptFailure) toError() (result *Error) {
 	}()
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
+	if f.policyCode != "" {
+		message := "The provider result was blocked by the route's content policy."
+		if f.policyCode == "policy_conflict" {
+			message = "The route's content policy cannot inspect this provider result."
+		}
+		return invalidRequest(f.policyCode, message, nil)
 	}
 	switch f.class {
 	case classLimitsUnavailable:

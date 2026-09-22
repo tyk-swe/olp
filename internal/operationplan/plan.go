@@ -299,9 +299,13 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	var usage *operations.Usage
+	if p.template.codec.Usage != nil {
+		usage = p.template.codec.Usage(view)
+	}
 	decisions, err := p.checkOutput(envelope)
 	if err != nil {
-		return Result{Decisions: decisions}, err
+		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
 	output := doc
 	if p.mapping != nil {
@@ -314,11 +318,7 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 		}
 	}
 	if err != nil {
-		return Result{}, err
-	}
-	var usage *operations.Usage
-	if p.template.codec.Usage != nil {
-		usage = p.template.codec.Usage(view)
+		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
 	return Result{Envelope: envelope, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions}, nil
 }

@@ -40,7 +40,7 @@ type ServingIdentity = oif.ServingIdentity
 type Error = oif.Incompatibility
 
 func incompatible(code, field, requirement, message string) *Error {
-	return &Error{code, field, requirement, message}
+	return &Error{Code: code, Field: field, Requirement: requirement, Message: message}
 }
 
 type Disposition = oif.Disposition

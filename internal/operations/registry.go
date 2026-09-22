@@ -181,3 +181,24 @@ func (r *Registry) HasOperation(id string) bool {
 	}
 	return false
 }
+
+func (r *Registry) SupportsTarget(target oif.Identity, surface, mode string) bool {
+	if mode != "unary" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	d, ok := r.dialects[target]
+	if !ok {
+		return false
+	}
+	if surface == "native" || d.Surface == surface {
+		return true
+	}
+	for pair := range r.mappings {
+		if pair[1] == target && r.dialects[pair[0]].Surface == surface {
+			return true
+		}
+	}
+	return false
+}

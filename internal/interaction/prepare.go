@@ -94,7 +94,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 				return nil, err
 			}
 			prepared = hosted.WithProvenance(prepared.Provenance()...)
-			receipt.Dispositions = append(receipt.Dispositions, Disposition{"/profile", "introduced", "hosting_identity_binding", evidenceNative})
+			receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: "/profile", Disposition: "introduced", Rule: "hosting_identity_binding", Evidence: evidenceNative})
 		}
 	}
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
@@ -121,10 +121,10 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 		if member.Name == "stream_options" && request.Stream && request.Family == openai.FamilyChat {
 			disposition, rule = "transport_bound", "native_usage_observation"
 		}
-		receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(member.Name), disposition, rule, evidenceNative})
+		receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: safeField(member.Name), Disposition: disposition, Rule: rule, Evidence: evidenceNative})
 	}
 	for _, entry := range prepared.Provenance() {
-		receipt.Dispositions = append(receipt.Dispositions, Disposition{entry.Pointer, "bound", string(entry.Origin), evidenceNative})
+		receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: entry.Pointer, Disposition: "bound", Rule: string(entry.Origin), Evidence: evidenceNative})
 	}
 	changes := []oif.Change{}
 	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
@@ -144,7 +144,7 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 			}
 		}
 		changes = append(changes, oif.Change{Pointer: oif.Pointer("", name), Value: string(raw), Origin: origin, Reason: "declared absent-only native operation default"})
-		receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(name), "introduced", rule, evidenceNative})
+		receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: safeField(name), Disposition: "introduced", Rule: rule, Evidence: evidenceNative})
 	}
 	if len(changes) > 0 {
 		document, err := oif.Apply(request.OIF().Document(), changes)
@@ -222,7 +222,7 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 			if err != nil {
 				return connectors.Config{}, nil, incompatible("target_capability", "/headers/Anthropic-Version", "hosting_api_revision", "The caller API revision has no qualified binding to the selected hosting profile.")
 			}
-			receipts = append(receipts, Disposition{"/headers/Anthropic-Version", "mapped", "hosting_api_revision", evidenceNative})
+			receipts = append(receipts, Disposition{Field: "/headers/Anthropic-Version", Disposition: "mapped", Rule: "hosting_api_revision", Evidence: evidenceNative})
 			continue
 		}
 		if !slices.Contains(t.profile.SemanticHeaders, name) || name == "Anthropic-Version" && values[0] != t.profile.DialectRevision {
@@ -237,7 +237,7 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 			}
 		}
 		config.SemanticHeaders[name] = values[0]
-		receipts = append(receipts, Disposition{"/headers/" + name, "preserved", "caller_semantic_header", evidenceNative})
+		receipts = append(receipts, Disposition{Field: "/headers/" + name, Disposition: "preserved", Rule: "caller_semantic_header", Evidence: evidenceNative})
 	}
 	for name, values := range context.Query {
 		// Gemini chooses SSE at the ingress path. This selector never becomes a
@@ -255,20 +255,20 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 			return connectors.Config{}, nil, incompatible("target_capability", "/query", "semantic_query_conflict", "A caller query setting conflicts with the published profile.")
 		}
 		config.QuerySettings[name] = values[0]
-		receipts = append(receipts, Disposition{"/query/" + name, "preserved", "caller_semantic_query", evidenceNative})
+		receipts = append(receipts, Disposition{Field: "/query/" + name, Disposition: "preserved", Rule: "caller_semantic_query", Evidence: evidenceNative})
 	}
 	for name := range t.config.Provider.SemanticHeaders {
 		if !seen[http.CanonicalHeaderKey(name)] {
-			receipts = append(receipts, Disposition{"/headers/" + http.CanonicalHeaderKey(name), "introduced", "profile_semantic_header", evidenceNative})
+			receipts = append(receipts, Disposition{Field: "/headers/" + http.CanonicalHeaderKey(name), Disposition: "introduced", Rule: "profile_semantic_header", Evidence: evidenceNative})
 		}
 	}
 	for name := range t.config.Provider.QuerySettings {
 		if _, present := context.Query[name]; !present {
-			receipts = append(receipts, Disposition{"/query/" + name, "introduced", "profile_semantic_query", evidenceNative})
+			receipts = append(receipts, Disposition{Field: "/query/" + name, Disposition: "introduced", Rule: "profile_semantic_query", Evidence: evidenceNative})
 		}
 	}
 	if t.profile.Hosting == "direct-anthropic" && !seen["Anthropic-Version"] {
-		receipts = append(receipts, Disposition{"/headers/Anthropic-Version", "introduced", "profile_api_revision", evidenceNative})
+		receipts = append(receipts, Disposition{Field: "/headers/Anthropic-Version", Disposition: "introduced", Rule: "profile_api_revision", Evidence: evidenceNative})
 	}
 	return config, receipts, nil
 }

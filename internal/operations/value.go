@@ -2,7 +2,6 @@ package operations
 
 import (
 	"encoding/json"
-	"math"
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -34,11 +33,10 @@ func Uint(value oif.Value) (uint64, bool) {
 	return n, err == nil
 }
 func Number(value oif.Value) bool {
-	if value.Kind() != oif.Number || len(value.Raw()) > 256 {
-		return false
-	}
-	n, err := strconv.ParseFloat(value.Raw(), 64)
-	return err == nil && !math.IsInf(n, 0) && !math.IsNaN(n)
+	// The source parser already validates JSON number syntax. A score or vector
+	// coordinate may exceed float64's range, and casting it here would impose a
+	// representation limit on an otherwise valid native result.
+	return value.Kind() == oif.Number && len(value.Raw()) <= 256
 }
 func Raw(value any) json.RawMessage    { out, _ := json.Marshal(value); return out }
 func Pointer(path, name string) string { return oif.Pointer(path, name) }

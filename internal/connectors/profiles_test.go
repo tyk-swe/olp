@@ -217,6 +217,12 @@ func TestOperationDefaultsRetainPresenceAndAtomicBindingOverrides(t *testing.T) 
 			t.Fatalf("reserved option %s accepted", name)
 		}
 	}
+	for _, ambiguous := range []json.RawMessage{json.RawMessage(`{"a":1,"a":2}`), json.RawMessage(`"\ud800"`)} {
+		c.OperationDefaults = map[string]DefaultSet{"generation": {Dialect: "openai-chat", NativeOptions: map[string]json.RawMessage{"future_native_control": ambiguous}}}
+		if c.Validate(&egress.Policy{}) == nil {
+			t.Fatalf("ambiguous native default accepted: %s", ambiguous)
+		}
+	}
 }
 
 func TestExistingDialectProviderExtensionNeedsOnlyRegistrationAndBinding(t *testing.T) {

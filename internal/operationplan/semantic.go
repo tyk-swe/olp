@@ -1,14 +1,16 @@
 package operationplan
 
 import (
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/oif"
-	"golang.org/x/net/http/httpguts"
 	"maps"
 	"net/http"
 	"net/textproto"
 	"slices"
 	"strings"
+
+	"golang.org/x/net/http/httpguts"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 func (t *Template) bindSemantic(context Context, native bool) (connectors.Config, []oif.Disposition, error) {
@@ -49,7 +51,7 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 			if err != nil {
 				return connectors.Config{}, nil, fail("target_capability", "/headers/Anthropic-Version", "hosting_api_revision", "The caller API revision has no qualified binding to the selected hosting profile.")
 			}
-			receipts = append(receipts, oif.Disposition{"/headers/Anthropic-Version", "mapped", "hosting_api_revision", t.codec.Evidence})
+			receipts = append(receipts, oif.Disposition{Field: "/headers/Anthropic-Version", Disposition: "mapped", Rule: "hosting_api_revision", Evidence: t.codec.Evidence})
 			continue
 		}
 		if !slices.Contains(t.profile.SemanticHeaders, name) || name == "Anthropic-Version" && values[0] != t.profile.DialectRevision {
@@ -64,7 +66,7 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 			}
 		}
 		config.SemanticHeaders[name] = values[0]
-		receipts = append(receipts, oif.Disposition{"/headers/" + name, "preserved", "caller_semantic_header", t.codec.Evidence})
+		receipts = append(receipts, oif.Disposition{Field: "/headers/" + name, Disposition: "preserved", Rule: "caller_semantic_header", Evidence: t.codec.Evidence})
 	}
 	for name, values := range context.Query {
 		// Gemini chooses SSE at the ingress path. This selector never becomes a
@@ -80,20 +82,20 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 			return connectors.Config{}, nil, fail("target_capability", "/query", "semantic_query_conflict", "A caller query setting conflicts with the published profile.")
 		}
 		config.QuerySettings[name] = values[0]
-		receipts = append(receipts, oif.Disposition{"/query/" + name, "preserved", "caller_semantic_query", t.codec.Evidence})
+		receipts = append(receipts, oif.Disposition{Field: "/query/" + name, Disposition: "preserved", Rule: "caller_semantic_query", Evidence: t.codec.Evidence})
 	}
 	for name := range t.config.Provider.SemanticHeaders {
 		if !seen[http.CanonicalHeaderKey(name)] {
-			receipts = append(receipts, oif.Disposition{"/headers/" + http.CanonicalHeaderKey(name), "introduced", "profile_semantic_header", t.codec.Evidence})
+			receipts = append(receipts, oif.Disposition{Field: "/headers/" + http.CanonicalHeaderKey(name), Disposition: "introduced", Rule: "profile_semantic_header", Evidence: t.codec.Evidence})
 		}
 	}
 	for name := range t.config.Provider.QuerySettings {
 		if _, present := context.Query[name]; !present {
-			receipts = append(receipts, oif.Disposition{"/query/" + name, "introduced", "profile_semantic_query", t.codec.Evidence})
+			receipts = append(receipts, oif.Disposition{Field: "/query/" + name, Disposition: "introduced", Rule: "profile_semantic_query", Evidence: t.codec.Evidence})
 		}
 	}
 	if t.profile.Hosting == "direct-anthropic" && !seen["Anthropic-Version"] {
-		receipts = append(receipts, oif.Disposition{"/headers/Anthropic-Version", "introduced", "profile_api_revision", t.codec.Evidence})
+		receipts = append(receipts, oif.Disposition{Field: "/headers/Anthropic-Version", Disposition: "introduced", Rule: "profile_api_revision", Evidence: t.codec.Evidence})
 	}
 	return config, receipts, nil
 }

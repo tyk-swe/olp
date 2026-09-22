@@ -3,12 +3,14 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"net/http/httptrace"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -143,18 +145,21 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	if len(raw) > cap {
 		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
 	}
+	state.upstream.Store(3)
 	result, err := plan.Decode(raw)
+	fact.Usage = legacyAccountingUsage(result.Usage)
 	for _, decision := range result.Decisions {
 		recordDecision(x, decision)
 	}
 	if err != nil {
-		code := "fidelity_protocol_violation"
-		return fail(classProtocol, &attemptFailure{contractCode: code})
+		var incompatible *oif.Incompatibility
+		if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
+			return fail(classPolicy, &attemptFailure{policyCode: incompatible.Code})
+		}
+		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
 	}
-	state.upstream.Store(3)
 	fact.Class = classSuccess
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.Usage = legacyAccountingUsage(result.Usage)
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamTerminal
 	}
