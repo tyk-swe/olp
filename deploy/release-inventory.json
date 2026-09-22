@@ -6451,6 +6451,7 @@
     "tests/integration/credential_pool_replay_test.go",
     "tests/integration/credential_routing_test.go",
     "tests/integration/epochs_test.go",
+    "tests/integration/extension_public_test.go",
     "tests/integration/fidelity_baseline_test.go",
     "tests/integration/fidelity_lifecycle_performance_test.go",
     "tests/integration/gateway_health_test.go",
