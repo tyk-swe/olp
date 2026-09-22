@@ -6060,7 +6060,9 @@
             "enum": [
               "file",
               "batch",
-              "response"
+              "response",
+              "continuation",
+              "strict_response"
             ],
             "type": "string"
           },
@@ -8781,6 +8783,13 @@
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "client_contract": {
+            "type": "string",
+            "enum": [
+              "chat-anthropic-tools-v1"
+            ],
+            "description": "Optional explicitly negotiated client continuation contract; unsupported versions fail before inference. Inspection performs no state write or inference."
           }
         },
         "required": [
@@ -8842,6 +8851,13 @@
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "client_contract": {
+            "type": "string",
+            "enum": [
+              "chat-anthropic-tools-v1"
+            ],
+            "description": "Optional explicitly negotiated client continuation contract; unsupported versions fail before inference. Inspection performs no state write or inference."
           }
         },
         "required": [
@@ -10047,6 +10063,15 @@
               "type": "string"
             },
             "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
+          },
+          "max_continuation_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Planner upper bound for retained native dependency and projected delivery; deployment limits may be tighter."
+          },
+          "actionability": {
+            "type": "string",
+            "description": "Declared dependency barrier before ordinary actionable client tool bytes."
           }
         },
         "required": [
@@ -16221,7 +16246,7 @@
     },
     "/api/v3/provider-resources": {
       "get": {
-        "description": "Metadata-only provider resource mappings (files, batches, stored responses)",
+        "description": "Metadata-only provider resources: files, batches, responses and encrypted continuation contracts. Native state and projected delivery are never included.",
         "operationId": "list_provider_resources",
         "parameters": [
           {
@@ -16253,7 +16278,9 @@
               "enum": [
                 "file",
                 "batch",
-                "response"
+                "response",
+                "continuation",
+                "strict_response"
               ],
               "type": "string"
             }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -333,6 +334,13 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
+	}
+	if res.Kind == resources.KindStrictResponse {
+		native, decodeErr := protocols.DecodeRequest(openai.FamilyResponses, openai.FamilyResponses, result, x.route.Slug, "", nil)
+		if decodeErr != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
+		}
+		result = native.Body
 	}
 	if e := s.reconcileResponse(ctx, res.ID, result); e != nil {
 		return e

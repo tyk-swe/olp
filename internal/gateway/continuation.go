@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -27,12 +30,14 @@ type continuationExecution struct {
 	emitted             int
 }
 type storedContinuation struct {
-	Version     string                    `json:"version"`
-	Source      json.RawMessage           `json:"source"`
-	Receipt     interaction.Receipt       `json:"receipt"`
-	Binding     string                    `json:"binding"`
-	Interaction *interaction.Continuation `json:"interaction,omitempty"`
-	Delivery    interaction.Delivery      `json:"delivery"`
+	Version         string                    `json:"version"`
+	Source          json.RawMessage           `json:"source"`
+	Receipt         interaction.Receipt       `json:"receipt"`
+	Binding         string                    `json:"binding"`
+	Interaction     *interaction.Continuation `json:"interaction,omitempty"`
+	Delivery        interaction.Delivery      `json:"delivery"`
+	SemanticHeaders http.Header               `json:"semantic_headers"`
+	Query           url.Values                `json:"query"`
 }
 
 func (x *execution) snapshot() *runtime.Snapshot {
@@ -85,7 +90,8 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 		if e != nil {
 			return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 		}
-		if !interaction.SameSource(state.Source, x.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.parsed.Route {
+		parentMatches := res.ParentID == nil && len(handles) == 0 || res.ParentID != nil && len(handles) == 1 && handles[0] == resources.LocalID(resources.KindContinuation, *res.ParentID)
+		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.parsed.Route {
 			return continuationError("continuation_mismatch", "This submission identity belongs to a different request.")
 		}
 		if e := s.authorizeContinuation(ctx, x, res, state); e != nil {
@@ -160,7 +166,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 	if c.parent != nil {
 		r.ParentID = &c.parent.UUID
 	}
-	state := &storedContinuation{Version: version, Source: x.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel}
+	state := &storedContinuation{Version: version, Source: x.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -275,4 +281,22 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Should-Retry", "false")
 	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
 	s.finish(x, nil, http.StatusOK)
+}
+
+// Only semantic controls enter encrypted correspondence, never authentication,
+// tracing, cookies, helper headers or transient SDK transport settings.
+func continuationSemanticHeaders(input http.Header) http.Header {
+	out := http.Header{}
+	for name, values := range input {
+		canonical := http.CanonicalHeaderKey(name)
+		switch canonical {
+		case "Anthropic-Version", "Anthropic-Beta", "Openai-Beta", "Openai-Version", "Api-Version", "Idempotency-Key", "X-Idempotency-Key", "Openai-Organization", "Openai-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name":
+			out[canonical] = append(out[canonical], values...)
+		default:
+			if strings.HasPrefix(canonical, "X-Amzn-Bedrock-") {
+				out[canonical] = append(out[canonical], values...)
+			}
+		}
+	}
+	return out
 }

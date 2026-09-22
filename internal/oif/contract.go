@@ -20,6 +20,8 @@ type Obligations struct {
 	Delivery, Lifetime, Submission, Continuation, Retry string
 	Effects                                             []string
 	MaxBodyBytes, MaxEventBytes                         int
+	MaxContinuationBytes                                int
+	Actionability                                       string
 	RejectAmbiguousFailover, GuardResults               bool
 }
 

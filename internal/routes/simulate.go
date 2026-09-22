@@ -28,6 +28,7 @@ type simulateDraftRequest struct {
 	MaxOutputTokens      *int64            `json:"max_output_tokens"`
 	Request              json.RawMessage   `json:"request"`
 	Dialect              string            `json:"dialect"`
+	ClientContract       string            `json:"client_contract"`
 	SemanticHeaders      map[string]string `json:"semantic_headers"`
 	QuerySettings        map[string]string `json:"query_settings"`
 	APIKeyID             *string           `json:"api_key_id"`
@@ -149,6 +150,10 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
+		return access.Reply{}, err
+	}
+
 	parsed, err := inspectorRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
@@ -196,6 +201,7 @@ type simulationRequest struct {
 	EstimatedInputTokens *int64                     `json:"estimated_input_tokens"`
 	MaxOutputTokens      *int64                     `json:"max_output_tokens"`
 	Dialect              string                     `json:"dialect"`
+	ClientContract       string                     `json:"client_contract"`
 	SemanticHeaders      map[string]string          `json:"semantic_headers"`
 	QuerySettings        map[string]string          `json:"query_settings"`
 }
@@ -286,6 +292,10 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
+		return access.Reply{}, err
+	}
+
 	parsed, err := inspectorRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err

@@ -106,6 +106,8 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 	receipt.Evidence = []string{evidenceTools}
 	receipt.Obligations.Continuation = ContinuationV1
 	receipt.Obligations.Lifetime = "durable"
+	receipt.Obligations.MaxContinuationBytes = 4 << 20
+	receipt.Obligations.Actionability = "encrypted_native_dependency_before_tool_bytes"
 	receipt.Obligations.Submission = "client_submission_identity"
 	receipt.Obligations.Retry = "recover_same_delivery_never_replay_unknown_work"
 	receipt.Dispositions = append(receipt.Dispositions, Disposition{"/messages", "mapped", "ordered_native_dependency_reconstruction", evidenceTools}, Disposition{"/tools", "mapped", "exact_function_schema", evidenceTools}, Disposition{"/result", "guarded", "ordered_observations_and_durable_actionability", evidenceTools})

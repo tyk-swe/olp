@@ -88,13 +88,7 @@ func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
 	if !p.Supports(model, operation, "openai", mode) {
 		return false
 	}
-	switch p.Kind {
-	case "openai":
-		return officialOpenAIEndpoint(p.Endpoint)
-	case "azure_openai":
-		return true
-	}
-	return false
+	return p.Connector().SupportsRetainedResponses()
 }
 
 func officialOpenAIEndpoint(endpoint string) bool {
