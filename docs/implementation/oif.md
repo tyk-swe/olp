@@ -42,7 +42,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | --- | --- | --- | --- |
 | [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Integrated; replacement qualification pending | Fixture commit `a541fd31`; [fixture validation](../qualification/fidelity/baseline-validation.md); [legacy performance baseline and frozen budgets](../evidence/fidelity-performance/README.md), measured at `8e52f775` and captured in `cff8c753` |
 | [#211](https://github.com/tyk-swe/olp/issues/211) Introduce source-preserving OIF and registered identity plans | D01-D07, D14, D19-D20; T01, T07, T10 | Source layer integrated; full G6 qualification pending in #218 | Source branch `f687cdc5`; [source contracts and validation](../qualification/fidelity/oif-source.md); [both performance captures and unresolved relay-control limit](../evidence/fidelity-performance/oif-source-v1/README.md) |
-| [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | Profile and connection implementation integrated; revoked-network-credential attempt-budget fix pending | Profile branch `7d2230f8`, merge `fe49524d`; [profile and connection contracts](../provider-profiles.md) |
+| [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | Integrated; strict interaction qualification remains #213 | Profile branch `7d2230f8`, merge `fe49524d`; attempt-budget fix `1f68975b`, merge `2b9a7867`; [profile and connection contracts](../provider-profiles.md) |
 | [#220](https://github.com/tyk-swe/olp/issues/220) Persist route fidelity contracts and policy invariants | D02, D18, D21, D23 | Foundation integrated; strict execution remains unavailable until #213 | Route branch `1a9a9248`, merge `b618961b`; [configuration and migration qualification](../qualification/fidelity/route-contracts.md) |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Pending | — |
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
@@ -86,8 +86,11 @@ conservation and response lifecycle. The SDK clients each retained all 19 native
 events and completed both tool results in two verified provider dispatches.
 Migration qualification retained both the 0022 network-credential and 0023
 route-fidelity additions; no historical production migration changed. The
-revoked-network-credential attempt-budget correction remains pending for #212.
-These checks do not provide strict admission (#213), complete G2, or G6.
+follow-up `1f68975b` checks current network-credential revocation before attempt
+admission, preserving the budget for eligible siblings with both API-key and
+credential-free provider authentication. The combined gateway revocation tests
+passed with race detection after its merge. These checks do not provide strict
+admission (#213), complete G2, or G6.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
