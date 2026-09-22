@@ -429,6 +429,9 @@ func selectionError(err error, model string) *Error {
 const requestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family openai.Family) http.HandlerFunc {
+	return s.inferenceOperation(family, "")
+}
+func (s *Server) inferenceOperation(family openai.Family, dialect string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
 		writeError := func(w http.ResponseWriter, e *Error) {
@@ -488,6 +491,16 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
+		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model")); selected || err != nil {
+			if err != nil {
+				e = requestError(err)
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+			out, status = s.serveUnary(w, r, x, body)
+			return
+		}
 		var parsed *openai.Request
 		var err error
 		if family == openai.FamilyBedrock {

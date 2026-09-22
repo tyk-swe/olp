@@ -79,7 +79,7 @@ func Definitions() []operations.Dialect {
 		d.Usage = func(view oif.View) *operations.Usage { return cloneUsage(view.(Result).usage) }
 		d.RequiredClient = func(view oif.View) string {
 			r := view.(Request)
-			if r.format.DType != "float32" || r.format.Layout != "dense" {
+			if r.format.DType != "float32" && r.format.DType != "float" || r.format.Layout != "dense" {
 				return operations.RawVectorClient
 			}
 			return ""
@@ -92,6 +92,7 @@ func Definitions() []operations.Dialect {
 		}
 		if id == "gemini-embeddings" || id == "gemini-batch-embeddings" {
 			d.BindModel = googleModels
+			d.ValidateRoute = googleRoute
 		}
 		d.Defaults = defaults(id)
 		d.RequestSchema = operations.ObjectSchema(map[string]any{"model": map[string]any{"type": "string"}}, inputField(id))
@@ -126,7 +127,11 @@ func inputField(id string) string {
 }
 
 func liftRequest(source oif.Request, id string) (Request, error) {
-	r := Request{source: source, dialect: id, format: Format{Layout: "dense", DType: "float32", Encoding: "array", BitsPerDimension: 32}, estimate: 1}
+	r := Request{source: source, dialect: id, format: Format{Layout: "dense", DType: "float", Encoding: "array", BitsPerDimension: 0}, estimate: 1}
+	if id == "voyage-embeddings" || id == "bedrock-embeddings" || strings.HasPrefix(id, "tei-") {
+		r.format.DType = "float32"
+		r.format.BitsPerDimension = 32
+	}
 	root := source.Document().Root()
 	if root.Kind() != oif.Object {
 		return r, operations.Invalid("request", "The native embedding request must be an object.")
@@ -179,6 +184,10 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 			value := operations.String(encoding)
 			if value == "base64" {
 				r.format.Encoding = "base64"
+				if id == "openai-embeddings" {
+					r.format.DType = "float32"
+					r.format.BitsPerDimension = 32
+				}
 			} else if !(id == "voyage-embeddings" && encoding.Kind() == oif.Null || id == "openai-embeddings" && value == "float") {
 				return r, operations.Invalid("encoding_format", "This encoding format has no native representation in the selected dialect.")
 			}
@@ -187,11 +196,22 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		r.inputs = 1
 		texts, err = googleText(input)
 	case "gemini-batch-embeddings":
+		for _, name := range []string{"outputDimensionality", "taskType", "title"} {
+			if _, present := root.Lookup(name); present {
+				return r, operations.Invalid(name, "Batch controls belong to each native request member.")
+			}
+		}
 		if input.Kind() != oif.Array || len(input.Elements()) < 1 || len(input.Elements()) > 100 {
 			return r, operations.Invalid("requests", "Use between 1 and 100 native embedding requests.")
 		}
 		r.inputs = len(input.Elements())
 		for _, entry := range input.Elements() {
+			if dim := operations.Member(entry, "outputDimensionality"); !operations.Optional(dim) {
+				n, ok := operations.Int(dim)
+				if !ok || n <= 0 || n > 1<<20 {
+					return r, operations.Invalid("requests/outputDimensionality", "Use a bounded positive member dimension.")
+				}
+			}
 			part, e := googleText(operations.Member(entry, "content"))
 			if e != nil {
 				return r, e
@@ -233,6 +253,11 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		}
 	default:
 		r.inputs, texts, err = operations.Strings(input, true)
+		if id != "tei-embeddings" {
+			if _, present := root.Lookup("dimensions"); present {
+				return r, operations.Invalid("dimensions", "This native operation has no dimension control.")
+			}
+		}
 		if id == "tei-sparse-embeddings" {
 			r.format.Layout = "sparse"
 		}
@@ -289,6 +314,12 @@ func googleText(content oif.Value) ([]operations.Text, error) {
 	}
 	out := []operations.Text{}
 	for _, part := range parts.Elements() {
+		if _, present := part.Lookup("fileData"); present {
+			return nil, operations.Error("resource_affinity", "/content/parts/fileData", "owned_resource", "Provider resource references need an admitted ownership binding.")
+		}
+		if _, present := part.Lookup("inlineData"); present {
+			return nil, operations.Error("target_capability", "/content/parts/inlineData", "embedding_media_contract", "This embedding dialect has not qualified inline media limits.")
+		}
 		if text, present := part.Lookup("text"); present {
 			if text.Kind() != oif.String {
 				return nil, operations.Invalid("content", "Text parts require native strings.")
@@ -350,6 +381,15 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 			if byType.Kind() != oif.Object {
 				return out, operations.Violation("/embeddingsByType", "native_dtype_map")
 			}
+			requested := operations.Member(source.Document().Root(), "embeddingTypes")
+			if len(byType.Members()) != len(requested.Elements()) {
+				return out, operations.Violation("/embeddingsByType", "requested_native_dtypes")
+			}
+			for _, kind := range requested.Elements() {
+				if _, present := byType.Lookup(operations.String(kind)); !present {
+					return out, operations.Violation("/embeddingsByType", "requested_native_dtypes")
+				}
+			}
 			for _, entry := range byType.Members() {
 				format := request.format
 				format.Layout = "dense"
@@ -399,7 +439,16 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 			seen[index] = true
 			value = operations.Member(value, "embedding")
 		}
-		vector, err := validateVector(value, request.format, index)
+		format := request.format
+		if id == "gemini-batch-embeddings" {
+			entry := operations.Member(source.Document().Root(), "requests").Elements()[index]
+			dim := operations.Member(entry, "outputDimensionality")
+			if !operations.Optional(dim) {
+				format.LogicalDimensions, _ = operations.Int(dim)
+				format.DimensionsKnown = true
+			}
+		}
+		vector, err := validateVector(value, format, index)
 		if err != nil {
 			return out, err
 		}
@@ -465,7 +514,7 @@ func validateVector(value oif.Value, format Format, index int) (Vector, error) {
 			return vector, operations.Violation("/embedding", "nonempty_vector")
 		}
 		for _, element := range value.Elements() {
-			if format.DType == "float32" {
+			if format.DType == "float32" || format.DType == "float" {
 				if !operations.Number(element) {
 					return vector, operations.Violation("/embedding", "native_numeric_value")
 				}
@@ -556,4 +605,26 @@ func probe(id, model string) []byte {
 		body = map[string]string{"inputs": "embedding probe"}
 	}
 	return operations.Raw(body)
+}
+
+func googleRoute(source oif.Request, route string) error {
+	root := source.Document().Root()
+	check := func(value oif.Value) error {
+		if value.Kind() == oif.Absent {
+			return nil
+		}
+		if value.Kind() != oif.String || strings.TrimPrefix(operations.String(value), "models/") != strings.TrimPrefix(route, "models/") {
+			return operations.Error("resource_affinity", "/model", "route_identity", "Nested native model identities must agree with the selected route.")
+		}
+		return nil
+	}
+	if err := check(operations.Member(root, "model")); err != nil {
+		return err
+	}
+	for _, entry := range operations.Member(root, "requests").Elements() {
+		if err := check(operations.Member(entry, "model")); err != nil {
+			return err
+		}
+	}
+	return nil
 }

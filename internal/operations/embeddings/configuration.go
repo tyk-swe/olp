@@ -54,10 +54,12 @@ func defaults(id string) map[string]operations.Field {
 			}
 			return operations.Invalid("encoding_format", "Use base64 or native null.")
 		})
-	case "gemini-embeddings", "gemini-batch-embeddings":
+	case "gemini-embeddings":
 		fields["outputDimensionality"] = positive
 		fields["taskType"] = text
 		fields["title"] = text
+	case "gemini-batch-embeddings":
+		// Every batch member owns its controls; no root default can stand in for them.
 	case "vertex-embeddings":
 		fields["parameters"] = operations.FieldSchema(map[string]any{"type": "object"}, func(v oif.Value) error {
 			if v.Kind() != oif.Object {
@@ -92,6 +94,12 @@ func defaults(id string) map[string]operations.Field {
 }
 
 func inputText(request oif.Request, id string) ([]operations.Text, error) {
+	if strings.HasPrefix(id, "tei-") {
+		v := operations.Member(request.Document().Root(), "prompt_name")
+		if !operations.Optional(v) {
+			return nil, operations.Error("policy_conflict", "/prompt_name", "native_prefix_scope", "The selected provider prefix is not available to this input policy.")
+		}
+	}
 	known := map[string]bool{inputField(id): true, "model": true, "user": true}
 	for name := range defaults(id) {
 		known[name] = true

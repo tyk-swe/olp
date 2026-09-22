@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -31,6 +32,7 @@ type simulateDraftRequest struct {
 	SemanticHeaders      map[string]string `json:"semantic_headers"`
 	QuerySettings        map[string]string `json:"query_settings"`
 	APIKeyID             *string           `json:"api_key_id"`
+	ClientContract       string            `json:"client_contract"`
 }
 
 func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
@@ -51,7 +53,10 @@ func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
 }
 
 func validTuple(operation, surface, mode string) error {
-	if !slices.Contains(supportedOperations, operation) {
+	if operationregistry.Default.Supports(operation, surface, mode) {
+		return nil
+	}
+	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {
 		return access.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
 	}
 	if !slices.Contains([]string{"openai", "anthropic", "gemini"}, surface) {
@@ -149,11 +154,14 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, err := inspectorRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
+	if unary != nil {
+		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
+	}
 	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept, Effective: effective}
 	if key.reason != "" {
 		options.Accept = nil
@@ -168,7 +176,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	}
 	targets := []map[string]any{}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed, inspections) {
+	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil, inspections) {
 		var name string
 		for _, t := range d.Targets {
 			if t.ID == decision.TargetID {
@@ -192,6 +200,7 @@ type simulationRequest struct {
 	Mode                 string                     `json:"mode"`
 	Preferences          *Preferences               `json:"preferences"`
 	APIKeyID             *string                    `json:"api_key_id"`
+	ClientContract       string                     `json:"client_contract"`
 	Seed                 string                     `json:"seed"`
 	EstimatedInputTokens *int64                     `json:"estimated_input_tokens"`
 	MaxOutputTokens      *int64                     `json:"max_output_tokens"`
@@ -286,7 +295,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, err := inspectorRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -294,6 +303,9 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		options.Parameters = protocols.ParameterNames(parsed)
 	}
 	accept, effective, inspections := inspectionAccept(route, parsed, context, options.TokenDemand)
+	if unary != nil {
+		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, options.TokenDemand)
+	}
 	options.Accept = accept
 	options.Effective = effective
 	if key.reason != "" {
@@ -306,7 +318,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	return access.OK(inspectedDecisions(plan.Decisions, route, parsed, inspections)), nil
+	return access.OK(inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil, inspections)), nil
 }
 
 // Register mounts the route surface.

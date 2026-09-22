@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"maps"
 	"slices"
 	"strings"
@@ -41,6 +43,9 @@ type DefaultProvenance struct {
 }
 
 func defaultFields(dialect, operation string) []string {
+	if codec, ok := operationregistry.Lookup(dialect); ok && codec.Operation.ID == operation {
+		return slices.Sorted(maps.Keys(codec.Defaults))
+	}
 	switch operation {
 	case "generation":
 		switch dialect {
@@ -110,10 +115,32 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		if err := validateDefaultValue(operation, name, raw); err != nil {
 			return err
 		}
+		if codec, ok := operationregistry.Lookup(defaults.Dialect); ok {
+			if field, exists := codec.Defaults[name]; exists && field.Validate != nil {
+				doc, err := oif.ParseJSON(raw, oif.Limits{})
+				if err != nil {
+					return errors.New("operation default is ambiguous or malformed")
+				}
+				if err := field.Validate(doc.Root()); err != nil {
+					return errors.New("operation default violates the registered native schema")
+				}
+			}
+		}
 	}
 	for name, raw := range defaults.NativeOptions {
 		if err := validateDefaultValue(operation, name, raw); err != nil {
 			return err
+		}
+		if codec, ok := operationregistry.Lookup(defaults.Dialect); ok {
+			if field, exists := codec.Defaults[name]; exists && field.Validate != nil {
+				doc, err := oif.ParseJSON(raw, oif.Limits{})
+				if err != nil {
+					return errors.New("operation default is ambiguous or malformed")
+				}
+				if err := field.Validate(doc.Root()); err != nil {
+					return errors.New("operation default violates the registered native schema")
+				}
+			}
 		}
 	}
 	for _, pair := range [][2]string{{"max_tokens", "max_completion_tokens"}, {"dimensions", "output_dimension"}} {

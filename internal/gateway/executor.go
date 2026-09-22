@@ -61,6 +61,7 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
+	unary                *unaryExecution
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
@@ -290,7 +291,7 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 		}
 		return []runtime.Slot{*x.pinnedSlot}
 	}
-	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.family.Operation(), x.family.Surface(), x.mode, x.affinity)
+	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
 	out := make([]runtime.Slot, 0, len(ordered))
 	for _, slot := range ordered {
 		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot)))) {
@@ -393,7 +394,11 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 	}
 	if x.strict() {
 		provider := x.request.release.Snapshot.Providers[a.ProviderID]
-		if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
+		if x.unary != nil {
+			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			}
+		} else if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		}
 	}
@@ -765,8 +770,8 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			UserID:          x.userID,
 			Family:          string(x.family),
 			Mode:            x.mode,
-			Operation:       x.family.Operation(),
-			Surface:         x.family.Surface(),
+			Operation:       x.operationName(),
+			Surface:         x.surfaceName(),
 			Outcome:         "failure",
 			Status:          status,
 			StartedAt:       x.request.startedAt,

@@ -109,3 +109,40 @@ func Strings(value oif.Value, allowTokens bool) (int, []Text, error) {
 	}
 	return len(items), texts, nil
 }
+
+// SameValue checks document identity without serializing it or reordering the
+// returned source. Native strings may use equivalent JSON escape spellings.
+func SameValue(a, b oif.Value) bool {
+	if a.Kind() != b.Kind() {
+		return false
+	}
+	switch a.Kind() {
+	case oif.String:
+		return String(a) == String(b)
+	case oif.Array:
+		aa, bb := a.Elements(), b.Elements()
+		if len(aa) != len(bb) {
+			return false
+		}
+		for i := range aa {
+			if !SameValue(aa[i], bb[i]) {
+				return false
+			}
+		}
+		return true
+	case oif.Object:
+		aa, bb := a.Members(), b.Members()
+		if len(aa) != len(bb) {
+			return false
+		}
+		for _, m := range aa {
+			v, ok := b.Lookup(m.Name)
+			if !ok || !SameValue(m.Value, v) {
+				return false
+			}
+		}
+		return true
+	default:
+		return a.Raw() == b.Raw()
+	}
+}

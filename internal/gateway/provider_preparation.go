@@ -112,6 +112,19 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 }
 
 func (x *execution) providerEstimate(provider *runtime.Provider) int64 {
+	if x.unary != nil {
+		var estimate int64
+		for _, a := range x.attempts {
+			if a.ProviderID == provider.ID {
+				plan, err := x.unaryPlan(provider, a.UpstreamModel)
+				if err != nil {
+					return limits.MaxCounter
+				}
+				estimate = max(estimate, plan.Estimate())
+			}
+		}
+		return max(estimate, 1)
+	}
 	if provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) {
 		return estimateTokens(x.parsed, provider.ParameterDefaults)
 	}

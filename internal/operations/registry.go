@@ -63,10 +63,11 @@ type Dialect struct {
 // Mapping qualifies one actual source/target pair. It owns both directions;
 // merely retaining foreign fields cannot establish target interpretation.
 type Mapping struct {
-	Source, Target oif.Identity
-	Lower          func(oif.Request, oif.View) (oif.Document, []oif.Provenance, error)
-	Project        func(oif.Request, oif.Result, oif.View, string) (oif.Document, error)
-	Evidence       string
+	Source, Target    oif.Identity
+	Lower             func(oif.Request, oif.View) (oif.Document, []oif.Provenance, error)
+	ValidateEffective func(oif.Request, oif.Request) error
+	Project           func(oif.Request, oif.Result, oif.View, string) (oif.Document, error)
+	Evidence          string
 }
 
 type Registry struct {
@@ -168,4 +169,15 @@ func cloneDialect(d Dialect) Dialect {
 	}
 	d.Defaults = fields
 	return d
+}
+
+func (r *Registry) HasOperation(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, d := range r.dialects {
+		if d.Operation.ID == id {
+			return true
+		}
+	}
+	return false
 }

@@ -501,78 +501,6 @@ func (e PlaygroundResponseFormat2Type) Valid() bool {
 	}
 }
 
-// Defines values for PriceOperation.
-const (
-	PriceOperationBatch           PriceOperation = "batch"
-	PriceOperationBedrockInvoke   PriceOperation = "bedrock_invoke"
-	PriceOperationEmbeddings      PriceOperation = "embeddings"
-	PriceOperationGeneration      PriceOperation = "generation"
-	PriceOperationImageEdit       PriceOperation = "image_edit"
-	PriceOperationImageGeneration PriceOperation = "image_generation"
-	PriceOperationImageVariation  PriceOperation = "image_variation"
-	PriceOperationModelGet        PriceOperation = "model_get"
-	PriceOperationModelList       PriceOperation = "model_list"
-	PriceOperationModeration      PriceOperation = "moderation"
-	PriceOperationRealtime        PriceOperation = "realtime"
-	PriceOperationRerank          PriceOperation = "rerank"
-	PriceOperationSpeech          PriceOperation = "speech"
-	PriceOperationTokenCount      PriceOperation = "token_count"
-	PriceOperationTranscription   PriceOperation = "transcription"
-	PriceOperationVideoContent    PriceOperation = "video_content"
-	PriceOperationVideoCreate     PriceOperation = "video_create"
-	PriceOperationVideoDelete     PriceOperation = "video_delete"
-	PriceOperationVideoGet        PriceOperation = "video_get"
-	PriceOperationVideoList       PriceOperation = "video_list"
-)
-
-// Valid indicates whether the value is a known member of the PriceOperation enum.
-func (e PriceOperation) Valid() bool {
-	switch e {
-	case PriceOperationBatch:
-		return true
-	case PriceOperationBedrockInvoke:
-		return true
-	case PriceOperationEmbeddings:
-		return true
-	case PriceOperationGeneration:
-		return true
-	case PriceOperationImageEdit:
-		return true
-	case PriceOperationImageGeneration:
-		return true
-	case PriceOperationImageVariation:
-		return true
-	case PriceOperationModelGet:
-		return true
-	case PriceOperationModelList:
-		return true
-	case PriceOperationModeration:
-		return true
-	case PriceOperationRealtime:
-		return true
-	case PriceOperationRerank:
-		return true
-	case PriceOperationSpeech:
-		return true
-	case PriceOperationTokenCount:
-		return true
-	case PriceOperationTranscription:
-		return true
-	case PriceOperationVideoContent:
-		return true
-	case PriceOperationVideoCreate:
-		return true
-	case PriceOperationVideoDelete:
-		return true
-	case PriceOperationVideoGet:
-		return true
-	case PriceOperationVideoList:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -884,6 +812,7 @@ const (
 	SurfaceAnthropic Surface = "anthropic"
 	SurfaceBedrock   Surface = "bedrock"
 	SurfaceGemini    Surface = "gemini"
+	SurfaceNative    Surface = "native"
 	SurfaceOpenai    Surface = "openai"
 )
 
@@ -895,6 +824,8 @@ func (e Surface) Valid() bool {
 	case SurfaceBedrock:
 		return true
 	case SurfaceGemini:
+		return true
+	case SurfaceNative:
 		return true
 	case SurfaceOpenai:
 		return true
@@ -2318,6 +2249,26 @@ type OidcRoleMappingResponse struct {
 	Role       string `json:"role"`
 }
 
+// OperationDialect defines model for OperationDialect.
+type OperationDialect struct {
+	Documentation     string                 `json:"documentation"`
+	Evidence          string                 `json:"evidence"`
+	Id                string                 `json:"id"`
+	Label             string                 `json:"label"`
+	Mode              string                 `json:"mode"`
+	Operation         string                 `json:"operation"`
+	OperationRevision string                 `json:"operation_revision"`
+	RequestSchema     map[string]interface{} `json:"request_schema"`
+	ResultSchema      map[string]interface{} `json:"result_schema"`
+	Revision          string                 `json:"revision"`
+	Surface           string                 `json:"surface"`
+}
+
+// OperationDialectList defines model for OperationDialectList.
+type OperationDialectList struct {
+	Items []OperationDialect `json:"items"`
+}
+
 // OverviewResponse Aggregate counts the console overview needs; one round-trip instead of paginating every collection.
 type OverviewResponse struct {
 	// ActiveProviders Providers with a published active revision.
@@ -2448,8 +2399,8 @@ type PriceCeiling struct {
 	UnitPrice        nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
-// PriceOperation defines model for PriceOperation.
-type PriceOperation string
+// PriceOperation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+type PriceOperation = string
 
 // PriceRequest defines model for PriceRequest.
 type PriceRequest struct {
@@ -2467,16 +2418,18 @@ type PriceRequest struct {
 
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
-	CachedInputPerMillion nullable.Nullable[string]             `json:"cached_input_per_million,omitempty"`
-	Currency              string                                `json:"currency"`
-	InputPerMillion       nullable.Nullable[string]             `json:"input_per_million,omitempty"`
-	Model                 string                                `json:"model"`
-	Operation             PriceOperation                        `json:"operation"`
-	OutputPerMillion      nullable.Nullable[string]             `json:"output_per_million,omitempty"`
-	ProviderId            nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind          ProviderKind                          `json:"provider_kind"`
-	UnitPrice             nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
+	Currency              string                    `json:"currency"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                 string                    `json:"model"`
+
+	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+	Operation        PriceOperation                        `json:"operation"`
+	OutputPerMillion nullable.Nullable[string]             `json:"output_per_million,omitempty"`
+	ProviderId       nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+	ProviderKind     ProviderKind                          `json:"provider_kind"`
+	UnitPrice        nullable.Nullable[string]             `json:"unit_price,omitempty"`
+	VendorId         nullable.Nullable[string]             `json:"vendor_id,omitempty"`
 }
 
 // PriceResponse defines model for PriceResponse.
@@ -3701,6 +3654,9 @@ type SimulateRouteRequest struct {
 	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
+	// ClientContract Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field.
+	ClientContract *string `json:"client_contract,omitempty"`
+
 	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
@@ -3741,6 +3697,9 @@ type SimulationQuerySettings map[string]string
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+
+	// ClientContract Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field.
+	ClientContract *string `json:"client_contract,omitempty"`
 
 	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`

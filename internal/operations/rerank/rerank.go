@@ -5,6 +5,7 @@ package rerank
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -75,7 +76,11 @@ func Definitions() []operations.Dialect {
 		d.InputText = func(request oif.Request) ([]operations.Text, error) { return inputText(request, id) }
 		d.OutputText = outputText
 		d.Defaults = defaults(id)
-		d.RequestSchema = operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}}, "query")
+		inputs := "documents"
+		if id == "tei-rerank" {
+			inputs = "texts"
+		}
+		d.RequestSchema = operations.ObjectSchema(map[string]any{"query": map[string]any{"type": "string"}}, "query", inputs)
 		d.ResultSchema = operations.Raw(map[string]any{"description": "Native ranked records with unchanged scores, order and document correspondence."})
 		out = append(out, d)
 	}
@@ -85,6 +90,9 @@ func Definitions() []operations.Dialect {
 func liftRequest(source oif.Request, id string) (Request, error) {
 	r := Request{source: source, dialect: id, estimate: 1}
 	root := source.Document().Root()
+	if id != "tei-rerank" && operations.Member(root, "model").Kind() != oif.String {
+		return r, operations.Invalid("model", "Use the native model identity.")
+	}
 	if root.Kind() != oif.Object || operations.Member(root, "query").Kind() != oif.String {
 		return r, operations.Invalid("query", "Use a native query string.")
 	}
@@ -126,8 +134,8 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 	}
 	if top, present := root.Lookup(topName); present && !operations.Optional(top) {
 		value, ok := operations.Int(top)
-		if !ok || value < 1 || value > int64(len(r.documents.Elements())) {
-			return r, operations.Invalid(topName, "Use a positive bound no greater than the candidate set.")
+		if !ok || value < 1 || value > 1<<31 {
+			return r, operations.Invalid(topName, "Use a positive bounded native result count.")
 		}
 		r.top = int(value)
 	}
@@ -170,7 +178,7 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	}
 	want := len(request.documents.Elements())
 	if request.top > 0 {
-		want = request.top
+		want = min(request.top, want)
 	}
 	if len(items.Elements()) != want {
 		return out, operations.Violation("/results", "ranked_candidate_count")
@@ -201,10 +209,10 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 					return out, operations.Violation("/results/document", "original_document_bytes")
 				}
 			} else {
-				idValue, originalID := operations.Member(document, "id"), operations.Member(original, "id")
-				if originalID.Kind() != oif.Absent && idValue.Raw() != originalID.Raw() {
-					return out, operations.Violation("/results/document/id", "document_identity")
+				if !operations.SameValue(document, original) {
+					return out, operations.Violation("/results/document", "original_document_identity")
 				}
+
 			}
 		}
 		out.rows = append(out.rows, Ranked{Position: position, InputIndex: int(index), Score: score, Document: document, InputID: operations.Member(original, "id")})
@@ -219,7 +227,7 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	if billed := operations.Member(operations.Member(root, "meta"), "billed_units"); billed.Kind() == oif.Object {
 		units := operations.Member(billed, "search_units")
 		if units.Kind() != oif.Absent {
-			if !operations.Number(units) {
+			if !operations.Number(units) || strings.HasPrefix(units.Raw(), "-") {
 				return out, operations.Violation("/meta/billed_units", "native_usage")
 			}
 			raw := units.Raw()

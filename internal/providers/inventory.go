@@ -125,6 +125,7 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
 	mux.HandleFunc("GET /api/v3/provider-profiles", h(s.profiles))
+	mux.HandleFunc("GET /api/v3/operation-dialects", h(s.operationDialects))
 	mux.HandleFunc("GET /api/v3/provider-kinds", h(s.kinds))
 	mux.HandleFunc("GET /api/v3/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
 	mux.HandleFunc("GET /api/v3/provider-vendors", h(s.vendors))

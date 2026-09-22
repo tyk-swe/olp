@@ -6,13 +6,18 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"slices"
 )
 
 // CompileRouteExecution validates the complete configured links of a route.
 // Request values are bound later; no provider request or discovery runs here.
 func (s *Snapshot) CompileRouteExecution(route Route) error {
 	_, _, err := s.compileRouteExecution(route)
+	if err == nil {
+		_, err = s.compileOperations(route)
+	}
 	return err
 }
 
@@ -27,10 +32,8 @@ func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.T
 	if FidelityMode(route.Fidelity) != FidelityStrict {
 		return nil, policy, nil
 	}
-	for _, operation := range route.Operations {
-		if operation != "generation" {
-			return nil, nil, &interaction.Error{Code: "target_capability", Field: "operations", Requirement: "operation_contract", Message: "This operation does not yet have a registered strict interaction runner."}
-		}
+	if !slices.Contains(route.Operations, "generation") {
+		return nil, policy, nil
 	}
 	templates := make(map[string]*interaction.Template, len(route.Targets))
 	for _, target := range route.Targets {
@@ -76,4 +79,32 @@ func EffectiveOutputLimit(request *openai.Request) *int64 {
 		}
 	}
 	return nil
+}
+
+func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
+	if FidelityMode(route.Fidelity) != FidelityStrict {
+		return nil, nil
+	}
+	templates := map[string]*operationplan.Template{}
+	for _, op := range route.Operations {
+		if op == "generation" {
+			continue
+		}
+		for _, target := range route.Targets {
+			provider, ok := s.Providers[target.ProviderID]
+			if !ok {
+				return nil, fmt.Errorf("route target references an unavailable provider")
+			}
+			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
+			if err != nil {
+				return nil, err
+			}
+			templates[op+"/"+target.ID] = template
+		}
+	}
+	return templates, nil
+}
+func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
+	template, ok := s.operations[slug][operation+"/"+target]
+	return template, ok
 }

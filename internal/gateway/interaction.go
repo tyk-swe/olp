@@ -27,11 +27,20 @@ func (x *execution) servingAllowed(provider *runtime.Provider, model string, slo
 	if !x.strict() {
 		return true
 	}
-	prepared, err := x.preparedProvider(provider, model)
-	if err != nil || prepared.plan == nil {
-		return false
+	var serving oif.ServingIdentity
+	if x.unary != nil {
+		plan, err := x.unaryPlan(provider, model)
+		if err != nil {
+			return false
+		}
+		serving = plan.Serving()
+	} else {
+		prepared, err := x.preparedProvider(provider, model)
+		if err != nil || prepared.plan == nil {
+			return false
+		}
+		serving = prepared.plan.Serving()
 	}
-	serving := prepared.plan.Serving()
 	if x.serving == nil {
 		if selectBaseline {
 			x.serving = &serving

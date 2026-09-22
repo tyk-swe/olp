@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -121,6 +122,7 @@ func init() {
 		}
 		completeProfileMetadata(p)
 	}
+	registerUnaryProfiles()
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
@@ -285,6 +287,14 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if c.ProfileID != "" {
+		if p, err := c.Profile(); err == nil {
+			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
+				return mode == "unary" && operationregistry.Default.Supports(operation, surface, mode)
+			}
+		}
+	}
+
 	if !Supports(c.Kind, c.VendorID, operation, surface, mode) {
 		return false
 	}
@@ -415,6 +425,9 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 // OperationDialect names the operation schema instead of making non-generation
 // defaults inherit a generation-shaped intermediate representation.
 func (p Profile) OperationDialect(operation string) string {
+	if dialect := p.OperationDialects[operation]; dialect != "" {
+		return dialect
+	}
 	if operation == "generation" {
 		return p.Dialect
 	}
@@ -448,7 +461,9 @@ func (p Profile) OperationDialect(operation string) string {
 }
 
 func completeProfileMetadata(p *Profile) {
-	p.OperationDialects = map[string]string{}
+	if p.OperationDialects == nil {
+		p.OperationDialects = map[string]string{}
+	}
 	p.DefaultSchemas = map[string]json.RawMessage{}
 	for _, operation := range p.Operations {
 		dialect := p.OperationDialect(operation)
@@ -456,6 +471,11 @@ func completeProfileMetadata(p *Profile) {
 		fields := map[string]any{}
 		for _, name := range defaultFields(dialect, operation) {
 			fields[name] = defaultControlSchema(operation, name)
+			if codec, ok := operationregistry.Lookup(dialect); ok {
+				if field, found := codec.Defaults[name]; found {
+					fields[name] = field.Schema
+				}
+			}
 		}
 		p.DefaultSchemas[operation], _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dialect"}, "properties": map[string]any{
 			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},

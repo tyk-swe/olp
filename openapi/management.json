@@ -4344,29 +4344,9 @@
         "type": "object"
       },
       "PriceOperation": {
-        "enum": [
-          "generation",
-          "embeddings",
-          "token_count",
-          "image_generation",
-          "image_edit",
-          "image_variation",
-          "speech",
-          "transcription",
-          "video_create",
-          "video_list",
-          "video_get",
-          "video_content",
-          "video_delete",
-          "moderation",
-          "model_list",
-          "model_get",
-          "rerank",
-          "batch",
-          "realtime",
-          "bedrock_invoke"
-        ],
-        "type": "string"
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,95}$",
+        "description": "An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
       },
       "PriceRequest": {
         "properties": {
@@ -8781,6 +8761,11 @@
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "client_contract": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field."
           }
         },
         "required": [
@@ -8842,6 +8827,11 @@
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "client_contract": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field."
           }
         },
         "required": [
@@ -8957,7 +8947,8 @@
           "openai",
           "anthropic",
           "gemini",
-          "bedrock"
+          "bedrock",
+          "native"
         ],
         "type": "string"
       },
@@ -8971,7 +8962,7 @@
         "type": "string"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -10148,6 +10139,75 @@
           "resource_scope_declared"
         ],
         "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
+      },
+      "OperationDialect": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "operation",
+          "operation_revision",
+          "surface",
+          "mode",
+          "label",
+          "request_schema",
+          "result_schema",
+          "documentation",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "operation_revision": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "documentation": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "request_schema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "result_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "OperationDialectList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationDialect"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -10164,7 +10224,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…) authorizing exactly the management operations it scopes.",
+        "description": "Management automation token (olpm_\u2026) authorizing exactly the management operations it scopes.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -21411,6 +21471,52 @@
         "tags": [
           "users"
         ]
+      }
+    },
+    "/api/v3/operation-dialects": {
+      "get": {
+        "operationId": "listOperationDialects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationDialectList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "List registered unary operation dialects"
       }
     }
   }
