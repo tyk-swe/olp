@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import time
 import uuid
+import json
 from typing import Any
+from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 import openai
 
@@ -147,3 +150,26 @@ def unary_turn(
         "submission": submission, "handle": ext["handle"],
         "assistant": response.choices[0].message, "response": response,
     }
+
+
+def recover_submission(origin: str, api_key: str, submission: str) -> dict[str, Any]:
+    """Read a committed delivery without asking the provider to work again."""
+    continuation_headers(submission)
+    request = Request(
+        f"{origin.rstrip('/')}/v1/continuation-submissions/{quote(submission, safe='')}",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "X-OLP-Continuation": CONTINUATION_VERSION,
+        },
+    )
+    with urlopen(request, timeout=15) as response:
+        state = json.load(response)
+    if (
+        state.get("version") != CONTINUATION_VERSION
+        or state.get("state") != "ready"
+        or not state.get("handle", "").startswith("continuation_")
+        or not state.get("assistant")
+        or not state.get("delivery")
+    ):
+        raise ValueError("Incomplete recoverable continuation delivery")
+    return state

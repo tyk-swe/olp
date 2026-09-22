@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import openai
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "clients/continuation"))
-from olp_continuation import next_turn, stream_turn, unary_turn  # noqa: E402
+from olp_continuation import next_turn, recover_submission, stream_turn, unary_turn  # noqa: E402
 
 origin = os.environ["OLP_CONTINUATION_ORIGIN"]
 key = os.environ["OLP_CONTINUATION_KEY"]
@@ -60,6 +60,10 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
     ]
     assert any(item["type"] == "thinking" and item.get("opaque_state") is True for item in first["observations"])
     assert "opaque-fixture-signature-do-not-log" not in repr(first["chunks"])
+    recovered = recover_submission(origin, key, first["submission"])
+    assert recovered["handle"] == first["handle"]
+    assert recovered["assistant"] == first["assistant"]
+    assert isinstance(recovered["delivery"]["frames"], list) and recovered["delivery"]["frames"]
     replay = stream_turn(client, request, submission=first["submission"])
     assert replay["handle"] == first["handle"]
     assert replay["assistant"] == first["assistant"]

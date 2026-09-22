@@ -122,3 +122,25 @@ export async function unaryTurn(client, request, { submission = submissionID(), 
   }
   return { submission, handle: response.olp.handle, assistant: response.choices[0].message, response };
 }
+
+// Recovery reads only the committed delivery. It never starts an inference
+// request or changes the submission identity after an ambiguous client loss.
+export async function recoverSubmission(origin, apiKey, submission, fetcher = globalThis.fetch) {
+  continuationHeaders(submission);
+  const address = new URL(`/v1/continuation-submissions/${encodeURIComponent(submission)}`, origin);
+  const response = await fetcher(address, {
+    headers: { Authorization: `Bearer ${apiKey}`, 'X-OLP-Continuation': CONTINUATION_VERSION }
+  });
+  const state = await response.json();
+  if (!response.ok) {
+    const error = new Error(state?.error?.message ?? 'Continuation outcome is unavailable');
+    error.status = response.status;
+    error.code = state?.error?.code;
+    throw error;
+  }
+  if (state?.version !== CONTINUATION_VERSION || state?.state !== 'ready' ||
+      !/^continuation_[0-9a-f]{32}$/.test(state.handle) || !state.assistant || !state.delivery) {
+    throw new Error('Incomplete recoverable continuation delivery');
+  }
+  return state;
+}

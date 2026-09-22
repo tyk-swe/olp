@@ -31,7 +31,8 @@ Authorization: Bearer <api-key>
 
 A ready recovery contains the standard assistant message and the original
 recorded unary body or streaming chunks; it contains no opaque native
-signature. An accepted request that never committed a ready delivery returns
+signature. `recoverSubmission` / `recover_submission` call this read-only
+endpoint after a lost response. An accepted request that never committed a ready delivery returns
 `continuation_outcome_unknown` and **must not** be resent under a new
 submission identity as if it were known unused. The provider may have accepted
 work before the gateway saw a terminal result. OLP does not promise exactly

@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict';
 import OpenAI from 'openai';
-import { nextTurn, streamTurn, unaryTurn } from '../../clients/continuation/javascript.mjs';
+import { nextTurn, recoverSubmission, streamTurn, unaryTurn } from '../../clients/continuation/javascript.mjs';
 
 const { OLP_CONTINUATION_ORIGIN: origin, OLP_CONTINUATION_KEY: key, OLP_CONTINUATION_ROUTE: route } = process.env;
 assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 assert.ok(key?.startsWith('olp_'));
 assert.ok(route?.startsWith('strict-'));
 const local = globalThis.fetch.bind(globalThis);
+const localOnlyFetch = (input, init) => {
+  assert.equal(new URL(input instanceof Request ? input.url : String(input)).origin, origin);
+  return local(input, init);
+};
 const client = new OpenAI({
   apiKey: key,
   baseURL: `${origin}/v1`,
   maxRetries: 0,
   timeout: 15_000,
-  fetch: (input, init) => {
-    assert.equal(new URL(input instanceof Request ? input.url : String(input)).origin, origin);
-    return local(input, init);
-  }
+  fetch: localOnlyFetch
 });
 let unsupportedCalls = 0;
 await assert.rejects(() => streamTurn({
@@ -47,6 +48,10 @@ assert.deepEqual(first.observations.filter((item) => item.phase === 'start').map
   ['thinking', 'text', 'tool_use', 'tool_use', 'text']);
 assert.ok(first.observations.some((item) => item.type === 'thinking' && item.opaque_state === true));
 assert.ok(!JSON.stringify(first.chunks).includes('opaque-fixture-signature-do-not-log'));
+const recovered = await recoverSubmission(origin, key, first.submission, localOnlyFetch);
+assert.equal(recovered.handle, first.handle);
+assert.deepEqual(recovered.assistant, first.assistant);
+assert.ok(Array.isArray(recovered.delivery.frames) && recovered.delivery.frames.length > 0);
 const replay = await streamTurn(client, request, { submission: first.submission });
 assert.equal(replay.handle, first.handle);
 assert.deepEqual(replay.assistant, first.assistant);
