@@ -1,0 +1,1273 @@
+{
+  "version": 1,
+  "assessed_revision": "e0534816efd4f6f2f45c3a462a78dc1d297a4e91",
+  "frozen_inventory": {
+    "path": "tests/fixtures/fidelity/v1/inventory.json",
+    "sha256": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd",
+    "row_count": 47,
+    "source_revision": "8580b39905dc4da9278de8e53ceac7d2412ad6a5"
+  },
+  "evidence": {
+    "strict-profile-control": {
+      "kind": "test",
+      "source": "tests/integration/provider_profiles_cloud_test.go#TestStrictPublishedProviderProfilesPreserveCloudInvocation",
+      "source_sha256": "0389af03132b504a2f41f824bf88c4a6a24a4cad8c1a8b1436075d59f3cdf931",
+      "receipt": "docs/qualification/fidelity/strict-planning.md",
+      "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "79168e7083ede1290ac92451cab4283dce213c72",
+      "outcome": "positive"
+    },
+    "anthropic-js-tool-workflow": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/smoke.mjs",
+      "source_sha256": "cb998e1a22990682951bf160d339ebee6d34bbe35b866b2992058cae17f7a4b6",
+      "receipt": "docs/qualification/fidelity/native-sdk.md",
+      "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "outcome": "positive"
+    },
+    "anthropic-python-tool-workflow": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/smoke.py",
+      "source_sha256": "dca5fd5ec7ce8a4eb1f7ec3ccf01ed637f1466687411575293f49e32ba7cf241",
+      "receipt": "docs/qualification/fidelity/native-sdk.md",
+      "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "outcome": "positive"
+    },
+    "sdk-js-smoke": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/smoke.mjs",
+      "source_sha256": "cb998e1a22990682951bf160d339ebee6d34bbe35b866b2992058cae17f7a4b6",
+      "receipt": "docs/qualification/fidelity/native-sdk.md",
+      "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "outcome": "positive"
+    },
+    "sdk-python-smoke": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/smoke.py",
+      "source_sha256": "dca5fd5ec7ce8a4eb1f7ec3ccf01ed637f1466687411575293f49e32ba7cf241",
+      "receipt": "docs/qualification/fidelity/native-sdk.md",
+      "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "outcome": "positive"
+    },
+    "native-vector-storage": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictNativeVectorStoragePublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "native-sparse-multivector": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictNativeSparseAndMultivectorPublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "native-hosted-embeddings": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictNativeHostedEmbeddingShapesPublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "native-rerank": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictNativeRerankScoresAndIdentityPublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "native-count-classification": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictClassificationAndNativeCountPublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "pinned-vector-sdk": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictOperationsPinnedSDKStorage",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "qualified-unary": {
+      "kind": "test",
+      "source": "tests/integration/strict_operations_test.go#TestStrictQualifiedUnaryOperationsPublic",
+      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "receipt": "docs/qualification/fidelity/unary-operations.md",
+      "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "native-media-source": {
+      "kind": "test",
+      "source": "tests/integration/media_source_oif_test.go#TestNativeMediaSourceRejectsNestedAmbiguityBeforeDispatch",
+      "source_sha256": "583c7f9f56979a69127abb9c20d7b7682618c26b39c1d3d38159cda074c51542",
+      "receipt": "docs/qualification/fidelity/media-source-foundation.md",
+      "receipt_sha256": "60f82c4303c695f50fca2207359c9d47dd25b8287f7191e081866f75206260e1",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "outcome": "positive"
+    },
+    "matrix-assessment": {
+      "kind": "assessment",
+      "source": "docs/qualification/fidelity/compatibility-matrix-v1.md",
+      "integration": "integrated",
+      "execution": "not-executed"
+    },
+    "catalog-assessment": {
+      "kind": "assessment",
+      "source": "internal/operationregistry/registry.go",
+      "integration": "integrated",
+      "execution": "not-executed"
+    },
+    "gemini-isolated-receipt": {
+      "kind": "isolated-receipt",
+      "source": "docs/qualification/fidelity/compatibility-matrix-v1.md",
+      "integration": "isolated",
+      "execution": "passed",
+      "revision": "6d361ba8a8595d50eda70c44dfd6312f7dd0325f"
+    },
+    "continuation-isolated-receipt": {
+      "kind": "isolated-receipt",
+      "source": "docs/qualification/fidelity/compatibility-matrix-v1.md",
+      "integration": "isolated",
+      "execution": "passed",
+      "revision": "d9c3d729fdb90d70f2b3c8018638a23b8f6f02b8"
+    },
+    "strict-reasoning-refusal": {
+      "kind": "test",
+      "source": "tests/integration/strict_generation_test.go#TestStrictPublicQualifiedTextAndPreciseRefusals",
+      "source_sha256": "6947dc73d17397a7cd19f9135fcbc2feaa8ee223674a1bd5a063f69e04458875",
+      "receipt": "docs/qualification/fidelity/strict-planning.md",
+      "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "79168e7083ede1290ac92451cab4283dce213c72",
+      "outcome": "zero-dispatch-refusal"
+    }
+  },
+  "rows": [
+    {
+      "id": "openai-openai-chat-unary",
+      "frozen_row_sha256": "0aec49c153e5a714e8d45d5a3843208584b8bd6be5e971a7c72e02e6cd5c4005",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-openai-chat-streaming",
+      "frozen_row_sha256": "5febf2dd030e1023ae59abab4ec923b38113ec82c7c285b41a60c94f97c7c8a9",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-openai-responses-unary",
+      "frozen_row_sha256": "dc9b606de21e9710330a955e1a9aad38903bc245559e5510dbb50e09454248d8",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-openai-responses-streaming",
+      "frozen_row_sha256": "a7b5b0a795cea11e93553d55cbb783498ec3638aaff0535fa7f2de56c475552f",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-anthropic-messages-unary",
+      "frozen_row_sha256": "d385871796726574512e29ff7e7c73c3d3f0656e5483e732e7799479088c2b40",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-anthropic-messages-streaming",
+      "frozen_row_sha256": "1599024e58dd2e4b0477ae5d81c2e43506bdb3c7f6822f75097eb037d3c6dbfd",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-gemini-v1beta-unary",
+      "frozen_row_sha256": "b7c9c6da5da3a4d461891f63cab2dc5db7eafb2ff157b5f354f0b4b2b46adbed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-gemini-v1beta-streaming",
+      "frozen_row_sha256": "4f037fa66b2da492c2a411b5f31b9dbd2fbd833b464a78cf9051bfe8357c309a",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-openai-chat-unary",
+      "frozen_row_sha256": "a27f73a7008b341a6c858eaffcf33232b760b5c679b3993d2125c2ef347f2aae",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-openai-chat-streaming",
+      "frozen_row_sha256": "97f2244896c4182e85fec5c9c483daaedfeef7424f13aafa7414f4e5f45e5923",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "vertex-ai-gemini-v1-unary",
+      "frozen_row_sha256": "a1338e919951f6c8a4df2712b8724b1504545ec9ea77ba4ed0a30d0c8ca11135",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "vertex-ai-gemini-v1-streaming",
+      "frozen_row_sha256": "4a7e5d9cb5cc2e086ff776fbe81cae8a8e6eb8458b8e56a203e17647d8b67ec3",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "vertex-anthropic-anthropic-messages-unary",
+      "frozen_row_sha256": "ffa0fdf1623f93860c65d416fa7c651c424d7bc71f280768113a57197fc156be",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "vertex-anthropic-anthropic-messages-streaming",
+      "frozen_row_sha256": "e12cc687c24988be4880548686135d9b5ca9075d61e968f2d910a0466a2a2553",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-bedrock-converse-unary",
+      "frozen_row_sha256": "0ba79cbad396cbd5bc1bfb0ced8fbf14531cd3a83387d5c1d9833a1499238095",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-bedrock-converse-streaming",
+      "frozen_row_sha256": "7a319b35eb66fad0fafe5223a0660e7ea8baa55213d402d8e41fb09c0602e5b0",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-anthropic-anthropic-messages-unary",
+      "frozen_row_sha256": "811c5a94e95d8b7b19207724c7a7f1cd17f37625a2ad5610eda100feca71eb6a",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-anthropic-anthropic-messages-streaming",
+      "frozen_row_sha256": "b19e5f8e2b815ae19569d46c461bc182f0ce31f86157c2a19dfedb822697ce52",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-compatible-openai-chat-unary",
+      "frozen_row_sha256": "53d21e3db737ec45bb188215292111c9f61c7923f53bafa99b43f2a2db3c745b",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-compatible-openai-chat-streaming",
+      "frozen_row_sha256": "9e8587b04f177a9b56117ba7a19b5b8f7e299acf04dc43ded70996e3b821aaff",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "strict-profile-control",
+        "matrix-assessment"
+      ],
+      "constraints": "Native profile dispatch is exercised, but the full frozen tool/reasoning/extension combination and client continuation are not qualified for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-js-openai-chat",
+      "frozen_row_sha256": "73795ef351c614022485a0c15283cbd5b169f788526c6ecc8a7e8c2dd26ecb60",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "sdk-js-smoke",
+        "matrix-assessment"
+      ],
+      "constraints": "Pinned SDK smoke executes basic native transport; this frozen row also requires tool-next-turn, retained native state and parallel calls.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-js-openai-responses",
+      "frozen_row_sha256": "3d14f443a6209eed24366613d6eec34b8b93b173e7a87c4948ef3934c8810abc",
+      "status": "unknown",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "continuation-isolated-receipt",
+        "matrix-assessment"
+      ],
+      "constraints": "Complete negotiated Responses continuation passed only in isolated #214 at d9c3d729, not in assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-js-anthropic-messages",
+      "frozen_row_sha256": "2fc8c5701b113ffc0316be8309b7c9169bd24eed2ce6dd8cc9693679107b27d1",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "anthropic-js-tool-workflow"
+      ],
+      "constraints": "Pinned official SDK; direct Anthropic native two-turn synthetic thinking/signature and parallel-tool fixture, exact next request and two dispatches. Legacy native route only; no translated/recovery claim.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "google-genai-js-gemini-v1beta",
+      "frozen_row_sha256": "b988bb9436373c266ba63bb2e4d8f63468de229a279ad5ad9e920ab448cfc8c3",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "sdk-js-smoke",
+        "matrix-assessment"
+      ],
+      "constraints": "Pinned SDK smoke executes basic native transport; this frozen row also requires tool-next-turn, retained native state and parallel calls.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-python-openai-chat",
+      "frozen_row_sha256": "07af5dbc71e9602f227396137679ff963dad0e3e3aa93b8a0d1b7cee4107ea66",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "sdk-python-smoke",
+        "matrix-assessment"
+      ],
+      "constraints": "Pinned SDK smoke executes basic native transport; this frozen row also requires tool-next-turn, retained native state and parallel calls.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-python-anthropic-messages",
+      "frozen_row_sha256": "ed233e8d3d8c749340e8894472bd57522cf61cd77f1953da8c082ba123d08559",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "anthropic-python-tool-workflow"
+      ],
+      "constraints": "Pinned official SDK; direct Anthropic native two-turn synthetic thinking/signature and parallel-tool fixture, exact next request and two dispatches. Legacy native route only; no translated/recovery claim.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "google-genai-python-gemini-v1beta",
+      "frozen_row_sha256": "8b4ade56907da6b327bd496335c8d8d2ef7a13f4aedacaf1d78f0152badf847d",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "sdk-python-smoke",
+        "matrix-assessment"
+      ],
+      "constraints": "Pinned SDK smoke executes basic native transport; this frozen row also requires tool-next-turn, retained native state and parallel calls.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-embeddings-unary",
+      "frozen_row_sha256": "dee4230a158d210142a3d6022ac67536a80a1ad5b89992ff199d6177064998b4",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "pinned-vector-sdk",
+        "matrix-assessment"
+      ],
+      "constraints": "Public scripted native examples pass, but every frozen vector storage/input-shape feature has not been demonstrated together for this exact row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "voyage-embeddings-unary",
+      "frozen_row_sha256": "943ff083b883e7fe54f427f5fedd93cb796595bdb8c8954154b3ce95381509c2",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "pinned-vector-sdk",
+        "native-vector-storage",
+        "matrix-assessment"
+      ],
+      "constraints": "Public scripted native examples pass, but every frozen vector storage/input-shape feature has not been demonstrated together for this exact row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "cohere-embeddings-unary",
+      "frozen_row_sha256": "a24c6d2759a72d8af5fd1de246d252b4c80cc354bc96ecad7065169ca88a552c",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "catalog-assessment",
+        "matrix-assessment"
+      ],
+      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered on assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "cohere-rerank-unary",
+      "frozen_row_sha256": "0216d2dec89d7feb7ac141429a5b1b39122df9e725f6080927a72ccd0a8e232f",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "catalog-assessment",
+        "matrix-assessment"
+      ],
+      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered on assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-moderation-unary",
+      "frozen_row_sha256": "e075bb617737c2746795815d9683e72d8995c9a9f27622a2c705cfd80e731605",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict route to scripted native provider, exact request/result and one Attempt; profile revision 1 fixture scope. Live model quality and serving drift unmeasured.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-token_count-unary",
+      "frozen_row_sha256": "6fd53ab9872a7b4d0c2a4cbd4a5aa8a35e84191bd0e884f0e54dc4bd7a7525b3",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict route to scripted native provider, exact request/result and one Attempt; profile revision 1 fixture scope. Live model quality and serving drift unmeasured.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-token_count-unary",
+      "frozen_row_sha256": "6af569d638e366da7732e4976f29da3890f745ccb72d4c91d4b09c26e29aa748",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict route to scripted native provider, exact request/result and one Attempt; profile revision 1 fixture scope. Live model quality and serving drift unmeasured.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-token_count-unary",
+      "frozen_row_sha256": "05112bb17d6067ac010c9fd1faed6679bb1db7744bc68b24f9864b9441e51895",
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict route to scripted native provider, exact request/result and one Attempt; profile revision 1 fixture scope. Live model quality and serving drift unmeasured.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-image_generation-unary",
+      "frozen_row_sha256": "0b34a10d22a0b542a122fa284d4e1ca26e4c1b2c1327fbf351a075395f93e1b4",
+      "status": "unavailable",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "native-media-source",
+        "matrix-assessment"
+      ],
+      "constraints": "Immutable JSON source and public rejection passed, but strict media result/event/asset/lifecycle contract is absent on assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-image_edit-multipart",
+      "frozen_row_sha256": "b157a6585e5f8b0141ba2754e37039f5e49fc2713334117ff7e74207ed1379aa",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-image_variation-multipart",
+      "frozen_row_sha256": "a922208c8d66cb22cde54a8829a38c4245b13f38d3fb23ec6bcb0c24820027a5",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-speech-binary",
+      "frozen_row_sha256": "a4664fee141c8f9fd7e8a42a5bde269684475b523f59261819c6e3a72407a773",
+      "status": "unavailable",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "native-media-source",
+        "matrix-assessment"
+      ],
+      "constraints": "Immutable JSON source and public rejection passed, but strict media result/event/asset/lifecycle contract is absent on assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-transcription-multipart",
+      "frozen_row_sha256": "29411b4837c1fc9a6d18f7ebe8516a4da92b9c08ec56a9bd9c372d14b4162b7c",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-translation-multipart",
+      "frozen_row_sha256": "b88e75b747ec4ba9c9b7c612b874ca97df545433872a3fce15d7c8f640eb6b4d",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-video-durable",
+      "frozen_row_sha256": "c460b7ed922be68cd6000269a6b66c9f057ed9eb813bdf2e727bd278cc8b4446",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "anthropic-documents-unary",
+      "frozen_row_sha256": "2cc8cac49cdb2eeea066399ed7be80121f5876a3a7254b75d103c1a9c3a66e2a",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-realtime-duplex",
+      "frozen_row_sha256": "92aee1ef2848d1c3e12fdf79fd021bada7df73bc771c427717a42aae346767fa",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-batch-durable",
+      "frozen_row_sha256": "181119f7f020b60c9f40385676a80b3a77f345ba5588b0509a9dc6ed4f8a1222",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-files-durable",
+      "frozen_row_sha256": "9879f192ab6f2fb5250295e9ac07e78ca43b085912b97a66d014ca5874f0310e",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-generation-durable-streaming",
+      "frozen_row_sha256": "59793521dc095e4adb799ccf0383945774d0415ca04ff8f22340de035f749351",
+      "status": "unavailable",
+      "evidence_state": "not-executed",
+      "evidence": [
+        "matrix-assessment"
+      ],
+      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "empirical_quality": "unknown"
+    }
+  ],
+  "additions": [
+    {
+      "id": "gemini-batch-embeddings-native",
+      "operation": "embeddings",
+      "profile": "gemini-batch-embeddings",
+      "dialect": "gemini-batch-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "batch",
+        "task-controls",
+        "ordered-results"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-hosted-embeddings"
+      ],
+      "constraints": "Public strict scripted batch embedContent fixture; ordered inputs/results and task controls, profile revision 1.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-single-embeddings-native",
+      "operation": "embeddings",
+      "profile": "gemini-generation",
+      "dialect": "gemini-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "task-type",
+        "dimensions"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-hosted-embeddings"
+      ],
+      "constraints": "Public strict scripted single embedContent fixture, profile revision 1.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "vertex-embeddings-native",
+      "operation": "embeddings",
+      "profile": "vertex-gemini",
+      "dialect": "vertex-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-predictions",
+        "adc"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-hosted-embeddings"
+      ],
+      "constraints": "Public strict scripted Vertex prediction with ADC and ordered results, profile revision 1.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-embeddings-native",
+      "operation": "embeddings",
+      "profile": "bedrock-converse",
+      "dialect": "bedrock-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "binary",
+        "sigv4"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-hosted-embeddings"
+      ],
+      "constraints": "Public strict scripted Bedrock embedding with exact binary result and SigV4, profile revision 1; raw-vector-storage/1 required.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "bedrock-count-native",
+      "operation": "token_count",
+      "profile": "bedrock-converse",
+      "dialect": "bedrock-count-tokens",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "native-count",
+        "sigv4"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict scripted native count and independent usage, profile revision 1.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-embeddings-native",
+      "operation": "embeddings",
+      "profile": "tei-embeddings",
+      "dialect": "tei-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "dense",
+        "ordered-inputs"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-sparse-multivector"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-sparse-embeddings-native",
+      "operation": "embeddings",
+      "profile": "tei-sparse-embeddings",
+      "dialect": "tei-sparse-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "sparse",
+        "exact-indices"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-sparse-multivector"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-multivector-embeddings-native",
+      "operation": "embeddings",
+      "profile": "tei-multivector-embeddings",
+      "dialect": "tei-multivector-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "multivector",
+        "ordered-inputs"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-sparse-multivector"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-rerank-native",
+      "operation": "rerank",
+      "profile": "tei-rerank",
+      "dialect": "tei-rerank",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "document-identity",
+        "scores",
+        "ties"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-rerank"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-classification-native",
+      "operation": "classification",
+      "profile": "tei-classification",
+      "dialect": "tei-classification",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "labels",
+        "scores"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-scoring-native",
+      "operation": "scoring",
+      "profile": "tei-scoring",
+      "dialect": "tei-scoring",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "pair-order",
+        "exact-scores"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "tei-tokenize-native",
+      "operation": "token_count",
+      "profile": "tei-tokenize",
+      "dialect": "tei-tokenize",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "token-ids",
+        "offsets"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-count-classification"
+      ],
+      "constraints": "Public strict scripted TEI native request/result bytes and one shared Attempt, profile revision 1; raw-vector-storage/1 is required for sparse/multivector.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "voyage-rerank-native",
+      "operation": "rerank",
+      "profile": "voyage-rerank",
+      "dialect": "voyage-rerank",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "document-identity",
+        "scores"
+      ],
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
+      "evidence": [
+        "qualified-unary"
+      ],
+      "constraints": "Mapped target request/result passed publicly, but a complete Voyage-native client request/result has not been demonstrated for this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-rerank-native",
+      "operation": "rerank",
+      "profile": "rerank",
+      "dialect": "rerank",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "document-identity",
+        "scores",
+        "ties"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "native-rerank"
+      ],
+      "constraints": "Public strict scripted compatible rerank native request/result with exact document IDs, scores and ties.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "openai-float-to-voyage-qualified",
+      "operation": "embeddings",
+      "profile": "voyage-embeddings",
+      "dialect": "openai-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "float",
+        "dimensions",
+        "usage-projection"
+      ],
+      "status": "qualified",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "qualified-unary"
+      ],
+      "constraints": "Only OpenAI float embeddings to Voyage float with the tested controls; dtype/task/default collisions fail before dispatch.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-rerank-to-voyage-qualified",
+      "operation": "rerank",
+      "profile": "voyage-rerank",
+      "dialect": "rerank",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "document-index",
+        "score",
+        "top-n"
+      ],
+      "status": "qualified",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "qualified-unary"
+      ],
+      "constraints": "Only compatible rerank to Voyage rerank with plain documents and tested controls; structured identity collisions are refused.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-interactions-unary-raw-http",
+      "operation": "generation",
+      "profile": "gemini-interactions",
+      "dialect": "gemini-interactions",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "two-turn",
+        "encrypted-state"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-interactions-streaming-raw-http",
+      "operation": "generation",
+      "profile": "gemini-interactions",
+      "dialect": "gemini-interactions",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "sse",
+        "cursor"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-interactions-streaming-google-genai-js-2-16-0",
+      "operation": "generation",
+      "profile": "gemini-interactions",
+      "dialect": "gemini-interactions",
+      "mode": "streaming",
+      "client": "google-genai-js@2.16.0",
+      "features": [
+        "two-turn",
+        "cursor"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-interactions-streaming-google-genai-python-2-22-0",
+      "operation": "generation",
+      "profile": "gemini-interactions",
+      "dialect": "gemini-interactions",
+      "mode": "streaming",
+      "client": "google-genai-python@2.22.0",
+      "features": [
+        "two-turn",
+        "cursor"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-live-duplex-raw-websocket",
+      "operation": "realtime",
+      "profile": "gemini-live",
+      "dialect": "gemini-live",
+      "mode": "duplex",
+      "client": "raw-websocket",
+      "features": [
+        "audio",
+        "video",
+        "tool-timing",
+        "vad",
+        "interruptions"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-live-duplex-google-genai-js-2-16-0",
+      "operation": "realtime",
+      "profile": "gemini-live",
+      "dialect": "gemini-live",
+      "mode": "duplex",
+      "client": "google-genai-js@2.16.0",
+      "features": [
+        "audio",
+        "video",
+        "tool-timing",
+        "vad",
+        "interruptions"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-live-duplex-google-genai-python-2-22-0",
+      "operation": "realtime",
+      "profile": "gemini-live",
+      "dialect": "gemini-live",
+      "mode": "duplex",
+      "client": "google-genai-python@2.22.0",
+      "features": [
+        "audio",
+        "video",
+        "tool-timing",
+        "vad",
+        "interruptions"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-live-session-resumption",
+      "operation": "realtime",
+      "profile": "gemini-live",
+      "dialect": "gemini-live",
+      "mode": "duplex-resume",
+      "client": "raw-websocket",
+      "features": [
+        "session-resumption-handle"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "gemini-isolated-receipt"
+      ],
+      "constraints": "Isolated #229 explicitly refuses nonempty native session-resumption handles before provider dispatch; current assessed revision has no Live runner.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "negotiated-openai-to-anthropic-openai-js-7-4-0",
+      "operation": "generation",
+      "profile": "anthropic-messages",
+      "dialect": "openai-responses",
+      "mode": "streaming",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "reasoning",
+        "tools",
+        "encrypted-continuation"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "continuation-isolated-receipt"
+      ],
+      "constraints": "#214 passed negotiated public SDK continuation only in isolated d9c3d729; not integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "negotiated-openai-to-anthropic-openai-python-3-8-0",
+      "operation": "generation",
+      "profile": "anthropic-messages",
+      "dialect": "openai-responses",
+      "mode": "streaming",
+      "client": "openai-python@3.8.0",
+      "features": [
+        "reasoning",
+        "tools",
+        "encrypted-continuation"
+      ],
+      "status": "unavailable",
+      "evidence_state": "isolated-executed",
+      "evidence": [
+        "continuation-isolated-receipt"
+      ],
+      "constraints": "#214 passed negotiated public SDK continuation only in isolated d9c3d729; not integrated at assessed e0534816.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "strict-openai-chat-anthropic-reasoning-refusal",
+      "operation": "generation",
+      "profile": "anthropic-messages",
+      "dialect": "openai-chat",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "reasoning-effort",
+        "pre-dispatch-refusal"
+      ],
+      "status": "incompatible",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-reasoning-refusal"
+      ],
+      "constraints": "Only the OpenAI Chat reasoning_effort high field against Anthropic Messages is classified incompatible here; the public strict test checks reasoning_budget and zero additional provider dispatch. Plain text is a separate qualified subset.",
+      "empirical_quality": "unknown"
+    }
+  ]
+}
