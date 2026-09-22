@@ -257,3 +257,52 @@ func TestPreparedDefaultsReportActualBranches(t *testing.T) {
 		t.Fatal("translated native token default not recorded")
 	}
 }
+
+func TestImmutableValidationReuseCannotBlessConstructorsDefaultsOrOverlays(t *testing.T) {
+	valid := func() *openai.Request {
+		r, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	tests := map[string]func() (*openai.Request, protocols.Object){
+		"unvalidated-constructor": func() (*openai.Request, protocols.Object) {
+			return openai.NewEnvelope(openai.FamilyChat, "route", false, protocols.Object{"model": json.RawMessage(`"route"`), "messages": json.RawMessage(`null`)}), nil
+		},
+		"unvalidated-source-constructor": func() (*openai.Request, protocols.Object) {
+			d, err := oif.ParseJSON([]byte(`{"model":"route","messages":"invalid"}`), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return openai.NewSourceEnvelope(openai.FamilyChat, "route", false, d), nil
+		},
+		"resource-overlay": func() (*openai.Request, protocols.Object) {
+			r := valid()
+			r.SetField("messages", json.RawMessage(`[]`))
+			return r, nil
+		},
+		"transformed-overlay": func() (*openai.Request, protocols.Object) {
+			r := valid()
+			fields := r.Document()
+			fields["messages"] = json.RawMessage(`false`)
+			return r.WithFields(fields, oif.ExplicitTransform), nil
+		},
+		"invalid-default": func() (*openai.Request, protocols.Object) {
+			return valid(), protocols.Object{"temperature": json.RawMessage(`"invalid"`)}
+		},
+		"changed-dialect": func() (*openai.Request, protocols.Object) {
+			r := valid()
+			r.Family = openai.FamilyResponses
+			return r, nil
+		},
+	}
+	for name, prepare := range tests {
+		t.Run(name, func(t *testing.T) {
+			r, defaults := prepare()
+			if _, err := r.Encode("upstream", defaults); err == nil {
+				t.Fatal("unvalidated effective document encoded")
+			}
+		})
+	}
+}

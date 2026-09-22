@@ -205,7 +205,10 @@ func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model str
 }
 
 func encodeTargetLegacy(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
-	f := r.Document()
+	var f Object
+	if r.Family.Surface() != "openai" {
+		f = r.Document()
+	}
 	native := wire == r.Family || (wire == openai.FamilyGemini && r.Family == openai.FamilyGeminiStream)
 	sourceDefaults := defaults
 	if !native {
@@ -229,15 +232,12 @@ func encodeTargetLegacy(r *openai.Request, wire openai.Family, kind, vendor, mod
 		mergeDefaultsTracked(f, sourceDefaults, applied)
 	}
 	if r.Family.Surface() == "openai" {
-		encoded, provenance, err := r.EncodeWithProvenance(model, sourceDefaults)
+		fields, provenance, err := r.EncodeFieldsWithProvenance(model, sourceDefaults)
 		*applied = append(*applied, provenance...)
 		if err != nil {
 			return nil, wire, err
 		}
-		f, err = object(encoded)
-		if err != nil {
-			return nil, wire, err
-		}
+		f = fields
 	}
 	if err := validateProfile(vendor, r.Family, f); err != nil {
 		return nil, wire, err

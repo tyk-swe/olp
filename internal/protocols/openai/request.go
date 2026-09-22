@@ -114,12 +114,14 @@ func invalid(param, message string) error {
 // it must understand and retains the whole document, including vendor
 // extensions, for upstream encoding.
 type Request struct {
-	Family       Family
-	Route        string
-	Stream       bool
-	IncludeUsage bool // the caller's chat-stream option, independent of upstream accounting
-	source       oif.Request
-	sourceError  error
+	Family            Family
+	Route             string
+	Stream            bool
+	IncludeUsage      bool // the caller's chat-stream option, independent of upstream accounting
+	source            oif.Request
+	sourceError       error
+	validatedDocument oif.Document
+	validatedFamily   Family
 }
 
 // Field returns a top-level field verbatim, or nil when absent.
@@ -210,23 +212,34 @@ func parseDocument(family Family, doc oif.Document) (*Request, error) {
 		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	r := NewSourceEnvelope(family, "", false, doc)
+	if err := r.validateFields(fields); err != nil {
+		return nil, err
+	}
+	r.source = r.source.WithDescriptor(Descriptor(family, r.Stream))
+	r.validatedDocument, r.validatedFamily = doc, family
+	return r, nil
+}
+
+func (r *Request) validateFields(fields map[string]json.RawMessage) error {
+	family := r.Family
+	r.Stream, r.IncludeUsage = false, false
 	model, ok := stringField(fields, "model")
 	if !ok {
-		return nil, &RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
+		return &RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
 	}
 	if !RouteSlug.MatchString(model) {
-		return nil, invalid("model", "model must name a published route slug; provider-qualified names are not accepted.")
+		return invalid("model", "model must name a published route slug; provider-qualified names are not accepted.")
 	}
 	r.Route = model
 	var err error
 	if raw, present := fields["stream"]; present && !isNull(raw) {
 		if err := json.Unmarshal(raw, &r.Stream); err != nil {
-			return nil, invalid("stream", "stream must be a boolean.")
+			return invalid("stream", "stream must be a boolean.")
 		}
 	}
 	switch family {
 	case FamilyChat:
-		err = r.validateChat()
+		err = r.validateChat(fields)
 	case FamilyResponses:
 		err = validateResponses(fields)
 	case FamilyInputTokens:
@@ -254,28 +267,26 @@ func parseDocument(family Family, doc oif.Document) (*Request, error) {
 			}
 		}
 	case FamilyRerank:
-		err = r.validateRerank()
+		err = r.validateRerank(fields)
 	default:
-		return nil, errors.New("unknown request family")
+		return errors.New("unknown request family")
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if family.Operation() != OperationGeneration && r.Stream {
-		return nil, invalid("stream", "This operation supports unary requests only.")
+		return invalid("stream", "This operation supports unary requests only.")
 	}
 	if raw, present := fields["top_logprobs"]; present && !isNull(raw) {
 		n, ok := int64Field(fields, "top_logprobs")
 		if !ok || n > 20 {
-			return nil, invalid("top_logprobs", "top_logprobs must be an integer from 0 to 20.")
+			return invalid("top_logprobs", "top_logprobs must be an integer from 0 to 20.")
 		}
 	}
-	r.source = r.source.WithDescriptor(Descriptor(family, r.Stream))
-	return r, nil
+	return nil
 }
 
-func (r *Request) validateChat() error {
-	fields := r.Document()
+func (r *Request) validateChat(fields map[string]json.RawMessage) error {
 	messages, ok := arrayField(fields, "messages")
 	if !ok || len(messages) == 0 {
 		return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
@@ -509,19 +520,40 @@ func (r *Request) Encode(upstreamModel string, defaults map[string]json.RawMessa
 	return r.encode(upstreamModel, defaults, nil)
 }
 func (r *Request) EncodeWithProvenance(upstreamModel string, defaults map[string]json.RawMessage) ([]byte, []oif.Provenance, error) {
-	var provenance []oif.Provenance
-	body, err := r.encode(upstreamModel, defaults, func(name string) {
-		provenance = append(provenance, oif.Provenance{Pointer: oif.Pointer("", name), Origin: oif.ProviderDefault, Reason: "absent caller field inherited provider default"})
-	})
+	fields, provenance, err := r.EncodeFieldsWithProvenance(upstreamModel, defaults)
+	if err != nil {
+		return nil, provenance, err
+	}
+	body, err := json.Marshal(fields)
 	return body, provenance, err
 }
+
+// EncodeFieldsWithProvenance gives the legacy dialect adapter its owned
+// destination fields without a serialize/parse round trip. The source remains
+// immutable; profile-specific legacy lowering can inspect this working copy.
+func (r *Request) EncodeFieldsWithProvenance(upstreamModel string, defaults map[string]json.RawMessage) (map[string]json.RawMessage, []oif.Provenance, error) {
+	var provenance []oif.Provenance
+	fields, err := r.encodeFields(upstreamModel, defaults, func(name string) {
+		provenance = append(provenance, oif.Provenance{Pointer: oif.Pointer("", name), Origin: oif.ProviderDefault, Reason: "absent caller field inherited provider default"})
+	})
+	return fields, provenance, err
+}
 func (r *Request) encode(upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) ([]byte, error) {
+	fields, err := r.encodeFields(upstreamModel, defaults, applied)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
+}
+func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.RawMessage, applied func(string)) (map[string]json.RawMessage, error) {
 	if r.sourceError != nil {
 		return nil, r.sourceError
 	}
 	fields := r.Document()
 	out := make(map[string]json.RawMessage, len(fields)+len(defaults))
-	maps.Copy(out, defaults)
+	for name, value := range defaults {
+		out[name] = bytes.Clone(value)
+	}
 	maps.Copy(out, fields)
 	if r.Family == FamilyChat {
 		// Either explicit token limit overrides the same setting under its alias,
@@ -554,8 +586,13 @@ func (r *Request) encode(upstreamModel string, defaults map[string]json.RawMessa
 	}
 	// Defaults are request fields too. Validate the merged envelope before
 	// rewriting the route to an upstream identifier (which need not be a slug).
-	if _, err := parseFields(r.Family, out); err != nil {
-		return nil, err
+	// Only the exact immutable document and dialect validated by Parse can
+	// reuse that result. Constructors, overlays and defaults still validate.
+	if len(defaults) > 0 || r.validatedFamily != r.Family || r.validatedDocument != r.source.Document() {
+		validation := *r
+		if err := validation.validateFields(out); err != nil {
+			return nil, err
+		}
 	}
 	model, err := json.Marshal(upstreamModel)
 	if err != nil {
@@ -584,7 +621,7 @@ func (r *Request) encode(upstreamModel string, defaults map[string]json.RawMessa
 			return nil, err
 		}
 	}
-	return json.Marshal(out)
+	return out, nil
 }
 
 // Extensions lists JSON pointers of fields the gateway does not model. They

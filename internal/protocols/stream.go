@@ -26,6 +26,8 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 // StreamWithEvents exposes immutable native events before projection. The
 // observer executes synchronously under the existing backpressure/cancellation
 // contract; ordinary native streams retain no event history.
+// It observes structurally valid JSON before dialect state-grammar validation.
+// Actionability still requires the admitted projection and durable-state barrier.
 func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	native := wire == target || wire == openai.FamilyGemini && target == openai.FamilyGeminiStream
 	var finish func(*openai.Completion) error

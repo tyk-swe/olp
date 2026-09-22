@@ -28,6 +28,15 @@ projection. Native streaming retains one bounded source event plus existing
 bounded dialect grammar state, instead of collecting a stream-sized document.
 The optional synchronous event observer is for operation projection and
 continuation dependencies under the existing backpressure contract.
+The observer receives structurally valid source before the dialect's state
+grammar validates it; observing a terminal-looking frame alone is not a
+tool-ready or durable-state signal.
+
+Validation receipts are tied to the exact immutable document and dialect that
+the request parser validated. Constructors, changed overlays and effective
+defaults still undergo dialect validation. Legacy adapters exchange an owned
+destination field copy, avoiding redundant serialize/parse cycles without
+changing controls, assets or source validation.
 
 Identity preparation validates dialect-owned pointer/origin/value-kind rules
 and rejects prior semantic transforms, even if a caller labels them identity
