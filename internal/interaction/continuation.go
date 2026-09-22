@@ -35,6 +35,9 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 	if !context.DurableContinuation {
 		return oif.Prepared{}, continuationFailure("/client_contract", "encrypted_continuation_authority")
 	}
+	if !context.AllowProviderState {
+		return oif.Prepared{}, incompatible("policy_conflict", "/client_contract", "allow_provider_state", "This key does not permit retention of the native dependencies needed for a continuation handle.")
+	}
 	if len(request.OIF().Provenance()) != 0 {
 		return oif.Prepared{}, continuationFailure("/request", "immutable_source_history")
 	}

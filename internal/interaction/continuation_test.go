@@ -23,7 +23,7 @@ func toolsTemplate(t *testing.T) *Template {
 	return template(t, config)
 }
 func toolContext() Context {
-	return Context{ContinuationVersion: ContinuationV1, DurableContinuation: true}
+	return Context{ContinuationVersion: ContinuationV1, DurableContinuation: true, AllowProviderState: true}
 }
 func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())

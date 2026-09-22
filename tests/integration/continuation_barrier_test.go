@@ -23,6 +23,11 @@ import (
 
 func continuationBarrierFixture(t *testing.T, h *accessHarness, run func(http.ResponseWriter, *http.Request, []byte)) (string, string) {
 	t.Helper()
+	return continuationBarrierFixtureOwner(t, h, h.owner(), run)
+}
+
+func continuationBarrierFixtureOwner(t *testing.T, h *accessHarness, owner *browser, run func(http.ResponseWriter, *http.Request, []byte)) (string, string) {
+	t.Helper()
 	f := &strictProviderFixture{profile: "anthropic-messages"}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -44,7 +49,10 @@ func continuationBarrierFixture(t *testing.T, h *accessHarness, run func(http.Re
 	}))
 	t.Cleanup(f.Close)
 	options := map[string]any{"bindings": map[string]any{vendorModel: map[string]any{"model": "fixture-model"}}, "operation_defaults": map[string]any{"generation": map[string]any{"dialect": "anthropic-messages", "values": map[string]any{"max_tokens": 2048, "thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}}}}
-	return publishStrictProvider(t, h, h.owner(), f, options, nil, "strict")
+	slug, _ := publishStrictProvider(t, h, owner, f, options, nil, "strict")
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	return slug, key
 }
 func continuationHeaders() map[string]string {
 	return map[string]string{"Content-Type": "application/json", "X-OLP-Continuation": continuationClientVersion, "X-OLP-Submission-ID": resources.SubmissionID(time.Now(), uuid.New())}

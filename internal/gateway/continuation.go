@@ -77,6 +77,9 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	if !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This key is not authorized for the continuation route.")
 	}
+	if !x.authority.Policy.AllowProviderState {
+		return invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil)
+	}
 	if !s.Resources.Encrypted() {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Encrypted continuation authority is not configured.")
 	}
@@ -243,6 +246,10 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	x.authority = authority
 	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
 		s.stateFail(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil), x.family)
+		return
+	}
+	if !authority.Policy.AllowProviderState {
+		s.stateFail(x, w, invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil), x.family)
 		return
 	}
 	var res *resources.Resource

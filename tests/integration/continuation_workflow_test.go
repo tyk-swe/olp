@@ -75,6 +75,8 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 	owner := h.owner()
 	options := map[string]any{"bindings": map[string]any{vendorModel: map[string]any{"model": "fixture-model"}}, "operation_defaults": map[string]any{"generation": map[string]any{"dialect": "anthropic-messages", "values": map[string]any{"max_tokens": 2048, "thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}}}}
 	slug, key := publishStrictProvider(t, h, owner, f, options, nil, "strict")
+	key = stateKey(t, h, owner, slug, true)
+	h.refresh()
 	source := strings.Replace(continuationInput, "ROUTE", slug, 1)
 	headers := map[string]string{"Content-Type": "application/json", "X-OLP-Continuation": continuationClientVersion, "X-OLP-Submission-ID": resources.SubmissionID(time.Now(), uuid.New())}
 	status, raw, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(source), headers)
