@@ -34,7 +34,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 
 | Ticket | Scope | Status | Evidence |
 | --- | --- | --- | --- |
-| [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Fixtures integrated; performance baseline pending | Fixture commit `a541fd31`; [baseline validation](../qualification/fidelity/baseline-validation.md) |
+| [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Integrated; replacement qualification pending | Fixture commit `a541fd31`; [fixture validation](../qualification/fidelity/baseline-validation.md); [legacy performance baseline and frozen budgets](../evidence/fidelity-performance/README.md), measured at `8e52f775` and captured in `cff8c753` |
 | [#211](https://github.com/tyk-swe/olp/issues/211) Introduce source-preserving OIF and registered identity plans | D01-D07, D14, D19-D20; T01, T07, T10 | Pending | — |
 | [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | Pending | — |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Pending | — |
@@ -45,6 +45,12 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
+
+The #210 merge passed `go test -mod=readonly ./tests/fidelity`, the gateway benchmark
+oracle corruption test, and the seven benchmark runner tests. The baseline artifact
+matches the recorded harness and runner hashes, and its self-comparison preserves
+all 22 workloads within the frozen budgets. This validates baseline integrity;
+replacement performance, empirical quality, and G1–G7 remain unqualified.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
