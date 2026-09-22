@@ -144,6 +144,53 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 	return call, effective, nil
 }
 
+// EncodeStrictConfigured keeps the caller's accepted multipart member order
+// and exact text values. Only the model binding and declared absent-only
+// defaults may change; the existing parser/spool still own all bytes.
+func EncodeStrictConfigured(request *Request, cfg connectors.Config, model string) (*UpstreamCall, *Request, *Error) {
+	call, effective, failure := EncodeConfigured(request, cfg, model)
+	if failure != nil || call == nil || len(call.Fields) == 0 {
+		return call, effective, failure
+	}
+	if request.SourceNormalized || len(request.SourceParts) == 0 {
+		return nil, nil, configuredFailure("multipart", "has a caller source that cannot be preserved exactly")
+	}
+	defaults, _, err := cfg.DefaultsFor(request.Op, model)
+	if err != nil {
+		return nil, nil, invalidMedia(err.Error())
+	}
+	fields := make([]Field, 0, len(request.SourceParts)+len(defaults))
+	seen := map[string]bool{}
+	for _, source := range request.SourceParts {
+		field := Field{Name: source.Name, Raw: source.Raw}
+		if source.Text != nil {
+			text := *source.Text
+			if field.Name == "model" {
+				text = cfg.Model(model)
+			}
+			field.Text = &text
+		}
+		if source.File != nil {
+			part := *source.File
+			field.File = &part
+		}
+		fields = append(fields, field)
+		seen[field.Name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(defaults)) {
+		if seen[name] || seen[name+"[]"] {
+			continue
+		}
+		added, failure := configuredMultipartFields(name, defaults[name])
+		if failure != nil {
+			return nil, nil, failure
+		}
+		fields = append(fields, added...)
+	}
+	call.Fields = fields
+	return call, effective, nil
+}
+
 func configuredFailure(name, detail string) *Error {
 	return Fail(400, "unsupported_parameter", "The configured media field "+strconv.Quote(name)+" "+detail+".")
 }

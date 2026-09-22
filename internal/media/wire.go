@@ -78,6 +78,7 @@ type UpstreamCall struct {
 	Stream    bool
 	Kind      ResponseKind
 	Native    string
+	Strict    bool // local decoding contract; never an upstream wire member
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
 	// Inject carries W3C trace-context headers the caller allows upstream.
 	// Only request-path calls set it; reconciliation traffic does not
@@ -130,8 +131,10 @@ type Request struct {
 
 	// SourceFields retains JSON member presence and raw values before typed decoding.
 	// Multipart requests use their explicit typed fields and staged parts instead.
-	SourceFields   map[string]json.RawMessage
-	sourceDocument oif.Document
+	SourceFields     map[string]json.RawMessage
+	sourceDocument   oif.Document
+	SourceParts      []Field // original accepted multipart member order
+	SourceNormalized bool    // caller multipart text or metadata was normalized
 
 	// Video job operations.
 	JobID           string
@@ -529,8 +532,10 @@ func DecodeImageEdit(form *Form) (*Request, *Error) {
 		v := int64(*n)
 		count64 = &v
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpImageEdit, Route: model, Stream: stream != nil && *stream,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Prompt: prompt, Count: count64, Size: size, Quality: quality,
 		Format: responseFormat, User: user, Background: background,
 		InputFidelity: inputFidelity, OutputCompression: int64Ptr(outputCompression),
@@ -582,8 +587,10 @@ func DecodeImageVariation(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpImageVariation, Route: model,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Count: int64Ptr(n), Size: size, Format: responseFormat, User: user,
 		Image: image, Extra: extraAny,
 	}, nil
@@ -683,8 +690,10 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpTranscription, Route: model, Stream: stream != nil && *stream,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		File: file, Format: responseFormat, Language: language, TextPrompt: prompt,
 		Temperature: temperature, Include: include, TimestampGranularities: granularities,
 		ChunkingStrategy: chunkingJSON, KnownSpeakerNames: names,
@@ -765,8 +774,10 @@ func DecodeVideoCreate(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpVideoCreate, Route: model, Prompt: prompt,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Seconds: seconds, Size: size, InputRef: inputRef, Extra: extraAny,
 	}, nil
 }

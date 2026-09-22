@@ -25,7 +25,7 @@ type inspectedField struct {
 	Empty     *bool   `json:"empty,omitempty"`
 }
 
-var inspectedRequestFields = strings.Fields("model messages input instructions system systemInstruction contents prompt tools tool_choice toolConfig response_format text thinking reasoning generationConfig inferenceConfig additionalModelRequestFields safetySettings stop stop_sequences temperature top_p top_k max_tokens max_completion_tokens max_output_tokens frequency_penalty presence_penalty seed n candidateCount stream stream_options parallel_tool_calls logprobs top_logprobs reasoning_effort service_tier verbosity truncation store background previous_response_id conversation metadata user")
+var inspectedRequestFields = strings.Fields("model messages input instructions system systemInstruction contents prompt tools tool_choice toolConfig response_format text thinking reasoning generationConfig inferenceConfig additionalModelRequestFields safetySettings stop stop_sequences temperature top_p top_k max_tokens max_completion_tokens max_output_tokens frequency_penalty presence_penalty seed n candidateCount stream stream_options parallel_tool_calls logprobs top_logprobs reasoning_effort service_tier verbosity truncation store background previous_response_id conversation metadata user quality size style moderation output_format output_compression partial_images voice speed stream_format input_fidelity language timestamp_granularities include chunking_strategy known_speaker_names known_speaker_references seconds mask file image")
 
 func inspectRequest(document oif.Document, provenance []oif.Provenance) inspectedRequest {
 	result := inspectedRequest{Fields: []inspectedField{}}
@@ -119,7 +119,7 @@ func safeInspectionValue(pointer string, value oif.Value) bool {
 	if len(value.Raw()) > 256 {
 		return false
 	}
-	if slices.Contains(strings.Fields("/temperature /top_p /top_k /max_tokens /max_completion_tokens /max_output_tokens /frequency_penalty /presence_penalty /seed /n /candidateCount /top_logprobs /thinking/budget_tokens /generationConfig/temperature /generationConfig/topP /generationConfig/topK /generationConfig/maxOutputTokens /generationConfig/candidateCount /inferenceConfig/temperature /inferenceConfig/topP /inferenceConfig/maxTokens"), pointer) {
+	if slices.Contains(strings.Fields("/temperature /top_p /top_k /max_tokens /max_completion_tokens /max_output_tokens /frequency_penalty /presence_penalty /seed /n /candidateCount /top_logprobs /speed /partial_images /output_compression /thinking/budget_tokens /generationConfig/temperature /generationConfig/topP /generationConfig/topK /generationConfig/maxOutputTokens /generationConfig/candidateCount /inferenceConfig/temperature /inferenceConfig/topP /inferenceConfig/maxTokens"), pointer) {
 		return value.Kind() == oif.Number || value.Kind() == oif.Null
 	}
 	if slices.Contains(strings.Fields("/stream /parallel_tool_calls /logprobs /store /background"), pointer) {

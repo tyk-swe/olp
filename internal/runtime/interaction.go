@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"slices"
@@ -17,6 +18,9 @@ func (s *Snapshot) CompileRouteExecution(route Route) error {
 	_, _, err := s.compileRouteExecution(route)
 	if err == nil {
 		_, err = s.compileOperations(route)
+	}
+	if err == nil {
+		_, err = s.compileMedia(route)
 	}
 	return err
 }
@@ -87,7 +91,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 	}
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
-		if op == "generation" {
+		if op == "generation" || mediacontract.IsMediaOperation(op) {
 			continue
 		}
 		for _, target := range route.Targets {
@@ -103,6 +107,35 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 		}
 	}
 	return templates, nil
+}
+
+func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template, error) {
+	if FidelityMode(route.Fidelity) != FidelityStrict {
+		return nil, nil
+	}
+	templates := map[string]*mediacontract.Template{}
+	for _, op := range route.Operations {
+		if !mediacontract.IsMediaOperation(op) {
+			continue
+		}
+		for _, target := range route.Targets {
+			provider, ok := s.Providers[target.ProviderID]
+			if !ok {
+				return nil, fmt.Errorf("route target references an unavailable provider")
+			}
+			template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
+			if err != nil {
+				return nil, err
+			}
+			templates[op+"/"+target.ID] = template
+		}
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract.Template, bool) {
+	template, ok := s.media[slug][operation+"/"+target]
+	return template, ok
 }
 func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
 	template, ok := s.operations[slug][operation+"/"+target]

@@ -403,7 +403,11 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 	}
 	if x.strict() {
 		provider := x.request.release.Snapshot.Providers[a.ProviderID]
-		if x.unary != nil {
+		if x.media != nil {
+			if _, ok := x.request.release.Snapshot.MediaTemplate(x.route.Slug, a.TargetID, x.media.Op); ok {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			}
+		} else if x.unary != nil {
 			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}

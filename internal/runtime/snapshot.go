@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 )
 
@@ -146,6 +147,7 @@ type Route struct {
 type Snapshot struct {
 	interactions       map[string]map[string]*interaction.Template
 	operations         map[string]map[string]*operationplan.Template
+	media              map[string]map[string]*mediacontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -185,6 +187,7 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 func (s *Snapshot) Validate() error {
 	s.interactions = make(map[string]map[string]*interaction.Template)
 	s.operations = make(map[string]map[string]*operationplan.Template)
+	s.media = make(map[string]map[string]*mediacontract.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
@@ -242,6 +245,11 @@ func (s *Snapshot) Validate() error {
 			return err
 		}
 		s.operations[slug] = unary
+		media, err := s.compileMedia(r)
+		if err != nil {
+			return fmt.Errorf("route %q media: %w", slug, err)
+		}
+		s.media[slug] = media
 		r.compiledContentPolicy = policy
 		s.Routes[slug] = r
 	}

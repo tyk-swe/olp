@@ -192,12 +192,32 @@ func (p Part) BlobReference() (oif.BlobReference, error) {
 // spool until Disarm hands ownership to request execution or Cleanup
 // removes them.
 type Form struct {
-	text    map[string][]string
-	files   map[string][]Part
-	spool   *Spool
-	handles []Handle
-	armed   bool
-	lease   *ParserLease
+	text       map[string][]string
+	files      map[string][]Part
+	source     []Field // accepted caller members in original multipart order
+	normalized bool    // legacy parsing changed text, filename, or part metadata
+	spool      *Spool
+	handles    []Handle
+	armed      bool
+	lease      *ParserLease
+}
+
+// SourceFields is a detached ordered view of the accepted caller parts. File
+// bytes remain in the existing spool; this view carries only their handles.
+func (f *Form) SourceFields() ([]Field, bool) {
+	out := make([]Field, len(f.source))
+	for i, field := range f.source {
+		out[i].Name = field.Name
+		if field.Text != nil {
+			text := *field.Text
+			out[i].Text = &text
+		}
+		if field.File != nil {
+			part := *field.File
+			out[i].File = &part
+		}
+	}
+	return out, f.normalized
 }
 
 func newForm(spool *Spool, lease *ParserLease) *Form {
@@ -537,6 +557,11 @@ func parseMultipartFields(ctx context.Context, r *http.Request, spool *Spool, re
 			part.Close()
 			return invalidRequest("A multipart field has no name.")
 		}
+		for header := range part.Header {
+			if header != "Content-Disposition" && header != "Content-Type" {
+				output.normalized = true
+			}
+		}
 		if rawFilename, isFile := partFilename(part); isFile {
 			fileCount++
 			if fileCount > maximumFiles {
@@ -582,6 +607,9 @@ func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part,
 	if err != nil {
 		return invalidRequest("The multipart filename is invalid.")
 	}
+	if filename != rawFilename {
+		output.normalized = true
+	}
 	contentType := part.Header.Get("Content-Type")
 	artifact, err := spool.Put(ctx, Upload{
 		Filename:      filename,
@@ -593,14 +621,16 @@ func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part,
 		return SpoolError(err)
 	}
 	output.handles = append(output.handles, artifact.Handle)
-	output.files[name] = append(output.files[name], Part{
+	stored := Part{
 		Handle:      artifact.Handle,
 		Digest:      artifact.Digest,
 		Filename:    filename,
 		ContentType: contentType,
 		Size:        artifact.ContentLength,
 		Limit:       maximumFileBytes,
-	})
+	}
+	output.files[name] = append(output.files[name], stored)
+	output.source = append(output.source, Field{Name: name, File: &stored})
 	return nil
 }
 
@@ -628,6 +658,12 @@ func storeMultipartText(part *multipart.Part, name string, admission *Admission,
 		}
 	}
 	raw := bytes.TrimPrefix(field.Bytes(), utf8BOM)
+	if len(raw) != field.Len() {
+		output.normalized = true
+	}
+	if part.Header.Get("Content-Type") != "" {
+		output.normalized = true
+	}
 	if !utf8.Valid(raw) {
 		return invalidRequest("The multipart field " + name + " is not valid UTF-8.")
 	}
@@ -651,5 +687,6 @@ func storeMultipartText(part *multipart.Part, name string, admission *Admission,
 		}
 	}
 	output.text[name] = append(output.text[name], text)
+	output.source = append(output.source, Field{Name: name, Text: &text})
 	return nil
 }

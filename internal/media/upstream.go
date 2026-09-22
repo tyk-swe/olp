@@ -20,6 +20,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -87,6 +88,8 @@ type Result struct {
 	Artifact      *Artifact     // staged binary response
 	Body          io.ReadCloser // SSE response body; the caller drains it
 	ContentType   string
+	Source        oif.Document    // bounded immutable native JSON result for strict media
+	BlobSource    *oif.BlobResult // existing spool owns the bytes and lifecycle
 }
 
 const errorBodyLimit = 64 * 1024
@@ -306,6 +309,17 @@ var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n"
 
 func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration) (*Result, *Failure) {
 	result := &Result{Kind: call.Kind, Status: resp.StatusCode, FirstByte: firstByte}
+	retainJSON := func(body []byte) *Failure {
+		if !call.Strict {
+			return nil
+		}
+		doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(t.MaxResponseBytes)})
+		if err != nil || doc.Root().Kind() != oif.Object {
+			return &Failure{Class: ClassProtocol, Detail: "native media result is malformed or ambiguous"}
+		}
+		result.Source = doc
+		return nil
+	}
 	switch call.Kind {
 	case ResponseSSE:
 		if !requireContentType(resp, "text/event-stream") {
@@ -360,6 +374,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure != nil {
 			return nil, failure
 		}
+		if failure := retainJSON(body); failure != nil {
+			return nil, failure
+		}
 		decoded, mErr := DecodeTranscriptionJSON(body)
 		if mErr != nil {
 			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
@@ -372,6 +389,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		body, failure := t.collect(resp)
 		if failure != nil {
+			return nil, failure
+		}
+		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
 		var stagedHandles []Handle
