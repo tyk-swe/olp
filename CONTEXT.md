@@ -75,6 +75,10 @@ semantics; native identity and qualified interaction describe individual plans.
 A route whose admitted interactions preserve execution, observation, permitted
 continuation, and effects relative to the selected target's native invocation.
 
+**Published route identity**:
+The client address of a published route, carrying its strict or non-strict
+promise across revisions. Crossing that boundary creates a distinct identity.
+
 **Upstream acceptance**:
 What is known about provider work: not sent, outcome unknown, accepted, or
 terminal. Absence of client-visible bytes does not establish absence of work.

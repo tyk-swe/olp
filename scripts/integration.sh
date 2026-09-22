@@ -14,6 +14,7 @@ cleanup() {
   if (( status != 0 )); then "${compose[@]}" logs --no-color >&2 || true; fi
   if [[ -n ${restore_valkey:-} ]]; then docker rm -f "$restore_valkey" >/dev/null 2>&1 || true; fi
   "${compose[@]}" down -v --remove-orphans >&2 || true
+  if [[ -d "$scratch/old-reader" ]]; then git worktree remove --force "$scratch/old-reader" >&2 || true; fi
   rm -rf -- "$scratch"
   exit "$status"
 }
@@ -38,6 +39,15 @@ export OLP_TEST_VALKEY_TLS_URL="rediss://:olp-go-local@$valkey_tls/0"
 export OLP_TEST_CA_FILE="$OLP_GO_TEST_TLS_DIR/ca.crt"
 export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make build
+# The mixed-version suite runs a real prior gateway beside the current binary.
+# Fetching this fixed reviewed base is necessary on shallow CI checkouts.
+reference_revision=8580b39905dc4da9278de8e53ceac7d2412ad6a5
+if ! git cat-file -e "$reference_revision^{commit}"; then
+  git fetch --no-tags --depth=1 origin "$reference_revision"
+fi
+git worktree add --detach "$scratch/old-reader" "$reference_revision" >&2
+export OLP_TEST_OLD_BINARY="$scratch/olp-old-reader"
+(cd "$scratch/old-reader" && go build -mod=readonly -o "$OLP_TEST_OLD_BINARY" ./cmd/olp)
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 # Recovery tests use a separately provisioned Valkey, never a logical database

@@ -93,9 +93,33 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
-	// Recreate the complete pre-0021 prefix. Removing only 0021 would leave a
-	// history hole once later migrations exist, which the runner must reject.
-	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.route_drafts DROP COLUMN fidelity;
+	// Recreate the pre-0021 schema changes that later migrations cannot apply
+	// twice. Removing history alone would manufacture duplicate columns/triggers
+	// rather than exercise a valid populated forward migration. The 0024 JSON
+	// source types can be converted again without changing this fixture's values.
+	if _, err = h.Pool.Exec(t.Context(), `DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
+	    DROP FUNCTION olp_go.check_runtime_route_contracts();
+	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
+	    DROP FUNCTION olp_go.check_route_revision_contract();
+	    DROP TRIGGER preserve_route_contract_identity ON olp_go.routes;
+	    DROP FUNCTION olp_go.preserve_route_contract_identity();
+	    ALTER TABLE olp_go.routes DROP COLUMN strict_contract;
+	    DROP INDEX olp_go.provider_resources_submission_identity;
+	    DROP INDEX olp_go.provider_resources_parent;
+	    ALTER TABLE olp_go.provider_resources
+	        DROP CONSTRAINT provider_resources_contract_version_check,
+	        DROP CONSTRAINT provider_resources_continuation_contract_check,
+	        DROP CONSTRAINT provider_resources_submission_check,
+	        DROP COLUMN contract_version,
+	        DROP COLUMN parent_id,
+	        DROP COLUMN submission_id,
+	        DROP CONSTRAINT provider_resources_kind_check,
+	        ADD CONSTRAINT provider_resources_kind_check CHECK (kind IN ('file','batch','response'));
+	    ALTER TABLE olp_go.secrets
+	        DROP CONSTRAINT secrets_continuation_ciphertext_bound,
+	        DROP CONSTRAINT secrets_purpose_check,
+	        ADD CONSTRAINT secrets_purpose_check CHECK (purpose IN ('oidc_client','oidc_flow','mutation_replay','provider_credential','notification_secret'));
+	    ALTER TABLE olp_go.route_drafts DROP COLUMN fidelity;
 	    ALTER TABLE olp_go.route_revisions DROP COLUMN fidelity;
 	    DROP TABLE IF EXISTS olp_go.provider_network_credentials;
 	    ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;

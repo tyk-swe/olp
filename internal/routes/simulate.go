@@ -327,6 +327,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/diff", h(s.revisionDiff))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/{revision_id}", h(s.revision))
 	mux.HandleFunc("POST /api/v3/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
+	mux.HandleFunc("POST /api/v3/routes/{route_id}/migration-draft", h(s.migrationDraft))
 	mux.HandleFunc("GET /api/v3/routing-policies/{scope}/{id}", h(s.policy))
 	mux.HandleFunc("PUT /api/v3/routing-policies/{scope}/{id}", h(s.putPolicy))
 	mux.HandleFunc("POST /api/v3/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))

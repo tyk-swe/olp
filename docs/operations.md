@@ -9,6 +9,35 @@ For the provider-pool and routing-policy schema upgrade, follow the
 older gateways before migrating; mixed binaries cannot enforce the same policy
 and release format.
 
+## Strict route cutover
+
+A route slug is a published contract identity. To move a legacy or transformed
+route to strict, fetch its current ETag and create a review draft with
+`POST /api/v3/routes/{route_id}/migration-draft`, `If-Match`, an idempotency key,
+and a body such as `{"slug":"new-route","fidelity":{"mode":"strict"}}`. The
+destination slug must never have been published, including as a retired route.
+The response is an editable draft that copies the current revision, targets,
+content policy and routing policy. Creation and plan inspection perform no
+inference. Resolve any strict policy or provider-profile incompatibility,
+validate the draft, then activate it. Reusing the original slug for this change
+returns `route_fidelity_migration_required` before publication; configuration
+plan/apply report the same boundary.
+
+Provision an API key or update its allowed routes for the new slug, verify the
+new gateway serves the strict route, and deliberately change clients to that
+slug. Existing clients continue on the original non-strict route until their
+cutover. Older live gateways reject the new release and retain their last
+supported snapshot; they cannot dispatch a slug absent from that snapshot.
+Drain them before retiring the old route. A newly started old binary refuses
+the forward schema and is not a rollback mechanism. Rollback uses a compatible
+binary and the retained legacy route, while keeping current key and credential
+revocations. A database restore needs its own reviewed cutover plan that
+reapplies those revocations; never restore deleted credentials as a shortcut.
+
+The database also rejects an old writer that omits strictness from a new
+revision or release. Migration 0027 refuses a pre-existing strict slug with
+non-strict publication history because its identity cannot be proven safe.
+
 ## Objectives and monitoring
 
 Measure availability and added latency at the client-facing listener. Define

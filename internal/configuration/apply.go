@@ -123,6 +123,9 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		if err := routes.ValidateFidelityPolicy(route.Fidelity, route.ContentPolicy); err != nil {
 			return err
 		}
+		if err := routes.ValidateFidelityMigration(ctx, tx, route.Slug, route.Fidelity); err != nil {
+			return err
+		}
 		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]

@@ -10148,6 +10148,25 @@
           "resource_scope_declared"
         ],
         "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
+      },
+      "CreateRouteMigrationDraftRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "description": "Previously unpublished route identity; retired slugs cannot be reused."
+          },
+          "fidelity": {
+            "$ref": "#/components/schemas/RouteFidelity"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -21411,6 +21430,119 @@
         "tags": [
           "users"
         ]
+      }
+    },
+    "/api/v3/routes/{route_id}/migration-draft": {
+      "post": {
+        "operationId": "create_route_migration_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Current published route ETag"
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
+                }
+              }
+            },
+            "description": "",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "412": {
+            "description": "Source route ETag has changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid fidelity or previously published destination slug",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "routes"
+        ],
+        "description": "Copy the current published revision into a same-project review draft under a previously unpublished slug. Fidelity defaults to strict. Preserves settings and policies; does not activate or invoke inference.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRouteMigrationDraftRequest"
+              }
+            }
+          }
+        }
       }
     }
   }

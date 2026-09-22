@@ -24,6 +24,27 @@ func PublishedFidelity(ctx context.Context, q access.Queryer, slug string, proje
 	return raw, err
 }
 
+// ValidateFidelityMigration keeps the contract advertised by a published slug
+// consistent even while unsupported readers retain an older runtime snapshot.
+func ValidateFidelityMigration(ctx context.Context, q access.Queryer, slug string, raw json.RawMessage) error {
+	fidelity, err := runtime.DecodeFidelity(raw)
+	if err != nil {
+		return access.Invalid("fidelity", err.Error())
+	}
+	var strict bool
+	err = q.QueryRow(ctx, "SELECT strict_contract FROM olp_go.routes WHERE slug=$1", slug).Scan(&strict)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strict != (runtime.FidelityMode(fidelity) == runtime.FidelityStrict) {
+		return access.Fail(422, "route_fidelity_migration_required", "Changing a published route's strict contract requires a migration draft with a new slug.")
+	}
+	return nil
+}
+
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	f, err := runtime.DecodeFidelity(raw)
 	if err != nil {
