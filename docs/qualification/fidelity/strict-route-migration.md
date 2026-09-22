@@ -37,6 +37,15 @@ its no-inference explanation.
 The public integration test provisions a compatible provider and an old route,
 rejects in-place strict publication, creates and replays a reviewed draft under
 a new slug, validates and activates it, then checks both routes' provider calls.
+Before activation it also performs a plan-only shadow review: the old published
+route and new strict draft receive the same deterministic seed and native input
+apart from the model slug. Their target provider, upstream model and eligibility
+agree, while the inspector shows the intended legacy-to-strict contract change.
+The draft names the reviewed source revision, and the test asserts neither
+simulation calls the provider or publishes a runtime release. These are two
+separate management calls, so an operator must reread the source/draft ETags
+before acting if either can change concurrently; a single atomic paired API is
+not claimed by this evidence.
 Database checks reject old writer revision insertion, flag mutation and an
 old-shaped runtime release. A second source with a redaction policy proves the
 copy preserves it and strict activation fails with `fidelity_policy_conflict`.

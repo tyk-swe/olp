@@ -43,9 +43,31 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	if draft["id"] != replay["id"] || draft["slug"] != newSlug || routeFidelityMode(t, draft["fidelity"]) != "strict" || draft["based_on_revision_id"] != route["latest_revision"].(map[string]any)["id"] {
 		t.Fatal("migration did not preserve reviewed source/replay identity", draft, replay)
 	}
+	// Compare both plans against one source revision and seed without executing
+	// either route. The model slug is the only caller identity change.
+	shadowSeed := "migration-shadow-v1"
+	message := []any{map[string]any{"role": "user", "content": "same native input"}}
+	oldPlan := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{
+		"operation": map[string]any{"operation": "generation", "route": slug, "request": map[string]any{"model": slug, "messages": message}},
+		"surface":   "openai", "mode": "unary", "seed": shadowSeed,
+	}, nil, 200)
+	newPlan := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
+		"operation": "generation", "surface": "openai", "mode": "unary", "seed": shadowSeed,
+		"request": map[string]any{"model": newSlug, "messages": message},
+	}, nil, 200)
+	oldDecision := oldPlan[0].(map[string]any)
+	newDecision := newPlan["targets"].([]any)[0].(map[string]any)["decision"].(map[string]any)
+	for _, field := range []string{"provider_id", "upstream_model", "eligible"} {
+		if oldDecision[field] != newDecision[field] {
+			t.Fatalf("plan-only migration changed %s: old=%v new=%v", field, oldDecision[field], newDecision[field])
+		}
+	}
+	if oldDecision["eligible"] != true || oldDecision["interaction"].(map[string]any)["fidelity"] != "legacy" || newDecision["interaction"].(map[string]any)["fidelity"] != "strict" || newDecision["interaction"].(map[string]any)["status"] != "admitted" || newPlan["deterministic_seed"] != shadowSeed {
+		t.Fatal("migration shadow did not show the legacy/strict contract difference", oldDecision, newDecision)
+	}
 	h.refresh()
 	if len(provider.captured()) != before || h.Runtime.Release().Sequence != sequence {
-		t.Fatal("migration draft or rejected publication performed work")
+		t.Fatal("migration draft, shadow plan, or rejected publication performed work")
 	}
 	path := "/api/v3/route-drafts/" + draft["id"].(string)
 	draft = h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
