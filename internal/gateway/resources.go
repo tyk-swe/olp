@@ -58,6 +58,14 @@ func (s *Server) registerState(mux *http.ServeMux) {
 
 const resourceEstimate = 100
 
+// Once a provider has accepted durable work, its owner mapping must outlive
+// a client disconnect. Persistence still has a short independent deadline.
+const resourceCommitTimeout = 5 * time.Second
+
+func resourceCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), resourceCommitTimeout)
+}
+
 const maxResourceList = 100
 
 type pin struct {
@@ -665,7 +673,9 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata, state, expires := fileMetadata(body, p.model)
-	res, err := s.Resources.Put(r.Context(), &resources.Resource{
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	res, err := s.Resources.Put(commitCtx, &resources.Resource{
 		Kind:               resources.KindFile,
 		APIKeyID:           authority.ID,
 		RouteSlug:          route.Slug,
@@ -861,7 +871,9 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
+				}
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -895,7 +907,11 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				commitCtx, stopCommit := resourceCommitContext(ctx)
+				defer stopCommit()
+				if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
+					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
+				}
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -903,7 +919,9 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		defer resp.Body.Close()
 		x.dispatched = true
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
-		if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		defer stopCommit()
+		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
 		encoded, _ := json.Marshal(res.ID)
@@ -1151,7 +1169,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata, state := batchMetadata(result, p.model)
-	res, err := s.Resources.Put(r.Context(), &resources.Resource{
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	res, err := s.Resources.Put(commitCtx, &resources.Resource{
 		Kind:               resources.KindBatch,
 		APIKeyID:           authority.ID,
 		RouteSlug:          route.Slug,
@@ -1274,7 +1294,13 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
 	metadata, state := batchMetadata(result, resourceModel(res))
-	if err := s.Resources.Update(ctx, res.ID, state, metadata, nil); err != nil {
+	commitCtx := ctx
+	stopCommit := func() {}
+	if method == http.MethodPost {
+		commitCtx, stopCommit = resourceCommitContext(ctx)
+	}
+	defer stopCommit()
+	if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
 		return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 	}
 	res.State, res.Metadata = state, metadata
