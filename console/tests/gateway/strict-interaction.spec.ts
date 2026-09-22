@@ -22,6 +22,7 @@ type ManagementBody = Record<string, unknown> & {
 
 async function signIn(page: Page) {
   await page.goto('/');
+  await expect(page).toHaveURL(/\/(setup|login)(\?.*)?$/);
   if (
     await page.getByRole('button', { name: 'Create owner account' }).isVisible()
   ) {
