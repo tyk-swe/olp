@@ -45,6 +45,9 @@ that historical credential then refused recovery. Public branch, cross-key,
 cross-route, tamper, expiry and live key-policy/revocation checks passed.
 Native strict public results separately preserved citation boundaries,
 refusal structure and ordered Gemini candidates.
+The no-inference inspector showed the negotiated carrier, 4 MiB dependency
+bound and encrypted actionability obligation to an authorized key; it rejected
+a state-disabled key and unsupported carrier without a provider call or claim.
 
 Focused validation after the combined claim/journal change: public workflow,
 barrier, fault, branch, policy, revision and JS/Python SDK tests passed in
@@ -64,6 +67,14 @@ metrics**: concurrency 1 `ns/op`, CPU/op and workflow p50/p95/p99; concurrency
 8 workflow p50. All other matched metrics, including every large-history and
 action-ready metric, passed. The artifact remains in the repository for review.
 The later one-resolution and combined claim/journal optimizations preserve
-semantics but have no clean full candidate capture yet; they do not erase the
-recorded failure. A new quiet capture must pass the same frozen limits before
-the performance portion of qualification can be called complete.
+semantics but do not erase the recorded failure. A second clean
+[candidate capture](../../evidence/fidelity-performance/barrier-v1/candidate-failed-7f333ee7.json)
+at `7f333ee7` completed the same full semantic inventory and **failed 13
+frozen metrics**, mainly small-history workflow/CPU/latency and one large c1
+workflow p50. Its source, storage and hardware identities passed the runner's
+strict checks. Ambient host load before capture was 2.60 (one minute) versus
+0.63 before the first candidate; the worsening across all four workloads is
+not evidence that the code change caused a regression, nor is it a passing
+result. The optimization needs a controlled same-condition differential and
+further hot-path diagnosis. A new clean capture must pass the unchanged frozen
+limits before the performance portion of qualification can be called complete.
