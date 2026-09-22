@@ -4,8 +4,8 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "710360d99d8d56270cb1647ca67e78e068f92b2aab98378133355ada019c9810",
-    "operations": 149
+    "sha256": "e520e1f1a62fa04781837e55a02b7785c1e5b36a24642b9777602562fa933864",
+    "operations": 150
   },
   "behaviorMapping": {
     "path": "tests/release-behaviors.json",
@@ -6361,6 +6361,10 @@
     "internal/observability/handler_test.go",
     "internal/oif/registry_test.go",
     "internal/oif/source_test.go",
+    "internal/operationplan/plan_test.go",
+    "internal/operations/classification/classification_test.go",
+    "internal/operations/embeddings/embeddings_test.go",
+    "internal/operations/tokenization/tokenization_test.go",
     "internal/process/health_test.go",
     "internal/process/listener_test.go",
     "internal/process/listeners_test.go",
@@ -6412,6 +6416,7 @@
     "internal/runtime/ordering_test.go",
     "internal/runtime/plan_parity_test.go",
     "internal/runtime/profile_mount_test.go",
+    "internal/runtime/selection_extension_test.go",
     "internal/runtime/selection_test.go",
     "internal/runtime/snapshot_test.go",
     "internal/secrets/keys_test.go",
@@ -6504,6 +6509,7 @@
     "tests/integration/shared_budgets_test.go",
     "tests/integration/simulation_authorization_test.go",
     "tests/integration/strict_generation_test.go",
+    "tests/integration/strict_operations_test.go",
     "tests/integration/strict_plan_inspector_test.go",
     "tests/integration/strict_route_migration_test.go"
   ],

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"math"
 	"strings"
 	"time"
@@ -254,7 +255,7 @@ var knownOperations = map[string]struct{}{
 }
 
 var knownSurfaces = map[string]struct{}{
-	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "unknown": {},
+	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
 func (w wireEvent) decode() (*Event, error) {
@@ -301,7 +302,9 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, err
 	}
 	event.UpstreamModel = w.UpstreamModel
-	if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
+	if w.Operation != nil && operationregistry.Default.HasOperation(*w.Operation) {
+		event.Operation = *w.Operation
+	} else if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
 		return nil, err
 	}
 	if event.Surface, err = requiredLabel("surface", w.Surface, knownSurfaces); err != nil {

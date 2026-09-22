@@ -326,8 +326,11 @@ func decodeModels(body []byte) ([]string, error) {
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
 func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
-	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
+	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
+	}
+	if codec, ok := configuredOperation(cfg, tuple.Operation); ok {
+		return s.certifyOperation(ctx, cfg, credential, model, tuple, codec)
 	}
 	switch {
 	case tuple.Operation == "batch":

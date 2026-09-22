@@ -111,6 +111,9 @@ services for the full suite. The fixture and oracle suites are included by
 ordinary `make test-go`.
 
 The initial validation record is [baseline-validation.md](baseline-validation.md).
+The additive [registered unary operation evidence](unary-operations.md) records
+native and qualified non-generation behavior, public profile coverage and the
+explicit raw-vector client contract.
 Performance baselines and predeclared replacement budgets are recorded
 separately by the benchmark harness. Do not turn a passing oracle test,
 fixture count, named SDK test, or benchmark harness into a claim that the full

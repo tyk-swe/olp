@@ -113,7 +113,7 @@ func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.P
 		}
 		if !present {
 			fields[name] = t.defaults[name]
-			receipt.Dispositions = append(receipt.Dispositions, Disposition{"/max_tokens", "introduced", "declared_target_output_cap", evidenceText})
+			receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: "/max_tokens", Disposition: "introduced", Rule: "declared_target_output_cap", Evidence: evidenceText})
 		}
 	}
 	var limit int64
@@ -131,10 +131,10 @@ func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.P
 	descriptor := openai.Descriptor(t.wire, false)
 	prepared, err := oif.PrepareDestination(request.OIF(), descriptor, document, oif.QualifiedMapping, "qualified stateless ordered Chat text to Anthropic text; explicit nonreasoning output cap")
 	receipt.Dispositions = append(receipt.Dispositions,
-		Disposition{"/messages", "mapped", "ordered_user_assistant_text", evidenceText},
-		Disposition{"/max_tokens", "mapped", "nonreasoning_output_token_cap", evidenceText},
-		Disposition{"/model", "bound", "published_serving_identity", evidenceText},
-		Disposition{"/result", "guarded", "single_text_result_with_usage_and_finish", evidenceText})
+		Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_user_assistant_text", Evidence: evidenceText},
+		Disposition{Field: "/max_tokens", Disposition: "mapped", Rule: "nonreasoning_output_token_cap", Evidence: evidenceText},
+		Disposition{Field: "/model", Disposition: "bound", Rule: "published_serving_identity", Evidence: evidenceText},
+		Disposition{Field: "/result", Disposition: "guarded", Rule: "single_text_result_with_usage_and_finish", Evidence: evidenceText})
 	return prepared, err
 }
 func member(value oif.Value, name string) oif.Value { out, _ := value.Lookup(name); return out }

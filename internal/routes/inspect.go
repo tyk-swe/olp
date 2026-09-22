@@ -298,13 +298,13 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 	return accept, effective, inspections
 }
 
-func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, parsed *openai.Request, details map[string]*interactionInspection) []inspectedDecision {
+func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspected bool, details map[string]*interactionInspection) []inspectedDecision {
 	result := make([]inspectedDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		inspection := details[decision.TargetID]
 		if inspection == nil {
 			status := "not_evaluated"
-			if parsed == nil {
+			if !inspected {
 				status = "not_inspected"
 			}
 			inspection = &interactionInspection{Status: status, Fidelity: runtime.FidelityMode(route.Fidelity), Evidence: []string{}}

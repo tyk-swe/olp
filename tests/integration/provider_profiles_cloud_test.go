@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -57,7 +58,28 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 	defer metadata.Close()
 	t.Setenv("GCE_METADATA_HOST", strings.TrimPrefix(metadata.URL, "http://"))
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+	// Pin the original generation catalogue independently of newly registered
+	// unary-only profiles. The non-strict run also retains bedrock-invoke below.
+	originalGeneration := []string{"openai-chat", "openai-responses", "compatible-chat", "compatible-responses", "anthropic-messages", "gemini-generation", "azure-legacy-chat", "azure-legacy-responses", "azure-v1-chat", "azure-v1-responses", "vertex-gemini", "vertex-anthropic", "bedrock-converse", "bedrock-anthropic-invoke"}
+	seenOriginal := map[string]bool{}
+	seenInvoke := false
 	for _, profile := range connectors.Profiles() {
+		if slices.Contains(originalGeneration, profile.ID) {
+			seenOriginal[profile.ID] = true
+			if !slices.Contains(profile.Operations, "generation") {
+				t.Fatalf("original generation profile %s lost its operation", profile.ID)
+			}
+		}
+		if profile.ID == "bedrock-invoke" {
+			seenInvoke = true
+		}
+		// This fixture sends a generation request. Registered unary-only
+		// profiles have their own public request/result suite in
+		// strict_operations_test.go; retain the
+		// existing Bedrock Invoke coverage in the non-strict run.
+		if !slices.Contains(profile.Operations, "generation") && profile.ID != "bedrock-invoke" {
+			continue
+		}
 		if strict && profile.ID == "bedrock-invoke" {
 			// The model-specific non-generation runner is qualified separately.
 			continue
@@ -312,5 +334,13 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				}
 			}
 		})
+	}
+	for _, id := range originalGeneration {
+		if !seenOriginal[id] {
+			t.Fatalf("original generation profile %s disappeared", id)
+		}
+	}
+	if !seenInvoke {
+		t.Fatal("original Bedrock Invoke profile disappeared")
 	}
 }

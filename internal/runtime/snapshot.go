@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/operationplan"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -144,6 +145,7 @@ type Route struct {
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
 	interactions       map[string]map[string]*interaction.Template
+	operations         map[string]map[string]*operationplan.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -182,6 +184,7 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) Validate() error {
 	s.interactions = make(map[string]map[string]*interaction.Template)
+	s.operations = make(map[string]map[string]*operationplan.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
@@ -234,6 +237,11 @@ func (s *Snapshot) Validate() error {
 			return fmt.Errorf("route %q interaction: %w", slug, err)
 		}
 		s.interactions[slug] = templates
+		unary, err := s.compileOperations(r)
+		if err != nil {
+			return err
+		}
+		s.operations[slug] = unary
 		r.compiledContentPolicy = policy
 		s.Routes[slug] = r
 	}

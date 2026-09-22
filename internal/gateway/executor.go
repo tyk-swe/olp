@@ -40,6 +40,7 @@ const (
 	classUpstreamClient = "upstream_client"
 	classCredential     = "credential"
 	classProtocol       = "protocol"
+	classPolicy         = "policy"
 	classCancelled      = "cancelled"
 	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
 	// gateway cannot prove; it never fails over.
@@ -61,6 +62,7 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
+	unary                *unaryExecution
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
@@ -164,6 +166,7 @@ type attemptFailure struct {
 	dispatched   bool   // the request reached the upstream before the failure
 	quota        string // a quota this gateway enforces rejected the attempt
 	contractCode string // safe runtime interaction guard violation
+	policyCode   string // local output policy refusal after upstream completion
 	noRetry      bool   // strict outcome uncertainty must not suggest client retries
 }
 
@@ -200,6 +203,13 @@ func (f *attemptFailure) toError() (result *Error) {
 	}()
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
+	if f.policyCode != "" {
+		message := "The provider result was blocked by the route's content policy."
+		if f.policyCode == "policy_conflict" {
+			message = "The route's content policy cannot inspect this provider result."
+		}
+		return invalidRequest(f.policyCode, message, nil)
 	}
 	switch f.class {
 	case classLimitsUnavailable:
@@ -290,7 +300,7 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 		}
 		return []runtime.Slot{*x.pinnedSlot}
 	}
-	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.family.Operation(), x.family.Surface(), x.mode, x.affinity)
+	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
 	out := make([]runtime.Slot, 0, len(ordered))
 	for _, slot := range ordered {
 		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot)))) {
@@ -393,7 +403,11 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 	}
 	if x.strict() {
 		provider := x.request.release.Snapshot.Providers[a.ProviderID]
-		if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
+		if x.unary != nil {
+			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			}
+		} else if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		}
 	}
@@ -765,8 +779,8 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			UserID:          x.userID,
 			Family:          string(x.family),
 			Mode:            x.mode,
-			Operation:       x.family.Operation(),
-			Surface:         x.family.Surface(),
+			Operation:       x.operationName(),
+			Surface:         x.surfaceName(),
 			Outcome:         "failure",
 			Status:          status,
 			StartedAt:       x.request.startedAt,

@@ -73,15 +73,15 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Integrated; continuation, other operations, lifecycle and playground guards remain #214–#217 | Planner branch `b09c0012`, merge `873b3ce1`; [strict planning scope and validation](../qualification/fidelity/strict-planning.md); [safe inspector qualification](../qualification/fidelity/plan-inspector.md) |
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
-| [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Active; #213 integrated | Operation/profile exploration started from `06523391`; no #215 implementation integrated yet |
+| [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Integrated; public extensibility and final G3/G7 qualification remain #218 | Operation branch `ebfd6d88`; [registered unary operation contracts and public qualification](../qualification/fidelity/unary-operations.md); forward schema 0026 |
 | [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Active; #211, #212 and #224 integrated | Native image/speech request source parser and public ambiguity/precision qualification pending |
-| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
+| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending #214 continuation and #227 native media source | #215 registered unary operations are integrated; media resource, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need their own qualification |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Reference baseline integrated; translated candidate qualification pending | Source `29e18268`, capture `a99d0217`, merge `533ac161`; [36 repetitions, encrypted barrier reference and frozen criteria](../evidence/fidelity-performance/barrier-v1/README.md); replacement qualification remains #214/#218 |
-| [#226](https://github.com/tyk-swe/olp/issues/226) Enforce reviewed route identity migration across mixed versions | D23; T10 | Active; #213, #220 and #224 integrated | Forward migration 0027 reserved after shared operation-label migration 0026; actual old/new reader and writer qualification pending |
+| [#226](https://github.com/tyk-swe/olp/issues/226) Enforce reviewed route identity migration across mixed versions | D23; T10 | Integrated; final mixed-version and release audit remain #218 | Migration branch `39bf2792`; [strict route migration, rollback and mixed-version qualification](../qualification/fidelity/strict-route-migration.md); forward schema 0027, reviewed console draft and screenshot |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
@@ -152,14 +152,16 @@ network-revocation regressions, and public network-profile/inspector race checks
 passed after this merge. Existing timeout, cancellation and bounded-header tests
 remain unchanged; this is distinct from the test-only pricing fixture correction.
 
-Strict continuation/resource authority (#214), independent non-generation
-contracts (#215), media/durable/duplex contracts (#216), and the console playground
-projection (#217) remain guarded until their own qualification. Full G2 and G6
-remain unqualified. #224 now supplies forward migration 0024 and native
-configuration/release storage conservation. #214 can build its persistence work
-on reserved forward migration 0025; the active #214 and #215 branches remain
-outside this integration. #223 supplies the configuration editors; #217 is ready
-for inspector, evidence presentation and operation playground work.
+Strict continuation/resource authority (#214), media/durable/duplex contracts
+(#216), and the console playground projection (#217) remain guarded until their
+own qualification. Full G2 and G6 remain unqualified. #224 supplies forward
+migration 0024 and native configuration/release storage conservation. Forward
+migration 0025 provides the shared encrypted continuation schema; #214 still
+owns production continuation and resource behavior. #223 supplies the
+configuration editors; #217 owns inspector, evidence presentation and operation
+playground work. #215 now provides registered unary operation admission and
+public tests, while #218 retains the full extension demonstrations and G3/G7
+audit.
 
 The #224 storage branch `3e5d5358` merged without conflicts in `3b35c1fb`, retaining
 the already integrated pricing-test and proxy corrections unchanged. Combined

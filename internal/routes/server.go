@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -230,7 +231,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		in.Operations = []string{"generation"}
 	}
 	for _, op := range in.Operations {
-		if !slices.Contains(supportedOperations, op) {
+		if !slices.Contains(supportedOperations, op) && !registeredOperation(op) {
 			return nil, access.Fail(422, "operation_unavailable", "The "+op+" operation is not available in this release.")
 		}
 	}
@@ -514,4 +515,13 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: 204})
+}
+
+func registeredOperation(operation string) bool {
+	for _, d := range operationregistry.Default.Dialects() {
+		if d.Operation.ID == operation {
+			return true
+		}
+	}
+	return false
 }
