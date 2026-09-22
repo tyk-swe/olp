@@ -1,0 +1,368 @@
+package connectors
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/textproto"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/protocols/openai"
+)
+
+// Profile links independently owned dialect, hosting and authentication contracts.
+// Revision is OLP's immutable composition revision, not a provider model revision.
+// Omitted profiles retain legacy configuration and published snapshot semantics.
+type Profile struct {
+	ID              string   `json:"id"`
+	Revision        string   `json:"revision"`
+	Label           string   `json:"label"`
+	Kind            string   `json:"kind"`
+	Dialect         string   `json:"dialect"`
+	DialectRevision string   `json:"dialect_revision"`
+	Hosting         string   `json:"hosting"`
+	Authentication  []string `json:"authentication"`
+	Transport       string   `json:"transport"`
+	Operations      []string `json:"operations"`
+	SemanticHeaders []string `json:"semantic_headers"`
+	QuerySettings   []string `json:"query_settings"`
+	Documentation   string   `json:"documentation"`
+}
+
+const ProfileRevision = "1"
+
+var profileRegistry = []Profile{
+	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
+	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
+	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
+	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
+	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: "2023-06-01", Hosting: "direct-anthropic"},
+	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
+	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
+	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
+	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
+	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
+	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
+	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
+	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
+	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
+	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
+}
+
+func init() {
+	for i := range profileRegistry {
+		p := &profileRegistry[i]
+		p.Revision, p.Transport = ProfileRevision, "http"
+		p.Authentication = []string{"api_key", "headers", "none"}
+		p.Operations = []string{"generation", "token_count"}
+		p.SemanticHeaders, p.QuerySettings = []string{}, []string{}
+		if p.DialectRevision == "" {
+			p.DialectRevision = "unversioned-2026-09-22"
+		}
+		switch p.Kind {
+		case "openai", "openai_compatible", "azure_openai":
+			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "video_create", "video_list", "video_get", "video_content", "video_delete"}
+			p.SemanticHeaders = []string{"Openai-Beta"}
+			p.Documentation = "https://developers.openai.com/api/docs/guides/migrate-to-responses"
+			if p.Kind != "openai_compatible" {
+				p.Operations = append(p.Operations, "batch", "realtime")
+			}
+			if p.Kind == "azure_openai" {
+				p.Authentication = []string{"api_key", "azure_default", "azure_client_secret"}
+				if p.Hosting != "azure-v1" {
+					p.QuerySettings = []string{"api-version"}
+				}
+				p.Documentation = "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"
+			}
+		case "anthropic":
+			p.SemanticHeaders = []string{"Anthropic-Version", "Anthropic-Beta"}
+			p.Documentation = "https://platform.claude.com/docs/en/api/versioning"
+		case "gemini", "vertex_ai":
+			p.Documentation = "https://ai.google.dev/api/generate-content"
+			p.QuerySettings = []string{"$xgafv"}
+			p.Operations = []string{"generation", "token_count", "embeddings"}
+			if p.Kind == "vertex_ai" {
+				p.Authentication = []string{"adc", "service_account"}
+				p.Operations = append(p.Operations, "image_generation")
+			}
+			if p.Hosting == "vertex-anthropic" {
+				p.Operations = []string{"generation"}
+				p.SemanticHeaders = []string{"Anthropic-Beta"}
+				p.Documentation = "https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai"
+			}
+		case "bedrock":
+			p.Authentication = []string{"static", "default_chain"}
+			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"
+			p.Operations = []string{"generation", "token_count", "embeddings", "image_generation"}
+			if p.Hosting == "bedrock-anthropic-invoke" || p.Hosting == "bedrock-invoke" {
+				p.Operations = []string{"bedrock_invoke"}
+				if p.Hosting == "bedrock-anthropic-invoke" {
+					p.Operations = append(p.Operations, "generation")
+				}
+				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
+			}
+		}
+	}
+}
+
+// Profiles returns detached catalogue metadata; registering a new hosting profile
+// using these components does not require a generation-kernel provider switch.
+func Profiles() []Profile {
+	out := make([]Profile, len(profileRegistry))
+	for i, p := range profileRegistry {
+		out[i] = cloneProfile(p)
+	}
+	return out
+}
+
+func cloneProfile(p Profile) Profile {
+	p.Authentication = slices.Clone(p.Authentication)
+	p.Operations = slices.Clone(p.Operations)
+	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
+	p.QuerySettings = slices.Clone(p.QuerySettings)
+	return p
+}
+
+func LookupProfile(id, revision string) (Profile, error) {
+	for _, p := range profileRegistry {
+		if p.ID == id && p.Revision == revision {
+			return cloneProfile(p), nil
+		}
+	}
+	return Profile{}, errors.New("unknown provider profile or unsupported profile revision")
+}
+
+func (c Config) Profile() (Profile, error) {
+	return LookupProfile(c.ProfileID, c.ProfileRevision)
+}
+
+func (c Config) Hosting() string {
+	if p, err := c.Profile(); err == nil {
+		return p.Hosting
+	}
+	return ""
+}
+
+func (c Config) ValidateProfile() error {
+	if c.ProfileID == "" {
+		if c.ProfileRevision != "" || len(c.SemanticHeaders) > 0 || len(c.QuerySettings) > 0 || len(c.OperationDefaults) > 0 || len(c.Bindings) > 0 {
+			return errors.New("semantic configuration and serving bindings require an explicit versioned profile")
+		}
+		return nil
+	}
+	p, err := c.Profile()
+	if err != nil {
+		return err
+	}
+	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
+		return errors.New("profile, connector kind and authentication are not a supported composition")
+	}
+	if p.Dialect == "openai-responses" && slices.Contains([]string{"deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere"}, c.VendorID) {
+		return errors.New("this vendor's declared dialect does not include Responses")
+	}
+	if len(c.SemanticHeaders) > 16 || len(c.QuerySettings) > 16 {
+		return errors.New("use at most 16 semantic headers and query settings")
+	}
+	seen := map[string]bool{}
+	for name, value := range c.SemanticHeaders {
+		key := textproto.CanonicalMIMEHeaderKey(name)
+		if seen[key] || !slices.Contains(p.SemanticHeaders, key) || len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") {
+			return errors.New("semantic header is duplicated, malformed or outside the profile allowlist")
+		}
+		seen[key] = true
+		if slices.ContainsFunc(c.CredentialHeaders, func(h string) bool { return strings.EqualFold(h, key) }) {
+			return errors.New("semantic headers cannot also be credential headers")
+		}
+		if key == "Anthropic-Version" && value != p.DialectRevision {
+			return errors.New("Anthropic version must match the selected profile revision")
+		}
+	}
+	for name, value := range c.QuerySettings {
+		if name == "$xgafv" && value != "1" && value != "2" {
+			return errors.New("Google $xgafv query value must be 1 or 2")
+		}
+		if name == "api-version" && value != c.APIVersion {
+			return errors.New("api-version query must match the configured API revision")
+		}
+		if !slices.Contains(p.QuerySettings, name) || len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") {
+			return errors.New("query setting is outside the profile allowlist")
+		}
+	}
+	for _, h := range c.CredentialHeaders {
+		if slices.ContainsFunc(p.SemanticHeaders, func(v string) bool { return strings.EqualFold(v, h) }) {
+			return errors.New("semantic/version headers belong in semantic_headers independently of credentials")
+		}
+	}
+	return c.validateDefaultsAndBindings(p)
+}
+
+// TargetFamily is explicit for generation and operation-owned for other calls.
+// The raw model-specific Invoke profile deliberately cannot enter a chat codec.
+func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
+	p, err := c.Profile()
+	if err != nil {
+		return "", err
+	}
+	if !slices.Contains(p.Operations, source.Operation()) {
+		return "", errors.New("operation is outside the selected provider profile")
+	}
+	switch source.Operation() {
+	case "generation":
+		switch p.Dialect {
+		case "openai-chat":
+			return openai.FamilyChat, nil
+		case "openai-responses":
+			return openai.FamilyResponses, nil
+		case "anthropic-messages":
+			return openai.FamilyAnthropic, nil
+		case "gemini-generate-content":
+			return openai.FamilyGemini, nil
+		case "bedrock-converse":
+			return openai.FamilyBedrock, nil
+		}
+	case "token_count":
+		switch p.Dialect {
+		case "anthropic-messages":
+			return openai.FamilyAnthropicCount, nil
+		case "gemini-generate-content":
+			return openai.FamilyGeminiCount, nil
+		case "bedrock-converse":
+			return openai.Family("bedrock_count"), nil
+		default:
+			return openai.FamilyInputTokens, nil
+		}
+	case "embeddings":
+		switch p.Hosting {
+		case "direct-gemini":
+			return openai.FamilyGeminiEmbeddings, nil
+		case "vertex-google":
+			return openai.FamilyVertexEmbeddings, nil
+		case "bedrock-converse":
+			return openai.FamilyBedrockEmbeddings, nil
+		default:
+			return openai.FamilyEmbeddings, nil
+		}
+	case "moderation":
+		return openai.FamilyModeration, nil
+	}
+	return "", errors.New("operation has no codec in the selected profile")
+}
+
+func (c Config) Supports(operation, surface, mode string) bool {
+	if !Supports(c.Kind, c.VendorID, operation, surface, mode) {
+		return false
+	}
+	if c.ProfileID == "" {
+		return true
+	}
+	p, err := c.Profile()
+	return err == nil && slices.Contains(p.Operations, operation)
+}
+
+// ApplySemantic configures only profile-owned headers and query settings. Call
+// before authentication so final SigV4 signs the complete request. Authentication
+// never chooses the semantic configuration of an explicit profile.
+func (c Config) ApplySemantic(req *http.Request) error {
+	if c.ProfileID == "" {
+		return nil
+	}
+	if err := c.ValidateProfile(); err != nil {
+		return err
+	}
+	p, _ := c.Profile()
+	if p.Hosting == "direct-anthropic" {
+		req.Header.Set("Anthropic-Version", p.DialectRevision)
+	}
+	for name, value := range c.SemanticHeaders {
+		req.Header.Set(name, value)
+	}
+	query := req.URL.Query()
+	for name, value := range c.QuerySettings {
+		if existing, found := query[name]; found && (len(existing) != 1 || existing[0] != value) {
+			return fmt.Errorf("query setting %s collides with operation addressing", name)
+		}
+		query.Set(name, value)
+	}
+	req.URL.RawQuery = query.Encode()
+	return nil
+}
+
+func (c Config) AzureScope() string {
+	if c.Hosting() == "azure-v1" {
+		return "https://ai.azure.com/.default"
+	}
+	return "https://cognitiveservices.azure.com/.default"
+}
+
+func (c Config) profileBase() string {
+	base := strings.TrimRight(c.Endpoint, "/")
+	if c.Hosting() == "azure-v1" && !strings.HasSuffix(base, "/openai/v1") {
+		base += "/openai/v1"
+	}
+	return base
+}
+
+func (c Config) validateProfileEndpoint(u *url.URL) error {
+	switch c.Hosting() {
+	case "azure-v1":
+		if u.Path != "" && u.Path != "/openai/v1" {
+			return errors.New("Azure v1 endpoint must be the resource origin or /openai/v1")
+		}
+		if c.APIVersion != "" || c.CloudProject != "" || c.CloudRegion != "" {
+			return errors.New("Azure v1 does not use a dated api_version, project or region field")
+		}
+		if c.Deployment != "" && !ModelValid(c.Kind, c.Deployment) {
+			return errors.New("Azure deployment is malformed")
+		}
+		return nil
+	case "azure-responses-legacy":
+		if u.Path != "" || c.CloudProject != "" || c.CloudRegion != "" {
+			return errors.New("legacy Azure Responses requires a resource origin and API version")
+		}
+		if _, err := time.Parse("2006-01-02", strings.TrimSuffix(c.APIVersion, "-preview")); err != nil {
+			return errors.New("legacy Azure Responses requires a dated API version")
+		}
+		return nil
+	case "vertex-google", "vertex-anthropic":
+		publisher := "google"
+		if c.Hosting() == "vertex-anthropic" {
+			publisher = "anthropic"
+		}
+		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + "/publishers/" + publisher
+		if u.Path != want {
+			return errors.New("Vertex endpoint path must match the profile publisher, project and location")
+		}
+	}
+	return nil
+}
+
+// WrapBody handles only documented hosting wrappers after semantic lowering.
+// Model and cloud revision construction precede authentication/signing.
+func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
+	hosting := c.Hosting()
+	if hosting != "vertex-anthropic" && hosting != "bedrock-anthropic-invoke" {
+		return body, nil
+	}
+	if wire != openai.FamilyAnthropic {
+		return nil, errors.New("Anthropic cloud profile requires the Messages dialect")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil || fields == nil {
+		return nil, errors.New("cloud request must be a JSON object")
+	}
+	p, _ := c.Profile()
+	version, _ := json.Marshal(p.DialectRevision)
+	if prior, found := fields["anthropic_version"]; found && string(prior) != string(version) {
+		return nil, errors.New("native cloud version collides with the configured profile")
+	}
+	fields["anthropic_version"] = version
+	delete(fields, "model")
+	if hosting == "bedrock-anthropic-invoke" {
+		delete(fields, "stream")
+	}
+	return json.Marshal(fields)
+}

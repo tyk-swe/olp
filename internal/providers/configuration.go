@@ -24,25 +24,31 @@ type Limits struct {
 
 // Options carries connector options and per-model metadata.
 type Options struct {
-	CredentialHeaders []string                   `json:"credential_headers"`
-	Limits            *Limits                    `json:"limits"`
-	Models            map[string]json.RawMessage `json:"models"`
-	ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults"`
-	VendorID          *string                    `json:"vendor_id"`
+	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
+	QuerySettings     map[string]string                `json:"query_settings,omitempty"`
+	OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+	Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
+	CredentialHeaders []string                         `json:"credential_headers"`
+	Limits            *Limits                          `json:"limits"`
+	Models            map[string]json.RawMessage       `json:"models"`
+	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
+	VendorID          *string                          `json:"vendor_id"`
 }
 
 // Configuration is the stored connection configuration; it is the contract's
 // ProviderConfiguration verbatim.
 type Configuration struct {
-	ProbeModels  []string `json:"-"`
-	Kind         string   `json:"kind"`
-	AuthMode     string   `json:"auth_mode"`
-	Endpoint     *string  `json:"endpoint"`
-	CloudRegion  *string  `json:"cloud_region"`
-	CloudProject *string  `json:"cloud_project"`
-	Deployment   *string  `json:"deployment"`
-	APIVersion   *string  `json:"api_version"`
-	Options      Options  `json:"options"`
+	ProfileID       string   `json:"profile_id,omitempty"`
+	ProfileRevision string   `json:"profile_revision,omitempty"`
+	ProbeModels     []string `json:"-"`
+	Kind            string   `json:"kind"`
+	AuthMode        string   `json:"auth_mode"`
+	Endpoint        *string  `json:"endpoint"`
+	CloudRegion     *string  `json:"cloud_region"`
+	CloudProject    *string  `json:"cloud_project"`
+	Deployment      *string  `json:"deployment"`
+	APIVersion      *string  `json:"api_version"`
+	Options         Options  `json:"options"`
 }
 
 // normalize applies defaults and canonical forms so equal configurations
@@ -50,6 +56,9 @@ type Configuration struct {
 func (c *Configuration) Normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
 		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
+			if c.ProfileID == "vertex-anthropic" {
+				endpoint = strings.TrimSuffix(endpoint, "/google") + "/anthropic"
+			}
 			c.Endpoint = new(endpoint)
 		}
 	}
@@ -136,6 +145,9 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if len(c.Options.ParameterDefaults) > 64 {
 		return access.Invalid("configuration.options.parameter_defaults", "Use at most 64 parameter defaults.")
 	}
+	if c.ProfileID != "" && len(c.Options.ParameterDefaults) != 0 {
+		return access.Invalid("configuration.options.parameter_defaults", "Explicit profiles use operation_defaults; legacy parameter_defaults cannot be mixed.")
+	}
 	if err := openai.ValidateDefaults(c.Options.ParameterDefaults); err != nil {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
@@ -181,7 +193,11 @@ func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequ
 // unchanged.
 func (c *Configuration) transportFingerprint() string {
 	h := sha256.New()
-	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID})
+	parts := []any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID}
+	if c.ProfileID != "" {
+		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
+	}
+	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
@@ -204,7 +220,7 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }
 func reservedHeader(h string) bool {
 	h = strings.ToLower(h)

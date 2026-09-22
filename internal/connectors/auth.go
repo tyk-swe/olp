@@ -182,7 +182,10 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) ([]string, error) {
 	sensitive := []string{string(secret)}
-	if c.Kind == "anthropic" {
+	if err := c.ApplySemantic(req); err != nil {
+		return nil, err
+	}
+	if c.Kind == "anthropic" && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", "2023-06-01")
 	}
 	switch c.AuthMode {
@@ -239,7 +242,7 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 	return sensitive, nil
 }
 func cacheKey(c Config, secret []byte) [32]byte {
-	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"), secret...))
+	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.AzureScope()+"\x00"), secret...))
 }
 
 type credentialResult struct {
@@ -314,7 +317,7 @@ func (a *Auth) azureToken(ctx context.Context, c Config, secret []byte) (azcore.
 	}
 	ctx, cancel := context.WithTimeout(ctx, authTimeout)
 	defer cancel()
-	token, err := credential.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{azureScope}})
+	token, err := credential.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{c.AzureScope()}})
 	if err != nil {
 		return azcore.AccessToken{}, ErrAuthentication
 	}

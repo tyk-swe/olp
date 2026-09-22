@@ -15,6 +15,11 @@ import (
 )
 
 type Config struct {
+	ProfileID, ProfileRevision                                                            string
+	SemanticHeaders                                                                       map[string]string
+	QuerySettings                                                                         map[string]string
+	OperationDefaults                                                                     map[string]DefaultSet
+	Bindings                                                                              map[string]Binding
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	CredentialHeaders                                                                     []string
 	Models                                                                                map[string]json.RawMessage
@@ -64,9 +69,18 @@ func ModelValid(kind, model string) bool {
 	return model != "" && !strings.ContainsAny(model, "\x00\r\n")
 }
 func (c Config) Validate(policy *egress.Policy) error {
+	if err := c.ValidateProfile(); err != nil {
+		return err
+	}
 	u, e := policy.ValidateEndpoint(c.Endpoint)
 	if e != nil {
 		return e
+	}
+	if err := c.validateProfileEndpoint(u); err != nil {
+		return err
+	}
+	if c.Hosting() == "azure-v1" || c.Hosting() == "azure-responses-legacy" {
+		return nil
 	}
 	switch c.Kind {
 	case "azure_openai":
@@ -106,6 +120,14 @@ func (c Config) Validate(policy *egress.Policy) error {
 	return nil
 }
 func (c Config) Model(model string) string {
+	if binding, ok := c.Bindings[model]; ok {
+		if binding.Deployment != "" {
+			return binding.Deployment
+		}
+		if binding.Model != "" {
+			return binding.Model
+		}
+	}
 	var metadata struct {
 		Deployment string `json:"deployment"`
 	}
@@ -117,7 +139,7 @@ func (c Config) Model(model string) string {
 }
 func (c Config) URL(wire openai.Family, model string, stream bool) (string, error) {
 	model = c.Model(model)
-	base := strings.TrimRight(c.Endpoint, "/")
+	base := c.profileBase()
 	if !ModelValid(c.Kind, model) {
 		return "", errors.New("invalid upstream model identifier")
 	}
@@ -169,8 +191,25 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		}
 		path = "/rerank"
 	}
-	if c.Kind == "azure_openai" {
-		if model != c.Deployment {
+	if c.Hosting() == "vertex-anthropic" && wire == openai.FamilyAnthropic {
+		action := "rawPredict"
+		if stream {
+			action = "streamRawPredict"
+		}
+		return base + "/models/" + url.PathEscape(model) + ":" + action, nil
+	}
+	if c.Hosting() == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
+		action := "invoke"
+		if stream {
+			action = "invoke-with-response-stream"
+		}
+		return base + "/model/" + url.PathEscape(model) + "/" + action, nil
+	}
+	if c.Hosting() == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
+		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
+	}
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+		if model != c.Deployment && !c.hasDeployment(model) {
 			var metadata struct {
 				Deployment string `json:"deployment"`
 			}
@@ -199,10 +238,10 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	if strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
 		return "", errors.New("invalid upstream resource path")
 	}
-	base := strings.TrimRight(c.Endpoint, "/")
-	if c.Kind == "azure_openai" {
+	base := c.profileBase()
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
 		deployment := c.Model(model)
-		if deployment != c.Deployment {
+		if deployment != c.Deployment && !c.hasDeployment(deployment) {
 			var metadata struct {
 				Deployment string `json:"deployment"`
 			}
@@ -223,7 +262,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	}
 	u := base + "/" + path
 	merged := url.Values{}
-	if c.Kind == "azure_openai" {
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -233,4 +272,13 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 		u += "?" + merged.Encode()
 	}
 	return u, nil
+}
+
+func (c Config) hasDeployment(model string) bool {
+	for _, binding := range c.Bindings {
+		if binding.Deployment == model {
+			return true
+		}
+	}
+	return false
 }

@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 // RevisionModel is the published shape of one enabled model inside a provider
@@ -36,19 +38,25 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	Kind         string `json:"kind"`
-	AuthMode     string `json:"auth_mode"`
-	Endpoint     string `json:"endpoint"`
-	CloudRegion  string `json:"cloud_region"`
-	CloudProject string `json:"cloud_project"`
-	Deployment   string `json:"deployment"`
-	APIVersion   string `json:"api_version"`
-	Options      struct {
-		Models            map[string]json.RawMessage `json:"models"`
-		CredentialHeaders []string                   `json:"credential_headers"`
-		Limits            *Limits                    `json:"limits"`
-		ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults"`
-		VendorID          string                     `json:"vendor_id"`
+	ProfileID       string `json:"profile_id,omitempty"`
+	ProfileRevision string `json:"profile_revision,omitempty"`
+	Kind            string `json:"kind"`
+	AuthMode        string `json:"auth_mode"`
+	Endpoint        string `json:"endpoint"`
+	CloudRegion     string `json:"cloud_region"`
+	CloudProject    string `json:"cloud_project"`
+	Deployment      string `json:"deployment"`
+	APIVersion      string `json:"api_version"`
+	Options         struct {
+		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
+		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
+		OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+		Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
+		Models            map[string]json.RawMessage       `json:"models"`
+		CredentialHeaders []string                         `json:"credential_headers"`
+		Limits            *Limits                          `json:"limits"`
+		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
+		VendorID          string                           `json:"vendor_id"`
 	} `json:"options"`
 }
 
@@ -122,6 +130,9 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			return nil, fmt.Errorf("provider %s revision: %w", provider.ID, err)
 		}
 		provider.Enabled = state == "active"
+		provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
+		provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
+		provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings
 		provider.Kind = cfg.Kind
 		provider.AuthMode = cfg.AuthMode
 		provider.Endpoint = cfg.Endpoint

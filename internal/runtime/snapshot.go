@@ -75,23 +75,29 @@ type Limits struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
-	ID                string                     `json:"id"`
-	Name              string                     `json:"name"`
-	Kind              string                     `json:"kind"`
-	Enabled           bool                       `json:"enabled"`
-	DefaultSlotID     string                     `json:"default_slot_id,omitempty"`
-	ActiveCredential  *string                    `json:"active_credential"`
-	Capabilities      []Capability               `json:"capabilities"`
-	RevisionID        string                     `json:"revision_id"`
-	Endpoint          string                     `json:"endpoint,omitempty"`
-	AuthMode          string                     `json:"auth_mode,omitempty"`
-	CredentialHeaders []string                   `json:"credential_headers,omitempty"`
-	ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults,omitempty"`
-	CloudRegion       string                     `json:"cloud_region,omitempty"`
-	CloudProject      string                     `json:"cloud_project,omitempty"`
-	Deployment        string                     `json:"deployment,omitempty"`
-	APIVersion        string                     `json:"api_version,omitempty"`
-	Models            map[string]json.RawMessage `json:"models,omitempty"`
+	ProfileID         string                           `json:"profile_id,omitempty"`
+	ProfileRevision   string                           `json:"profile_revision,omitempty"`
+	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
+	QuerySettings     map[string]string                `json:"query_settings,omitempty"`
+	OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+	Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
+	ID                string                           `json:"id"`
+	Name              string                           `json:"name"`
+	Kind              string                           `json:"kind"`
+	Enabled           bool                             `json:"enabled"`
+	DefaultSlotID     string                           `json:"default_slot_id,omitempty"`
+	ActiveCredential  *string                          `json:"active_credential"`
+	Capabilities      []Capability                     `json:"capabilities"`
+	RevisionID        string                           `json:"revision_id"`
+	Endpoint          string                           `json:"endpoint,omitempty"`
+	AuthMode          string                           `json:"auth_mode,omitempty"`
+	CredentialHeaders []string                         `json:"credential_headers,omitempty"`
+	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults,omitempty"`
+	CloudRegion       string                           `json:"cloud_region,omitempty"`
+	CloudProject      string                           `json:"cloud_project,omitempty"`
+	Deployment        string                           `json:"deployment,omitempty"`
+	APIVersion        string                           `json:"api_version,omitempty"`
+	Models            map[string]json.RawMessage       `json:"models,omitempty"`
 	// VendorID is the upstream vendor this connection speaks to. It groups
 	// connections that share one upstream account for accounting and limits.
 	VendorID  string  `json:"vendor_id,omitempty"`
@@ -221,5 +227,5 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

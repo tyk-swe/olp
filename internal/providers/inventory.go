@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 func (s *Server) kinds(r *http.Request) (access.Reply, error) {
@@ -123,6 +124,7 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 // Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
+	mux.HandleFunc("GET /api/v3/provider-profiles", h(s.profiles))
 	mux.HandleFunc("GET /api/v3/provider-kinds", h(s.kinds))
 	mux.HandleFunc("GET /api/v3/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
 	mux.HandleFunc("GET /api/v3/provider-vendors", h(s.vendors))
@@ -154,4 +156,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/{revision_id}", h(s.revision))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/{revision_id}/models", h(s.revisionModels))
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
+}
+
+func (s *Server) profiles(r *http.Request) (access.Reply, error) {
+	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+		return access.Reply{}, err
+	}
+	return access.OK(map[string]any{"items": connectors.Profiles()}), nil
 }
