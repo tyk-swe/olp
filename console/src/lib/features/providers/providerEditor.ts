@@ -1,3 +1,5 @@
+import { ConfigurationDraft } from './configurationDraft.svelte';
+import type { NativeValue } from '$lib/json/nativeJson';
 import type { Provider } from './api';
 import type {
   CreateProviderInput,
@@ -13,6 +15,10 @@ import type {
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {
+  /** The sole configuration authority; the remaining properties are form views. */
+  document?: ConfigurationDraft;
+  profileId?: string;
+  profileRevision?: string;
   options?: Provider['configuration']['options'];
   name: string;
   endpoint: string;
@@ -66,23 +72,112 @@ export function emptyProviderOptions(): NonNullable<
   };
 }
 
-export function createProviderDraft(
-  spec: ProviderKindCapability
-): ProviderDraft {
-  return {
-    kind: spec.kind,
-    name: '',
-    endpoint: '',
-    apiVersion: '',
-    cloudRegion: '',
-    cloudProject: '',
-    deployment: '',
-    authMode: spec.default_auth_mode,
-    credential: '',
-    model: '',
-    projectId: '',
-    presetId: ''
+/** Read/write field views share the same immutable native document. The
+ * non-enumerable document is not a second wire field or part of form spreads. */
+function configurationViews<Values extends ProviderEditValues>(
+  values: Values,
+  configuration: Provider['configuration'],
+  lockedKind?: string
+): Values {
+  const document = new ConfigurationDraft(configuration, lockedKind);
+  Object.defineProperty(values, 'document', {
+    value: document,
+    enumerable: false
+  });
+  const fields: Record<string, string> = {
+    endpoint: 'endpoint',
+    apiVersion: 'api_version',
+    cloudRegion: 'cloud_region',
+    cloudProject: 'cloud_project',
+    deployment: 'deployment',
+    authMode: 'auth_mode',
+    profileId: 'profile_id',
+    profileRevision: 'profile_revision'
   };
+  if ('kind' in values) fields.kind = 'kind';
+  for (const [field, member] of Object.entries(fields)) {
+    Object.defineProperty(values, field, {
+      enumerable: true,
+      configurable: true,
+      get: () => document.text([member]),
+      set: (input: string) =>
+        document.set(
+          [member],
+          member === 'profile_id' || member === 'profile_revision'
+            ? input || undefined
+            : member === 'kind' || member === 'auth_mode'
+              ? input
+              : input.trim() || null
+        )
+    });
+  }
+  Object.defineProperty(values, 'options', {
+    enumerable: true,
+    configurable: true,
+    get: () => document.at(['options']),
+    set: (options: NativeValue | undefined) =>
+      document.set(['options'], options)
+  });
+  if ('kind' in values) {
+    Object.defineProperty(values, 'presetId', {
+      enumerable: true,
+      configurable: true,
+      get: () => document.text(['options', 'vendor_id']),
+      set: (vendor: string) =>
+        document.set(['options', 'vendor_id'], vendor || null)
+    });
+    Object.defineProperty(values, 'credentialHeaders', {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        const headers = document.at(['options', 'credential_headers']);
+        return Array.isArray(headers)
+          ? headers.filter((value) => typeof value === 'string').join(', ')
+          : '';
+      },
+      set: (headers: string) =>
+        document.set(
+          ['options', 'credential_headers'],
+          headers
+            .split(/[\n,]/)
+            .map((header) => header.trim())
+            .filter(Boolean)
+        )
+    });
+  }
+  return values;
+}
+
+export function createProviderDraft(
+  spec: ProviderKindCapability,
+  configuration?: Provider['configuration']
+): ProviderDraft {
+  return configurationViews(
+    {
+      kind: spec.kind,
+      name: '',
+      endpoint: '',
+      apiVersion: '',
+      cloudRegion: '',
+      cloudProject: '',
+      deployment: '',
+      authMode: spec.default_auth_mode,
+      credential: '',
+      model: '',
+      projectId: '',
+      presetId: ''
+    },
+    configuration ?? {
+      kind: spec.kind,
+      auth_mode: spec.default_auth_mode,
+      endpoint: null,
+      api_version: null,
+      cloud_region: null,
+      cloud_project: null,
+      deployment: null,
+      options: emptyProviderOptions()
+    }
+  );
 }
 
 export function setProviderDraftKind(
@@ -91,6 +186,8 @@ export function setProviderDraftKind(
 ): void {
   if (draft.kind === kind) return;
   draft.kind = kind;
+  draft.profileId = '';
+  draft.profileRevision = '';
   // Connector fields are kind-specific. Carrying an Azure resource endpoint or
   // a preset-resolved URL into the next connector silently persists a value the
   // operator never chose for it, and a secret typed for one upstream must never
@@ -194,8 +291,17 @@ export function validateProviderDraft(
     deployment: draft.deployment,
     model: draft.model
   };
+  if (draft.document?.issue) return draft.document.issue;
+  // Versioned profiles own connection requirements; the server validates their
+  // hosting adapter. Legacy kind fields cannot describe registered profiles.
+  const profiled = Boolean(draft.profileId);
   const missing = spec.fields
-    .filter((field) => field.required && !values[field.field]?.trim())
+    .filter(
+      (field) =>
+        field.required &&
+        !(profiled && field.field !== 'model') &&
+        !values[field.field]?.trim()
+    )
     .map((field) => field.label.toLowerCase());
   if (!draft.name.trim()) missing.unshift('name');
   if (
@@ -221,6 +327,12 @@ function buildConnectionFields(
   spec: ProviderKindCapability
 ): Omit<Provider['configuration'], 'kind' | 'options'> {
   return {
+    ...(values.profileId
+      ? {
+          profile_id: values.profileId,
+          profile_revision: values.profileRevision
+        }
+      : {}),
     auth_mode: values.authMode,
     endpoint: hasCustomEndpoint(spec) ? values.endpoint.trim() || null : null,
     api_version: hasApiVersion(spec) ? values.apiVersion.trim() || null : null,
@@ -241,20 +353,22 @@ export function buildCreateProviderInput(
   return {
     name: draft.name.trim(),
     project_id: draft.projectId || null,
-    configuration: {
-      kind: draft.kind,
-      options: {
-        ...emptyProviderOptions(),
-        ...draft.options,
-        vendor_id: draft.presetId || draft.options?.vendor_id || null,
-        credential_headers:
-          draft.credentialHeaders
-            ?.split(/[\n,]/)
-            .map((s) => s.trim())
-            .filter(Boolean) ?? []
-      },
-      ...buildConnectionFields(draft, spec)
-    },
+    configuration: draft.document
+      ? draft.document.configuration()
+      : {
+          kind: draft.kind,
+          options: {
+            ...emptyProviderOptions(),
+            ...draft.options,
+            vendor_id: draft.presetId || draft.options?.vendor_id || null,
+            credential_headers:
+              draft.credentialHeaders
+                ?.split(/[\n,]/)
+                .map((s) => s.trim())
+                .filter(Boolean) ?? []
+          },
+          ...buildConnectionFields(draft, spec)
+        },
     credential: requiresCredential(spec, draft.authMode)
       ? draft.credential
       : undefined,
@@ -267,26 +381,30 @@ export function providerEditValues(
   current: Pick<Provider, 'name' | 'configuration'>,
   spec: ProviderKindCapability
 ): ProviderEditValues {
-  return {
-    options: current.configuration.options,
-    name: current.name,
-    endpoint: hasCustomEndpoint(spec)
-      ? (current.configuration.endpoint ?? '')
-      : '',
-    apiVersion: hasApiVersion(spec)
-      ? (current.configuration.api_version ?? '')
-      : '',
-    cloudRegion: hasCloudRegion(spec)
-      ? (current.configuration.cloud_region ?? '')
-      : '',
-    cloudProject: hasCloudProject(spec)
-      ? (current.configuration.cloud_project ?? '')
-      : '',
-    deployment: hasDeployment(spec)
-      ? (current.configuration.deployment ?? '')
-      : '',
-    authMode: current.configuration.auth_mode
-  };
+  return configurationViews(
+    {
+      options: current.configuration.options,
+      name: current.name,
+      endpoint: hasCustomEndpoint(spec)
+        ? (current.configuration.endpoint ?? '')
+        : '',
+      apiVersion: hasApiVersion(spec)
+        ? (current.configuration.api_version ?? '')
+        : '',
+      cloudRegion: hasCloudRegion(spec)
+        ? (current.configuration.cloud_region ?? '')
+        : '',
+      cloudProject: hasCloudProject(spec)
+        ? (current.configuration.cloud_project ?? '')
+        : '',
+      deployment: hasDeployment(spec)
+        ? (current.configuration.deployment ?? '')
+        : '',
+      authMode: current.configuration.auth_mode
+    },
+    current.configuration,
+    current.configuration.kind
+  );
 }
 
 export function buildUpdateProviderInput(
@@ -295,11 +413,13 @@ export function buildUpdateProviderInput(
 ): UpdateProviderInput {
   return {
     name: values.name.trim(),
-    configuration: {
-      kind: spec.kind,
-      options: values.options,
-      ...buildConnectionFields(values, spec)
-    }
+    configuration: values.document
+      ? values.document.configuration()
+      : {
+          kind: spec.kind,
+          options: values.options,
+          ...buildConnectionFields(values, spec)
+        }
   };
 }
 
@@ -399,7 +519,7 @@ export function disableNotice(generation: number | null): string {
 
 export function providerStatus(current: ProviderStatusValue): string {
   if (providerDisabled(current)) return 'disabled · not serving';
-  if (current.pending_activation)
+  if (current.pending_activation && current.active_revision != null)
     return `revision ${current.active_revision} live · changes pending`;
   if (current.active_revision != null)
     return `revision ${current.active_revision} active`;

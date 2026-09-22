@@ -28,6 +28,7 @@
     busy,
     canManage,
     canSave,
+    dirty = false,
     run,
     onSave,
     onProviderChanged,
@@ -38,6 +39,7 @@
     busy: string;
     canManage: boolean;
     canSave: boolean;
+    dirty?: boolean;
     run: RunProviderAction;
     onSave: () => void;
     onProviderChanged: () => Promise<void>;
@@ -174,6 +176,9 @@
     Revision {current.active_revision} is live. No changes are pending.
   </p>
 {/if}
+{#if dirty}<p class="live-note">
+    Save the complete configuration draft before testing or activating it.
+  </p>{/if}
 <div class="form-actions">
   <button
     class="button button-secondary"
@@ -187,7 +192,11 @@
       class="button button-secondary"
       type="button"
       onclick={testDraft}
-      disabled={!canManage || Boolean(busy) || !capabilitiesCertified(current)}
+      disabled={!canManage ||
+        Boolean(busy) ||
+        dirty ||
+        !canSave ||
+        !capabilitiesCertified(current)}
       >{busy === 'detail-probe'
         ? 'Testing completed draft…'
         : 'Test completed draft'}</button
@@ -196,8 +205,11 @@
       class="button button-primary"
       type="button"
       onclick={activate}
-      disabled={!canManage || Boolean(busy) || !activationReady(current)}
-      >Activate changes</button
+      disabled={!canManage ||
+        Boolean(busy) ||
+        dirty ||
+        !canSave ||
+        !activationReady(current)}>Activate changes</button
     >
   {/if}
   {#if canManage && editingLocked}

@@ -68,6 +68,8 @@ export type RouteEditorValues = {
   targets: EditableTarget[];
   contentPolicyRules: EditablePolicyRule[];
   projectId?: string;
+  /** Null preserves a historical omission; explicit modes require review. */
+  fidelity?: components['schemas']['RouteFidelity'] | null;
 };
 
 export const operationOptions = [
@@ -296,6 +298,7 @@ export function buildCreateRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
+    ...(values.fidelity ? { fidelity: values.fidelity } : {}),
     targets: values.targets.map((target) => {
       const model = providerModel(target, modelOptions)!;
       return {
@@ -318,6 +321,7 @@ export function buildReplaceRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
+    ...(values.fidelity ? { fidelity: values.fidelity } : {}),
     targets: values.targets.map((target) => ({
       provider_model_id: target.providerModelId,
       priority: target.priority,

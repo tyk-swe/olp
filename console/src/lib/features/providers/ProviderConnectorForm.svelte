@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -75,10 +76,11 @@
   );
 
   function chooseProviderKind(event: Event) {
-    setProviderDraftKind(
-      draft,
-      (event.currentTarget as HTMLInputElement).value as ProviderDraft['kind']
-    );
+    const kind = (event.currentTarget as HTMLInputElement)
+      .value as ProviderDraft['kind'];
+    setProviderDraftKind(draft, kind);
+    const spec = providerKinds.find((candidate) => candidate.kind === kind);
+    if (spec) draft.authMode = spec.default_auth_mode;
   }
 
   function chooseCompatibleProvider(event: Event) {
@@ -250,6 +252,12 @@
         >
       </div>{/if}
   </div>
+  <ProviderProfileEditor
+    values={draft}
+    idPrefix="provider"
+    disabled={Boolean(busy)}
+    onChange={() => {}}
+  />
   <div class="form-actions">
     <button class="button button-primary" type="submit" disabled={Boolean(busy)}
       >{busy === 'create' ? 'Saving and testing…' : 'Save and test connection'}

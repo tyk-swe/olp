@@ -69,6 +69,7 @@ export class RouteDraftEditorState {
   operations = $state<string[]>(['generation']);
   overallTimeoutMs = $state(120000);
   maxAttempts = $state(2);
+  fidelity = $state<RouteDraft['fidelity']>({ mode: 'strict' });
   targets = $state<EditableTarget[]>([]);
   policyRules = $state<EditablePolicyRule[]>([]);
   outputPolicyActive = $derived(hasOutputRules(this.policyRules));
@@ -119,7 +120,8 @@ export class RouteDraftEditorState {
     maxAttempts: this.maxAttempts,
     targets: this.targets,
     contentPolicyRules: this.policyRules,
-    projectId: this.projectId
+    projectId: this.projectId,
+    fidelity: this.fidelity
   });
   concurrentNotice = $derived(conflictNotice(this.sync));
   routeEligibilityWarnings = $derived(
@@ -147,6 +149,7 @@ export class RouteDraftEditorState {
     this.operations = ['generation'];
     this.overallTimeoutMs = 120000;
     this.maxAttempts = 2;
+    this.fidelity = { mode: 'strict' };
     this.targets = [];
     this.policyRules = [];
     this.sync = initialConcurrentEdit();
@@ -250,7 +253,7 @@ export class RouteDraftEditorState {
       {
         id: `rule-${this.policyRules.length + 1}`,
         phase: 'input',
-        action: 'redact',
+        action: this.fidelity?.mode === 'strict' ? 'block' : 'redact',
         pattern: '',
         replacement: ''
       }
@@ -431,6 +434,7 @@ export class RouteDraftEditorState {
       this.operations = [...current.operations];
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
+      this.fidelity = current.fidelity ?? null;
       this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,

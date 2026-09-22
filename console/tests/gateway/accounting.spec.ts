@@ -144,6 +144,8 @@ async function provisionRoute(page: Page): Promise<void> {
   await expect(
     page.getByLabel('Provider model').first().locator('option:checked')
   ).toContainText(upstream.model);
+  // This journey intentionally qualifies the historical compatibility route.
+  await page.getByLabel('Fidelity mode').selectOption('legacy');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await page

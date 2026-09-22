@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RouteFidelityEditor from './RouteFidelityEditor.svelte';
   import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
@@ -168,6 +169,7 @@
           </fieldset>
         </div>
       </section>
+      <RouteFidelityEditor {editor} />
       <RouteTargets {editor} />
       <ContentPolicyEditor {editor} />
       <section class="card editor advanced" aria-labelledby="advanced-heading">

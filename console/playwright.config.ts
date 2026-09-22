@@ -6,7 +6,8 @@ if (!process.env.OLP_DATABASE_URL || !process.env.OLP_VALKEY_URL) {
 
 function database(name: string) {
   const url = new URL(process.env.OLP_DATABASE_URL!);
-  url.pathname = '/' + name;
+  url.pathname =
+    '/' + (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') + name;
   return url.toString();
 }
 

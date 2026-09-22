@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
+import { stringifyNativeJSON } from '$lib/json/nativeJson';
 import {
   clearCsrfToken,
   getCsrfToken,
@@ -130,4 +131,23 @@ describe('generated API request boundary', () => {
 
     expect(getCsrfToken()).toBe('csrf-rotated-by-response');
   });
+});
+
+it('retains native configuration through the generated client without Content-Length', async () => {
+  const source =
+    '{"configuration":{"kind":"openai","auth_mode":"none","options":{"parameter_defaults":{"seed":9007199254740993,"tiny":1e-1000,"schema":{"10":{},"2":{},"__proto__":{"inert":true}}}}}}';
+  captureRequests(
+    () =>
+      new Response(source, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked'
+        }
+      })
+  );
+  const response = await apiClient.GET('/api/v3/providers/{provider_id}', {
+    params: { path: { provider_id: 'provider' } }
+  });
+  expect(stringifyNativeJSON(response.data)).toBe(source);
+  expect(response.response.headers.has('content-length')).toBe(false);
 });
