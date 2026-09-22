@@ -35,6 +35,11 @@ graph TD
   profiles --> media_source_foundation
   native_config_storage --> media_source_foundation
   media_source_foundation --> lifecycle
+  gemini_lifecycle_foundation["#229 Gemini Interactions/Live"]
+  profiles --> gemini_lifecycle_foundation
+  operations --> gemini_lifecycle_foundation
+  media_source_foundation --> gemini_lifecycle_foundation
+  gemini_lifecycle_foundation --> lifecycle
   console["#217 console"]
   planning --> console
   console_forms["#223 console forms"]
@@ -78,6 +83,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Integrated; public extensibility and final G3/G7 qualification remain #218 | Operation branch `ebfd6d88`; [registered unary operation contracts and public qualification](../qualification/fidelity/unary-operations.md); forward schema 0026 |
 | [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Source foundation integrated; full strict media plans remain #216 | Media source branch `ad5558e5`, merge `22738e0d`; [native image/speech source parser and public ambiguity qualification](../qualification/fidelity/media-source-foundation.md) |
+| [#229](https://github.com/tyk-swe/olp/issues/229) Implement distinct Gemini Interactions and Live native lifecycle profiles | D06,D11-D15; T03-T05 | Ready; #212, #215 and #227 integrated | New native Gemini Interactions/Live API contracts and real JS/Python SDK gateway lifecycle qualification pending |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending #214 continuation | #215 operations and #227 native media source are integrated; media resources, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need their own qualification |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
