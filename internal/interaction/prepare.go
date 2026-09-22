@@ -52,7 +52,11 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	} else {
 		receipt.Class, receipt.Evidence = QualifiedInteraction, []string{evidenceText}
 		receipt.Obligations.Continuation = "stateless_text_history"
-		prepared, err = t.prepareText(request, &receipt)
+		if context.ContinuationVersion != "" {
+			prepared, err = t.prepareTools(request, context, &receipt)
+		} else {
+			prepared, err = t.prepareText(request, &receipt)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -284,12 +288,16 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 		retained = !present || store.Kind() == oif.Null || store.Raw() != "false"
 	}
 	referenced := false
+	unsupportedReference := false
 	for _, name := range []string{"previous_response_id", "conversation", "cachedContent"} {
 		value, present := root.Lookup(name)
 		if !present || value.Kind() == oif.Null {
 			continue
 		}
 		referenced = true
+		if name != "previous_response_id" {
+			unsupportedReference = true
+		}
 		if name == "conversation" {
 			retained = true
 		}
@@ -301,7 +309,17 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
 	}
 	if retained || referenced {
-		return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
+		if wire != openai.FamilyResponses || !context.RetainedResponses || unsupportedReference {
+			return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
+		}
+		obligations.Lifetime = "durable"
+		obligations.Continuation = "native_response_resource"
+		if retained {
+			obligations.Effects = append(obligations.Effects, "resource_mutation")
+		}
+		if referenced {
+			obligations.Effects = append(obligations.Effects, "resource_read")
+		}
 	}
 	tools, err := declaredClientTools(root, wire)
 	if err != nil {

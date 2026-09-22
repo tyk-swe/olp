@@ -11,12 +11,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
-	KindFile     = "file"
-	KindBatch    = "batch"
-	KindResponse = "response"
+	KindFile           = "file"
+	KindBatch          = "batch"
+	KindResponse       = "response"
+	KindContinuation   = "continuation"
+	KindStrictResponse = "strict_response"
 )
 
 const StateDeleted = "deleted"
@@ -45,6 +49,9 @@ type Resource struct {
 	ExpiresAt          *time.Time      `json:"expires_at,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+	ContractVersion    *string         `json:"contract_version,omitempty"`
+	ParentID           *uuid.UUID      `json:"-"`
+	SubmissionID       *string         `json:"-"`
 }
 
 func LocalID(kind string, id uuid.UUID) string {
@@ -52,7 +59,7 @@ func LocalID(kind string, id uuid.UUID) string {
 }
 
 func parseLocal(local string) (uuid.UUID, error) {
-	i := strings.IndexByte(local, '_')
+	i := strings.LastIndexByte(local, '_')
 	if i <= 0 {
 		return uuid.Nil, ErrNotFound
 	}
@@ -61,14 +68,21 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	id, err := uuid.Parse(rest[:8] + "-" + rest[8:12] + "-" + rest[12:16] + "-" + rest[16:20] + "-" + rest[20:])
-	if err != nil {
+	if err != nil || LocalID(local[:i], id) != local {
+		return uuid.Nil, ErrNotFound
+	}
+	switch local[:i] {
+	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse:
+	default:
 		return uuid.Nil, ErrNotFound
 	}
 	return id, nil
 }
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	installation string
+	keys         *secrets.KeyRing
 }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
@@ -77,14 +91,14 @@ func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	return s.pool.Begin(ctx)
 }
 
-const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at`
+const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id`
 
 func scan(row pgx.Row) (*Resource, error) {
 	var r Resource
 	var metadata []byte
 	err := row.Scan(&r.UUID, &r.Kind, &r.APIKeyID, &r.RouteSlug, &r.ProviderID,
 		&r.ProviderRevisionID, &r.RouteRevisionID, &r.SlotID, &r.CredentialID, &r.UpstreamID,
-		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt)
+		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +108,9 @@ func scan(row pgx.Row) (*Resource, error) {
 }
 
 func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
+	if r.Kind == KindContinuation || r.Kind == KindStrictResponse {
+		return nil, ErrContract
+	}
 	if len(r.Metadata) == 0 {
 		r.Metadata = json.RawMessage(`{}`)
 	}
@@ -115,11 +132,11 @@ func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
 
 func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resource, error) {
 	id, err := parseLocal(localID)
-	if err != nil || !strings.HasPrefix(localID, kind+"_") {
+	if err != nil || LocalID(kind, id) != localID {
 		return nil, ErrNotFound
 	}
 	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
-		WHERE kind=$1 AND id=$2 AND api_key_id=$3 AND state<>$4`,
+		WHERE kind=$1 AND id=$2 AND api_key_id=$3 AND state<>$4 AND (expires_at IS NULL OR expires_at>now())`,
 		kind, id, apiKeyID, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -132,7 +149,7 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 
 func (s *Store) GetByUpstream(ctx context.Context, kind, apiKeyID, providerID, upstreamID string) (*Resource, error) {
 	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
-		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND upstream_id=$4 AND state<>$5`,
+		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND upstream_id=$4 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())`,
 		kind, apiKeyID, providerID, upstreamID, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -153,7 +170,7 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 		after = parsed
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
-		WHERE kind=$1 AND api_key_id=$2 AND state<>$3
+		WHERE kind=$1 AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
 		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp_go.provider_resources WHERE id=$4))
 		ORDER BY created_at DESC, id DESC LIMIT $5`,
 		kind, apiKeyID, StateDeleted, nilUUID(after), limit)
@@ -183,7 +200,8 @@ func (s *Store) Update(ctx context.Context, localID, state string, metadata json
 	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources
 		SET state=COALESCE($2,state), metadata=metadata||COALESCE($3,'{}'::jsonb),
 			expires_at=COALESCE($4,expires_at), updated_at=now()
-		WHERE id=$1 AND state<>$5`,
+		WHERE id=$1 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())
+ AND kind<>'continuation' AND (kind<>'strict_response' OR ($3::jsonb IS NULL AND $4::timestamptz IS NULL))`,
 		id, nilIfEmpty(state), nilIfEmpty(string(metadata)), expiresAt, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource update: %w", err)
@@ -199,21 +217,39 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 	if err != nil {
 		return ErrNotFound
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources
-		SET state=$2, updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$2,updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource tombstone: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err = tx.Exec(ctx, `DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='provider_continuation'`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM olp_go.provider_resources WHERE expires_at IS NOT NULL AND expires_at<$1`, now)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `DELETE FROM olp_go.secrets s USING olp_go.provider_resources r WHERE s.id=r.id AND s.purpose='provider_continuation' AND r.expires_at<=$1`, now); err != nil {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM olp_go.provider_resources WHERE expires_at IS NOT NULL AND expires_at<=$1`, now)
 	if err != nil {
 		return 0, fmt.Errorf("provider resource cleanup: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
 	}
 	return tag.RowsAffected(), nil
 }

@@ -29,10 +29,10 @@ type simulateDraftRequest struct {
 	MaxOutputTokens      *int64            `json:"max_output_tokens"`
 	Request              json.RawMessage   `json:"request"`
 	Dialect              string            `json:"dialect"`
+	ClientContract       string            `json:"client_contract"`
 	SemanticHeaders      map[string]string `json:"semantic_headers"`
 	QuerySettings        map[string]string `json:"query_settings"`
 	APIKeyID             *string           `json:"api_key_id"`
-	ClientContract       string            `json:"client_contract"`
 }
 
 func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
@@ -157,6 +157,11 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	parsed, unary, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if input.Operation == "generation" {
+		if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
 	if unary != nil {
@@ -298,6 +303,11 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	parsed, unary, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if operation == "generation" {
+		if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	if parsed != nil {
 		options.Parameters = protocols.ParameterNames(parsed)

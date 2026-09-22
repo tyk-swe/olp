@@ -31,10 +31,14 @@ type Config struct {
 	MaxBodyBytes, MaxEventBytes   int
 }
 type Context struct {
-	Headers            http.Header
-	Query              url.Values
-	AllowProviderState bool
-	RequiredServing    *ServingIdentity
+	Headers             http.Header
+	Query               url.Values
+	AllowProviderState  bool
+	RequiredServing     *ServingIdentity
+	ContinuationVersion string
+	DurableContinuation bool
+	RetainedResponses   bool
+	Continuation        *Continuation
 }
 type ServingIdentity = oif.ServingIdentity
 type Error = oif.Incompatibility

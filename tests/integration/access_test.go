@@ -153,7 +153,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		Jobs:      mediaJobs,
 		Admission: media.NewAdmissionState(media.MinCapacityBytes),
 	}
-	gw.Resources = resources.New(pool)
+	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool, installation, ring)
 	catalogue := providers.New(server, &policy)
 	mux := http.NewServeMux()

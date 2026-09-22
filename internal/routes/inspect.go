@@ -70,6 +70,8 @@ type inspectedObligations struct {
 	Retry                   string   `json:"retry"`
 	MaxBodyBytes            int      `json:"max_body_bytes"`
 	MaxEventBytes           int      `json:"max_event_bytes"`
+	MaxContinuationBytes    int      `json:"max_continuation_bytes,omitempty"`
+	Actionability           string   `json:"actionability,omitempty"`
 	RejectAmbiguousFailover bool     `json:"reject_ambiguous_failover"`
 	GuardResults            bool     `json:"guard_results"`
 }
@@ -217,7 +219,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		if fidelity != runtime.FidelityStrict {
 			// Legacy/transformed previews retain their explicit old semantics and
 			// never acquire a strict qualification class from a successful encode.
-			if len(context.Headers) > 0 || len(context.Query) > 0 {
+			if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
 				return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
 			}
 			invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
@@ -238,7 +240,9 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		if err != nil {
 			return safeInspectionError(err)
 		}
-		plan, err := template.Bind(parsed, context)
+		binding := context
+		binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
+		plan, err := template.Bind(parsed, binding)
 		if err != nil {
 			return safeInspectionError(err)
 		}
@@ -253,7 +257,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		result.Obligations = &inspectedObligations{
 			Delivery: obligations.Delivery, Lifetime: obligations.Lifetime, Continuation: obligations.Continuation, Retry: obligations.Retry,
 			Submission: obligations.Submission, Effects: append([]string{}, obligations.Effects...),
-			MaxBodyBytes: obligations.MaxBodyBytes, MaxEventBytes: obligations.MaxEventBytes, RejectAmbiguousFailover: obligations.RejectAmbiguousFailover, GuardResults: obligations.GuardResults,
+			MaxBodyBytes: obligations.MaxBodyBytes, MaxEventBytes: obligations.MaxEventBytes, MaxContinuationBytes: obligations.MaxContinuationBytes, Actionability: obligations.Actionability, RejectAmbiguousFailover: obligations.RejectAmbiguousFailover, GuardResults: obligations.GuardResults,
 		}
 		seen := map[inspectedDisposition]bool{}
 		for _, disposition := range receipt.Dispositions {
@@ -312,4 +316,16 @@ func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspe
 		result = append(result, inspectedDecision{Decision: decision, Interaction: inspection})
 	}
 	return result
+}
+
+// Capability is supplied by server composition, never asserted by raw request
+// fields. Inspection binds the same versioned planner without claiming a state
+// reservation, creating a handle, or dispatching an inference request.
+func inspectionClientContract(version string, context *interaction.Context, encrypted bool) error {
+	if version != "" && version != interaction.ContinuationV1 {
+		return access.Invalid("client_contract", "Use the tested chat-anthropic-tools-v1 client contract.")
+	}
+	context.ContinuationVersion = version
+	context.DurableContinuation = encrypted
+	return nil
 }

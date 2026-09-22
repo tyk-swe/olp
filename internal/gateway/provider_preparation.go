@@ -34,14 +34,20 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		var template *interaction.Template
 		for _, target := range x.route.Targets {
 			if target.ProviderID == provider.ID && target.ProviderModel == model {
-				template, _ = x.request.release.Snapshot.InteractionTemplate(x.route.Slug, target.ID)
+				template, _ = x.snapshot().InteractionTemplate(x.route.Slug, target.ID)
 				break
 			}
 		}
 		if template == nil {
 			return preparedProvider{}, &interaction.Error{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 		}
-		plan, err := template.Bind(x.parsed, interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState})
+		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState}
+		if x.continuation != nil {
+			binding.ContinuationVersion = x.continuation.version
+			binding.DurableContinuation = true
+			binding.Continuation = x.continuation.prior
+		}
+		plan, err := template.Bind(x.parsed, binding)
 		if err != nil {
 			return preparedProvider{}, err
 		}

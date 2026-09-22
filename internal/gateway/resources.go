@@ -40,6 +40,10 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
 		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
 	}
+	if s.Resources.Encrypted() {
+		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
+		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
+	}
 	mux.HandleFunc("GET /v1/responses/{id}", s.getResponse)
 	mux.HandleFunc("DELETE /v1/responses/{id}", s.deleteResponse)
 	mux.HandleFunc("POST /v1/responses/{id}/cancel", s.cancelResponse)
@@ -56,6 +60,7 @@ const resourceEstimate = 100
 const maxResourceList = 100
 
 type pin struct {
+	target    runtime.Target
 	provider  runtime.Provider
 	attempt   runtime.Attempt
 	slot      runtime.Slot
@@ -83,13 +88,7 @@ func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
 	if !p.Supports(model, operation, "openai", mode) {
 		return false
 	}
-	switch p.Kind {
-	case "openai":
-		return officialOpenAIEndpoint(p.Endpoint)
-	case "azure_openai":
-		return true
-	}
-	return false
+	return p.Connector().SupportsRetainedResponses()
 }
 
 func officialOpenAIEndpoint(endpoint string) bool {
@@ -147,7 +146,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		Timeout:            time.Duration(target.Timeout) * time.Millisecond,
 		VendorID:           provider.VendorID,
 	}
-	p := &pin{provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
+	p := &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
 	if secret != nil {
 		p.secret, p.hasSecret = secret, true
 	}

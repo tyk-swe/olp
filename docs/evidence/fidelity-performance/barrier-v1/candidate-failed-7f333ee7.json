@@ -1,0 +1,918 @@
+{
+  "schema": "openllmproxy.dev/continuation-candidate-performance/v1",
+  "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+  "started_at": "2026-09-22T22:24:23.408Z",
+  "completed_at": "2026-09-22T22:25:11.675Z",
+  "source_revision": "7f333ee78855fcfa252cd63d8cbef92135a6c232",
+  "working_tree": "",
+  "harness_sha256": "31e069311426229290d0229ceaaed138a4b97e6ce7a062d2597baf71d6d0008c",
+  "runner_sha256": "b5de48cbf3aea4d94fa151d74ab8ebb3921f22d3d868525447307eb0a5e71e82",
+  "shared_source_sha256": {
+    "tests/integration/continuation_barrier_benchmark_test.go": "e1791ea2f6981b9f370edc0be9107967f02aefe8310e8d6d1c7c7e70716644ff",
+    "tests/integration/fidelity_lifecycle_performance_test.go": "635559ec6eb6eb66388eed150f1fe188b9ad3350184f0cebcfe93f61efabadf6",
+    "tests/integration/access_test.go": "0f7230293d2e325dafcaf9dc56d4c02dc29b12c61ce105ce281dbc126954cb93",
+    "tests/integration/strict_generation_test.go": "caa03124be088dd56d7636412cd846d0e9202b87b565103c4904bac7085774c2",
+    "tests/fidelity/reference.go": "3dab7efcfbc34c3e64e925a97064201003114da628d90f90356b7214dc93ee0f",
+    "tests/fixtures/fidelity/v1/anthropic-tool-next-request.json": "81062860b3b9d324f122027adaa141280a665e710df452277cb3cb4ebbb08c07",
+    "tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse": "8989d7c7b79e0cf1a79b84bef0e9a023b176cb58259df6aabc37a0de3a8197ac"
+  },
+  "reference_sha256": "4f51998f47d08eba252ea47dc5f7388ac319c4281f61e413fe70b719c3381115",
+  "frozen_budget_sha256": "4c6932869299d8bc522c5f55f049c96e8c7e400d04bad4ab957a2af8bc8880cd",
+  "reference_revision": "29e18268ac23f7290d1881cbda3af2cc2ccab018",
+  "command": [
+    "go",
+    "test",
+    "-mod=readonly",
+    "-tags=integration",
+    "-run",
+    "^TestNegotiatedContinuationCandidateBenchmark$",
+    "-count=1",
+    "-v",
+    "-timeout=10m",
+    "./tests/integration"
+  ],
+  "runtime_environment": {
+    "GOMAXPROCS": "4",
+    "GOGC": "100",
+    "GOMEMLIMIT": "off",
+    "GODEBUG": "",
+    "OLP_CONTINUATION_CANDIDATE_MEASURE": "1"
+  },
+  "toolchain": "go version go1.27.1 linux/amd64",
+  "go_build_environment": "v1\namd64\nlinux",
+  "hardware": {
+    "os": "linux",
+    "architecture": "x64",
+    "kernel": "7.0.0-31-generic",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logical_cpus": 8,
+    "total_memory_bytes": 24598122496,
+    "cpu_quota": null,
+    "memory_limit": null
+  },
+  "system_load": {
+    "before": "2.60 4.13 4.42 4/588 2709249",
+    "after": "4.07 4.35 4.49 1/612 2712408"
+  },
+  "storage": {
+    "postgresql_server_version": "180006",
+    "postgresql_tls": false
+  },
+  "conditions": {
+    "network": "IPv4 loopback, two warm HTTP/1.1 inference hops, no inference TLS",
+    "authority": "Public strict Anthropic Messages profile, same disposable PostgreSQL release and provider fixture, state-enabled API key and existing encrypted resource authority",
+    "workflow": "Go SDK-equivalent parser of the versioned OpenAI Chat chunks and standard assistant/tool history; pinned JavaScript/Python official SDKs qualified separately with the same native oracle",
+    "history": "Original user turn or the same additional 262144 ASCII bytes in both provider requests and the encrypted complete dependency",
+    "reference_relation": "Same frozen native first/next request and 19-event provider oracle. Candidate action-ready means first actionable projected tool chunk followed by a separate authenticated public GET that decrypts committed ready state, before either fixture action. Native wire-tool is earlier and is not a candidate observation.",
+    "outcomes": "24 complete two-turn workflows, 48 provider dispatches, 456 native events, 312 ordered first-turn projected observations, 48 final-turn observations, 48 fixture actions and 24 ready checks per repetition. Any unexpected provider request or response fails the test.",
+    "resources": "Process CPU, allocations and 1ms sampled heap growth include Go client, provider, gateway, oracle and instrumentation; exclude separate PostgreSQL process; no actual SDK process CPU or isolated gateway RSS",
+    "ordering": "Fixed size/concurrency order, one warmup per repetition, three repetitions of 24 successful workflows at concurrency 1/8"
+  },
+  "repetitions": 3,
+  "samples_per_repetition": 24,
+  "concurrency": [
+    1,
+    8
+  ],
+  "runs": [
+    {
+      "name": "small/c1/translated",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1077415.6666666667,
+        "action-ready-p50-us": 17346.107,
+        "action-ready-p95-us": 21446.377,
+        "action-ready-p99-us": 22224.337,
+        "allocs/op": 11496,
+        "elapsed_ns": 860079855,
+        "first-event-p50-us": 6529.48,
+        "first-event-p95-us": 8309.578,
+        "first-event-p99-us": 9245.296,
+        "ns/op": 35836660.625,
+        "process-cpu-ns/op": 26431625,
+        "sampled-heap-growth-B": 7455296,
+        "tool-visible-p50-us": 12227.74,
+        "tool-visible-p95-us": 13880.598,
+        "tool-visible-p99-us": 14764.708,
+        "workflow-p50-us": 34761.185,
+        "workflow-p95-us": 39588.368,
+        "workflow-p99-us": 40198.706
+      }
+    },
+    {
+      "name": "small/c1/translated",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1082820,
+        "action-ready-p50-us": 17531.581,
+        "action-ready-p95-us": 19689.229,
+        "action-ready-p99-us": 20073.673,
+        "allocs/op": 11493.125,
+        "elapsed_ns": 795134869,
+        "first-event-p50-us": 6355.065,
+        "first-event-p95-us": 7482.724,
+        "first-event-p99-us": 7499.654,
+        "ns/op": 33130619.541666668,
+        "process-cpu-ns/op": 23250833.333333332,
+        "sampled-heap-growth-B": 7839824,
+        "tool-visible-p50-us": 11834.027,
+        "tool-visible-p95-us": 12982.212,
+        "tool-visible-p99-us": 13750.393,
+        "workflow-p50-us": 33712.119,
+        "workflow-p95-us": 36153.743,
+        "workflow-p99-us": 37650.121
+      }
+    },
+    {
+      "name": "small/c1/translated",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1076883,
+        "action-ready-p50-us": 15622.005,
+        "action-ready-p95-us": 17910.735,
+        "action-ready-p99-us": 18582.18,
+        "allocs/op": 11500.541666666666,
+        "elapsed_ns": 748255181,
+        "first-event-p50-us": 5703.016,
+        "first-event-p95-us": 7094.749,
+        "first-event-p99-us": 7375.289,
+        "ns/op": 31177299.208333332,
+        "process-cpu-ns/op": 22000083.333333332,
+        "sampled-heap-growth-B": 7693400,
+        "tool-visible-p50-us": 11037.009,
+        "tool-visible-p95-us": 13117.626,
+        "tool-visible-p99-us": 13533.876,
+        "workflow-p50-us": 30270.492,
+        "workflow-p95-us": 34890.714,
+        "workflow-p99-us": 37289.901
+      }
+    },
+    {
+      "name": "small/c8/translated",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1123637,
+        "action-ready-p50-us": 59892.93,
+        "action-ready-p95-us": 135400.543,
+        "action-ready-p99-us": 137174.651,
+        "allocs/op": 11673.333333333334,
+        "elapsed_ns": 397241925,
+        "first-event-p50-us": 26164.813,
+        "first-event-p95-us": 64297.721,
+        "first-event-p99-us": 69138.521,
+        "ns/op": 16551746.875,
+        "process-cpu-ns/op": 23472375,
+        "sampled-heap-growth-B": 11791160,
+        "tool-visible-p50-us": 45471.915,
+        "tool-visible-p95-us": 94710.523,
+        "tool-visible-p99-us": 105800.258,
+        "workflow-p50-us": 109334.675,
+        "workflow-p95-us": 189962.284,
+        "workflow-p99-us": 194420.018
+      }
+    },
+    {
+      "name": "small/c8/translated",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1079340.6666666667,
+        "action-ready-p50-us": 39860.244,
+        "action-ready-p95-us": 59791.864,
+        "action-ready-p99-us": 61566.29,
+        "allocs/op": 11484.083333333334,
+        "elapsed_ns": 280845389,
+        "first-event-p50-us": 16797.025,
+        "first-event-p95-us": 22104.105,
+        "first-event-p99-us": 23174.765,
+        "ns/op": 11701891.208333334,
+        "process-cpu-ns/op": 20282625,
+        "sampled-heap-growth-B": 10137072,
+        "tool-visible-p50-us": 32091.104,
+        "tool-visible-p95-us": 46360.641,
+        "tool-visible-p99-us": 48746.678,
+        "workflow-p50-us": 86179.192,
+        "workflow-p95-us": 109719.892,
+        "workflow-p99-us": 113391.407
+      }
+    },
+    {
+      "name": "small/c8/translated",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 0,
+      "state_bytes": 8598,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 1080268,
+        "action-ready-p50-us": 52103.364,
+        "action-ready-p95-us": 81896.109,
+        "action-ready-p99-us": 82617.479,
+        "allocs/op": 11479.416666666666,
+        "elapsed_ns": 323581814,
+        "first-event-p50-us": 19563.699,
+        "first-event-p95-us": 53794.11,
+        "first-event-p99-us": 54204.17,
+        "ns/op": 13482575.583333334,
+        "process-cpu-ns/op": 21799041.666666668,
+        "sampled-heap-growth-B": 10460104,
+        "tool-visible-p50-us": 41256.12,
+        "tool-visible-p95-us": 68883.409,
+        "tool-visible-p99-us": 72351.613,
+        "workflow-p50-us": 102783.328,
+        "workflow-p95-us": 141492.439,
+        "workflow-p99-us": 158662.814
+      }
+    },
+    {
+      "name": "large/c1/translated",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 76547433.33333333,
+        "action-ready-p50-us": 89564.517,
+        "action-ready-p95-us": 103547.927,
+        "action-ready-p99-us": 104302.916,
+        "allocs/op": 13946.791666666666,
+        "elapsed_ns": 4414213832,
+        "first-event-p50-us": 56901.19,
+        "first-event-p95-us": 65146.584,
+        "first-event-p99-us": 66218.868,
+        "ns/op": 183925576.33333334,
+        "process-cpu-ns/op": 229048833.33333334,
+        "sampled-heap-growth-B": 26265408,
+        "tool-visible-p50-us": 79112.866,
+        "tool-visible-p95-us": 85019.872,
+        "tool-visible-p99-us": 89325.438,
+        "workflow-p50-us": 182095.609,
+        "workflow-p95-us": 202244.147,
+        "workflow-p99-us": 204615.01
+      }
+    },
+    {
+      "name": "large/c1/translated",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 76421264.33333333,
+        "action-ready-p50-us": 85606.892,
+        "action-ready-p95-us": 97012.404,
+        "action-ready-p99-us": 103346.963,
+        "allocs/op": 13928.833333333334,
+        "elapsed_ns": 4279775199,
+        "first-event-p50-us": 54952.663,
+        "first-event-p95-us": 59975.248,
+        "first-event-p99-us": 61711.698,
+        "ns/op": 178323966.625,
+        "process-cpu-ns/op": 227897458.33333334,
+        "sampled-heap-growth-B": 23088672,
+        "tool-visible-p50-us": 74838.605,
+        "tool-visible-p95-us": 82125.464,
+        "tool-visible-p99-us": 90707.13,
+        "workflow-p50-us": 176809.578,
+        "workflow-p95-us": 198734.838,
+        "workflow-p99-us": 202091.512
+      }
+    },
+    {
+      "name": "large/c1/translated",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 76497640,
+        "action-ready-p50-us": 78581.602,
+        "action-ready-p95-us": 89893.15,
+        "action-ready-p99-us": 91913.149,
+        "allocs/op": 13960.291666666666,
+        "elapsed_ns": 3999389278,
+        "first-event-p50-us": 48623.07,
+        "first-event-p95-us": 58105.142,
+        "first-event-p99-us": 62786.535,
+        "ns/op": 166641219.91666666,
+        "process-cpu-ns/op": 217794041.66666666,
+        "sampled-heap-growth-B": 23098128,
+        "tool-visible-p50-us": 66280.453,
+        "tool-visible-p95-us": 80570.355,
+        "tool-visible-p99-us": 81173.716,
+        "workflow-p50-us": 164664.407,
+        "workflow-p95-us": 182296.067,
+        "workflow-p99-us": 183683.756
+      }
+    },
+    {
+      "name": "large/c8/translated",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 75716065.33333333,
+        "action-ready-p50-us": 204641.31,
+        "action-ready-p95-us": 294171.621,
+        "action-ready-p99-us": 327195.491,
+        "allocs/op": 13635.416666666666,
+        "elapsed_ns": 1288063084,
+        "first-event-p50-us": 117636.333,
+        "first-event-p95-us": 159555.85,
+        "first-event-p99-us": 168865.953,
+        "ns/op": 53669295.166666664,
+        "process-cpu-ns/op": 154905541.66666666,
+        "sampled-heap-growth-B": 85591112,
+        "tool-visible-p50-us": 184807.255,
+        "tool-visible-p95-us": 274043.988,
+        "tool-visible-p99-us": 307977.846,
+        "workflow-p50-us": 384943.642,
+        "workflow-p95-us": 508984.84,
+        "workflow-p99-us": 538447.335
+      }
+    },
+    {
+      "name": "large/c8/translated",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 75864254,
+        "action-ready-p50-us": 195058.918,
+        "action-ready-p95-us": 275985.165,
+        "action-ready-p99-us": 277292.959,
+        "allocs/op": 13628.5,
+        "elapsed_ns": 1266498013,
+        "first-event-p50-us": 105553.507,
+        "first-event-p95-us": 131683.591,
+        "first-event-p99-us": 137140.783,
+        "ns/op": 52770750.541666664,
+        "process-cpu-ns/op": 145104291.66666666,
+        "sampled-heap-growth-B": 80758520,
+        "tool-visible-p50-us": 180555.332,
+        "tool-visible-p95-us": 237335.756,
+        "tool-visible-p99-us": 240621.822,
+        "workflow-p50-us": 359640.001,
+        "workflow-p95-us": 476686.333,
+        "workflow-p99-us": 522311.438
+      }
+    },
+    {
+      "name": "large/c8/translated",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "native_events": 456,
+      "first_turn_observations": 312,
+      "final_observations": 48,
+      "actions": 48,
+      "ready_checks": 24,
+      "rejected": 0,
+      "history_bytes": 262144,
+      "state_bytes": 795036,
+      "contract": "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1",
+      "metrics": {
+        "B/op": 75739865,
+        "action-ready-p50-us": 186978.11,
+        "action-ready-p95-us": 257792.695,
+        "action-ready-p99-us": 278649.747,
+        "allocs/op": 13634.041666666666,
+        "elapsed_ns": 1214680996,
+        "first-event-p50-us": 109605.501,
+        "first-event-p95-us": 145069.48,
+        "first-event-p99-us": 145606.257,
+        "ns/op": 50611708.166666664,
+        "process-cpu-ns/op": 143649875,
+        "sampled-heap-growth-B": 82149952,
+        "tool-visible-p50-us": 167789.559,
+        "tool-visible-p95-us": 229551.704,
+        "tool-visible-p99-us": 245594.62,
+        "workflow-p50-us": 371133.645,
+        "workflow-p95-us": 470465.165,
+        "workflow-p99-us": 484675.472
+      }
+    }
+  ],
+  "summary": {
+    "small/c1/translated": {
+      "elapsed_ns": {
+        "median": 795134869,
+        "minimum": 748255181,
+        "maximum": 860079855
+      },
+      "ns/op": {
+        "median": 33130619.541666668,
+        "minimum": 31177299.208333332,
+        "maximum": 35836660.625
+      },
+      "process-cpu-ns/op": {
+        "median": 23250833.333333332,
+        "minimum": 22000083.333333332,
+        "maximum": 26431625
+      },
+      "B/op": {
+        "median": 1077415.6666666667,
+        "minimum": 1076883,
+        "maximum": 1082820
+      },
+      "allocs/op": {
+        "median": 11496,
+        "minimum": 11493.125,
+        "maximum": 11500.541666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 7693400,
+        "minimum": 7455296,
+        "maximum": 7839824
+      },
+      "workflow-p50-us": {
+        "median": 33712.119,
+        "minimum": 30270.492,
+        "maximum": 34761.185
+      },
+      "workflow-p95-us": {
+        "median": 36153.743,
+        "minimum": 34890.714,
+        "maximum": 39588.368
+      },
+      "workflow-p99-us": {
+        "median": 37650.121,
+        "minimum": 37289.901,
+        "maximum": 40198.706
+      },
+      "first-event-p50-us": {
+        "median": 6355.065,
+        "minimum": 5703.016,
+        "maximum": 6529.48
+      },
+      "first-event-p95-us": {
+        "median": 7482.724,
+        "minimum": 7094.749,
+        "maximum": 8309.578
+      },
+      "first-event-p99-us": {
+        "median": 7499.654,
+        "minimum": 7375.289,
+        "maximum": 9245.296
+      },
+      "tool-visible-p50-us": {
+        "median": 11834.027,
+        "minimum": 11037.009,
+        "maximum": 12227.74
+      },
+      "tool-visible-p95-us": {
+        "median": 13117.626,
+        "minimum": 12982.212,
+        "maximum": 13880.598
+      },
+      "tool-visible-p99-us": {
+        "median": 13750.393,
+        "minimum": 13533.876,
+        "maximum": 14764.708
+      },
+      "action-ready-p50-us": {
+        "median": 17346.107,
+        "minimum": 15622.005,
+        "maximum": 17531.581
+      },
+      "action-ready-p95-us": {
+        "median": 19689.229,
+        "minimum": 17910.735,
+        "maximum": 21446.377
+      },
+      "action-ready-p99-us": {
+        "median": 20073.673,
+        "minimum": 18582.18,
+        "maximum": 22224.337
+      }
+    },
+    "small/c8/translated": {
+      "elapsed_ns": {
+        "median": 323581814,
+        "minimum": 280845389,
+        "maximum": 397241925
+      },
+      "ns/op": {
+        "median": 13482575.583333334,
+        "minimum": 11701891.208333334,
+        "maximum": 16551746.875
+      },
+      "process-cpu-ns/op": {
+        "median": 21799041.666666668,
+        "minimum": 20282625,
+        "maximum": 23472375
+      },
+      "B/op": {
+        "median": 1080268,
+        "minimum": 1079340.6666666667,
+        "maximum": 1123637
+      },
+      "allocs/op": {
+        "median": 11484.083333333334,
+        "minimum": 11479.416666666666,
+        "maximum": 11673.333333333334
+      },
+      "sampled-heap-growth-B": {
+        "median": 10460104,
+        "minimum": 10137072,
+        "maximum": 11791160
+      },
+      "workflow-p50-us": {
+        "median": 102783.328,
+        "minimum": 86179.192,
+        "maximum": 109334.675
+      },
+      "workflow-p95-us": {
+        "median": 141492.439,
+        "minimum": 109719.892,
+        "maximum": 189962.284
+      },
+      "workflow-p99-us": {
+        "median": 158662.814,
+        "minimum": 113391.407,
+        "maximum": 194420.018
+      },
+      "first-event-p50-us": {
+        "median": 19563.699,
+        "minimum": 16797.025,
+        "maximum": 26164.813
+      },
+      "first-event-p95-us": {
+        "median": 53794.11,
+        "minimum": 22104.105,
+        "maximum": 64297.721
+      },
+      "first-event-p99-us": {
+        "median": 54204.17,
+        "minimum": 23174.765,
+        "maximum": 69138.521
+      },
+      "tool-visible-p50-us": {
+        "median": 41256.12,
+        "minimum": 32091.104,
+        "maximum": 45471.915
+      },
+      "tool-visible-p95-us": {
+        "median": 68883.409,
+        "minimum": 46360.641,
+        "maximum": 94710.523
+      },
+      "tool-visible-p99-us": {
+        "median": 72351.613,
+        "minimum": 48746.678,
+        "maximum": 105800.258
+      },
+      "action-ready-p50-us": {
+        "median": 52103.364,
+        "minimum": 39860.244,
+        "maximum": 59892.93
+      },
+      "action-ready-p95-us": {
+        "median": 81896.109,
+        "minimum": 59791.864,
+        "maximum": 135400.543
+      },
+      "action-ready-p99-us": {
+        "median": 82617.479,
+        "minimum": 61566.29,
+        "maximum": 137174.651
+      }
+    },
+    "large/c1/translated": {
+      "elapsed_ns": {
+        "median": 4279775199,
+        "minimum": 3999389278,
+        "maximum": 4414213832
+      },
+      "ns/op": {
+        "median": 178323966.625,
+        "minimum": 166641219.91666666,
+        "maximum": 183925576.33333334
+      },
+      "process-cpu-ns/op": {
+        "median": 227897458.33333334,
+        "minimum": 217794041.66666666,
+        "maximum": 229048833.33333334
+      },
+      "B/op": {
+        "median": 76497640,
+        "minimum": 76421264.33333333,
+        "maximum": 76547433.33333333
+      },
+      "allocs/op": {
+        "median": 13946.791666666666,
+        "minimum": 13928.833333333334,
+        "maximum": 13960.291666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 23098128,
+        "minimum": 23088672,
+        "maximum": 26265408
+      },
+      "workflow-p50-us": {
+        "median": 176809.578,
+        "minimum": 164664.407,
+        "maximum": 182095.609
+      },
+      "workflow-p95-us": {
+        "median": 198734.838,
+        "minimum": 182296.067,
+        "maximum": 202244.147
+      },
+      "workflow-p99-us": {
+        "median": 202091.512,
+        "minimum": 183683.756,
+        "maximum": 204615.01
+      },
+      "first-event-p50-us": {
+        "median": 54952.663,
+        "minimum": 48623.07,
+        "maximum": 56901.19
+      },
+      "first-event-p95-us": {
+        "median": 59975.248,
+        "minimum": 58105.142,
+        "maximum": 65146.584
+      },
+      "first-event-p99-us": {
+        "median": 62786.535,
+        "minimum": 61711.698,
+        "maximum": 66218.868
+      },
+      "tool-visible-p50-us": {
+        "median": 74838.605,
+        "minimum": 66280.453,
+        "maximum": 79112.866
+      },
+      "tool-visible-p95-us": {
+        "median": 82125.464,
+        "minimum": 80570.355,
+        "maximum": 85019.872
+      },
+      "tool-visible-p99-us": {
+        "median": 89325.438,
+        "minimum": 81173.716,
+        "maximum": 90707.13
+      },
+      "action-ready-p50-us": {
+        "median": 85606.892,
+        "minimum": 78581.602,
+        "maximum": 89564.517
+      },
+      "action-ready-p95-us": {
+        "median": 97012.404,
+        "minimum": 89893.15,
+        "maximum": 103547.927
+      },
+      "action-ready-p99-us": {
+        "median": 103346.963,
+        "minimum": 91913.149,
+        "maximum": 104302.916
+      }
+    },
+    "large/c8/translated": {
+      "elapsed_ns": {
+        "median": 1266498013,
+        "minimum": 1214680996,
+        "maximum": 1288063084
+      },
+      "ns/op": {
+        "median": 52770750.541666664,
+        "minimum": 50611708.166666664,
+        "maximum": 53669295.166666664
+      },
+      "process-cpu-ns/op": {
+        "median": 145104291.66666666,
+        "minimum": 143649875,
+        "maximum": 154905541.66666666
+      },
+      "B/op": {
+        "median": 75739865,
+        "minimum": 75716065.33333333,
+        "maximum": 75864254
+      },
+      "allocs/op": {
+        "median": 13634.041666666666,
+        "minimum": 13628.5,
+        "maximum": 13635.416666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 82149952,
+        "minimum": 80758520,
+        "maximum": 85591112
+      },
+      "workflow-p50-us": {
+        "median": 371133.645,
+        "minimum": 359640.001,
+        "maximum": 384943.642
+      },
+      "workflow-p95-us": {
+        "median": 476686.333,
+        "minimum": 470465.165,
+        "maximum": 508984.84
+      },
+      "workflow-p99-us": {
+        "median": 522311.438,
+        "minimum": 484675.472,
+        "maximum": 538447.335
+      },
+      "first-event-p50-us": {
+        "median": 109605.501,
+        "minimum": 105553.507,
+        "maximum": 117636.333
+      },
+      "first-event-p95-us": {
+        "median": 145069.48,
+        "minimum": 131683.591,
+        "maximum": 159555.85
+      },
+      "first-event-p99-us": {
+        "median": 145606.257,
+        "minimum": 137140.783,
+        "maximum": 168865.953
+      },
+      "tool-visible-p50-us": {
+        "median": 180555.332,
+        "minimum": 167789.559,
+        "maximum": 184807.255
+      },
+      "tool-visible-p95-us": {
+        "median": 237335.756,
+        "minimum": 229551.704,
+        "maximum": 274043.988
+      },
+      "tool-visible-p99-us": {
+        "median": 245594.62,
+        "minimum": 240621.822,
+        "maximum": 307977.846
+      },
+      "action-ready-p50-us": {
+        "median": 195058.918,
+        "minimum": 186978.11,
+        "maximum": 204641.31
+      },
+      "action-ready-p95-us": {
+        "median": 275985.165,
+        "minimum": 257792.695,
+        "maximum": 294171.621
+      },
+      "action-ready-p99-us": {
+        "median": 278649.747,
+        "minimum": 277292.959,
+        "maximum": 327195.491
+      }
+    }
+  },
+  "comparison_scope": [
+    "ns/op",
+    "process-cpu-ns/op",
+    "B/op",
+    "allocs/op",
+    "sampled-heap-growth-B",
+    "workflow-p50-us",
+    "action-ready-p50-us",
+    "workflow-p95-us",
+    "action-ready-p95-us",
+    "workflow-p99-us",
+    "action-ready-p99-us"
+  ],
+  "excluded_from_direct_comparison": [
+    "first-event: native first event versus first projected client observation",
+    "tool-visible: native pre-barrier wire tool versus post-commit projected tool",
+    "reference claim/journal/ready phase timings: candidate uses production transactions without phase instrumentation",
+    "actual JS/Python SDK process CPU"
+  ],
+  "unmeasured": [
+    "WAN/TLS inference",
+    "isolated gateway RSS",
+    "live-model quality"
+  ],
+  "raw_output": "=== RUN   TestNegotiatedContinuationCandidateBenchmark\n    continuation_candidate_benchmark_test.go:401: CANDIDATE_SETUP {\"postgresql_server_version\":\"180006\",\"postgresql_tls\":false}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c1/translated\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1077415.6666666667,\"action-ready-p50-us\":17346.107,\"action-ready-p95-us\":21446.377,\"action-ready-p99-us\":22224.337,\"allocs/op\":11496,\"elapsed_ns\":860079855,\"first-event-p50-us\":6529.48,\"first-event-p95-us\":8309.578,\"first-event-p99-us\":9245.296,\"ns/op\":35836660.625,\"process-cpu-ns/op\":26431625,\"sampled-heap-growth-B\":7455296,\"tool-visible-p50-us\":12227.74,\"tool-visible-p95-us\":13880.598,\"tool-visible-p99-us\":14764.708,\"workflow-p50-us\":34761.185,\"workflow-p95-us\":39588.368,\"workflow-p99-us\":40198.706}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c1/translated\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1082820,\"action-ready-p50-us\":17531.581,\"action-ready-p95-us\":19689.229,\"action-ready-p99-us\":20073.673,\"allocs/op\":11493.125,\"elapsed_ns\":795134869,\"first-event-p50-us\":6355.065,\"first-event-p95-us\":7482.724,\"first-event-p99-us\":7499.654,\"ns/op\":33130619.541666668,\"process-cpu-ns/op\":23250833.333333332,\"sampled-heap-growth-B\":7839824,\"tool-visible-p50-us\":11834.027,\"tool-visible-p95-us\":12982.212,\"tool-visible-p99-us\":13750.393,\"workflow-p50-us\":33712.119,\"workflow-p95-us\":36153.743,\"workflow-p99-us\":37650.121}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c1/translated\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1076883,\"action-ready-p50-us\":15622.005,\"action-ready-p95-us\":17910.735,\"action-ready-p99-us\":18582.18,\"allocs/op\":11500.541666666666,\"elapsed_ns\":748255181,\"first-event-p50-us\":5703.016,\"first-event-p95-us\":7094.749,\"first-event-p99-us\":7375.289,\"ns/op\":31177299.208333332,\"process-cpu-ns/op\":22000083.333333332,\"sampled-heap-growth-B\":7693400,\"tool-visible-p50-us\":11037.009,\"tool-visible-p95-us\":13117.626,\"tool-visible-p99-us\":13533.876,\"workflow-p50-us\":30270.492,\"workflow-p95-us\":34890.714,\"workflow-p99-us\":37289.901}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c8/translated\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1123637,\"action-ready-p50-us\":59892.93,\"action-ready-p95-us\":135400.543,\"action-ready-p99-us\":137174.651,\"allocs/op\":11673.333333333334,\"elapsed_ns\":397241925,\"first-event-p50-us\":26164.813,\"first-event-p95-us\":64297.721,\"first-event-p99-us\":69138.521,\"ns/op\":16551746.875,\"process-cpu-ns/op\":23472375,\"sampled-heap-growth-B\":11791160,\"tool-visible-p50-us\":45471.915,\"tool-visible-p95-us\":94710.523,\"tool-visible-p99-us\":105800.258,\"workflow-p50-us\":109334.675,\"workflow-p95-us\":189962.284,\"workflow-p99-us\":194420.018}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c8/translated\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1079340.6666666667,\"action-ready-p50-us\":39860.244,\"action-ready-p95-us\":59791.864,\"action-ready-p99-us\":61566.29,\"allocs/op\":11484.083333333334,\"elapsed_ns\":280845389,\"first-event-p50-us\":16797.025,\"first-event-p95-us\":22104.105,\"first-event-p99-us\":23174.765,\"ns/op\":11701891.208333334,\"process-cpu-ns/op\":20282625,\"sampled-heap-growth-B\":10137072,\"tool-visible-p50-us\":32091.104,\"tool-visible-p95-us\":46360.641,\"tool-visible-p99-us\":48746.678,\"workflow-p50-us\":86179.192,\"workflow-p95-us\":109719.892,\"workflow-p99-us\":113391.407}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"small/c8/translated\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":0,\"state_bytes\":8598,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":1080268,\"action-ready-p50-us\":52103.364,\"action-ready-p95-us\":81896.109,\"action-ready-p99-us\":82617.479,\"allocs/op\":11479.416666666666,\"elapsed_ns\":323581814,\"first-event-p50-us\":19563.699,\"first-event-p95-us\":53794.11,\"first-event-p99-us\":54204.17,\"ns/op\":13482575.583333334,\"process-cpu-ns/op\":21799041.666666668,\"sampled-heap-growth-B\":10460104,\"tool-visible-p50-us\":41256.12,\"tool-visible-p95-us\":68883.409,\"tool-visible-p99-us\":72351.613,\"workflow-p50-us\":102783.328,\"workflow-p95-us\":141492.439,\"workflow-p99-us\":158662.814}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c1/translated\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":76547433.33333333,\"action-ready-p50-us\":89564.517,\"action-ready-p95-us\":103547.927,\"action-ready-p99-us\":104302.916,\"allocs/op\":13946.791666666666,\"elapsed_ns\":4414213832,\"first-event-p50-us\":56901.19,\"first-event-p95-us\":65146.584,\"first-event-p99-us\":66218.868,\"ns/op\":183925576.33333334,\"process-cpu-ns/op\":229048833.33333334,\"sampled-heap-growth-B\":26265408,\"tool-visible-p50-us\":79112.866,\"tool-visible-p95-us\":85019.872,\"tool-visible-p99-us\":89325.438,\"workflow-p50-us\":182095.609,\"workflow-p95-us\":202244.147,\"workflow-p99-us\":204615.01}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c1/translated\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":76421264.33333333,\"action-ready-p50-us\":85606.892,\"action-ready-p95-us\":97012.404,\"action-ready-p99-us\":103346.963,\"allocs/op\":13928.833333333334,\"elapsed_ns\":4279775199,\"first-event-p50-us\":54952.663,\"first-event-p95-us\":59975.248,\"first-event-p99-us\":61711.698,\"ns/op\":178323966.625,\"process-cpu-ns/op\":227897458.33333334,\"sampled-heap-growth-B\":23088672,\"tool-visible-p50-us\":74838.605,\"tool-visible-p95-us\":82125.464,\"tool-visible-p99-us\":90707.13,\"workflow-p50-us\":176809.578,\"workflow-p95-us\":198734.838,\"workflow-p99-us\":202091.512}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c1/translated\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":76497640,\"action-ready-p50-us\":78581.602,\"action-ready-p95-us\":89893.15,\"action-ready-p99-us\":91913.149,\"allocs/op\":13960.291666666666,\"elapsed_ns\":3999389278,\"first-event-p50-us\":48623.07,\"first-event-p95-us\":58105.142,\"first-event-p99-us\":62786.535,\"ns/op\":166641219.91666666,\"process-cpu-ns/op\":217794041.66666666,\"sampled-heap-growth-B\":23098128,\"tool-visible-p50-us\":66280.453,\"tool-visible-p95-us\":80570.355,\"tool-visible-p99-us\":81173.716,\"workflow-p50-us\":164664.407,\"workflow-p95-us\":182296.067,\"workflow-p99-us\":183683.756}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c8/translated\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":75716065.33333333,\"action-ready-p50-us\":204641.31,\"action-ready-p95-us\":294171.621,\"action-ready-p99-us\":327195.491,\"allocs/op\":13635.416666666666,\"elapsed_ns\":1288063084,\"first-event-p50-us\":117636.333,\"first-event-p95-us\":159555.85,\"first-event-p99-us\":168865.953,\"ns/op\":53669295.166666664,\"process-cpu-ns/op\":154905541.66666666,\"sampled-heap-growth-B\":85591112,\"tool-visible-p50-us\":184807.255,\"tool-visible-p95-us\":274043.988,\"tool-visible-p99-us\":307977.846,\"workflow-p50-us\":384943.642,\"workflow-p95-us\":508984.84,\"workflow-p99-us\":538447.335}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c8/translated\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":75864254,\"action-ready-p50-us\":195058.918,\"action-ready-p95-us\":275985.165,\"action-ready-p99-us\":277292.959,\"allocs/op\":13628.5,\"elapsed_ns\":1266498013,\"first-event-p50-us\":105553.507,\"first-event-p95-us\":131683.591,\"first-event-p99-us\":137140.783,\"ns/op\":52770750.541666664,\"process-cpu-ns/op\":145104291.66666666,\"sampled-heap-growth-B\":80758520,\"tool-visible-p50-us\":180555.332,\"tool-visible-p95-us\":237335.756,\"tool-visible-p99-us\":240621.822,\"workflow-p50-us\":359640.001,\"workflow-p95-us\":476686.333,\"workflow-p99-us\":522311.438}}\n    continuation_candidate_benchmark_test.go:496: CANDIDATE_MEASUREMENT {\"name\":\"large/c8/translated\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"native_events\":456,\"first_turn_observations\":312,\"final_observations\":48,\"actions\":48,\"ready_checks\":24,\"rejected\":0,\"history_bytes\":262144,\"state_bytes\":795036,\"contract\":\"negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1\",\"metrics\":{\"B/op\":75739865,\"action-ready-p50-us\":186978.11,\"action-ready-p95-us\":257792.695,\"action-ready-p99-us\":278649.747,\"allocs/op\":13634.041666666666,\"elapsed_ns\":1214680996,\"first-event-p50-us\":109605.501,\"first-event-p95-us\":145069.48,\"first-event-p99-us\":145606.257,\"ns/op\":50611708.166666664,\"process-cpu-ns/op\":143649875,\"sampled-heap-growth-B\":82149952,\"tool-visible-p50-us\":167789.559,\"tool-visible-p95-us\":229551.704,\"tool-visible-p99-us\":245594.62,\"workflow-p50-us\":371133.645,\"workflow-p95-us\":470465.165,\"workflow-p99-us\":484675.472}}\n--- PASS: TestNegotiatedContinuationCandidateBenchmark (22.44s)\nPASS\nok  \tgithub.com/tyk-swe/olp/tests/integration\t22.478s\n"
+}

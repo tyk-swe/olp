@@ -761,9 +761,11 @@ func (e ProviderKind) Valid() bool {
 
 // Defines values for ProviderResourceItemKind.
 const (
-	ProviderResourceItemKindBatch    ProviderResourceItemKind = "batch"
-	ProviderResourceItemKindFile     ProviderResourceItemKind = "file"
-	ProviderResourceItemKindResponse ProviderResourceItemKind = "response"
+	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
+	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
+	ProviderResourceItemKindStrictResponse ProviderResourceItemKind = "strict_response"
 )
 
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
@@ -771,9 +773,13 @@ func (e ProviderResourceItemKind) Valid() bool {
 	switch e {
 	case ProviderResourceItemKindBatch:
 		return true
+	case ProviderResourceItemKindContinuation:
+		return true
 	case ProviderResourceItemKindFile:
 		return true
 	case ProviderResourceItemKindResponse:
+		return true
+	case ProviderResourceItemKindStrictResponse:
 		return true
 	default:
 		return false
@@ -1154,9 +1160,11 @@ func (e ListBudgetAlertDeliveriesParamsStatus) Valid() bool {
 
 // Defines values for ListProviderResourcesParamsKind.
 const (
-	ListProviderResourcesParamsKindBatch    ListProviderResourcesParamsKind = "batch"
-	ListProviderResourcesParamsKindFile     ListProviderResourcesParamsKind = "file"
-	ListProviderResourcesParamsKindResponse ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
+	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindStrictResponse ListProviderResourcesParamsKind = "strict_response"
 )
 
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
@@ -1164,9 +1172,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	switch e {
 	case ListProviderResourcesParamsKindBatch:
 		return true
+	case ListProviderResourcesParamsKindContinuation:
+		return true
 	case ListProviderResourcesParamsKindFile:
 		return true
 	case ListProviderResourcesParamsKindResponse:
+		return true
+	case ListProviderResourcesParamsKindStrictResponse:
 		return true
 	default:
 		return false
@@ -2182,18 +2194,23 @@ type InteractionInspectionStatus string
 
 // InteractionObligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
 type InteractionObligations struct {
-	Continuation string `json:"continuation"`
-	Delivery     string `json:"delivery"`
+	// Actionability Declared dependency barrier before ordinary actionable client tool bytes.
+	Actionability *string `json:"actionability,omitempty"`
+	Continuation  string  `json:"continuation"`
+	Delivery      string  `json:"delivery"`
 
 	// Effects Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection.
-	Effects                 []string `json:"effects"`
-	GuardResults            bool     `json:"guard_results"`
-	Lifetime                string   `json:"lifetime"`
-	MaxBodyBytes            int      `json:"max_body_bytes"`
-	MaxEventBytes           int      `json:"max_event_bytes"`
-	RejectAmbiguousFailover bool     `json:"reject_ambiguous_failover"`
-	Retry                   string   `json:"retry"`
-	Submission              string   `json:"submission"`
+	Effects      []string `json:"effects"`
+	GuardResults bool     `json:"guard_results"`
+	Lifetime     string   `json:"lifetime"`
+	MaxBodyBytes int      `json:"max_body_bytes"`
+
+	// MaxContinuationBytes Planner upper bound for retained native dependency and projected delivery; deployment limits may be tighter.
+	MaxContinuationBytes    *int   `json:"max_continuation_bytes,omitempty"`
+	MaxEventBytes           int    `json:"max_event_bytes"`
+	RejectAmbiguousFailover bool   `json:"reject_ambiguous_failover"`
+	Retry                   string `json:"retry"`
+	Submission              string `json:"submission"`
 }
 
 // InvitationListResponse defines model for InvitationListResponse.

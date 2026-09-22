@@ -237,7 +237,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
-				gw.Resources = resources.New(pool)
+				gw.Resources = resources.NewEncrypted(pool, installation, keys)
 				gw.Resolver = resources.NewResolver(pool, installation, keys)
 			}
 			// Without shared state there is no admission backend at all: the

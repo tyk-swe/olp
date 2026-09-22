@@ -666,7 +666,7 @@ func integerValue(raw json.RawMessage) (int64, bool) {
 func requestEstimate(x *execution) int64 {
 	var estimate int64
 	for _, attempt := range x.attempts {
-		provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
+		provider := x.snapshot().Providers[attempt.ProviderID]
 		estimate = max(estimate, x.providerEstimate(&provider))
 	}
 	return max(estimate, 1)

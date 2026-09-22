@@ -31,7 +31,7 @@ type attemptOutcome[Result any] struct {
 // settlement and final downstream delivery continue after the loop returns.
 func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapter attemptAdapter[Result]) attemptOutcome[Result] {
 	deadline, _ := ctx.Deadline()
-	snapshot := x.request.release.Snapshot
+	snapshot := x.snapshot()
 	used := 0
 	unmeterable := false
 	var last *attemptFailure
