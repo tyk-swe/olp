@@ -38,7 +38,7 @@ func (p *Plan) ValidateResult(result oif.Result) error {
 	if !document.Valid() || document.Len() > p.receipt.Obligations.MaxBodyBytes || result.Descriptor().Dialect != openai.Descriptor(p.Wire(), false).Dialect {
 		return guardFailure("/result", "native_result_grammar")
 	}
-	if p.receipt.Class == QualifiedInteraction {
+	if p.receipt.Class == QualifiedInteraction && !p.ToolContinuation() {
 		if err := validateAnthropicTextResult(document); err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func nonnegativeInteger(value oif.Value) bool {
 // any projection. Ordering, terminal state, bounded accumulation and completion
 // remain enforced by StreamWithEvents' dialect state machine, not mutable Plan.
 func (p *Plan) ValidateEvent(event oif.Event) error {
-	if !p.stream || p.receipt.Class != NativeIdentity {
+	if !p.stream || p.receipt.Class != NativeIdentity && !p.ToolContinuation() {
 		return guardFailure("/events", "admitted_event_contract")
 	}
 	if event.Descriptor().Operation.ID != "generation" || event.Descriptor().Dialect.ID != p.receipt.TargetDialect {

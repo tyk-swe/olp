@@ -52,7 +52,11 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	} else {
 		receipt.Class, receipt.Evidence = QualifiedInteraction, []string{evidenceText}
 		receipt.Obligations.Continuation = "stateless_text_history"
-		prepared, err = t.prepareText(request, &receipt)
+		if context.ContinuationVersion != "" {
+			prepared, err = t.prepareTools(request, context, &receipt)
+		} else {
+			prepared, err = t.prepareText(request, &receipt)
+		}
 	}
 	if err != nil {
 		return nil, err
