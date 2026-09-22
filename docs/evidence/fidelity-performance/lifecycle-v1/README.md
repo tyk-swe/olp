@@ -91,4 +91,10 @@ stress qualification are complete.
 The short public-service suite and both result/event corruption oracles passed
 with race detection. The five runner tests passed, including deliberate omission,
 changed hardware, state publication/cancellation regression and invalid budget
-mutations. Initial baseline capture and numeric freeze are pending.
+mutations. The clean harness at `373c5846` captured all 48 repetitions (1,152 measured
+successes and matching provider dispatches) in 23.73 seconds on 2026-09-22.
+The separate `replacement-budgets.json` froze the declared formula before any
+lifecycle replacement. Its baseline self-comparison passed and establishes
+artifact integrity only. All candidate comparisons remain pending. The team
+paused local builds/tests for capture; required PostgreSQL and the existing
+idle shared test-service containers remained running.
