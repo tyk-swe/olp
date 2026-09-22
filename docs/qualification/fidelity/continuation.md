@@ -15,6 +15,10 @@ per client. Both clients rejected a missing carrier before dispatch, verified
 ordered observations and no exposed signature, read a committed recovery
 delivery, replayed the same submission without another Attempt and completed
 the next turn. The helpers reject unqualified SDK versions before sending.
+An additional official JavaScript SDK test consumed the committed first stream
+inside its transport, raised a connection error, and let the SDK automatically
+retry: both proxy HTTP requests carried the same submission identity, while
+the provider accepted once and accounting recorded one Attempt.
 
 The resource authority stores bounded complete native dependencies encrypted
 under the existing KeyRing. An API key must explicitly allow provider state.
@@ -54,7 +58,8 @@ barrier, fault, branch, policy, revision and JS/Python SDK tests passed in
 18.527 s; relevant race tests passed in 18.280 s; fresh binary process loss
 and accepted-cancellation tests passed in 3.493 s; failed-encryption zero-call
 and eight-claim journal tests passed in 2.524 s. The recovery helper update
-passed both official SDK journeys in 8.130 s. These are focused checks; the
+passed both official SDK journeys in 8.130 s. Actual automatic JavaScript SDK
+retry passed in 1.750 s and its race check in 4.511 s. These are focused checks; the
 repository-wide release gates still run on the integrated PR branch.
 
 The [frozen native encrypted barrier](../../evidence/fidelity-performance/barrier-v1/README.md)
