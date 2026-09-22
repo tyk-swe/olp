@@ -218,7 +218,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   await page.getByLabel('Request JSON').fill(
     JSON.stringify({
       model: slug,
-      max_tokens: 64,
+      max_tokens: 2048,
       messages: [{ role: 'user', content: 'private-prompt-marker' }]
     })
   );
@@ -304,7 +304,9 @@ test('strict inspector has zero inference effects and browser tool continuation 
   await page
     .getByRole('button', { name: 'Submit ordered tool results' })
     .click();
-  await expect(page.locator('.assistant-result pre')).toHaveText('Both tools completed.');
+  await expect(page.locator('.assistant-result pre')).toHaveText(
+    'Both tools completed.'
+  );
   await expect(page.getByText(secret, { exact: true })).toHaveCount(0);
   const captured = await request
     .get(`${fixture}/__test__/requests`)
@@ -322,4 +324,62 @@ test('strict inspector has zero inference effects and browser tool continuation 
       path: info.outputPath('strict-tool-continuation.png'),
       animations: 'disabled'
     });
+});
+
+test('native vector and rerank presentation keeps storage and score representation', async ({
+  page
+}, info) => {
+  await signIn(page);
+  const vector =
+    '{"data":[{"index":0,"embedding":"AP8="}],"provider_metadata":{"count":9007199254740993}}';
+  const ranked =
+    '{"results":[{"index":1,"relevance_score":0.1000000000000000000001},{"index":0,"relevance_score":0.1000000000000000000001}]}';
+  await page.route('**/api/v3/playground', async (route) => {
+    const request = JSON.parse(route.request().postData() ?? '{}') as {
+      operation?: string;
+    };
+    const result = request.operation === 'rerank' ? ranked : vector;
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'no-store'
+      },
+      body: `{"id":"00000000-0000-4000-8000-000000000001","model":"display-route","output_text":"","tool_calls":[],"latency_ms":1,"routing":[],"response":${result},"response_raw":${JSON.stringify(result)}}`
+    });
+  });
+  await page.goto('/playground');
+  await page.getByRole('radio', { name: 'Advanced' }).check();
+  await page.getByLabel('Route slug').fill('display-route');
+  await page.getByLabel('Operation').selectOption('embeddings');
+  await page
+    .getByLabel('Request JSON')
+    .fill(
+      '{"model":"display-route","input":"one","output_dtype":"ubinary","output_dimension":16,"encoding_format":"base64"}'
+    );
+  await page.getByRole('button', { name: 'Run test' }).click();
+  const result = page.locator('.operation-result');
+  await expect(result.getByText('Base64 storage · ubinary')).toBeVisible();
+  await expect(result.getByText('2 stored bytes')).toBeVisible();
+  await result.getByText('Native result JSON').click();
+  await expect(
+    result.locator('[data-testid="native-operation-result"]')
+  ).toContainText('9007199254740993');
+  await result.screenshot({ path: info.outputPath('native-vector-shape.png') });
+
+  await page.getByLabel('Operation').selectOption('rerank');
+  await page
+    .getByLabel('Request JSON')
+    .fill(
+      '{"model":"display-route","query":"rank","documents":[{"id":"alpha","text":"a"},{"id":"beta","text":"b"}]}'
+    );
+  await page.getByRole('button', { name: 'Run test' }).click();
+  await expect(
+    result.locator('td code').filter({ hasText: '0.1000000000000000000001' })
+  ).toHaveCount(2);
+  await expect(result.getByText('"beta"')).toBeVisible();
+  await expect(result.getByText('"alpha"')).toBeVisible();
+  await result.screenshot({
+    path: info.outputPath('native-rerank-scores.png')
+  });
 });
