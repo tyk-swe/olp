@@ -218,7 +218,7 @@ func TestStrictPublicResponsesPreserveScalarAndArrayInputs(t *testing.T) {
 	}
 	before := len(f.captured())
 	status, response, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"native default retention"}`), map[string]string{"Content-Type": "application/json"})
-	if status != 400 || !bytes.Contains(response, []byte(`"param":"store"`)) || len(f.captured()) != before {
+	if status != 400 || !bytes.Contains(response, []byte(`"param":"store"`)) || !bytes.Contains(response, []byte(`"code":"policy_conflict"`)) || len(f.captured()) != before {
 		t.Fatalf("native retention default bypassed policy: %d %s", status, response)
 	}
 }
@@ -228,6 +228,11 @@ func TestStrictPublicQualifiedTextAndPreciseRefusals(t *testing.T) {
 	owner := h.owner()
 	f := newStrictProviderFixture(t, "anthropic-messages")
 	slug, key := publishStrictProvider(t, h, owner, f, nil, nil, "strict")
+	beforePlayground := len(f.captured())
+	problem := h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": slug, "input": "hello"}, nil, 400)
+	if problemCode(t, problem) != "state_carrier" || len(f.captured()) != beforePlayground {
+		t.Fatal("unqualified playground projection dispatched strict work", problem)
+	}
 	body := `{"model":"` + slug + `","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`
 	status, response, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
 	if status != 200 || !bytes.Contains(response, []byte(vendorAnswer)) {

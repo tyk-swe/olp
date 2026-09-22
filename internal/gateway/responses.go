@@ -40,10 +40,23 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if raw := parsed.Field("store"); raw != nil {
 		_ = json.Unmarshal(raw, &store)
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && parsed.Field("store") == nil {
-		// Native Responses omission requests provider retention. Strict admission
-		// cannot silently inject store:false to avoid the caller's state policy.
-		store = true
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+		if parsed.Field("store") == nil {
+			// Native Responses omission requests provider retention. Strict admission
+			// cannot silently inject store:false to avoid the caller's state policy.
+			store = true
+		}
+		if background {
+			param := "background"
+			return invalidRequest("state_carrier", "Background generation requires a qualified durable interaction runner.", &param)
+		}
+		if !authority.Policy.AllowProviderState && (store || previous != "") {
+			param := "store"
+			if previous != "" {
+				param = "previous_response_id"
+			}
+			return invalidRequest("policy_conflict", "The native invocation retains provider state but this API key does not permit it.", &param)
+		}
 	}
 	if previous == "" && !background && !store {
 		return nil

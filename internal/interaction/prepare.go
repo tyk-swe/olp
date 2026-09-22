@@ -279,13 +279,8 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 	if (retained || referenced) && !context.AllowProviderState {
 		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
 	}
-	if referenced {
-		obligations.Effects = append(obligations.Effects, "resource_read")
-	}
-	if retained {
-		obligations.Lifetime = "provider_resource"
-		obligations.Continuation = "authorized_provider_resource"
-		obligations.Effects = append(obligations.Effects, "resource_mutation")
+	if retained || referenced {
+		return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
 	}
 	tools, err := declaredClientTools(root, wire)
 	if err != nil {

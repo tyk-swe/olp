@@ -268,15 +268,15 @@ func TestNativeStateOmissionAndResourceAffinityAreExplicit(t *testing.T) {
 	source := request(t, openai.FamilyResponses, `{"model":"route","input":"hello"}`)
 	_, err := compiled.Bind(source, Context{})
 	assertReason(t, err, "policy_conflict")
-	plan := bind(t, compiled, source, Context{AllowProviderState: true})
-	if plan.Obligations().Lifetime != "provider_resource" || len(field(t, plan.Body(), "store")) != 0 {
-		t.Fatal("native store omission was rewritten")
-	}
+	_, err = compiled.Bind(source, Context{AllowProviderState: true})
+	assertReason(t, err, "state_carrier")
+	plan := bind(t, compiled, request(t, openai.FamilyResponses, `{"model":"route","input":"hello","store":false}`), Context{})
 	prior := request(t, openai.FamilyResponses, `{"model":"route","input":"follow up","previous_response_id":"opaque-native-id","store":false}`)
 	_, err = compiled.Bind(prior, Context{AllowProviderState: true})
 	assertReason(t, err, "resource_affinity")
 	identity := plan.Serving()
-	bind(t, compiled, prior, Context{AllowProviderState: true, RequiredServing: &identity})
+	_, err = compiled.Bind(prior, Context{AllowProviderState: true, RequiredServing: &identity})
+	assertReason(t, err, "state_carrier")
 	identity.PrincipalID = "different-principal"
 	_, err = compiled.Bind(prior, Context{AllowProviderState: true, RequiredServing: &identity})
 	assertReason(t, err, "resource_affinity")
@@ -401,10 +401,10 @@ func TestNativeStreamingDefaultsPrecedeTransportOverlay(t *testing.T) {
 
 func TestNativeExecutionEffectsAreScopedAndImmutable(t *testing.T) {
 	compiled := template(t, configuration(t, "openai-responses"))
-	source := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","tools":[{"type":"function","name":"local","parameters":{"type":"object"}}]}`)
+	source := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","store":false,"tools":[{"type":"function","name":"local","parameters":{"type":"object"}}]}`)
 	plan := bind(t, compiled, source, Context{AllowProviderState: true})
 	effects := plan.Obligations().Effects
-	if !reflect.DeepEqual(effects, []string{"inference", "resource_mutation", "client_tool_call"}) {
+	if !reflect.DeepEqual(effects, []string{"inference", "client_tool_call"}) {
 		t.Fatalf("wrong declared effects: %v", effects)
 	}
 	effects[0] = "mutated"
