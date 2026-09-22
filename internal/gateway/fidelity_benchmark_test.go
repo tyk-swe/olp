@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"reflect"
 	goruntime "runtime"
 	"slices"
@@ -78,6 +79,60 @@ type fidelitySink struct{ calls atomic.Int64 }
 
 func (s *fidelitySink) Terminal(Envelope) { s.calls.Add(1) }
 
+// fidelityContract lets later strict implementations reuse this exact harness
+// and payload/oracle hash. Unknown fields must fail instead of benchmarking legacy.
+// This input is test-only: it cannot change existing routing/policy/timeout fields.
+func fidelityContract[T runtime.Route | runtime.Provider](b *testing.B, w fidelityWorkload, target T, setting string, allowed []string) T {
+	b.Helper()
+	raw := os.Getenv(setting)
+	if raw == "" {
+		return target
+	}
+	var contracts map[string]map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &contracts); err != nil || len(contracts) != 3 {
+		b.Fatal("contract configuration must contain native, translated and rejected objects")
+	}
+	for _, name := range []string{"native", "translated", "rejected"} {
+		if len(contracts[name]) == 0 {
+			b.Fatalf("explicit %s route contract is required", name)
+		}
+	}
+	category := "native"
+	if w.kind == "anthropic" {
+		category = "translated"
+	}
+	if w.rejected {
+		category = "rejected"
+	}
+	encoded, _ := json.Marshal(target)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		b.Fatal(err)
+	}
+	for name, value := range contracts[category] {
+		if !slices.Contains(allowed, name) {
+			b.Fatalf("%s cannot change fixture %s", setting, name)
+		}
+		fields[name] = value
+	}
+	encoded, _ = json.Marshal(fields)
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		b.Fatal(err)
+	}
+	encoded, _ = json.Marshal(target)
+	var persisted map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &persisted); err != nil {
+		b.Fatal(err)
+	}
+	for name, value := range contracts[category] {
+		var want, got any
+		if json.Unmarshal(value, &want) != nil || json.Unmarshal(persisted[name], &got) != nil || !reflect.DeepEqual(want, got) {
+			b.Fatalf("%s field %s is unavailable or changed; refusing implicit legacy measurement", setting, name)
+		}
+	}
+	return target
+}
+
 type fidelityFixture struct {
 	client     *http.Client
 	url        string
@@ -139,6 +194,10 @@ func newFidelityFixture(b *testing.B, w fidelityWorkload, relay bool) *fidelityF
 			ID: routeID, Slug: "team-chat", Operations: []string{"generation"}, OverallTimeout: 30000, MaxAttempts: 1, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1,
 			Targets: []runtime.Target{{ID: targetID, ProviderID: providerID, ProviderModel: "model-a", Weight: 1, Timeout: 20000, RoutingID: targetID}},
 		}},
+	}
+	if !relay {
+		snapshot.Routes["team-chat"] = fidelityContract(b, w, snapshot.Routes["team-chat"], "OLP_FIDELITY_BENCH_ROUTE_CONTRACT", []string{"contract", "fidelity", "fidelity_mode", "fidelity_contract", "interaction_contract", "client_contract", "continuation", "qualification"})
+		snapshot.Providers[providerID] = fidelityContract(b, w, snapshot.Providers[providerID], "OLP_FIDELITY_BENCH_PROVIDER_CONTRACT", []string{"profile", "profile_id", "profile_revision", "serving_identity", "model_bindings"})
 	}
 	release, err := runtime.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{credentialID: []byte("benchmark-provider-key")})
 	if err != nil {

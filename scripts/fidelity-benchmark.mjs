@@ -88,6 +88,9 @@ function record(path) {
   const args = ['test', '-mod=readonly', '-run', '^$', '-bench', '^BenchmarkFidelity$', '-benchmem', '-benchtime=2s', '-count=3', '-cpu=4', '-timeout=15m', './internal/gateway'];
   const startedAt = new Date().toISOString();
   const loadBefore = optionalFile('/proc/loadavg');
+  const routeContract = process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT) : null;
+  const providerContract = process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT) : null;
+  if (providerContract && !routeContract) throw new Error('A provider contract requires explicit route contracts');
   const run = spawnSync('go', args, { encoding: 'utf8', maxBuffer: 16 << 20, env: { ...process.env, GOMAXPROCS: '4' } });
   process.stdout.write(run.stdout ?? '');
   process.stderr.write(run.stderr ?? '');
@@ -100,7 +103,7 @@ function record(path) {
     relayDifferences[name] = Object.fromEntries(['latency-p50-us', 'latency-p95-us', 'latency-p99-us', 'B/op', 'allocs/op', 'process-cpu-ns/op'].map((metric) => [metric, summary[name].metrics[metric].median - relay.metrics[metric].median]));
   }
   const artifact = {
-    schema, started_at: startedAt, completed_at: new Date().toISOString(), source_revision: command('git', ['rev-parse', 'HEAD']), working_tree: command('git', ['status', '--short']),
+    schema, contract_mode: routeContract ? 'explicit' : 'legacy', route_contract: routeContract, provider_contract: providerContract, started_at: startedAt, completed_at: new Date().toISOString(), source_revision: command('git', ['rev-parse', 'HEAD']), working_tree: command('git', ['status', '--short']),
     harness_sha256: digest('internal/gateway/fidelity_benchmark_test.go'), runner_sha256: digest('scripts/fidelity-benchmark.mjs'), command: ['go', ...args],
     hardware: { os: platform(), architecture: arch(), kernel: release(), cpu: cpus()[0]?.model, logical_cpus: cpus().length, total_memory_bytes: totalmem(), cpu_quota: optionalFile('/sys/fs/cgroup/cpu.max'), memory_limit: optionalFile('/sys/fs/cgroup/memory.max'), load_before: loadBefore, load_after: optionalFile('/proc/loadavg') },
     toolchain: command('go', ['version']), gomaxprocs: 4, concurrency: [1, 8], repetitions: 3, target_time_per_repetition: '2s',
@@ -128,11 +131,14 @@ export function freezeBudgets(artifact) {
     }
     workloads[name] = { maxima, exact: { 'request-bytes': metrics['request-bytes'].median, 'content-events/op': metrics['content-events/op'].median }, minimum_samples: Math.min(20, ...summary[name].iterations) };
   }
-  return { schema: 'openllmproxy.dev/fidelity-performance-budget/v1', declared_at: new Date().toISOString(), baseline_revision: artifact.source_revision, baseline_harness_sha256: artifact.harness_sha256, hardware: structuredClone(artifact.hardware), gomaxprocs: 4, repetitions: 3, method: 'Before replacement: per-workload maximum of 3 baseline runs ×1.5 plus 1ms timing/CPU allowance, 16KiB allocation allowance or 8MiB sampled heap allowance. Allocation counts ×1.25 +64. These tolerances are change-regression budgets, not service SLOs. Never auto-rebase budgets on candidate results.', workloads };
+  return { schema: 'openllmproxy.dev/fidelity-performance-budget/v1', declared_at: new Date().toISOString(), baseline_revision: artifact.source_revision, baseline_harness_sha256: artifact.harness_sha256, baseline_runner_sha256: artifact.runner_sha256, hardware: structuredClone(artifact.hardware), gomaxprocs: 4, repetitions: 3, method: 'Before replacement: per-workload maximum of 3 baseline runs ×1.5 plus 1ms timing/CPU allowance, 16KiB allocation allowance or 8MiB sampled heap allowance. Allocation counts ×1.25 +64. These tolerances are change-regression budgets, not service SLOs. Never auto-rebase budgets on candidate results.', workloads };
 }
 
-export function compareBudgets(candidate, budgets) {
+export function compareBudgets(candidate, budgets, mode = 'legacy') {
   if (candidate.schema !== schema || budgets.schema !== 'openllmproxy.dev/fidelity-performance-budget/v1') throw new Error('Unknown evidence or budget schema');
+  if (candidate.harness_sha256 !== budgets.baseline_harness_sha256) throw new Error('Benchmark harness/oracle differs; use a reviewed versioned extension, never weaken frozen workloads');
+  if (candidate.contract_mode !== mode) throw new Error(`Expected ${mode} contract evidence, got ${candidate.contract_mode}`);
+  if (mode === 'explicit' && (!candidate.route_contract || ['native', 'translated', 'rejected'].some((name) => !Object.keys(candidate.route_contract[name] ?? {}).length))) throw new Error('All explicit route contracts must be recorded');
   if (candidate.gomaxprocs !== budgets.gomaxprocs || candidate.repetitions !== budgets.repetitions) throw new Error('Measurement configuration differs from the frozen budget');
   for (const key of ['cpu', 'logical_cpus', 'architecture', 'cpu_quota']) {
     if (candidate.hardware[key] !== budgets.hardware[key]) throw new Error(`Hardware differs (${key}); results require separate qualification`);
@@ -162,12 +168,12 @@ function main() {
     writeFileSync(second, JSON.stringify(budgets, null, 2) + '\n', { flag: 'wx' });
     return console.log(`Frozen replacement budgets in ${second}`);
   }
-  if (operation === 'compare' && first && second && !third) {
-    const failures = compareBudgets(JSON.parse(readFileSync(first, 'utf8')), JSON.parse(readFileSync(second, 'utf8')));
+  if ((operation === 'compare' || operation === 'compare-explicit') && first && second && !third) {
+    const failures = compareBudgets(JSON.parse(readFileSync(first, 'utf8')), JSON.parse(readFileSync(second, 'utf8')), operation === 'compare-explicit' ? 'explicit' : 'legacy');
     if (failures.length) throw new Error(failures.join('\n'));
     return console.log('All 22 workloads retain their outcomes and meet the frozen performance budgets.');
   }
-  throw new Error('Usage: node scripts/fidelity-benchmark.mjs record OUTPUT.json | freeze BASELINE.json BUDGETS.json | compare CANDIDATE.json BUDGETS.json');
+  throw new Error('Usage: node scripts/fidelity-benchmark.mjs record OUTPUT.json | freeze BASELINE.json BUDGETS.json | compare CANDIDATE.json BUDGETS.json | compare-explicit CANDIDATE.json BUDGETS.json');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

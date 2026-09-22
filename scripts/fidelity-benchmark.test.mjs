@@ -22,7 +22,7 @@ function evidence() {
       }
     }
   }
-  return { schema: 'openllmproxy.dev/fidelity-performance/v1', source_revision: 'baseline', harness_sha256: 'fixture-hash', repetitions: 3, gomaxprocs: 4, hardware: { cpu: 'fixture', logical_cpus: 8, architecture: 'amd64', cpu_quota: 'max 100000' }, runs };
+  return { schema: 'openllmproxy.dev/fidelity-performance/v1', source_revision: 'baseline', contract_mode: 'legacy', route_contract: null, harness_sha256: 'fixture-hash', repetitions: 3, gomaxprocs: 4, hardware: { cpu: 'fixture', logical_cpus: 8, architecture: 'amd64', cpu_quota: 'max 100000' }, runs };
 }
 
 test('complete measured inventory retains successful and rejected workloads', () => {
@@ -74,4 +74,17 @@ test('parser rejects incomplete metrics instead of treating partial output as ev
   assert.throws(() => parseBenchmarks('BenchmarkFidelity/native_unary/c1/gateway-4 100 10 ns/op'), /counts changed/);
   assert.deepEqual(parseBenchmarks('goos: linux\nPASS\n'), []);
   assert.throws(() => summarize([], 3), /expected 3 repetitions/);
+});
+
+test('changed harness and implicit legacy cannot masquerade as strict evidence', () => {
+  const candidate = evidence();
+  const budgets = freezeBudgets(candidate);
+  candidate.harness_sha256 = 'weakened-oracle';
+  assert.throws(() => compareBudgets(candidate, budgets), /harness\/oracle differs/);
+  candidate.harness_sha256 = budgets.baseline_harness_sha256;
+  assert.throws(() => compareBudgets(candidate, budgets, 'explicit'), /Expected explicit/);
+  candidate.contract_mode = 'explicit';
+  assert.throws(() => compareBudgets(candidate, budgets, 'explicit'), /contracts must be recorded/);
+  candidate.route_contract = { native: { fidelity: 'native_identity' }, translated: { fidelity: 'qualified_interaction' }, rejected: { fidelity: 'qualified_interaction' } };
+  assert.deepEqual(compareBudgets(candidate, budgets, 'explicit'), []);
 });

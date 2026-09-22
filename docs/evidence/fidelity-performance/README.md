@@ -116,3 +116,38 @@ See `v1/baseline.json` for raw Go output and all measured values, and
 comparison against its own frozen budgets verifies artifact integrity only. Actual
 replacement qualification requires recording and comparing a later candidate;
 that result must be reported separately.
+
+## Later strict-contract qualification with an unchanged harness
+
+Normal `compare` requires a legacy candidate and the exact baseline harness hash.
+An edited payload, oracle, measurement loop or fixture cannot be accepted merely
+because its byte/event counts match. Reviewed harness changes need a new evidence
+version; keep the old baseline and numeric budgets as historical evidence.
+
+The harness already supports an explicit test-only contract overlay so strict
+routing/profile implementations can be measured later without changing its bytes:
+
+```sh
+OLP_FIDELITY_BENCH_ROUTE_CONTRACT="$(cat /tmp/strict-route-contracts.json)" \
+OLP_FIDELITY_BENCH_PROVIDER_CONTRACT="$(cat /tmp/strict-provider-contracts.json)" \
+node scripts/fidelity-benchmark.mjs record /tmp/fidelity-explicit.json
+node scripts/fidelity-benchmark.mjs compare-explicit /tmp/fidelity-explicit.json docs/evidence/fidelity-performance/v1/replacement-budgets.json
+```
+
+Each overlay file is an object with exactly three nonempty objects named `native`,
+`translated` and `rejected`. Their members use the published runtime's actual
+contract/profile fields introduced by the corresponding implementation. Provider
+selection is optional if the strict implementation has an already appropriate
+profile; explicit route selection is required. Only contract/profile metadata
+names are allowed. Endpoint, auth, model, capability inventory, routing targets,
+timeouts, defaults, source payloads and response oracles cannot be overridden.
+Unknown or altered fields fail a serialize/decode/serialize check before warmup;
+the current pre-OIF implementation therefore refuses future strict settings.
+
+The runner records both overlay objects and separates legacy from explicit results.
+An explicit result is strict evidence only after review confirms those recorded
+fields select the intended native-identity/qualified-interaction implementation;
+explicitly selecting a legacy contract does not qualify it as strict. Retain a
+normal legacy candidate too. Both comparisons use the original frozen payloads,
+relay, complete-response checks and numeric budgets. The strict implementation
+must preserve successful translated controls and precise pre-dispatch rejection.
