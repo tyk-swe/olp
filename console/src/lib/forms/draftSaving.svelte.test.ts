@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
 import { ApiProblem } from '$lib/api/http';
 import { apiClient } from '$lib/api/client';
 import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
@@ -277,15 +278,14 @@ it('preserves resolved connection options when returning to a saved wizard draft
   button('Save and test connection')
     .closest('form')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
-    expect(updateProvider).toHaveBeenCalledWith(
-      saved.id,
-      provider.etag,
-      expect.objectContaining({
-        configuration: expect.objectContaining({ options })
-      })
-    )
-  );
+  await vi.waitFor(() => {
+    const [id, etag, input] = vi.mocked(updateProvider).mock.calls[0]!;
+    expect(id).toBe(saved.id);
+    expect(etag).toBe(provider.etag);
+    expect(stringifyNativeJSON(input.configuration.options)).toBe(
+      JSON.stringify(options)
+    );
+  });
 });
 
 for (const kind of ['route', 'provider'] as const) {
@@ -844,11 +844,18 @@ it('locks credential fields until a pending save completes', async () => {
   expect(credential.value).toBe('replacement-secret');
 });
 
-it('preserves options input and its original ETag across provider refreshes', async () => {
+it('preserves the unified native draft and its original ETag across provider refreshes', async () => {
   vi.mocked(updateProvider).mockRejectedValue(new Error('Conflict'));
   render('provider');
-  const options = host.querySelector<HTMLTextAreaElement>('#provider-options')!;
-  const local = '{"parameter_defaults":{"temperature":0.4}}';
+  const options = host.querySelector<HTMLTextAreaElement>(
+    '#detail-native-json'
+  )!;
+  const local = stringifyNativeJSON({
+    ...provider.configuration,
+    options: parseNativeJSON(
+      '{"parameter_defaults":{"temperature":0.4,"seed":9007199254740993}}'
+    )
+  });
   options.value = local;
   options.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
@@ -857,7 +864,13 @@ it('preserves options input and its original ETag across provider refreshes', as
     etag: 'newer-options',
     configuration: {
       ...provider.configuration,
-      options: { parameter_defaults: { temperature: 0.8 } }
+      options: {
+        vendor_id: null,
+        limits: null,
+        credential_headers: [],
+        models: {},
+        parameter_defaults: { temperature: 0.8 }
+      }
     }
   };
   client.setQueryData(providerKeys.models(provider.id), {
@@ -868,29 +881,29 @@ it('preserves options input and its original ETag across provider refreshes', as
   await vi.waitFor(() => {
     flushSync();
     expect(host.textContent).toContain(
-      'This provider changed while you were editing.'
+      'Your unsaved changes have not been overwritten.'
     );
   });
   expect(options.value).toBe(local);
   expect(navigationBlocked()).toBe(true);
-  button('Save options to draft')
-    .closest('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
-    expect(updateProvider).toHaveBeenCalledWith(
-      provider.id,
-      provider.etag,
-      expect.objectContaining({
-        configuration: expect.objectContaining({ options: JSON.parse(local) })
-      })
-    )
-  );
-  await vi.waitFor(() =>
-    expect(button('Reload saved options').disabled).toBe(false)
-  );
-  button('Reload saved options').click();
-  flushSync();
-  expect(JSON.parse(options.value)).toEqual(remote.configuration.options);
+  save('provider');
+  await vi.waitFor(() => {
+    const [id, etag, input] = vi.mocked(updateProvider).mock.calls[0]!;
+    expect(id).toBe(provider.id);
+    expect(etag).toBe(provider.etag);
+    expect(stringifyNativeJSON(input.configuration)).toBe(local);
+  });
+  vi.mocked(listProviderModelPage).mockResolvedValue({
+    provider: remote,
+    items: [],
+    nextCursor: null
+  });
+  await vi.waitFor(() => expect(button('Reload').disabled).toBe(false));
+  button('Reload').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(JSON.parse(options.value)).toEqual(remote.configuration);
+  });
 });
 
 it.each(['original-key', 'changed-key'])(

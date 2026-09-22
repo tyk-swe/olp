@@ -1,4 +1,8 @@
 import createClient from 'openapi-fetch';
+import {
+  preserveNativeConfiguration,
+  stringifyNativeJSON
+} from '$lib/json/nativeJson';
 import type { paths } from '$lib/api/schema';
 import { serializeIfMatch } from '$lib/api/http';
 import { createAuthMiddleware } from '$lib/features/access/session/authMiddleware';
@@ -14,9 +18,12 @@ export const apiClient = createClient<paths>({
   cache: 'no-store',
   credentials: 'same-origin',
   redirect: 'error',
+  bodySerializer: (body: unknown) =>
+    body instanceof FormData ? body : stringifyNativeJSON(body),
   // Resolve fetch at call time so browser instrumentation and unit-test
   // transports observe the same generated request object.
-  fetch: (request) => globalThis.fetch(request)
+  fetch: async (request) =>
+    preserveNativeConfiguration(await globalThis.fetch(request))
 });
 
 apiClient.use({

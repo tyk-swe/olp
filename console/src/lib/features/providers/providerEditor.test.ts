@@ -372,7 +372,7 @@ describe('provider editor API mappings', () => {
     ).toBeUndefined();
   });
 
-  it('never sends fields omitted by capability metadata', () => {
+  it('filters legacy form inputs while preserving complete loaded documents', () => {
     const values: ProviderEditValues = {
       name: ' Primary OpenAI ',
       endpoint: 'https://api.openai.com/v1/',
@@ -412,12 +412,15 @@ describe('provider editor API mappings', () => {
       )
     ).toEqual({
       name: 'Primary OpenAI',
-      endpoint: '',
-      apiVersion: '',
-      cloudRegion: '',
-      cloudProject: '',
-      deployment: '',
-      authMode: 'api_key'
+      endpoint: 'https://api.openai.com/v1/',
+      apiVersion: 'ignored',
+      cloudRegion: 'ignored',
+      cloudProject: 'ignored',
+      deployment: 'ignored',
+      authMode: 'api_key',
+      options: undefined,
+      profileId: '',
+      profileRevision: ''
     });
   });
 

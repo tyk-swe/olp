@@ -1,7 +1,6 @@
 <script lang="ts">
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
-  import ProviderOptions from './ProviderOptions.svelte';
   import { focusErrorSummary } from '$lib/forms/focusError';
   import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
@@ -325,6 +324,7 @@
       {canManage}
       {run}
       onTouch={touch}
+      dirty={sync.dirty}
       onSave={() => saveProvider(current)}
       onProviderChanged={providerChanged}
       onRefetchProvider={refetchProvider}
@@ -351,7 +351,6 @@
     {canManage}
     onChanged={providerChanged}
   />
-  <ProviderOptions provider={current} {canManage} onChanged={providerChanged} />
   <ProviderBulkModels
     provider={current}
     {canManage}

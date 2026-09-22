@@ -352,9 +352,6 @@ export class ProviderWizardState {
       const current = this.draft;
       const spec = this.selectedSpec;
       if (!current || !spec) return;
-      if (!this.authOptions.some(([value]) => value === current.authMode)) {
-        current.authMode = spec.default_auth_mode;
-      }
       if (!this.credentialRequired) current.credential = '';
     });
     $effect(() => {
@@ -369,22 +366,22 @@ export class ProviderWizardState {
             (kind) => kind.kind === source.configuration.kind
           );
           if (!spec) return;
-          this.draft = {
-            ...createProviderDraft(spec),
-            name: `${source.name} copy`,
-            endpoint: source.configuration.endpoint ?? '',
-            cloudRegion: source.configuration.cloud_region ?? '',
-            cloudProject: source.configuration.cloud_project ?? '',
-            deployment: source.configuration.deployment ?? '',
-            apiVersion: source.configuration.api_version ?? '',
-            authMode: source.configuration.auth_mode,
-            presetId: source.configuration.options?.vendor_id ?? '',
-            options: source.configuration.options,
-            credentialHeaders:
-              source.configuration.options?.credential_headers?.join(', ') ??
-              '',
-            credential: ''
-          };
+          const duplicate = createProviderDraft(spec, source.configuration);
+          duplicate.name = `${source.name} copy`;
+          duplicate.credential = '';
+          // Network credentials are provider-owned and cannot be reused by a copy.
+          if (
+            duplicate.document?.at(['options', 'network', 'credential_id']) !==
+            undefined
+          ) {
+            duplicate.document.set(
+              ['options', 'network', 'credential_id'],
+              undefined
+            );
+            this.notice =
+              'The copied connection needs its own network credential. The source credential reference was removed.';
+          }
+          this.draft = duplicate;
         })
         .catch((error) => {
           this.errorMessage = message(error);

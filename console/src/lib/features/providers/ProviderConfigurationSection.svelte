@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import type { Provider } from '$lib/features/providers/api';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
@@ -18,6 +19,7 @@
     canManage,
     run,
     onTouch,
+    dirty = false,
     onSave,
     onProviderChanged,
     onRefetchProvider,
@@ -30,6 +32,7 @@
     canManage: boolean;
     run: RunProviderAction;
     onTouch: () => void;
+    dirty?: boolean;
     onSave: () => void;
     onProviderChanged: () => Promise<void>;
     onRefetchProvider: () => Promise<boolean>;
@@ -63,11 +66,21 @@
       />
     {/if}
   </div>
+  <ProviderProfileEditor
+    values={editValues}
+    idPrefix="detail"
+    provider={current}
+    disabled={!canManage || Boolean(busy) || current.state === 'disabled'}
+    {run}
+    {onProviderChanged}
+    onChange={onTouch}
+  />
   <ProviderActivationControls
     {current}
     {busy}
     {canManage}
-    canSave={Boolean(providerSpec)}
+    canSave={Boolean(providerSpec) && !editValues.document?.issue}
+    {dirty}
     {run}
     {onSave}
     {onProviderChanged}
