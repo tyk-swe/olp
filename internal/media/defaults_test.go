@@ -359,10 +359,47 @@ func TestConfiguredCloudImageDefaultsKeepQualifiedWrapperMappings(t *testing.T) 
 	}
 }
 
-func TestMediaSourceJSONRejectsAmbiguousTopLevelMembers(t *testing.T) {
-	for _, body := range []string{`{"model":"images","prompt":"one","prompt":"two"}`, `{"model":"images","prompt":"one"} {}`} {
+func TestMediaSourceJSONRejectsAmbiguousNestedMembersAndUnicode(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"images","prompt":"one","prompt":"two"}`,
+		`{"model":"images","prompt":"one"} {}`,
+		`{"model":"images","prompt":"one","native_extension":{"path":1,"\u0070ath":2}}`,
+		`{"model":"images","prompt":"one","native_extension":"\ud800"}`,
+	} {
 		if _, failure := DecodeImageGeneration([]byte(body)); failure == nil {
 			t.Fatal("ambiguous source body accepted")
 		}
+	}
+	for _, body := range []string{
+		`{"model":"voice","input":"hello","voice":"fixture","native_extension":{"x":1,"x":2}}`,
+		`{"model":"voice","input":"hello","voice":"fixture","native_extension":"\ud800"}`,
+	} {
+		if _, failure := DecodeSpeech([]byte(body)); failure == nil {
+			t.Fatal("ambiguous speech source body accepted")
+		}
+	}
+}
+
+func TestMediaSourceRetainsNativeNumberLexemesAndOwnsInput(t *testing.T) {
+	input := []byte(`{"model":"images","prompt":"one","native_extension":{"long":9007199254740993,"minus_zero":-0,"tiny":1e-400,"null":null}}`)
+	r, failure := DecodeImageGeneration(input)
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	want := `{"long":9007199254740993,"minus_zero":-0,"tiny":1e-400,"null":null}`
+	if string(r.SourceFields["native_extension"]) != want {
+		t.Fatal("native source number or presence changed")
+	}
+	start := bytes.Index(input, []byte(want))
+	if start < 0 {
+		t.Fatal("fixture has no native source")
+	}
+	input[start] = 'x'
+	if string(r.SourceFields["native_extension"]) != want {
+		t.Fatal("caller mutation changed the retained native source")
+	}
+	r.SourceFields["native_extension"][1] = 'X'
+	if input[start+1] != '"' {
+		t.Fatal("retained source mutation changed caller bytes")
 	}
 }

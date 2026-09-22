@@ -6469,6 +6469,7 @@
     "tests/integration/master_key_rotation_test.go",
     "tests/integration/master_key_startup_test.go",
     "tests/integration/media_management_test.go",
+    "tests/integration/media_source_oif_test.go",
     "tests/integration/migration_recovery_test.go",
     "tests/integration/mixed_version_strict_route_test.go",
     "tests/integration/mounted_parity_test.go",
