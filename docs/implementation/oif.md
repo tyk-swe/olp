@@ -62,14 +62,14 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#220](https://github.com/tyk-swe/olp/issues/220) Persist route fidelity contracts and policy invariants | D02, D18, D21, D23 | Foundation integrated; bounded strict generation execution integrated in #213 | Route branch `1a9a9248`, merge `b618961b`; [configuration and migration qualification](../qualification/fidelity/route-contracts.md) |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Integrated; continuation, other operations, lifecycle and playground guards remain #214–#217 | Planner branch `b09c0012`, merge `873b3ce1`; [strict planning scope and validation](../qualification/fidelity/strict-planning.md); [safe inspector qualification](../qualification/fidelity/plan-inspector.md) |
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
-| [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward migration 0025 reserved; continuation/resource guards remain pending implementation and qualification |
+| [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Active; #213 integrated | Operation/profile exploration started from `06523391`; no #215 implementation integrated yet |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
-| [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Active; #213 and #224 integrated | Independent native two-turn reference and encrypted claim/journal/ready transactions; translated candidate qualification remains #214/#218 |
+| [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Reference baseline integrated; translated candidate qualification pending | Source `29e18268`, capture `a99d0217`, merge `533ac161`; [36 repetitions, encrypted barrier reference and frozen criteria](../evidence/fidelity-performance/barrier-v1/README.md); replacement qualification remains #214/#218 |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
@@ -171,6 +171,19 @@ remains the recorded four packaged/Vite native-configuration cases and legacy
 onboarding with unary/streaming inference. Historical migrations, independent
 fixtures and both performance evidence sets remain unchanged. #217's inspector,
 evidence presentation and operation playgrounds remain a separate ready task.
+
+The #225 encrypted continuation reference merged without conflicts in
+`533ac161`; the native JSON accounting fixture correction merged in `ad9810c9`.
+The recorded source `29e18268`, harness, runner and six helper/oracle hashes
+match the integrated files. All ten pre-existing performance evidence files,
+the new captured baseline/budgets, and schema 0025 remain byte-identical;
+schema 0025 also matches the continuation owner's `495ade9f`. The five runner
+mutation tests and baseline self-comparison passed. The recorded-vendor pricing
+regression and barrier in-memory/storage corruption checks passed together with
+race detection in 3.991 s. Current inventory regeneration introduced no changes.
+These checks establish reference integrity only: no candidate was timed, no
+budgets were reset, and translated continuation performance and full G6 remain
+pending in #214/#218.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
