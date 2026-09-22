@@ -56,6 +56,7 @@ const resourceEstimate = 100
 const maxResourceList = 100
 
 type pin struct {
+	target    runtime.Target
 	provider  runtime.Provider
 	attempt   runtime.Attempt
 	slot      runtime.Slot
@@ -147,7 +148,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		Timeout:            time.Duration(target.Timeout) * time.Millisecond,
 		VendorID:           provider.VendorID,
 	}
-	p := &pin{provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
+	p := &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
 	if secret != nil {
 		p.secret, p.hasSecret = secret, true
 	}

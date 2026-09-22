@@ -286,3 +286,14 @@ func toolIndex(value oif.Value) (int, error) {
 	}
 	return n, nil
 }
+
+// SameSource verifies an invocation for delivery replay with exact numeric
+// lexemes and ordered arrays, allowing only insignificant JSON object order.
+func SameSource(a, b []byte) bool {
+	first, err := oif.ParseJSON(a, oif.Limits{})
+	if err != nil {
+		return false
+	}
+	second, err := oif.ParseJSON(b, oif.Limits{})
+	return err == nil && sameValue(first.Root(), second.Root())
+}

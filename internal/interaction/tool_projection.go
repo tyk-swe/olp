@@ -397,3 +397,16 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 func ContinuationFrame(raw []byte) []byte {
 	return bytes.Join([][]byte{[]byte("data: "), raw, []byte("\n\n")}, nil)
 }
+
+func ContinuationActionable(frame []byte) bool {
+	document, err := oif.ParseJSON(frame, oif.Limits{})
+	if err != nil {
+		return false
+	}
+	for _, choice := range member(document.Root(), "choices").Elements() {
+		if len(member(member(choice, "delta"), "tool_calls").Elements()) > 0 {
+			return true
+		}
+	}
+	return false
+}

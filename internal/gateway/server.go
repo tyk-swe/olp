@@ -508,6 +508,15 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		x.parsed = parsed
+		if e := s.prepareContinuation(r.Context(), x); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		if x.continuation != nil && x.continuation.replay != nil {
+			status, _ = s.replayContinuation(w, x)
+			return
+		}
 		if family == openai.FamilyResponses {
 			if e := s.responsesStateGate(r.Context(), x, authority, parsed); e != nil {
 				x.failure, status = e, e.Status
@@ -626,7 +635,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	if x.parsed.Stream {
 		x.mode = "streaming"
 	}
-	snapshot := x.request.release.Snapshot
+	snapshot := x.snapshot()
 	route, ok := snapshot.Routes[x.parsed.Route]
 	if !ok {
 		return modelNotFound(x.parsed.Route)
@@ -634,6 +643,13 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	x.route = &route
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	}
+	if x.pin != nil {
+		if e := s.pinAttempts(ctx, x); e != nil {
+			return e
+		}
+		snapshot = x.snapshot()
+		route = *x.route
 	}
 	if x.strict() {
 		if x.actor == "playground" {
@@ -746,7 +762,10 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
-	return s.pinAttempts(ctx, x)
+	if x.pin != nil {
+		x.budget = 1
+	}
+	return nil
 }
 
 // modelObject renders a route as an OpenAI model object.

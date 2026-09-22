@@ -31,11 +31,12 @@ func NewResolver(pool *pgxpool.Pool, installation string, keys *secrets.KeyRing)
 }
 
 func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
-	var providerID string
+	var providerID, providerName, providerState string
+	var providerProject *string
 	var configuration, models, slots []byte
 	err := tx.QueryRow(ctx,
-		"SELECT provider_id::text,configuration,models,slots FROM olp_go.provider_revisions WHERE id=$1",
-		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots)
+		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text FROM olp_go.provider_revisions r JOIN olp_go.providers p ON p.id=r.provider_id WHERE r.id=$1",
+		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots, &providerName, &providerState, &providerProject)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
 	}
@@ -47,7 +48,7 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 			res.ProviderRevisionID, providerID, res.ProviderID, ErrNoRows)
 	}
 
-	provider := &runtime.Provider{ID: providerID, RevisionID: res.ProviderRevisionID, Capabilities: []runtime.Capability{}}
+	provider := &runtime.Provider{ID: providerID, Name: providerName, Enabled: providerState == "active", ProjectID: providerProject, RevisionID: res.ProviderRevisionID, Capabilities: []runtime.Capability{}}
 	var cfg runtime.Configuration
 	var revisionModels []runtime.RevisionModel
 	var revisionSlots []runtime.RevisionSlot
@@ -72,6 +73,14 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	provider.CredentialHeaders = cfg.Options.CredentialHeaders
 	provider.ParameterDefaults = cfg.Options.ParameterDefaults
 	provider.VendorID = cfg.Options.VendorID
+	provider.Limits = cfg.Options.Limits
+	for _, revisionSlot := range revisionSlots {
+		provider.Slots = append(provider.Slots, revisionSlot.Slot)
+		if revisionSlot.Default {
+			provider.DefaultSlotID = revisionSlot.ID
+			provider.ActiveCredential = revisionSlot.CredentialID
+		}
+	}
 	for _, model := range revisionModels {
 		for _, c := range model.Capabilities {
 			if c.Source == "certified" {
@@ -97,12 +106,12 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	}
 
 	route := &runtime.Route{RevisionID: res.RouteRevisionID}
-	var operations, targets, policy, fidelity []byte
+	var operations, targets, policy, fidelity, contentPolicy []byte
 	err = tx.QueryRow(ctx,
-		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity
+		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy
          FROM olp_go.route_revisions v JOIN olp_go.routes r ON r.id=v.route_id WHERE v.id=$1`,
 		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
-		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &fidelity)
+		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &fidelity, &contentPolicy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
 	}
@@ -123,6 +132,11 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	if len(policy) > 0 {
 		if err = json.Unmarshal(policy, &route.Policy); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("route %s policy: %w", route.Slug, err)
+		}
+	}
+	if len(contentPolicy) > 0 {
+		if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
+			return nil, nil, nil, nil, err
 		}
 	}
 	route.Fidelity, err = runtime.DecodeFidelity(fidelity)

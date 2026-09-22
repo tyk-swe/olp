@@ -91,11 +91,13 @@ type execution struct {
 	emit            openai.Emit
 	estimate        int64
 
-	pin           *resources.Resource
-	pinnedSlot    *runtime.Slot
-	pinnedSecret  []byte
-	providerState bool
-	responseMap   map[string]string
+	historicalSnapshot *runtime.Snapshot
+	continuation       *continuationExecution
+	pin                *resources.Resource
+	pinnedSlot         *runtime.Slot
+	pinnedSecret       []byte
+	providerState      bool
+	responseMap        map[string]string
 
 	once       sync.Once
 	facts      []AttemptFact
@@ -138,7 +140,7 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 	remaining := x.budget
 	available := 0
 	for _, attempt := range x.attempts {
-		provider, ok := x.request.release.Snapshot.Providers[attempt.ProviderID]
+		provider, ok := x.snapshot().Providers[attempt.ProviderID]
 		if !ok {
 			continue
 		}
@@ -306,7 +308,7 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 	if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) {
 		return false
 	}
-	provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
+	provider := x.snapshot().Providers[attempt.ProviderID]
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
@@ -392,7 +394,7 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
 	if x.strict() {
-		provider := x.request.release.Snapshot.Providers[a.ProviderID]
+		provider := x.snapshot().Providers[a.ProviderID]
 		if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		}
@@ -433,6 +435,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			f = &attemptFailure{}
 		}
 		f.dispatched = st.dispatched.Load()
+		if x.continuation != nil && x.continuation.resource != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			_ = s.Resources.MarkUnknown(cleanup, x.continuation.resource)
+			cancel()
+		}
+
 		if fact.Interaction != nil {
 			f.noRetry = f.dispatched
 			fact.Interaction.UpstreamState = st.upstreamState()
@@ -530,6 +538,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if err != nil {
 		return fail(classCredential, nil)
 	}
+	if contract != nil && contract.ToolContinuation() {
+		if err := s.claimToolWork(actx, x, contract, a, slot); err != nil {
+			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true})
+		}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fail(st.classify(err, false), nil)
@@ -624,7 +637,53 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				return nil
 			}
 		}
-		completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
+		if contract != nil && contract.ToolContinuation() {
+			var projection *interaction.ToolProjection
+			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
+			if err == nil {
+				completion, err = protocols.StreamWithEvents(wire, wire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
+					frames, e := projection.Observe(event)
+					if e != nil {
+						return e
+					}
+					if watchdog != nil {
+						watchdog.Reset(a.Timeout)
+					}
+					for _, frame := range frames {
+						if e = emit(interaction.ContinuationFrame(frame)); e != nil {
+							return e
+						}
+						x.continuation.emitted++
+					}
+					return nil
+				})
+			}
+			if err == nil {
+				st.upstream.Store(3)
+				var state *interaction.Continuation
+				var delivery interaction.Delivery
+				state, delivery, err = projection.Complete(completion, x.continuation.resource.ID)
+				if err == nil {
+					err = s.validateToolDelivery(delivery)
+				}
+				if err == nil {
+					err = s.commitToolDelivery(ctx, x, state, delivery)
+				}
+				if err == nil {
+					for _, frame := range delivery.Frames[x.continuation.emitted:] {
+						actionable = actionable || interaction.ContinuationActionable(frame)
+						if err = emit(interaction.ContinuationFrame(frame)); err != nil {
+							break
+						}
+					}
+					if err == nil {
+						err = emit([]byte("data: [DONE]\n\n"))
+					}
+				}
+			}
+		} else {
+			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
+		}
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)
@@ -640,6 +699,21 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				if err == nil {
 					st.upstream.Store(3)
 					err = contract.ValidateResult(native.Native)
+				}
+				if err == nil && contract.ToolContinuation() {
+					var state *interaction.Continuation
+					var delivery interaction.Delivery
+					state, delivery, err = contract.ProjectUnary(native, x.continuation.resource.ID, min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
+					if err == nil {
+						err = s.validateToolDelivery(delivery)
+					}
+					if err == nil {
+						err = s.commitToolDelivery(ctx, x, state, delivery)
+					}
+					if err == nil {
+						completion = native
+						completion.Body = delivery.Body
+					}
 				}
 				if err == nil && wire == x.family {
 					completion = native

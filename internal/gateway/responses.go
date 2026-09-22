@@ -106,7 +106,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	if x.pin == nil {
 		return nil
 	}
-	p, _, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation())
+	p, historical, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation())
 	if e != nil {
 		return e
 	}
@@ -114,6 +114,19 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 		return serverError(http.StatusConflict, "provider_resource_credential_unavailable",
 			"The provider that owns this object can no longer serve this operation.")
 	}
+	// Preserve the historical provider and compiled route contract. Resolving
+	// only a slot/attempt and then reading the current provider changes defaults,
+	// endpoint or profile behind a retained response/continuation handle.
+	historical.Targets = []runtime.Target{p.target}
+	p.provider.Slots = []runtime.Slot{p.slot}
+	current := x.request.release.Snapshot
+	retained := &runtime.Snapshot{Generation: current.Generation, Providers: map[string]runtime.Provider{p.provider.ID: p.provider}, Routes: map[string]runtime.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
+	if err := retained.Validate(); err != nil {
+		return pinUnavailable()
+	}
+	x.historicalSnapshot = retained
+	route := retained.Routes[historical.Slug]
+	x.route = &route
 	x.attempts = []runtime.Attempt{p.attempt}
 	x.budget = 1
 	x.pinnedSlot = &p.slot
