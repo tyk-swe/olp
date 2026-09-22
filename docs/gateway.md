@@ -43,6 +43,12 @@ only when it validates and every referenced credential can be decrypted; a
 release that fails either check is skipped and the previous one stays active.
 Repeated publication is harmless.
 
+Route revisions carry an optional [fidelity declaration](qualification/fidelity/route-contracts.md).
+Historical omission remains legacy and retains its original snapshot encoding.
+Explicit transformed routes declare their intentional policy changes. Strict
+drafts reject redaction, and strict publication remains unavailable until the
+complete interaction planner can admit their obligations.
+
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older
 than 60 seconds, measured from the start of the last successful read, is stale:

@@ -612,6 +612,27 @@ func (e RouteDetailResponseState) Valid() bool {
 	}
 }
 
+// Defines values for RouteFidelityMode.
+const (
+	Legacy      RouteFidelityMode = "legacy"
+	Strict      RouteFidelityMode = "strict"
+	Transformed RouteFidelityMode = "transformed"
+)
+
+// Valid indicates whether the value is a known member of the RouteFidelityMode enum.
+func (e RouteFidelityMode) Valid() bool {
+	switch e {
+	case Legacy:
+		return true
+	case Strict:
+		return true
+	case Transformed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
 	Latency    RoutingStrategy = "latency"
@@ -1288,10 +1309,13 @@ type ConfigurationProviderEntry struct {
 
 // ConfigurationRouteEntry defines model for ConfigurationRouteEntry.
 type ConfigurationRouteEntry struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
+	MaxAttempts      int32          `json:"max_attempts"`
+	Operations       []string       `json:"operations"`
+	OverallTimeoutMs int32          `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
 	Project       nullable.Nullable[string]        `json:"project"`
@@ -1574,10 +1598,13 @@ type CreateProviderRequest struct {
 
 // CreateRouteDraftRequest defines model for CreateRouteDraftRequest.
 type CreateRouteDraftRequest struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       *[]string                        `json:"operations,omitempty"`
-	OverallTimeoutMs int64                            `json:"overall_timeout_ms"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
+	MaxAttempts      int32          `json:"max_attempts"`
+	Operations       *[]string      `json:"operations,omitempty"`
+	OverallTimeoutMs int64          `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
@@ -2764,12 +2791,15 @@ type RecentAuthenticationRequest struct {
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
-	Slug             string                           `json:"slug"`
-	Targets          []ReplaceRouteTargetRequest      `json:"targets"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity              `json:"fidelity,omitempty"`
+	MaxAttempts      int32                       `json:"max_attempts"`
+	Operations       []string                    `json:"operations"`
+	OverallTimeoutMs int32                       `json:"overall_timeout_ms"`
+	Slug             string                      `json:"slug"`
+	Targets          []ReplaceRouteTargetRequest `json:"targets"`
 }
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
@@ -2977,12 +3007,15 @@ type RouteDraftDetailResponse struct {
 	CreatedAt         time.Time                             `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
-	CreatedByEmail   nullable.Nullable[string] `json:"created_by_email,omitempty"`
-	Etag             openapi_types.UUID        `json:"etag"`
-	Id               openapi_types.UUID        `json:"id"`
-	MaxAttempts      int32                     `json:"max_attempts"`
-	Operations       []string                  `json:"operations"`
-	OverallTimeoutMs int32                     `json:"overall_timeout_ms"`
+	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
+	Etag           openapi_types.UUID        `json:"etag"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	Id               openapi_types.UUID               `json:"id"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -3002,13 +3035,25 @@ type RouteDraftListResponse struct {
 // RouteDraftResponse defines model for RouteDraftResponse.
 type RouteDraftResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
-	Id   openapi_types.UUID `json:"id"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	Id       openapi_types.UUID               `json:"id"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	Slug      string                                `json:"slug"`
 	State     string                                `json:"state"`
 }
+
+// RouteFidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+type RouteFidelity struct {
+	// Mode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+	Mode *RouteFidelityMode `json:"mode,omitempty"`
+}
+
+// RouteFidelityMode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+type RouteFidelityMode string
 
 // RouteListResponse defines model for RouteListResponse.
 type RouteListResponse struct {
@@ -3025,20 +3070,27 @@ type RouteRetireResponse struct {
 
 // RouteRevisionDiffResponse defines model for RouteRevisionDiffResponse.
 type RouteRevisionDiffResponse struct {
-	ContentPolicyChanged bool          `json:"content_policy_changed"`
-	FromRevision         int32         `json:"from_revision"`
-	MaxAttemptsChanged   bool          `json:"max_attempts_changed"`
-	OperationsAdded      []string      `json:"operations_added"`
-	OperationsRemoved    []string      `json:"operations_removed"`
-	RoutingPolicyAfter   RoutingPolicy `json:"routing_policy_after"`
-	RoutingPolicyBefore  RoutingPolicy `json:"routing_policy_before"`
-	RoutingPolicyChanged bool          `json:"routing_policy_changed"`
-	SlugChanged          bool          `json:"slug_changed"`
-	TargetsAdded         []string      `json:"targets_added"`
-	TargetsChanged       []string      `json:"targets_changed"`
-	TargetsRemoved       []string      `json:"targets_removed"`
-	TimeoutChanged       bool          `json:"timeout_changed"`
-	ToRevision           int32         `json:"to_revision"`
+	ContentPolicyChanged bool `json:"content_policy_changed"`
+
+	// FidelityAfter Null means the route retains its historical legacy contract.
+	FidelityAfter nullable.Nullable[RouteFidelity] `json:"fidelity_after,omitempty"`
+
+	// FidelityBefore Null means the route retains its historical legacy contract.
+	FidelityBefore       nullable.Nullable[RouteFidelity] `json:"fidelity_before,omitempty"`
+	FidelityChanged      *bool                            `json:"fidelity_changed,omitempty"`
+	FromRevision         int32                            `json:"from_revision"`
+	MaxAttemptsChanged   bool                             `json:"max_attempts_changed"`
+	OperationsAdded      []string                         `json:"operations_added"`
+	OperationsRemoved    []string                         `json:"operations_removed"`
+	RoutingPolicyAfter   RoutingPolicy                    `json:"routing_policy_after"`
+	RoutingPolicyBefore  RoutingPolicy                    `json:"routing_policy_before"`
+	RoutingPolicyChanged bool                             `json:"routing_policy_changed"`
+	SlugChanged          bool                             `json:"slug_changed"`
+	TargetsAdded         []string                         `json:"targets_added"`
+	TargetsChanged       []string                         `json:"targets_changed"`
+	TargetsRemoved       []string                         `json:"targets_removed"`
+	TimeoutChanged       bool                             `json:"timeout_changed"`
+	ToRevision           int32                            `json:"to_revision"`
 }
 
 // RouteRevisionListResponse defines model for RouteRevisionListResponse.
@@ -3049,9 +3101,12 @@ type RouteRevisionListResponse struct {
 
 // RouteRevisionResponse defines model for RouteRevisionResponse.
 type RouteRevisionResponse struct {
-	ActivatedAt      time.Time                        `json:"activated_at"`
-	ActivatedBy      openapi_types.UUID               `json:"activated_by"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	ActivatedAt   time.Time                        `json:"activated_at"`
+	ActivatedBy   openapi_types.UUID               `json:"activated_by"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
 	Id               openapi_types.UUID               `json:"id"`
 	MaxAttempts      int32                            `json:"max_attempts"`
 	Operations       []string                         `json:"operations"`

@@ -393,7 +393,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp_go.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil}},
+		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, nil}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
 		{match: "FROM olp_go.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
 		{match: "FROM olp_go.projects", rows: [][]any{{"edge-id", "Edge"}}},

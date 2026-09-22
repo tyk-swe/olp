@@ -165,15 +165,15 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var operations, targets, policy, contentPolicy []byte
+		var operations, targets, policy, contentPolicy, fidelity []byte
 		route := Route{}
-		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy); err != nil {
+		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy, &fidelity); err != nil {
 			return nil, err
 		}
 		var published []PublishedTarget
@@ -192,6 +192,10 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
 				return nil, fmt.Errorf("route %s content policy: %w", route.Slug, err)
 			}
+		}
+		route.Fidelity, err = DecodeFidelity(fidelity)
+		if err != nil {
+			return nil, fmt.Errorf("route %s fidelity: %w", route.Slug, err)
 		}
 		route.RoutingID = route.ID
 		route.PublishedAt = route.PublishedAt.UTC()

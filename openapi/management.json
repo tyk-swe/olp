@@ -1648,6 +1648,9 @@
               "$ref": "#/components/schemas/ConfigurationRouteTarget"
             },
             "type": "array"
+          },
+          "fidelity": {
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -2521,6 +2524,9 @@
               "$ref": "#/components/schemas/RouteTargetRequest"
             },
             "type": "array"
+          },
+          "fidelity": {
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -6745,6 +6751,9 @@
               "$ref": "#/components/schemas/ReplaceRouteTargetRequest"
             },
             "type": "array"
+          },
+          "fidelity": {
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -7482,6 +7491,17 @@
           "updated_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "fidelity": {
+            "description": "Null means the route retains its historical legacy contract.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7544,6 +7564,17 @@
           },
           "state": {
             "type": "string"
+          },
+          "fidelity": {
+            "description": "Null means the route retains its historical legacy contract.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7652,6 +7683,31 @@
           "to_revision": {
             "format": "int32",
             "type": "integer"
+          },
+          "fidelity_changed": {
+            "type": "boolean"
+          },
+          "fidelity_before": {
+            "description": "Null means the route retains its historical legacy contract.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fidelity_after": {
+            "description": "Null means the route retains its historical legacy contract.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7753,6 +7809,17 @@
               "$ref": "#/components/schemas/RouteTargetResponse"
             },
             "type": "array"
+          },
+          "fidelity": {
+            "description": "Null means the route retains its historical legacy contract.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9633,6 +9700,23 @@
           "parameters",
           "documentation_url"
         ],
+        "type": "object"
+      },
+      "RouteFidelity": {
+        "additionalProperties": false,
+        "description": "Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.",
+        "properties": {
+          "mode": {
+            "default": "strict",
+            "description": "Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.",
+            "enum": [
+              "legacy",
+              "strict",
+              "transformed"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       }
     },

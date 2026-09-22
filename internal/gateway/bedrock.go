@@ -14,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"

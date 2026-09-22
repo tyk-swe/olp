@@ -264,6 +264,12 @@ credential authority export a stable `credential_ref` of
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
+Routes may carry a [fidelity declaration](qualification/fidelity/route-contracts.md).
+Historical legacy omission stays omitted in exports. Importing an old artifact
+without this field preserves an existing staged or published contract; explicit
+mode changes remain visible in revision history. Configuration staging never
+activates a strict route or bypasses its policy checks.
+
 `POST /api/v3/configuration/plan` validates an artifact and reports
 `{digest, actions, conflicts, blockers}` without mutating. Validation rejects
 unknown fields, oversized collections, duplicate natural identities
