@@ -844,7 +844,8 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		obj, err := fileObject(row)
 		if err != nil {
-			continue
+			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list could not be projected."), x.family)
+			return
 		}
 		items = append(items, obj)
 	}
@@ -872,7 +873,9 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
 		metadata, state, expires := fileMetadata(body, resourceModel(res))
-		_ = s.Resources.Update(ctx, res.ID, state, metadata, expires)
+		if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
+		}
 		res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
 		out, err := rewriteID(body, "id", res.ID)
 		if err != nil {
@@ -927,25 +930,49 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		x.dispatched = true
-		if ct := resp.Header.Get("Content-Type"); ct != "" {
-			w.Header().Set("Content-Type", ct)
-		} else {
-			w.Header().Set("Content-Type", "application/octet-stream")
+		// Stage the bounded upstream body before committing headers. Otherwise
+		// a provider overflow would become a successful but truncated download.
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
 		}
+		spool := s.transport().Spool
+		if spool == nil {
+			return serverError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
+		}
+		artifact, err := spool.Put(ctx, media.Upload{
+			Filename: "file-content", ContentType: contentType,
+			MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body,
+		})
+		if err != nil {
+			if len(x.facts) > 0 {
+				fact := &x.facts[len(x.facts)-1]
+				fact.Class, fact.UsageComplete, fact.BillingUncertain = classProtocol, false, true
+			}
+			var tooLarge *media.TooLargeError
+			if errors.As(err, &tooLarge) {
+				return serverError(http.StatusBadGateway, "upstream_response_too_large", "The provider file exceeded the configured response bound.")
+			}
+			return serverError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
+		}
+		defer spool.Remove(artifact.Handle)
+		opened, err := spool.Open(artifact.Handle)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "media_content_unavailable", "The staged provider file could not be read.")
+		}
+		defer opened.File.Close()
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
+			return serverError(http.StatusInternalServerError, "internal_error", "The file response could not be bounded.")
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Length", fmt.Sprint(artifact.ContentLength))
 		w.WriteHeader(http.StatusOK)
 		x.delivered(s.now())
-		written, _ := io.Copy(w, io.LimitReader(resp.Body, s.cfg.MaxResponseBytes))
-		overflow := false
-		if written == s.cfg.MaxResponseBytes {
-			var probe [1]byte
-			if n, _ := resp.Body.Read(probe[:]); n > 0 {
-				overflow = true
-			}
-		}
-		if overflow && len(x.facts) > 0 {
-			fact := &x.facts[len(x.facts)-1]
-			fact.UsageComplete = false
-			fact.BillingUncertain = true
+		written, copyErr := io.Copy(w, opened.File)
+		if copyErr != nil || written != artifact.ContentLength {
+			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
+			s.finish(x, &outcome{err: x.failure, committed: true}, x.failure.Status)
+			return nil
 		}
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
@@ -1208,7 +1235,8 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		obj, err := s.batchObject(r.Context(), row)
 		if err != nil {
-			continue
+			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."), x.family)
+			return
 		}
 		items = append(items, obj)
 	}
@@ -1246,7 +1274,9 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
 	metadata, state := batchMetadata(result, resourceModel(res))
-	_ = s.Resources.Update(ctx, res.ID, state, metadata, nil)
+	if err := s.Resources.Update(ctx, res.ID, state, metadata, nil); err != nil {
+		return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
+	}
 	res.State, res.Metadata = state, metadata
 	out, err := s.batchObject(ctx, res)
 	if err != nil {

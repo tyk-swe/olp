@@ -373,24 +373,39 @@ func TestBatchLifecycle(t *testing.T) {
 	if fixture.dials.Load() != before {
 		t.Fatal("a metadata-only list must not contact the provider")
 	}
+	var originalFileMetadata []byte
+	if err := h.Pool.QueryRow(t.Context(), `SELECT metadata FROM olp_go.provider_resources WHERE kind='file' AND route_slug=$1`, slug).Scan(&originalFileMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata='[]'::jsonb WHERE kind='file' AND route_slug=$1`, slug); err != nil {
+		t.Fatal(err)
+	}
+	status, raw, _ := h.gatewayRaw("GET", "/v1/files", secret, nil, nil)
+	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != before {
+		t.Fatalf("corrupt file was silently omitted from local list: status=%d body=%s", status, raw)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata=$2::jsonb WHERE kind='file' AND route_slug=$1`, slug, string(originalFileMetadata)); err != nil {
+		t.Fatal(err)
+	}
 
 	status, fetched, _ := h.gateway("GET", "/v1/files/"+fileID, secret, nil)
 	if status != 200 || fetched["id"] != fileID {
 		t.Fatalf("get file: %d %v", status, fetched)
 	}
-	status, raw, _ := h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
+	status, raw, _ = h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
 	if status != 200 || string(raw) != fileContent {
 		t.Fatalf("file content: %d %q", status, raw)
 	}
 
 	fixture.content.Store(strings.Repeat("z", (1<<20)+64))
 	status, raw, _ = h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
-	if status != 200 || len(raw) != 1<<20 {
-		t.Fatalf("content overflow: %d %d bytes", status, len(raw))
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"upstream_response_too_large"`)) || len(raw) >= 1<<20 {
+		t.Fatalf("provider file overflow looked like a successful truncated download: %d %d bytes %s", status, len(raw), raw)
 	}
-	overflow := sink.last().Attempts[len(sink.last().Attempts)-1]
-	if overflow.UsageComplete || !overflow.BillingUncertain {
-		t.Fatalf("overflow attempt not marked incomplete/uncertain: %+v", overflow)
+	overflowEnvelope := sink.last()
+	overflow := overflowEnvelope.Attempts[len(overflowEnvelope.Attempts)-1]
+	if overflowEnvelope.Outcome != "failure" || overflowEnvelope.Committed || overflow.Class != "protocol" || overflow.UsageComplete || !overflow.BillingUncertain {
+		t.Fatalf("overflow acceptance/observation was not separated: %+v %+v", overflowEnvelope, overflow)
 	}
 	fixture.content.Store(fileContent)
 	status, fetched, _ = h.gateway("GET", "/v1/files/"+fileID, otherSecret, nil)
@@ -426,6 +441,11 @@ func TestBatchLifecycle(t *testing.T) {
 	status, raw, _ = h.gatewayRaw("GET", "/v1/batches/"+batchID, secret, nil, nil)
 	if status < 500 || bytes.Contains(raw, []byte("file-up-out")) {
 		t.Fatalf("mapping collision leaked upstream identifier: %d %s", status, raw)
+	}
+	beforeList := fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw("GET", "/v1/batches", secret, nil, nil)
+	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != beforeList {
+		t.Fatalf("unprojectable batch was silently omitted from local list: status=%d body=%s", status, raw)
 	}
 	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp_go.provider_resources WHERE kind='file' AND upstream_id='file-up-out'`); err != nil {
 		t.Fatal(err)
