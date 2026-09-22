@@ -74,6 +74,28 @@ func TestConfiguredImageDefaultsPreserveSourcePresenceAndNumbers(t *testing.T) {
 	}
 }
 
+func TestConfiguredImageUsesOrderedImmutableNativeSource(t *testing.T) {
+	input := []byte(`{"prompt":"p","vendor":{"quantized":9007199254740993,"negative_zero":-0},"model":"images"}`)
+	r, failure := DecodeImageGeneration(input)
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	cfg := mediaDefaultsConfig(t, OpImageGeneration, map[string]json.RawMessage{
+		"quality": json.RawMessage(`"high"`),
+	}, nil)
+	call, _, failure := EncodeConfigured(r, cfg, "native-image")
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	want := `{"prompt":"p","vendor":{"quantized":9007199254740993,"negative_zero":-0},"model":"native-image","quality":"high"}`
+	if string(call.JSON) != want {
+		t.Fatalf("native member order or numeric source changed:\n got %s\nwant %s", call.JSON, want)
+	}
+	if r.SourceDocument().Raw() != string(input) {
+		t.Fatal("configured request changed its immutable caller source")
+	}
+}
+
 func TestConfiguredJSONDefaultsUseBindingAtomsAndRetainLegacyEncoding(t *testing.T) {
 	r, failure := DecodeImageGeneration([]byte(`{"model":"images","prompt":"p"}`))
 	if failure != nil {
