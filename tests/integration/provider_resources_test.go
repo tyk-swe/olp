@@ -63,15 +63,16 @@ func (c *captureSink) all() []gateway.Envelope {
 
 type openaiFixture struct {
 	*httptest.Server
-	files    map[string]map[string]any
-	batches  map[string]map[string]any
-	resps    map[string]map[string]any
-	mu       sync.Mutex
-	lastReq  atomic.Value
-	lastPath atomic.Value
-	content  atomic.Value
-	respID   atomic.Value
-	dials    atomic.Int64
+	files        map[string]map[string]any
+	batches      map[string]map[string]any
+	resps        map[string]map[string]any
+	mu           sync.Mutex
+	lastReq      atomic.Value
+	lastBatchRaw atomic.Value
+	lastPath     atomic.Value
+	content      atomic.Value
+	respID       atomic.Value
+	dials        atomic.Int64
 }
 
 func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
@@ -139,9 +140,19 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("POST /openai/batches", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
-		body := decodeBody(t, r)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid batch fixture body", http.StatusBadRequest)
+			return
+		}
+		body := map[string]any{}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			http.Error(w, "invalid batch fixture JSON", http.StatusBadRequest)
+			return
+		}
 		f.mu.Lock()
 		f.lastReq.Store(body)
+		f.lastBatchRaw.Store(string(raw))
 		f.mu.Unlock()
 		batch := map[string]any{}
 		for k, v := range f.batches["batch-up-1"] {
@@ -413,7 +424,22 @@ func TestBatchLifecycle(t *testing.T) {
 		t.Fatalf("other key file: %d %v", status, fetched)
 	}
 
-	status, batch, _ := h.gateway("POST", "/v1/batches", secret, map[string]any{"input_file_id": fileID, "endpoint": "/v1/chat/completions", "completion_window": "24h"})
+	beforeBatch := fixture.dials.Load()
+	for _, rejected := range []string{
+		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions"}`,
+		`{"input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions","id":"caller-selected"}`,
+	} {
+		status, raw, _ = h.gatewayRaw("POST", "/v1/batches", secret, strings.NewReader(rejected), map[string]string{"Content-Type": "application/json"})
+		if status != http.StatusBadRequest || fixture.dials.Load() != beforeBatch {
+			t.Fatalf("ambiguous or caller-owned batch identity dispatched: status=%d body=%s", status, raw)
+		}
+	}
+	batchSource := `{"completion_window":"24h","native":{"rank":9007199254740993,"tiny":-0},"input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions"}`
+	status, raw, _ = h.gatewayRaw("POST", "/v1/batches", secret, strings.NewReader(batchSource), map[string]string{"Content-Type": "application/json"})
+	var batch map[string]any
+	if err := json.Unmarshal(raw, &batch); err != nil {
+		t.Fatalf("batch response: %s: %v", raw, err)
+	}
 	if status != 200 {
 		t.Fatalf("create batch: %d %v", status, batch)
 	}
@@ -424,6 +450,10 @@ func TestBatchLifecycle(t *testing.T) {
 	sent, _ := fixture.lastReq.Load().(map[string]any)
 	if sent["input_file_id"] != "file-up-1" {
 		t.Fatalf("upstream did not receive the rewritten file identifier: %v", sent)
+	}
+	wantBatchRaw := `{"completion_window":"24h","native":{"rank":9007199254740993,"tiny":-0},"input_file_id":"file-up-1","endpoint":"/v1/chat/completions","model":"` + vendorModel + `"}`
+	if got := fixture.lastBatchRaw.Load().(string); got != wantBatchRaw {
+		t.Fatalf("batch source, numeric syntax or overlay order changed:\n got %s\nwant %s", got, wantBatchRaw)
 	}
 
 	fixture.mu.Lock()

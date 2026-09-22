@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -1093,13 +1094,18 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	var request map[string]json.RawMessage
-	if json.Unmarshal(body, &request) != nil {
+	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	if err != nil || source.Root().Kind() != oif.Object {
 		s.stateFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil), x.family)
 		return
 	}
-	localFile, ok := upstreamString(body, "input_file_id")
-	if !ok || !strings.HasPrefix(localFile, "file_") {
+	if _, supplied := source.Root().Lookup("id"); supplied {
+		s.stateFail(x, w, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id")), x.family)
+		return
+	}
+	fileValue, ok := source.Root().Lookup("input_file_id")
+	localFile, valid := fileValue.Text()
+	if !ok || !valid || !strings.HasPrefix(localFile, "file_") {
 		param := "input_file_id"
 		s.stateFail(x, w, invalidRequest("missing_required_parameter", "input_file_id must name a file uploaded through this key.", &param), x.family)
 		return
@@ -1136,15 +1142,21 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.hold = gate.hold
-	request["input_file_id"], _ = json.Marshal(file.UpstreamID)
+	upstreamFile, _ := json.Marshal(file.UpstreamID)
+	changes := []oif.Change{{Pointer: "/input_file_id", Value: string(upstreamFile), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"}}
 	if p.provider.Kind == "azure_openai" {
 		deployment := p.provider.Connector().Model(p.model)
 		if deployment != "" {
-			request["model"], _ = json.Marshal(deployment)
+			upstreamModel, _ := json.Marshal(deployment)
+			changes = append(changes, oif.Change{Pointer: "/model", Value: string(upstreamModel), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
 		}
 	}
-	delete(request, "id")
-	upstream, _ := json.Marshal(request)
+	effective, err := oif.Apply(source, changes)
+	if err != nil {
+		s.stateFail(x, w, invalidRequest("invalid_json", "The batch request could not be bound to its provider resource.", nil), x.family)
+		return
+	}
+	upstream := effective.Bytes()
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches", nil)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
