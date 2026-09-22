@@ -73,12 +73,15 @@ func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, 
 	if err != nil {
 		return err
 	}
-	var a, b any
-	_ = json.Unmarshal(current, &a)
-	_ = json.Unmarshal(encoded, &b)
-	left, _ := json.Marshal(a)
-	right, _ := json.Marshal(b)
-	if string(left) == string(right) {
+	var stored providers.Configuration
+	if err := json.Unmarshal(current, &stored); err != nil {
+		return err
+	}
+	canonical, err := json.Marshal(stored)
+	if err != nil {
+		return err
+	}
+	if string(canonical) == string(encoded) {
 		return nil
 	}
 	_, err = tx.Exec(ctx, "UPDATE olp_go.providers SET configuration=$2,etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, encoded, access.NewID())

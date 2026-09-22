@@ -66,7 +66,7 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 			SELECT 1 FROM jsonb_array_elements(r.models) published,jsonb_array_elements(published->'capabilities') c
 			WHERE published->>'id'=m.id::text AND c->>'source'='certified' AND ($4='' OR c->>'surface'=$4)
 		),
-		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::jsonb)
+		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::json)
 		FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id
 		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
