@@ -19,7 +19,7 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
       messages: [
         {
           role: 'user',
-          content: 'What are the weather and local time in Paris?'
+          content: 'Weather and time in Paris?'
         }
       ],
       tools: [

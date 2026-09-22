@@ -155,6 +155,15 @@ const server = createServer(async (request, response) => {
     parsed.messages?.length === 1 &&
     parsed.stream === true
   ) {
+    if (parsed.messages[0]?.content !== 'Weather and time in Paris?') {
+      unexpected.push('first native user history changed');
+      return json(response, 400, {
+        error: {
+          type: 'invalid_request_error',
+          message: 'first history changed'
+        }
+      });
+    }
     response.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-store'
