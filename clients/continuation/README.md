@@ -9,7 +9,11 @@ send complete history through the native API and need no OLP helper.
 `streamTurn` sends one timestamp/UUID submission identity, reads ordinary Chat
 chunks plus ordered `olp.observation` extensions, and returns the standard
 assistant message and opaque handle only after a terminal `olp.ready:true`
-delivery. A complete assistant plus one ordered result per call is passed to
+delivery. The terminal extension also returns validated provider-native usage
+categories in `olp.native_usage`; cache-read tokens appear in standard Chat
+`prompt_tokens_details`, while cache-write and TTL details stay in that
+versioned extension. An unknown native category makes the delivery incomplete.
+A complete assistant plus one ordered result per call is passed to
 `nextTurn`; `unaryTurn` submits it with the previous handle and a fresh
 submission identity. Keep the returned submission identity unchanged when
 retrying the **same** request after a client or network failure. A retry of a

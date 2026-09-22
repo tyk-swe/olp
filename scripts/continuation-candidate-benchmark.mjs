@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { compare as validateReference } from './continuation-barrier-benchmark.mjs';
 
-const schema = 'openllmproxy.dev/continuation-candidate-performance/v1';
-const contract = 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1';
+const schema = 'openllmproxy.dev/continuation-candidate-performance/v2';
+const contract = 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/2';
 const runner = 'scripts/continuation-candidate-benchmark.mjs';
 const harness = 'tests/integration/continuation_candidate_benchmark_test.go';
 const reference = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
@@ -29,7 +29,7 @@ export const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'o
 export const conditions = {
   network: 'IPv4 loopback, two warm HTTP/1.1 inference hops, no inference TLS',
   authority: 'Public strict Anthropic Messages profile, same disposable PostgreSQL release and provider fixture, state-enabled API key and existing encrypted resource authority',
-  workflow: 'Go SDK-equivalent parser of the versioned OpenAI Chat chunks and standard assistant/tool history; pinned JavaScript/Python official SDKs qualified separately with the same native oracle',
+  workflow: 'Go SDK-equivalent parser of the versioned OpenAI Chat chunks, exact provider-native usage categories and standard assistant/tool history; pinned JavaScript/Python official SDKs qualified separately with the same native oracle',
   history: 'Original user turn or the same additional 262144 ASCII bytes in both provider requests and the encrypted complete dependency',
   reference_relation: 'Same frozen native first/next request and 19-event provider oracle. Candidate action-ready means first actionable projected tool chunk followed by a separate authenticated public GET that decrypts committed ready state, before either fixture action. Native wire-tool is earlier and is not a candidate observation.',
   outcomes: '24 complete two-turn workflows, 48 provider dispatches, 456 native events, 312 ordered first-turn projected observations, 48 final-turn observations, 48 fixture actions and 24 ready checks per repetition. Any unexpected provider request or response fails the test.',

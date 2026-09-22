@@ -15,6 +15,10 @@ per client. Both clients rejected a missing carrier before dispatch, verified
 ordered observations and no exposed signature, read a committed recovery
 delivery, replayed the same submission without another Attempt and completed
 the next turn. The helpers reject unqualified SDK versions before sending.
+The versioned client extension retains exact native usage categories; standard
+Chat usage includes cached-read detail, while cache-write and TTL categories
+remain in `olp.native_usage`. Unknown usage categories fail the strict runtime
+guard rather than disappearing from a successful translated response.
 An additional official JavaScript SDK test consumed the committed first stream
 inside its transport, raised a connection error, and let the SDK automatically
 retry: both proxy HTTP requests carried the same submission identity, while
@@ -80,6 +84,9 @@ workflow p50. Its source, storage and hardware identities passed the runner's
 strict checks. Ambient host load before capture was 2.60 (one minute) versus
 0.63 before the first candidate; the worsening across all four workloads is
 not evidence that the code change caused a regression, nor is it a passing
-result. The optimization needs a controlled same-condition differential and
-further hot-path diagnosis. A new clean capture must pass the unchanged frozen
+result. Both retained artifacts use candidate oracle version 1. Candidate
+oracle version 2 also verifies exact native usage categories; the earlier
+failures remain reviewable at their recorded source revisions. The
+optimization needs a controlled same-condition differential and further
+hot-path diagnosis. A new clean capture must pass the unchanged frozen
 limits before the performance portion of qualification can be called complete.

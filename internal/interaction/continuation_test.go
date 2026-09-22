@@ -152,3 +152,80 @@ func TestNegotiatedUnaryUsesSameNativeOrderedProjection(t *testing.T) {
 		t.Fatalf("wrong unary projection: %s", delivery.Body)
 	}
 }
+
+func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
+	expectedUsage := []byte(`{"input_tokens":3,"output_tokens":28,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}`)
+	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())
+	frozen, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withCache := strings.Replace(string(frozen), `"usage":{"input_tokens":18,"output_tokens":1}`, `"usage":{"input_tokens":3,"output_tokens":1,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}`, 1)
+	projection, err := plan.NewToolProjection(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion, err := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(withCache), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+		_, err := projection.Observe(event)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, delivery, err := projection.Complete(completion, "continuation_usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := oif.ParseJSON(delivery.Frames[len(delivery.Frames)-1], oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeUsage, present := terminal.Lookup("/olp/native_usage")
+	if !present || fidelity.Compare(expectedUsage, nativeUsage.Bytes()) != nil {
+		t.Fatalf("native cache-read/write/TTL usage was lost: %s", terminal.Bytes())
+	}
+	if prompt, present := terminal.Lookup("/usage/prompt_tokens"); !present || prompt.Raw() != "53" {
+		t.Fatal("normalized prompt usage did not include native cache categories")
+	}
+	if cached, present := terminal.Lookup("/usage/prompt_tokens_details/cached_tokens"); !present || cached.Raw() != "20" {
+		t.Fatal("standard Chat cached-token detail was omitted")
+	}
+	// The unary path must expose the same native categories while projecting a
+	// standard Chat response. Unknown categories cannot silently disappear.
+	unary := strings.Replace(toolSource, `"stream":true,`, "", 1)
+	unaryPlan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, unary), toolContext())
+	body := []byte(`{"id":"message-usage","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-weather","name":"weather","input":{"city":"Paris"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":28,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":5}}}`)
+	native, err := protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "route", "", unaryPlan.EffectiveRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, unaryDelivery, err := unaryPlan.ProjectUnary(native, "continuation_usage_unary", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unaryDocument, err := oif.ParseJSON(unaryDelivery.Body, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeUsage, present = unaryDocument.Lookup("/olp/native_usage")
+	if !present || fidelity.Compare(expectedUsage, nativeUsage.Bytes()) != nil {
+		t.Fatalf("unary native usage lost: %s", unaryDelivery.Body)
+	}
+	withUnknown := strings.Replace(withCache, `"cache_read_input_tokens":20`, `"future_token_category":1,"cache_read_input_tokens":20`, 1)
+	projection, err = plan.NewToolProjection(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(withUnknown), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+		_, err := projection.Observe(event)
+		return err
+	})
+	assertReason(t, err, "fidelity_protocol_violation")
+	unknownUnary := bytes.Replace(body, []byte(`"cache_read_input_tokens":20`), []byte(`"future_token_category":1,"cache_read_input_tokens":20`), 1)
+	native, err = protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, unknownUnary, "route", "", unaryPlan.EffectiveRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = unaryPlan.ProjectUnary(native, "continuation_unknown_usage", 1<<20)
+	assertReason(t, err, "fidelity_protocol_violation")
+}

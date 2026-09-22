@@ -27,7 +27,7 @@ function completeRuns() {
       actions: 48, ready_checks: 24, rejected: 0,
       history_bytes: size === 'large' ? 262144 : 0,
       state_bytes: size === 'large' ? 527000 : 2100,
-      contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1', metrics
+      contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/2', metrics
     });
   }
   return runs;
@@ -35,8 +35,8 @@ function completeRuns() {
 
 function completeEvidence() {
   return {
-    schema: 'openllmproxy.dev/continuation-candidate-performance/v1',
-    contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1',
+    schema: 'openllmproxy.dev/continuation-candidate-performance/v2',
+    contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/2',
     working_tree: '',
     reference_sha256: hash(baselinePath), frozen_budget_sha256: hash(budgetPath),
     reference_revision: baseline.source_revision,

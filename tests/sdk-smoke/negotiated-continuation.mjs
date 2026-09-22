@@ -47,6 +47,7 @@ assert.deepEqual(first.assistant.tool_calls.map((call) => call.id), ['call-weath
 assert.deepEqual(first.observations.filter((item) => item.phase === 'start').map((item) => item.type),
   ['thinking', 'text', 'tool_use', 'tool_use', 'text']);
 assert.ok(first.observations.some((item) => item.type === 'thinking' && item.opaque_state === true));
+assert.deepEqual(first.nativeUsage, { input_tokens: 18, output_tokens: 28 });
 assert.ok(!JSON.stringify(first.chunks).includes('opaque-fixture-signature-do-not-log'));
 const recovered = await recoverSubmission(origin, key, first.submission, localOnlyFetch);
 assert.equal(recovered.handle, first.handle);
@@ -62,4 +63,5 @@ const next = nextTurn(request, first, [
 const final = await unaryTurn(client, next, { handle: first.handle });
 assert.equal(final.response.choices[0].message.content, 'Both tools completed.');
 assert.equal(final.response.choices[0].finish_reason, 'stop');
+assert.deepEqual(final.nativeUsage, { input_tokens: 30, output_tokens: 4 });
 process.stdout.write(JSON.stringify({ sdk: 'openai-js-7.4.0', first: first.handle, final: final.handle, observations: first.observations.length }) + '\n');

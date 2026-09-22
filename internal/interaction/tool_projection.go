@@ -24,6 +24,7 @@ type ToolProjection struct {
 	active            map[int]*toolBlock
 	frames            []json.RawMessage
 	observations      []json.RawMessage
+	nativeUsage       map[string]json.RawMessage
 	blocked           bool
 	started, terminal bool
 	finish            string
@@ -72,6 +73,34 @@ func (p *ToolProjection) chunk(delta any, observation map[string]any) ([]byte, e
 	return frame, nil
 }
 
+// Preserve exact provider usage categories in the negotiated extension. The
+// ordinary Chat usage object has no fields for Anthropic cache-write TTLs.
+// Unknown categories fail closed before a ready result can be published.
+func (p *ToolProjection) recordNativeUsage(usage oif.Value) error {
+	if !onlyMembers(usage, "input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens cache_creation") {
+		return guardFailure("/usage", "qualified_native_usage_categories")
+	}
+	if p.nativeUsage == nil {
+		p.nativeUsage = map[string]json.RawMessage{}
+	}
+	for _, field := range usage.Members() {
+		if field.Name == "cache_creation" {
+			if !onlyMembers(field.Value, "ephemeral_5m_input_tokens ephemeral_1h_input_tokens") {
+				return guardFailure("/usage/cache_creation", "qualified_native_cache_ttls")
+			}
+			for _, detail := range field.Value.Members() {
+				if !nonnegativeInteger(detail.Value) {
+					return guardFailure("/usage/cache_creation", "native_cache_token_count")
+				}
+			}
+		} else if !nonnegativeInteger(field.Value) {
+			return guardFailure("/usage/"+field.Name, "native_token_count")
+		}
+		p.nativeUsage[field.Name] = field.Value.Bytes()
+	}
+	return nil
+}
+
 // Observe processes one native event synchronously. Before a tool starts,
 // non-actionable text/reasoning observations are incremental. A tool turn's
 // complete assistant history (including later blocks/signatures) is required to
@@ -98,6 +127,11 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		p.started = true
 		p.id = valueText(member(message, "id"))
 		p.model = valueText(member(message, "model"))
+		if usage, present := message.Lookup("usage"); present {
+			if err := p.recordNativeUsage(usage); err != nil {
+				return nil, err
+			}
+		}
 	case "content_block_start":
 		if !p.started || p.terminal || !onlyMembers(root, "type index content_block") {
 			return nil, guardFailure("/events", "block_start_contract")
@@ -261,6 +295,11 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		if !onlyMembers(root, "type delta usage") || len(p.active) > 0 {
 			return nil, guardFailure("/events", "message_delta_contract")
 		}
+		if usage, present := root.Lookup("usage"); present {
+			if err := p.recordNativeUsage(usage); err != nil {
+				return nil, err
+			}
+		}
 		delta := member(root, "delta")
 		if !onlyMembers(delta, "stop_reason stop_sequence") {
 			return nil, guardFailure("/events", "terminal_metadata")
@@ -306,7 +345,7 @@ func (p *Plan) declaresTool(name string) bool {
 // terminal result. It builds a bounded delivery; the caller still must commit
 // it and its dependency state before emitting the queued frames or handle.
 func (p *ToolProjection) Complete(completion *openai.Completion, handle string) (*Continuation, Delivery, error) {
-	if !p.terminal || completion == nil || completion.Usage == nil || handle == "" {
+	if !p.terminal || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" {
 		return nil, Delivery{}, guardFailure("/result", "complete_recoverable_result")
 	}
 	assistant := map[string]any{"role": "assistant", "content": p.content.String()}
@@ -317,7 +356,10 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 	blocks, _ := json.Marshal(p.blocks)
 	state := &Continuation{Version: ContinuationV1, Source: p.plan.prepared.Request().Document().Bytes(), NativeRequest: p.plan.Body(), Blocks: blocks, Assistant: assistantRaw}
 	usage := map[string]any{"prompt_tokens": completion.Usage.InputTokens, "completion_tokens": completion.Usage.OutputTokens, "total_tokens": completion.Usage.TotalTokens}
-	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true}
+	if completion.Usage.CachedInputTokens != nil {
+		usage["prompt_tokens_details"] = map[string]any{"cached_tokens": *completion.Usage.CachedInputTokens}
+	}
+	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage}
 	finish := completion.FinishReason
 	if p.finish == "tool_use" {
 		finish = "tool_calls"

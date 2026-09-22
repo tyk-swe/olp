@@ -59,6 +59,7 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
         "thinking", "text", "tool_use", "tool_use", "text"
     ]
     assert any(item["type"] == "thinking" and item.get("opaque_state") is True for item in first["observations"])
+    assert first["native_usage"] == {"input_tokens": 18, "output_tokens": 28}
     assert "opaque-fixture-signature-do-not-log" not in repr(first["chunks"])
     recovered = recover_submission(origin, key, first["submission"])
     assert recovered["handle"] == first["handle"]
@@ -74,4 +75,5 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
     final = unary_turn(client, next_request, handle=first["handle"])
     assert final["response"].choices[0].message.content == "Both tools completed."
     assert final["response"].choices[0].finish_reason == "stop"
+    assert final["native_usage"] == {"input_tokens": 30, "output_tokens": 4}
     print(f"openai-python-3.8.0: {len(first['observations'])} observations; two native dispatches")

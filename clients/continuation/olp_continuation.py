@@ -67,6 +67,7 @@ def stream_turn(
     ready_handle = None
     finish = None
     usage = None
+    native_usage = None
     terminal = False
     for chunk in stream:
         ext = _extension(chunk)
@@ -98,8 +99,9 @@ def stream_turn(
             finish = choice.finish_reason
             ready_handle = ext["handle"]
             usage = chunk.usage
+            native_usage = ext.get("native_usage")
             terminal = True
-    if not terminal or not ready_handle:
+    if not terminal or not ready_handle or not native_usage:
         raise ValueError("Incomplete continuation delivery")
     ordered = []
     for index, call in sorted(calls.items()):
@@ -113,7 +115,8 @@ def stream_turn(
         assistant["tool_calls"] = ordered
     return {
         "submission": submission, "handle": ready_handle, "assistant": assistant,
-        "observations": observations, "chunks": chunks, "finish": finish, "usage": usage,
+        "observations": observations, "chunks": chunks, "finish": finish,
+        "usage": usage, "native_usage": native_usage,
     }
 
 
@@ -144,11 +147,12 @@ def unary_turn(
         **request, extra_headers=continuation_headers(submission, handle)
     )
     ext = _extension(response)
-    if ext.get("ready") is not True or not ext.get("handle") or not response.choices[0].message:
+    if ext.get("ready") is not True or not ext.get("handle") or not ext.get("native_usage") or not response.choices[0].message:
         raise ValueError("Incomplete continuation delivery")
     return {
         "submission": submission, "handle": ext["handle"],
-        "assistant": response.choices[0].message, "response": response,
+        "assistant": response.choices[0].message,
+        "native_usage": ext["native_usage"], "response": response,
     }
 
 

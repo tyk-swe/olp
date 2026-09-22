@@ -5,6 +5,13 @@ workload and limits. The candidate is a separately versioned measurement of the
 production `chat-anthropic-tools-v1` carrier. It must not replace the native
 reference or change its baseline, runner, hashes or budgets.
 
+Candidate oracle version 2 requires the exact native usage projection as well
+as first/next requests, events and tool structure. Earlier version 1 candidate
+captures remain available at their recorded source revisions and retain their
+failed results; they did not check the native usage extension and cannot
+qualify the final carrier. The frozen native reference and budgets are shared
+unchanged by both candidate oracle versions.
+
 Both paths use the same scripted provider, original user history, 256 KiB
 history variant, two native requests, 19 native events, native thinking and
 signature, text before and after two parallel tool calls, and the two ordered
@@ -14,6 +21,10 @@ defaults create the native reasoning and output budget. Its Go client consumes
 the same versioned chunk and assistant/tool structures qualified separately
 through the actual pinned OpenAI JavaScript 7.4.0 and Python 3.8.0 SDKs. The
 Go measurement includes no SDK child-process CPU or memory.
+The candidate checks the terminal and final-turn `olp.native_usage` against
+the frozen native event/result categories, including exact token counts;
+separate regression tests cover cache-read, cache-write and TTL categories
+that ordinary Chat usage cannot express and reject unknown native categories.
 
 The native reference exposes a tool-use frame on the wire before its separate
 reference-side ready transaction. Its `wire-tool` metric is intentionally

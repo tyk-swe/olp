@@ -26,7 +26,7 @@ import (
 // The frozen reference is a native-wire client with an independent persistence
 // barrier. This candidate is the production negotiated Chat carrier with a Go
 // SDK-equivalent assembler; separate public tests run both official SDKs.
-const candidateContract = "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1"
+const candidateContract = "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/2"
 
 type candidateSample struct {
 	workflow, firstEvent, toolVisible, actionReady                      time.Duration
@@ -186,8 +186,9 @@ func candidateWorkflow(ctx context.Context, d barrierDocuments, client *http.Cli
 							Type  string `json:"type"`
 							Phase string `json:"phase"`
 						} `json:"observation"`
-						Ready  bool   `json:"ready"`
-						Handle string `json:"handle"`
+						Ready       bool            `json:"ready"`
+						Handle      string          `json:"handle"`
+						NativeUsage json.RawMessage `json:"native_usage"`
 					} `json:"olp"`
 				}
 				if err := json.Unmarshal(data, &chunk); err != nil || chunk.OLP.Version != continuationClientVersion || len(chunk.Choices) != 1 {
@@ -234,6 +235,10 @@ func candidateWorkflow(ctx context.Context, d barrierDocuments, client *http.Cli
 					if choice.Finish != "tool_calls" || !chunk.OLP.Ready || chunk.OLP.Handle != readyHandle {
 						response.Body.Close()
 						return sample, fmt.Errorf("uncommitted or changed terminal handle")
+					}
+					if err := fidelity.Compare([]byte(`{"input_tokens":18,"output_tokens":28}`), chunk.OLP.NativeUsage); err != nil {
+						response.Body.Close()
+						return sample, fmt.Errorf("first-turn native usage changed: %w", err)
 					}
 					finished = true
 				}
@@ -333,6 +338,10 @@ func candidateWorkflow(ctx context.Context, d barrierDocuments, client *http.Cli
 	if err := json.Unmarshal(d.final, &direct); err != nil {
 		return sample, err
 	}
+	var nativeFinal map[string]json.RawMessage
+	if err := json.Unmarshal(d.final, &nativeFinal); err != nil {
+		return sample, err
+	}
 	var final struct {
 		ID      string `json:"id"`
 		Model   string `json:"model"`
@@ -354,10 +363,14 @@ func candidateWorkflow(ctx context.Context, d barrierDocuments, client *http.Cli
 			Version      string            `json:"version"`
 			Handle       string            `json:"handle"`
 			Observations []json.RawMessage `json:"observations"`
+			NativeUsage  json.RawMessage   `json:"native_usage"`
 		} `json:"olp"`
 	}
 	if json.Unmarshal(body, &final) != nil || len(direct.Content) != 1 || direct.Content[0].Type != "text" || direct.StopReason != "end_turn" || direct.Model != "fixture-model" || direct.Usage.InputTokens != 64 || direct.Usage.OutputTokens != 8 || len(final.Choices) != 1 || final.ID != direct.ID || final.Model != slug || final.Choices[0].Message.Role != "assistant" || final.Choices[0].Message.Content != direct.Content[0].Text || len(final.Choices[0].Message.ToolCalls) != 0 || final.Choices[0].Finish != "stop" || final.Usage.PromptTokens != direct.Usage.InputTokens || final.Usage.CompletionTokens != direct.Usage.OutputTokens || final.Usage.TotalTokens != direct.Usage.InputTokens+direct.Usage.OutputTokens || !final.OLP.Ready || final.OLP.Version != continuationClientVersion || final.OLP.Handle == "" || len(final.OLP.Observations) != 2 || bytes.Contains(body, []byte("opaque-fixture-signature-do-not-log")) {
 		return sample, fmt.Errorf("incomplete final SDK result")
+	}
+	if err := fidelity.Compare(nativeFinal["usage"], final.OLP.NativeUsage); err != nil {
+		return sample, fmt.Errorf("final native usage changed: %w", err)
 	}
 	for i, raw := range final.OLP.Observations {
 		var observation struct {

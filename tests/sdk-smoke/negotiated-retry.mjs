@@ -40,6 +40,7 @@ assert.equal(result.submission, submission);
 assert.equal(result.assistant.content, 'beforeafter');
 assert.deepEqual(result.assistant.tool_calls.map((call) => call.id), ['call-weather', 'call-clock']);
 assert.equal(result.finish, 'tool_calls');
+assert.deepEqual(result.nativeUsage, { input_tokens: 18, output_tokens: 28 });
 assert.deepEqual(headersSeen, [submission, submission], 'SDK retry must reuse one accepted-work identity');
 const recovered = await recoverSubmission(origin, key, submission, nativeFetch);
 assert.equal(recovered.handle, result.handle);

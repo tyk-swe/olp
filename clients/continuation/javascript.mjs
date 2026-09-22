@@ -47,6 +47,7 @@ export async function streamTurn(client, request, { submission = submissionID(),
   let readyHandle;
   let finish;
   let usage;
+  let nativeUsage;
   let terminal = false;
   for await (const chunk of stream) {
     checkExtension(chunk.olp);
@@ -73,10 +74,11 @@ export async function streamTurn(client, request, { submission = submissionID(),
       finish = choice.finish_reason;
       readyHandle = chunk.olp.handle;
       usage = chunk.usage;
+      nativeUsage = chunk.olp.native_usage;
       terminal = true;
     }
   }
-  if (!terminal || !/^continuation_[0-9a-f]{32}$/.test(readyHandle)) {
+  if (!terminal || !/^continuation_[0-9a-f]{32}$/.test(readyHandle) || !nativeUsage) {
     throw new Error('Incomplete continuation delivery');
   }
   const toolCalls = [...calls].sort(([a], [b]) => a - b).map(([index, call], position) => {
@@ -88,7 +90,7 @@ export async function streamTurn(client, request, { submission = submissionID(),
   if ((finish === 'tool_calls') !== (toolCalls.length > 0)) throw new Error('Tool terminal mismatch');
   const assistant = { role: 'assistant', content: text };
   if (toolCalls.length) assistant.tool_calls = toolCalls;
-  return { submission, handle: readyHandle, assistant, observations, chunks, finish, usage };
+  return { submission, handle: readyHandle, assistant, observations, chunks, finish, usage, nativeUsage };
 }
 
 export function nextTurn(request, completed, results) {
@@ -117,10 +119,10 @@ export async function unaryTurn(client, request, { submission = submissionID(), 
     { headers: continuationHeaders(submission, handle) }
   );
   checkExtension(response.olp);
-  if (response.olp.ready !== true || !response.olp.handle || !response.choices?.[0]?.message) {
+  if (response.olp.ready !== true || !response.olp.handle || !response.olp.native_usage || !response.choices?.[0]?.message) {
     throw new Error('Incomplete continuation delivery');
   }
-  return { submission, handle: response.olp.handle, assistant: response.choices[0].message, response };
+  return { submission, handle: response.olp.handle, assistant: response.choices[0].message, nativeUsage: response.olp.native_usage, response };
 }
 
 // Recovery reads only the committed delivery. It never starts an inference
