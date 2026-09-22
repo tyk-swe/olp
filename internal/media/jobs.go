@@ -476,6 +476,17 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	if _, err = tx.Exec(ctx, "SELECT id FROM olp_go.providers WHERE id = $1 FOR SHARE", input.ProviderID); err != nil {
 		return JobRecord{}, dbError(err)
 	}
+	// Compare the exact feature-owned configuration before inserting, under
+	// the same provider lock. jsonb equality would equate distinct native
+	// defaults such as -0 and 0; only quota changes may be ignored here.
+	compatible, err := compatibleReservationConfiguration(ctx, tx, input.RuntimeGenerationID, input.ProviderID)
+	if err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	if !compatible {
+		return JobRecord{}, &JobError{Kind: JobErrorInvalid,
+			Message: "the pinned provider authority is unavailable or incompatible with current video support"}
+	}
 	tag, err := tx.Exec(ctx, `WITH authority AS (
 			SELECT r.id AS runtime_generation_id, r.snapshot->'providers'->>$3::text AS provider_key,
 			       r.snapshot#>'{providers}' -> $3::text AS provider_entry
@@ -509,14 +520,12 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 			      IS NOT DISTINCT FROM current.configuration->>'api_version'
 			  AND pinned_revision.configuration->>'auth_mode'
 			      IS NOT DISTINCT FROM current.configuration->>'auth_mode'
-			  AND ((pinned_revision.configuration->'options') - 'limits'::text)
-			      IS NOT DISTINCT FROM ((current.configuration->'options') - 'limits'::text)
 			  AND ($11::uuid IS NULL OR EXISTS (
-			       SELECT 1 FROM jsonb_array_elements(pinned.provider_entry->'slots') slot
+			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
 			       WHERE slot->>'id' = $11::text
 			         AND slot->>'credential_id' IS NOT DISTINCT FROM $9::text))
 			  AND ($9::uuid IS NULL OR EXISTS (
-			       SELECT 1 FROM jsonb_array_elements(pinned.provider_entry->'slots') slot
+			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
 			       WHERE slot->>'credential_id' = $9::text))
 			  AND (SELECT cred.version FROM olp_go.provider_credentials cred
 			       WHERE cred.id = (pinned.provider_entry->>'active_credential')::uuid)
