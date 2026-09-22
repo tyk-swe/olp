@@ -58,11 +58,11 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#220](https://github.com/tyk-swe/olp/issues/220) Persist route fidelity contracts and policy invariants | D02, D18, D21, D23 | Foundation integrated; bounded strict generation execution integrated in #213 | Route branch `1a9a9248`, merge `b618961b`; [configuration and migration qualification](../qualification/fidelity/route-contracts.md) |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Integrated; continuation, other operations, lifecycle and playground guards remain #214–#217 | Planner branch `b09c0012`, merge `873b3ce1`; [strict planning scope and validation](../qualification/fidelity/strict-planning.md); [safe inspector qualification](../qualification/fidelity/plan-inspector.md) |
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
-| [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Pending | — |
-| [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Pending | — |
+| [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Ready; #213, #221 and #224 integrated | Forward migration 0025 reserved; continuation/resource guards remain pending implementation and qualification |
+| [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Active; #213 integrated | Operation/profile exploration started from `06523391`; no #215 implementation integrated yet |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
-| [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Active; #212 integrated; blocks #223 and #214 integration | Native JSON lexemes and release storage; migration 0024 reserved; no implementation integrated yet |
-| [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Active; #212 and #220 integrated; lossless reload depends on #224 | Independent configuration-editor slice; inspector, evidence and operation playgrounds remain #217 |
+| [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
+| [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Active; #212, #220 and #224 integrated | Independent configuration-editor slice; backend storage blocker resolved; inspector, evidence and operation playgrounds remain #217 |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Pending | — |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
@@ -138,10 +138,22 @@ remain unchanged; this is distinct from the test-only pricing fixture correction
 Strict continuation/resource authority (#214), independent non-generation
 contracts (#215), media/durable/duplex contracts (#216), and the console playground
 projection (#217) remain guarded until their own qualification. Full G2 and G6
-remain unqualified. #224 reserves forward migration 0024 for native configuration
-and release JSON storage, and blocks integration of both lossless #223 reloads
-and #214's subsequent persistence work. The active #223 and #224 branches are
-not included in this integration.
+remain unqualified. #224 now supplies forward migration 0024 and native
+configuration/release storage conservation. #214 can build its persistence work
+on reserved forward migration 0025; the active #223 and #215 branches remain
+outside this integration.
+
+The #224 storage branch `3e5d5358` merged without conflicts in `3b35c1fb`, retaining
+the already integrated pricing-test and proxy corrections unchanged. Combined
+access/configuration/media/provider/runtime/routes/interaction race suites and
+focused Go vet passed. The public suite passed with race detection in 75.849 s,
+using a freshly built CLI for migration/rotation checks, and covered native JSON
+configuration/replay/promotion/reload, migration history and rollback, strict
+admission/inspection, route fidelity, network profiles and Responses lifecycle.
+Focused media lifecycle/quota/revocation and claim-reconciliation service races
+also passed. Current inventory regeneration introduced no further changes;
+0024 is the only new migration, with no historical migration or frozen evidence
+changes. These results supplement the storage branch's recorded `make check`.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
