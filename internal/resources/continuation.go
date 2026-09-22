@@ -80,6 +80,17 @@ func (s *Store) validateContract(r *Resource, payload []byte) error {
 // all other callers receive the existing resource for authorized delivery replay.
 // A pending/unknown claim is never permission to repeat provider inference.
 func (s *Store) ClaimContinuation(ctx context.Context, r *Resource, payload []byte) (*Resource, bool, error) {
+	return s.claimContinuation(ctx, r, payload, StatePending)
+}
+
+// ClaimForDispatch commits the encrypted initial dependency and the durable
+// dispatch journal together immediately before the Attempt owner calls the
+// provider. A crash after this commit is conservatively outcome-unknown.
+func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byte) (*Resource, bool, error) {
+	return s.claimContinuation(ctx, r, payload, StateDispatching)
+}
+
+func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []byte, state string) (*Resource, bool, error) {
 	if err := s.validateContract(r, payload); err != nil {
 		return nil, false, err
 	}
@@ -106,7 +117,7 @@ func (s *Store) ClaimContinuation(ctx context.Context, r *Resource, payload []by
 	}
 	copy := *r
 	copy.UUID = uuid.Must(uuid.NewV7())
-	copy.State = StatePending
+	copy.State = state
 	// A continuation has no provider resource ID; use its own internal identity.
 	copy.UpstreamID = copy.UUID.String()
 	if len(copy.Metadata) == 0 {

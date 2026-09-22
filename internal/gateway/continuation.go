@@ -178,7 +178,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 	if err != nil {
 		return err
 	}
-	res, created, err := s.Resources.ClaimContinuation(ctx, r, payload)
+	res, created, err := s.Resources.ClaimForDispatch(ctx, r, payload)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 		return resources.ErrTransition
 	}
 	c.resource, c.stored = res, state
-	return s.Resources.StartDispatch(ctx, res)
+	return nil
 }
 func (s *Server) commitToolDelivery(ctx context.Context, x *execution, state *interaction.Continuation, delivery interaction.Delivery) error {
 	c := x.continuation

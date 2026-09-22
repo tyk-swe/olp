@@ -202,3 +202,81 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	}
 
 }
+
+func TestContinuationClaimForDispatchCommitsOneEncryptedJournal(t *testing.T) {
+	h := newAccessHarness(t)
+	f := newStrictProviderFixture(t, "anthropic-messages")
+	slug, key := publishStrictProvider(t, h, h.owner(), f, nil, nil, "strict")
+	authority, err := h.Runtime.Authenticate(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := resources.NewEncrypted(h.Pool, installation, ring)
+	release := h.Runtime.Release()
+	route := release.Snapshot.Routes[slug]
+	provider := release.Snapshot.Providers[f.providerID]
+	version := "chat-anthropic-tools-v1"
+	expires := time.Now().Add(time.Hour)
+	submission := resources.SubmissionID(time.Now(), uuid.New())
+	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
+	initial := []byte(`{"private":"complete initial dependency"}`)
+	ready := []byte(`{"private":"complete ready dependency"}`)
+	var mu sync.Mutex
+	var creator *resources.Resource
+	created := 0
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			res, fresh, err := store.ClaimForDispatch(t.Context(), contract, initial)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if fresh {
+				created++
+				creator = res
+			}
+		})
+	}
+	wg.Wait()
+	if created != 1 || creator == nil {
+		t.Fatalf("claim creators=%d", created)
+	}
+	got, payload, err := store.FindSubmission(t.Context(), authority.ID, submission)
+	if err != nil || got.State != resources.StateDispatching || !bytes.Equal(payload, initial) {
+		t.Fatalf("journal was not committed with encrypted claim: state=%v err=%v", got, err)
+	}
+	if err := store.StartDispatch(t.Context(), got); !errors.Is(err, resources.ErrTransition) {
+		t.Fatalf("a second dispatch transition unexpectedly succeeded: %v", err)
+	}
+	if err := store.CompleteContinuation(t.Context(), creator, ready); err != nil {
+		t.Fatal(err)
+	}
+	got, payload, err = store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, creator.ID)
+	if err != nil || got.State != resources.StateReady || !bytes.Equal(payload, ready) {
+		t.Fatalf("ready dependency changed after journal: state=%v err=%v", got, err)
+	}
+	badRing, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":2,"key":"abababababababababababababababababababababababababababababababab"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	badStore := resources.NewEncrypted(h.Pool, installation, badRing)
+	badSubmission := resources.SubmissionID(time.Now(), uuid.New())
+	contract.SubmissionID = &badSubmission
+	if _, _, err := badStore.ClaimForDispatch(t.Context(), contract, initial); err == nil {
+		t.Fatal("claim with unavailable active key unexpectedly committed")
+	}
+	if _, _, err := store.FindSubmission(t.Context(), authority.ID, badSubmission); !errors.Is(err, resources.ErrNotFound) {
+		t.Fatalf("failed encryption left an accepted-work journal: %v", err)
+	}
+}

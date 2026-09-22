@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func continuationBarrierFixture(t *testing.T, h *accessHarness, run func(http.ResponseWriter, *http.Request, []byte)) (string, string) {
@@ -221,5 +223,33 @@ func TestPublicContinuationFaultsNeverReplayUnknownInference(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPublicContinuationClaimFailureNeverDispatchesProvider(t *testing.T) {
+	h := newAccessHarness(t)
+	var calls atomic.Int64
+	slug, key := continuationBarrierFixture(t, h, func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		calls.Add(1)
+		http.Error(w, "unexpected provider dispatch", 500)
+	})
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badRing, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":2,"key":"abababababababababababababababababababababababababababababababab"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Gateway.Resources = resources.NewEncrypted(h.Pool, installation, badRing)
+	headers := continuationHeaders()
+	source := strings.Replace(continuationInput, "ROUTE", slug, 1)
+	status, body, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(source), headers)
+	if status < 400 || calls.Load() != 0 || !bytes.Contains(body, []byte("continuation_unavailable")) {
+		t.Fatalf("failed encrypted claim dispatched: status=%d calls=%d %s", status, calls.Load(), body)
+	}
+	var claimed int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claimed); err != nil || claimed != 0 {
+		t.Fatalf("failed encrypted claim left a dispatch journal: count=%d err=%v", claimed, err)
 	}
 }
