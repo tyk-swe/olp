@@ -1,0 +1,680 @@
+{
+  "version": 1,
+  "created_at": "2026-09-22",
+  "source_revision": "8580b39905dc4da9278de8e53ceac7d2412ad6a5",
+  "purpose": "Representative qualification denominator, not an assertion that these combinations are implemented or supported. Refusal, unknown and incomplete cases remain in the denominator.",
+  "historical_reference": "tests/fixtures/reference-inventory.json remains authoritative for preserved legacy surface coverage.",
+  "api_revision_policy": "Each fixture pins its own API contract; fixture revisions do not assert live provider revision stability. Unpinned empirical serving identity remains unknown.",
+  "rows": [
+    {
+      "id": "openai-openai-chat-unary",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-chat",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-openai-chat-streaming",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-chat",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-openai-responses-unary",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-responses",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-openai-responses-streaming",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-responses",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-anthropic-messages-unary",
+      "operation": "generation",
+      "profile": "anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-anthropic-messages-streaming",
+      "operation": "generation",
+      "profile": "anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "gemini-gemini-v1beta-unary",
+      "operation": "generation",
+      "profile": "gemini",
+      "dialect": "gemini-v1beta",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "gemini-gemini-v1beta-streaming",
+      "operation": "generation",
+      "profile": "gemini",
+      "dialect": "gemini-v1beta",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "azure-openai-openai-chat-unary",
+      "operation": "generation",
+      "profile": "azure-openai",
+      "dialect": "openai-chat",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "azure-openai-openai-chat-streaming",
+      "operation": "generation",
+      "profile": "azure-openai",
+      "dialect": "openai-chat",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "vertex-ai-gemini-v1-unary",
+      "operation": "generation",
+      "profile": "vertex-ai",
+      "dialect": "gemini-v1",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "vertex-ai-gemini-v1-streaming",
+      "operation": "generation",
+      "profile": "vertex-ai",
+      "dialect": "gemini-v1",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "vertex-anthropic-anthropic-messages-unary",
+      "operation": "generation",
+      "profile": "vertex-anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "vertex-anthropic-anthropic-messages-streaming",
+      "operation": "generation",
+      "profile": "vertex-anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "bedrock-bedrock-converse-unary",
+      "operation": "generation",
+      "profile": "bedrock",
+      "dialect": "bedrock-converse",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "bedrock-bedrock-converse-streaming",
+      "operation": "generation",
+      "profile": "bedrock",
+      "dialect": "bedrock-converse",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "bedrock-anthropic-anthropic-messages-unary",
+      "operation": "generation",
+      "profile": "bedrock-anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "bedrock-anthropic-anthropic-messages-streaming",
+      "operation": "generation",
+      "profile": "bedrock-anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-compatible-openai-chat-unary",
+      "operation": "generation",
+      "profile": "openai-compatible",
+      "dialect": "openai-chat",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-compatible-openai-chat-streaming",
+      "operation": "generation",
+      "profile": "openai-compatible",
+      "dialect": "openai-chat",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "ordered-content",
+        "tools",
+        "reasoning",
+        "native-extensions"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-js-openai-chat",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-chat",
+      "mode": "streaming",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-js-openai-responses",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-responses",
+      "mode": "streaming",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-js-anthropic-messages",
+      "operation": "generation",
+      "profile": "anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "streaming",
+      "client": "anthropic-js@0.116.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "google-genai-js-gemini-v1beta",
+      "operation": "generation",
+      "profile": "gemini",
+      "dialect": "gemini-v1beta",
+      "mode": "streaming",
+      "client": "google-genai-js@2.16.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-python-openai-chat",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-chat",
+      "mode": "streaming",
+      "client": "openai-python@3.8.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-python-anthropic-messages",
+      "operation": "generation",
+      "profile": "anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "streaming",
+      "client": "anthropic-python@1.4.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "google-genai-python-gemini-v1beta",
+      "operation": "generation",
+      "profile": "gemini",
+      "dialect": "gemini-v1beta",
+      "mode": "streaming",
+      "client": "google-genai-python@2.22.0",
+      "features": [
+        "tool-next-turn",
+        "native-state",
+        "parallel-calls"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-embeddings-unary",
+      "operation": "embeddings",
+      "profile": "openai",
+      "dialect": "openai-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "float",
+        "base64",
+        "dimensions",
+        "ordered-inputs"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "voyage-embeddings-unary",
+      "operation": "embeddings",
+      "profile": "voyage",
+      "dialect": "voyage-embeddings",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "int8",
+        "binary",
+        "packed-dimensions",
+        "task-type"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "cohere-embeddings-unary",
+      "operation": "embeddings",
+      "profile": "cohere",
+      "dialect": "cohere-embed",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "sparse",
+        "multivector",
+        "truncation"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "cohere-rerank-unary",
+      "operation": "rerank",
+      "profile": "cohere",
+      "dialect": "cohere-rerank",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "document-identity",
+        "scores",
+        "ties",
+        "top-n"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-moderation-unary",
+      "operation": "moderation",
+      "profile": "openai",
+      "dialect": "openai-moderation",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "native-categories",
+        "scores",
+        "thresholds"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-token_count-unary",
+      "operation": "token_count",
+      "profile": "anthropic",
+      "dialect": "anthropic-count-tokens",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "native-tokenizer"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "gemini-token_count-unary",
+      "operation": "token_count",
+      "profile": "gemini",
+      "dialect": "gemini-count-tokens",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "native-tokenizer"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-token_count-unary",
+      "operation": "token_count",
+      "profile": "openai",
+      "dialect": "openai-input-tokens",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "native-tokenizer"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-image_generation-unary",
+      "operation": "image_generation",
+      "profile": "openai",
+      "dialect": "openai-images",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "original-asset-bytes"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-image_edit-multipart",
+      "operation": "image_edit",
+      "profile": "openai",
+      "dialect": "openai-images",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "mask",
+        "original-asset-bytes"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-image_variation-multipart",
+      "operation": "image_variation",
+      "profile": "openai",
+      "dialect": "openai-images",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "original-asset-bytes"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-speech-binary",
+      "operation": "speech",
+      "profile": "openai",
+      "dialect": "openai-audio",
+      "mode": "binary",
+      "client": "raw-http",
+      "features": [
+        "codec",
+        "channels"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-transcription-multipart",
+      "operation": "transcription",
+      "profile": "openai",
+      "dialect": "openai-audio",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "timestamps",
+        "codec"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-translation-multipart",
+      "operation": "translation",
+      "profile": "openai",
+      "dialect": "openai-audio",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "original-language",
+        "codec"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-video-durable",
+      "operation": "video",
+      "profile": "openai",
+      "dialect": "openai-video",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "create",
+        "retrieve",
+        "content",
+        "delete",
+        "expiry"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "anthropic-documents-unary",
+      "operation": "documents",
+      "profile": "anthropic",
+      "dialect": "anthropic-messages",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "original-document",
+        "no-ocr"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-realtime-duplex",
+      "operation": "realtime",
+      "profile": "openai",
+      "dialect": "openai-realtime",
+      "mode": "duplex",
+      "client": "raw-http",
+      "features": [
+        "vad",
+        "interruptions",
+        "tool-timing"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-batch-durable",
+      "operation": "batch",
+      "profile": "openai",
+      "dialect": "openai-batch",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "item-identity",
+        "partial-failure",
+        "cancel",
+        "expiry"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-files-durable",
+      "operation": "files",
+      "profile": "openai",
+      "dialect": "openai-files",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "upload",
+        "retrieve",
+        "delete",
+        "ownership"
+      ],
+      "evidence_status": "unqualified"
+    },
+    {
+      "id": "openai-generation-durable-streaming",
+      "operation": "generation",
+      "profile": "openai",
+      "dialect": "openai-responses",
+      "mode": "durable-streaming",
+      "client": "raw-http",
+      "features": [
+        "background",
+        "retrieve",
+        "cancel"
+      ],
+      "evidence_status": "unqualified"
+    }
+  ]
+}
