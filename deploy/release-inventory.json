@@ -6298,6 +6298,8 @@
     "internal/contentpolicy/policy_test.go",
     "internal/coordination/client_test.go",
     "internal/database/database_test.go",
+    "internal/egress/connection_limits_test.go",
+    "internal/egress/connection_test.go",
     "internal/egress/credentials_test.go",
     "internal/egress/egress_test.go",
     "internal/gateway/accounting_test.go",
