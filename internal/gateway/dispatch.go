@@ -86,14 +86,17 @@ func (s *Server) cooling(ctx context.Context, providerID string, slot *runtime.S
 // gateSlot is the shared pre-dispatch boundary every new upstream attempt
 // crosses — ordinary inference, media, and durable video create alike. A slot
 // list filtered before an earlier call is not authority for a later sibling,
-// so each candidate is revalidated in slot order: live credential revocation,
-// the route deadline, the distributed or local cooldown, the connection and
-// slot quota reservations, and the provider circuit's exclusive half-open
-// probe. An admitted slot's hold carries the reservation and the probe until
-// the attempt settles or releaseHold abandons them before dispatch.
+// so each candidate is revalidated in slot order: live API and network
+// credential revocation, the route deadline, the distributed or local cooldown,
+// connection and slot quota reservations, and the provider circuit's exclusive
+// half-open probe. An admitted slot's hold carries the reservation and the probe
+// until the attempt settles or releaseHold abandons them before dispatch.
 func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
 	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Revoked(*slot.CredentialID) {
+		return gateResult{verdict: gateSkip}
+	}
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Revoked(provider.Network.CredentialID) {
 		return gateResult{verdict: gateSkip}
 	}
 	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
