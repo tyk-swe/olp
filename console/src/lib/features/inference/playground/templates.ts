@@ -10,6 +10,47 @@ export type PlaygroundTemplate = {
 
 export const playgroundTemplates: PlaygroundTemplate[] = [
   {
+    key: 'generation-negotiated-tools',
+    label: 'Generation · negotiated two-tool workflow',
+    operation: 'generation',
+    surface: 'openai',
+    request: {
+      model: '',
+      messages: [
+        {
+          role: 'user',
+          content: 'What are the weather and local time in Paris?'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'weather',
+            description: 'Weather in a city',
+            parameters: {
+              type: 'object',
+              properties: { city: { type: 'string' } },
+              required: ['city']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'clock',
+            description: 'Time in a zone',
+            parameters: {
+              type: 'object',
+              properties: { zone: { type: 'string' } },
+              required: ['zone']
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
     key: 'generation-multiturn',
     label: 'Generation · multi-turn',
     operation: 'generation',

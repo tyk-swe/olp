@@ -77,6 +77,11 @@ export default defineConfig({
       reuseExistingServer: false
     },
     {
+      command: 'node tests/gateway/mock-anthropic.mjs',
+      url: 'http://127.0.0.1:4188/health',
+      reuseExistingServer: false
+    },
+    {
       command: 'pnpm dev --host 127.0.0.1 --port 4183 --strictPort',
       url: 'http://127.0.0.1:4183',
       reuseExistingServer: false,

@@ -24,6 +24,7 @@
   } from '$lib/features/inference/playground/inspection';
   import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
   import OperationResult from './OperationResult.svelte';
+  import StrictToolPlayground from './StrictToolPlayground.svelte';
   import {
     playgroundTemplates,
     templateFor
@@ -80,6 +81,9 @@
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
   const selectedRoute = $derived(
     (routes.data ?? []).find((route) => route.slug === model.trim())
+  );
+  const strictSelected = $derived(
+    selectedRoute?.latest_revision?.fidelity?.mode === 'strict'
   );
   const outputPolicyActive = $derived(
     hasOutputRules(selectedRoute?.latest_revision?.content_policy?.rules ?? [])
@@ -330,6 +334,11 @@
     if (streamEnabled && streamCheck !== 'ok') {
       validationError =
         'Streaming has not been verified as available for this route.';
+      return;
+    }
+    if (strictSelected) {
+      validationError =
+        'Use the qualified public client below for this strict route.';
       return;
     }
     let request: PlaygroundRequest;
@@ -610,6 +619,11 @@
     {#if validationError}<p class="field-error" role="alert">
         {validationError}
       </p>{/if}
+    {#if strictSelected}<p class="policy-note" role="status">
+        This route requires a client that retains its native observation and
+        continuation contract. Use the public strict client below with an
+        authorized inference key.
+      </p>{/if}
     <details class="dry-run">
       <summary>Inspect effective plan without running</summary>
       <p class="dry-run-help">
@@ -680,6 +694,7 @@
         type="submit"
         disabled={mutation.isPending ||
           streaming ||
+          strictSelected ||
           (composer === 'advanced' && !operationKnown)}
         >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
       >
@@ -837,6 +852,20 @@
   </section>
 </div>
 
+{#if strictSelected}
+  {#if composer === 'advanced' && operation === 'generation' && surface === 'openai'}
+    {#key model.trim()}
+      <StrictToolPlayground route={model.trim()} requestText={rawJson} />
+    {/key}
+  {:else}
+    <section class="card strict-client-unavailable" role="status">
+      This route needs a native or negotiated public client. Choose Advanced,
+      Generation, OpenAI and the negotiated tool template for the currently
+      qualified tool workflow.
+    </section>
+  {/if}
+{/if}
+
 {#if explanation}<section class="card composer">
     <h2>Routing explanation</h2>
     <p class="explanation-source">
@@ -848,6 +877,10 @@
   </section>{/if}
 
 <style>
+  .strict-client-unavailable {
+    padding: 1.25rem;
+    margin-top: 1rem;
+  }
   .explanation-source {
     margin: 0 0 1rem;
     color: var(--foreground-muted);
