@@ -15,6 +15,7 @@ func TestNativeAssetIDsRequireOwnedServingAuthority(t *testing.T) {
 		{"openai-chat", openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":[{"type":"file","file":{"file_id":"private-file"}}]}]}`},
 		{"anthropic-messages", openai.FamilyAnthropic, `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"private-file"}}]}]}`},
 		{"gemini-generation", openai.FamilyGemini, `{"contents":[{"parts":[{"fileData":{"mimeType":"text/plain","fileUri":"https://generativelanguage.googleapis.com/v1beta/files/private-file"}}]}]}`},
+		{"gemini-generation", openai.FamilyGemini, `{"contents":[{"parts":[{"fileData":{"mimeType":"text/plain","fileUri":"https://GENERATIVELANGUAGE.googleapis.com./v1beta/files/private-file"}}]}]}`},
 	} {
 		t.Run(fixture.profile, func(t *testing.T) {
 			compiled := template(t, configuration(t, fixture.profile))

@@ -50,7 +50,7 @@ func checkAssetResources(document oif.Document, wire openai.Family) error {
 				uri := valueText(member(member(part, "fileData"), "fileUri"))
 				if uri != "" {
 					parsed, err := url.Parse(uri)
-					if err != nil || strings.HasPrefix(uri, "files/") || parsed.Hostname() == "generativelanguage.googleapis.com" || parsed.Scheme == "gs" || parsed.Scheme == "s3" {
+					if err != nil || strings.HasPrefix(strings.TrimPrefix(uri, "/"), "files/") || strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), "generativelanguage.googleapis.com") || strings.EqualFold(parsed.Scheme, "gs") || strings.EqualFold(parsed.Scheme, "s3") {
 						return fail(at + "/fileData/fileUri")
 					}
 				}
