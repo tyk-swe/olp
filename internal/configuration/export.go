@@ -109,7 +109,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		portableNetwork(pp.entry)
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
-	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy
+	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity
         FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id
         LEFT JOIN olp_go.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
 	if err != nil {
@@ -119,7 +119,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	for routes.Next() {
 		var route RouteEntry
 		var operations, targets, policy []byte
-		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy); err != nil {
+		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy, &route.Fidelity); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(operations, &route.Operations); err != nil {

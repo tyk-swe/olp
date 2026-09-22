@@ -86,6 +86,12 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if !p.CanProject(d.ProjectID, false) {
 		return access.Reply{}, pgx.ErrNoRows
 	}
+	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
+		return access.Reply{}, err
+	}
+	if err := requireFidelityExecution(d.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	live, err := resolve(r.Context(), s.Access.Pool, d.Targets)
 	if err != nil {
 		return access.Reply{}, err
@@ -104,6 +110,10 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	route := simulationRoute(routingID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
+	route.Fidelity, err = runtime.DecodeFidelity(d.Fidelity)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	route.Policy, _, err = loadPolicy(r.Context(), tx, "route-draft", d.ID, false)
 	if err != nil {
 		return access.Reply{}, err

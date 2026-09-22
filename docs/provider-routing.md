@@ -222,6 +222,12 @@ timeout. Supported operations also include `token_count`, `embeddings`,
 `speech`, `transcription`, the `video_*` operations, `batch`, `realtime`, and
 `bedrock_invoke`; see the [compatibility matrix](compatibility.md).
 
+The optional [route fidelity declaration](qualification/fidelity/route-contracts.md)
+selects legacy, strict, or transformed behavior. Existing routes retain legacy
+semantics until an explicit transition; old-client edits preserve a configured
+contract. Strict drafts reject redaction, and activation requires the complete
+interaction planner before they can serve.
+
 The overall deadline is 1–3,600,000 milliseconds; target timeouts cannot exceed
 it. The attempt budget is 1–32,767 and counts credential attempts, so it can
 exceed the target count. Every target must reference a published model with

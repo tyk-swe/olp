@@ -54,3 +54,15 @@ and effects are preserved for a particular operation and client behavior.
 **Continuation**:
 A permitted next interaction whose retained native dependencies correspond to
 the client's visible history and selected branch.
+
+**Route fidelity**:
+A route's declared legacy, strict, or transformed treatment of invocation
+semantics; native identity and qualified interaction describe individual plans.
+
+**Strict route**:
+A route whose admitted interactions preserve execution, observation, permitted
+continuation, and effects relative to the selected target's native invocation.
+
+**Transformed route**:
+A route declaring intentional model-significant changes to an invocation or
+its observed result.

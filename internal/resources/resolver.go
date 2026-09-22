@@ -97,12 +97,12 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	}
 
 	route := &runtime.Route{RevisionID: res.RouteRevisionID}
-	var operations, targets, policy []byte
+	var operations, targets, policy, fidelity []byte
 	err = tx.QueryRow(ctx,
-		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text
+		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity
          FROM olp_go.route_revisions v JOIN olp_go.routes r ON r.id=v.route_id WHERE v.id=$1`,
 		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
-		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID)
+		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &fidelity)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
 	}
@@ -124,6 +124,10 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 		if err = json.Unmarshal(policy, &route.Policy); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("route %s policy: %w", route.Slug, err)
 		}
+	}
+	route.Fidelity, err = runtime.DecodeFidelity(fidelity)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("route %s fidelity: %w", route.Slug, err)
 	}
 	route.RoutingID = route.ID
 	route.PublishedAt = route.PublishedAt.UTC()

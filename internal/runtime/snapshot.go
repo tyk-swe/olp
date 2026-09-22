@@ -136,6 +136,7 @@ type Route struct {
 	ProjectID      *string   `json:"project_id,omitempty"`
 
 	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
+	Fidelity      *RouteFidelity        `json:"fidelity,omitempty"`
 }
 
 // Snapshot is the complete immutable serving configuration.
@@ -210,6 +211,12 @@ func (s *Snapshot) Validate() error {
 		}
 		if r.OverallTimeout < 1 || r.MaxAttempts < 1 || len(r.Operations) == 0 || len(r.Targets) == 0 {
 			return fmt.Errorf("route %q has no serving budget or targets", slug)
+		}
+		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
+			return fmt.Errorf("route %q fidelity: %w", slug, err)
+		}
+		if err := RequireRouteExecution(r.Fidelity); err != nil {
+			return fmt.Errorf("route %q fidelity: %w", slug, err)
 		}
 		seen := map[string]bool{}
 		for _, t := range r.Targets {

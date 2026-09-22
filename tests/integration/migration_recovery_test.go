@@ -82,7 +82,9 @@ func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	h := newAccessHarness(t)
 	var err error
-	owner := h.owner()
+	fixture := newOpenAIFixture(t, "")
+	owner, _, slug, secret := provisionOpenAI(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"})
+	previousDigest := h.Runtime.Release().Digest
 	profile := h.want(owner, "GET", "/api/v3/profile", nil, nil, 200)
 	if _, err = h.Pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link)
         VALUES(gen_random_uuid(),$1,'https://identity.example','existing-subject','owner@example.com')`, profile["id"]); err != nil {
@@ -91,7 +93,11 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
-	if _, err = h.Pool.Exec(t.Context(), `DROP TABLE IF EXISTS olp_go.provider_network_credentials;
+	// Recreate the complete pre-0021 prefix. Removing only 0021 would leave a
+	// history hole once later migrations exist, which the runner must reject.
+	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.route_drafts DROP COLUMN fidelity;
+	    ALTER TABLE olp_go.route_revisions DROP COLUMN fidelity;
+	    DROP TABLE IF EXISTS olp_go.provider_network_credentials;
 	    ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.route_revisions DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.requests DROP COLUMN policy_decisions;
@@ -117,6 +123,19 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	if err = h.Pool.QueryRow(t.Context(), `SELECT role_claims IS NULL AND subject='existing-subject' AND email_at_link='owner@example.com'
         FROM olp_go.oidc_identities WHERE user_id=$1`, profile["id"]).Scan(&retained); err != nil || !retained {
 		t.Fatal("forward migration changed the identity or invented verified role inputs")
+	}
+	for _, table := range []string{"route_drafts", "route_revisions"} {
+		var legacy bool
+		if err = h.Pool.QueryRow(t.Context(), "SELECT count(*)>0 AND bool_and(fidelity IS NULL) FROM olp_go."+table).Scan(&legacy); err != nil || !legacy {
+			t.Fatal("forward migration reinterpreted a populated legacy route", table, err)
+		}
+	}
+	h.refresh()
+	if h.Runtime.Release().Digest != previousDigest || h.Runtime.Release().Snapshot.Routes[slug].Fidelity != nil {
+		t.Fatal("historical release digest or fidelity changed across forward migration")
+	}
+	if status, body, _ := h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "after migration"}}}); status != 200 {
+		t.Fatal("legacy route stopped serving after migration", status, body)
 	}
 }
 

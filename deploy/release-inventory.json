@@ -4,7 +4,7 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "1ac1cfdc892c33550655ee2098dffd11e8407a4698ee696928e8bfedcec9fe30",
+    "sha256": "760b5f9a03104ae3e8eadbb6c4b87ca9acbd07872411303eeb2bf942dd465d73",
     "operations": 148
   },
   "behaviorMapping": {
@@ -6403,6 +6403,7 @@
     "internal/routes/simulate_test.go",
     "internal/runtime/capabilities_test.go",
     "internal/runtime/capacity_test.go",
+    "internal/runtime/fidelity_test.go",
     "internal/runtime/ordering_test.go",
     "internal/runtime/plan_parity_test.go",
     "internal/runtime/profile_mount_test.go",
@@ -6483,6 +6484,7 @@
     "tests/integration/reports_test.go",
     "tests/integration/resource_scope_test.go",
     "tests/integration/responses_fixture_test.go",
+    "tests/integration/route_fidelity_test.go",
     "tests/integration/route_lifecycle_test.go",
     "tests/integration/routing_measurements_test.go",
     "tests/integration/routing_policy_parity_test.go",
