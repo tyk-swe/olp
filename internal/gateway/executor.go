@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,13 +18,16 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Failure classes shared with the routing retry taxonomy fixture.
@@ -57,25 +61,31 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
-	preparedProviders map[string]preparedProvider
-	request           request
-	family            openai.Family
-	parsed            *openai.Request
-	media             *media.Request
-	actor             string
-	keyID             string
-	budgetGroupID     *string
-	attribution       map[string]string
-	userID            string
-	affinity          []byte
-	authority         access.Authority
-	route             *runtime.Route
-	mode              string
-	attempts          []runtime.Attempt
-	budget            int
-	preferences       *runtime.Preferences
-	decisions         []runtime.Decision
-	policy            runtime.EffectivePolicy
+	semanticHeaders      http.Header
+	semanticQuery        url.Values
+	semanticQueryInvalid bool
+	serving              *interaction.ServingIdentity
+	servingSlot          string
+	servingBinding       string
+	preparedProviders    map[string]preparedProvider
+	request              request
+	family               openai.Family
+	parsed               *openai.Request
+	media                *media.Request
+	actor                string
+	keyID                string
+	budgetGroupID        *string
+	attribution          map[string]string
+	userID               string
+	affinity             []byte
+	authority            access.Authority
+	route                *runtime.Route
+	mode                 string
+	attempts             []runtime.Attempt
+	budget               int
+	preferences          *runtime.Preferences
+	decisions            []runtime.Decision
+	policy               runtime.EffectivePolicy
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
@@ -145,14 +155,16 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 }
 
 type attemptFailure struct {
-	class      string
-	status     int
-	committed  bool
-	retryAfter time.Duration
-	upstream   *openai.UpstreamError
-	overall    bool   // the route deadline, not the attempt deadline, expired
-	dispatched bool   // the request reached the upstream before the failure
-	quota      string // a quota this gateway enforces rejected the attempt
+	class        string
+	status       int
+	committed    bool
+	retryAfter   time.Duration
+	upstream     *openai.UpstreamError
+	overall      bool   // the route deadline, not the attempt deadline, expired
+	dispatched   bool   // the request reached the upstream before the failure
+	quota        string // a quota this gateway enforces rejected the attempt
+	contractCode string // safe runtime interaction guard violation
+	noRetry      bool   // strict outcome uncertainty must not suggest client retries
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -180,12 +192,22 @@ func (f *attemptFailure) billingUncertain() bool {
 	return f.dispatched
 }
 
-func (f *attemptFailure) toError() *Error {
+func (f *attemptFailure) toError() (result *Error) {
+	defer func() {
+		if result != nil && result.Status >= 500 && f.noRetry {
+			result.NoRetry = true
+		}
+	}()
+	if f.contractCode != "" {
+		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
 	switch f.class {
 	case classLimitsUnavailable:
 		return limitsUnavailable()
 	case classAmbiguous:
-		return serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
+		err := serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
+		err.NoRetry = f.noRetry
+		return err
 	case classCancelled:
 		return &Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
 	case classTimeout:
@@ -302,6 +324,7 @@ type attemptState struct {
 	parent     context.Context
 	reason     atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
 	dispatched atomic.Bool
+	upstream   atomic.Int32 // 0 not sent, 1 outcome unknown, 2 accepted, 3 terminal
 }
 
 // trace conservatively marks dispatch once writing has begun or a response
@@ -310,13 +333,14 @@ type attemptState struct {
 func (st *attemptState) trace() *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// A failed body write can still leave work at the upstream.
-		WroteHeaders: func() { st.dispatched.Store(true) },
+		WroteHeaders: func() { st.dispatched.Store(true); st.upstream.CompareAndSwap(0, 1) },
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			if info.Err == nil {
 				st.dispatched.Store(true)
+				st.upstream.CompareAndSwap(0, 1)
 			}
 		},
-		GotFirstResponseByte: func() { st.dispatched.Store(true) },
+		GotFirstResponseByte: func() { st.dispatched.Store(true); st.upstream.CompareAndSwap(0, 1) },
 	}
 }
 
@@ -367,6 +391,12 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 	if slot.CredentialVersion != nil {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
+	if x.strict() {
+		provider := x.request.release.Snapshot.Providers[a.ProviderID]
+		if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+		}
+	}
 	return fact
 }
 
@@ -402,8 +432,16 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if f == nil {
 			f = &attemptFailure{}
 		}
-		f.class = class
 		f.dispatched = st.dispatched.Load()
+		if fact.Interaction != nil {
+			f.noRetry = f.dispatched
+			fact.Interaction.UpstreamState = st.upstreamState()
+			if f.dispatched && st.upstream.Load() != 3 && (class == classConnect || class == classTimeout || class == classUpstreamServer) {
+				class = classAmbiguous
+				f.noRetry = true
+			}
+		}
+		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
@@ -423,11 +461,19 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	cfg := provider.Connector()
 	var body []byte
 	var wire openai.Family
-	if provider.ProfileID != "" {
+	var contract *interaction.Plan
+	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil {
 		prepared, prepareErr := x.preparedProvider(provider, a.UpstreamModel)
 		err = prepareErr
 		if err == nil {
+			for _, decision := range prepared.policyDecisions {
+				recordDecision(x, decision)
+			}
 			body, wire = prepared.invocation.Prepared.Document().Bytes(), prepared.invocation.Wire
+			contract = prepared.plan
+			if contract != nil {
+				cfg = contract.Config()
+			}
 		}
 	} else {
 		body, wire, err = providerinvoke.Encode(x.parsed, cfg, a.UpstreamModel, provider.ParameterDefaults)
@@ -494,6 +540,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.FirstByte = &received
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode < 500 {
+			st.upstream.Store(3)
+		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw)}
 		if f.upstream != nil {
@@ -512,9 +561,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 		return fail(classUpstreamClient, f)
 	}
+	st.upstream.Store(2)
 
 	var completion *openai.Completion
 	committed := false
+	actionable := false
 	if x.parsed.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 		if mediaType != "text/event-stream" && !((wire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
@@ -547,20 +598,56 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				return openai.ErrEventTooLarge
 			}
 			err := x.emit(frame)
+			if fact.Interaction != nil {
+				if fact.Interaction.ClientState == usage.ClientUnobserved {
+					fact.Interaction.ClientState = usage.ClientPartial
+				}
+				if actionable {
+					// A failed write can have exposed a complete call before losing
+					// the remaining frame. Do not infer non-actionability from error.
+					fact.Interaction.ClientState = usage.ClientActionable
+				}
+			}
 			if err == nil && fact.FirstOutput == nil && protocols.MeaningfulFrame(x.family, frame) {
 				elapsed := s.now().Sub(fact.StartedAt)
 				fact.FirstOutput = &elapsed
 			}
 			return err
 		}
-		completion, err = protocols.Stream(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
+		var observe func(oif.Event) error
+		if contract != nil {
+			observe = func(event oif.Event) error {
+				if err := contract.ValidateEvent(event); err != nil {
+					return err
+				}
+				actionable = actionable || eventActionable(event)
+				return nil
+			}
+		}
+		completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)
 		if readErr != nil {
 			err = readErr
 		} else {
-			completion, err = protocols.DecodeRequest(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
+			if contract != nil {
+				var native *openai.Completion
+				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
+				if native != nil {
+					fact.Usage = native.Usage
+				}
+				if err == nil {
+					st.upstream.Store(3)
+					err = contract.ValidateResult(native.Native)
+				}
+				if err == nil && wire == x.family {
+					completion = native
+				}
+			}
+			if err == nil && completion == nil {
+				completion, err = protocols.DecodeRequest(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
+			}
 		}
 	}
 	if completion != nil {
@@ -572,7 +659,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if err != nil {
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
 		var ue *openai.UpstreamError
+		var violation *interaction.Error
 		switch {
+		case errors.As(err, &violation):
+			f.contractCode = "fidelity_protocol_violation"
+			return fail(classProtocol, f)
 		case errors.Is(err, errResponseTooLarge):
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
@@ -585,6 +676,13 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(st.classify(err, committed), f)
 	}
 	fact.Class = classSuccess
+	st.upstream.Store(3)
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = usage.UpstreamTerminal
+		if x.parsed.Stream {
+			fact.Interaction.ClientState = usage.ClientTerminal
+		}
+	}
 	fact.Committed = committed
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	// A success carrying no usage was still served and billed upstream, with

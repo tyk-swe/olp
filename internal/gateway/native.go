@@ -10,6 +10,9 @@ import (
 )
 
 func requestSurface(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/bedrock/") {
+		return "bedrock"
+	}
 	if strings.HasPrefix(r.URL.Path, "/anthropic/") {
 		return "anthropic"
 	}

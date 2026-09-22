@@ -18,6 +18,9 @@ func compiledPolicy(route *runtime.Route) (*contentpolicy.Compiled, *Error) {
 	if route == nil || route.ContentPolicy == nil {
 		return nil, nil
 	}
+	if compiled := route.CompiledContentPolicy(); compiled != nil {
+		return compiled, nil
+	}
 	c, err := contentpolicy.Compile(route.ContentPolicy)
 	if err != nil {
 		return nil, serverError(http.StatusInternalServerError, "internal_error", "The route content policy could not be evaluated.")
@@ -54,6 +57,12 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
+	if x.strict() || len(x.preparedProviders) > 0 {
+		// The compiled interaction inspected the effective destination after
+		// defaults while filtering candidates. Inspecting the caller projection
+		// again would not establish coverage of that actual invocation.
+		return nil
+	}
 	for i := range compiled.Input {
 		rule := &compiled.Input[i]
 		matched, blocked := false, false
@@ -74,6 +83,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		case matched:
 			x.parsed = transformed
+			x.preparedProviders = nil
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 		}
 	}

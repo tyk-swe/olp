@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -59,8 +60,10 @@ func TestStrictSnapshotCannotInstallLegacyExecution(t *testing.T) {
 		}
 		route.ContentPolicy.Rules[0].Action = contentpolicy.ActionBlock
 		snapshot.Routes[slug] = route
-		if _, err := NewRelease("strict-fixture", 1, &snapshot, nil); !errors.Is(err, ErrStrictExecutionUnavailable) {
-			t.Fatal("strict snapshot installed without a compiled planner", err)
+		_, err := NewRelease("strict-fixture", 1, &snapshot, nil)
+		var incompatible *interaction.Error
+		if !errors.As(err, &incompatible) || incompatible.Code != "target_capability" || incompatible.Requirement != "explicit_profile" {
+			t.Fatal("strict snapshot installed without explicit compiled profiles", err)
 		}
 		route.Fidelity.Mode = FidelityTransformed
 		route.ContentPolicy.Rules[0].Action = contentpolicy.ActionRedact

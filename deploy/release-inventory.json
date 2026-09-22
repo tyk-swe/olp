@@ -4,7 +4,7 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "760b5f9a03104ae3e8eadbb6c4b87ca9acbd07872411303eeb2bf942dd465d73",
+    "sha256": "6efcf9e63a319e346d55898156a896eee36459f3fb0fea8ed3971836d7755ce8",
     "operations": 148
   },
   "behaviorMapping": {
@@ -6318,6 +6318,7 @@
     "internal/gateway/fidelity_benchmark_test.go",
     "internal/gateway/gateway_test.go",
     "internal/gateway/health_parity_test.go",
+    "internal/gateway/interaction_test.go",
     "internal/gateway/limits_regression_test.go",
     "internal/gateway/limits_test.go",
     "internal/gateway/media_delivery_test.go",
@@ -6339,6 +6340,8 @@
     "internal/gateway/structured_output_test.go",
     "internal/gateway/unary_choices_test.go",
     "internal/gateway/unary_test.go",
+    "internal/interaction/assets_test.go",
+    "internal/interaction/interaction_test.go",
     "internal/limits/limits_test.go",
     "internal/management/contract/types_test.go",
     "internal/media/capacity_system_test.go",
@@ -6398,6 +6401,7 @@
     "internal/providers/quotas_test.go",
     "internal/providers/server_test.go",
     "internal/providers/validation_test.go",
+    "internal/routes/inspect_redaction_test.go",
     "internal/routes/media_test.go",
     "internal/routes/policy_test.go",
     "internal/routes/simulate_test.go",
@@ -6417,6 +6421,7 @@
     "internal/usage/epochs_test.go",
     "internal/usage/event_test.go",
     "internal/usage/http_test.go",
+    "internal/usage/interaction_test.go",
     "internal/usage/notifications_test.go",
     "internal/usage/pricing_test.go",
     "internal/usage/protocol_test.go",
@@ -6493,7 +6498,9 @@
     "tests/integration/services_test.go",
     "tests/integration/session_expiry_test.go",
     "tests/integration/shared_budgets_test.go",
-    "tests/integration/simulation_authorization_test.go"
+    "tests/integration/simulation_authorization_test.go",
+    "tests/integration/strict_generation_test.go",
+    "tests/integration/strict_plan_inspector_test.go"
   ],
   "browserJourneys": [
     "console/playwright.config.ts",

@@ -12,15 +12,18 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -30,6 +33,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Config bounds the inference surface.
@@ -381,6 +385,25 @@ func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
 }
 
 func requestError(err error) *Error {
+	if gatewayError, ok := errors.AsType[*Error](err); ok {
+		return gatewayError
+	}
+	var contract interface {
+		Incompatibility() (code, field, requirement, message string)
+	}
+	if errors.As(err, &contract) {
+		code, field, requirement, message := contract.Incompatibility()
+		var param *string
+		if field != "" {
+			param = &field
+		}
+		if code == "target_capability" && requirement == "source_control_mapping" {
+			// Preserve the established ingress error for an unmapped control;
+			// the planner and inspector retain its precise requirement/category.
+			return invalidRequest("unsupported_parameter", message, param)
+		}
+		return invalidRequest(code, message, param)
+	}
 	if re, ok := errors.AsType[*openai.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
@@ -407,8 +430,18 @@ const requestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family openai.Family) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeError := func(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, family.Surface()) }
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		writeError := func(w http.ResponseWriter, e *Error) {
+			if x.strict() && x.dispatched && e.Status >= 500 {
+				copy := *e
+				copy.NoRetry = true
+				e = &copy
+			}
+			writeSurfaceError(w, e, family.Surface())
+		}
+		x.semanticHeaders = r.Header.Clone()
+		query, queryErr := url.ParseQuery(r.URL.RawQuery)
+		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 		status := http.StatusInternalServerError
 		var out *outcome
 		defer func() {
@@ -455,7 +488,13 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
-		parsed, err := protocols.Parse(family, body, r.PathValue("model"))
+		var parsed *openai.Request
+		var err error
+		if family == openai.FamilyBedrock {
+			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
+		} else {
+			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+		}
 		if err != nil {
 			e = requestError(err)
 			x.failure, status = e, e.Status
@@ -560,6 +599,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
 		x.facts[len(x.facts)-1].Committed = true
+		if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+			fact.Interaction.ClientState = usage.ClientPartial
+		}
 		_, err = w.Write(out.completion.Body)
 		if err == nil {
 			// Flush buffered responses before recording successful delivery.
@@ -570,6 +612,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			out.cancelled = true
 		} else {
 			x.delivered(s.now())
+			if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+				fact.Interaction.ClientState = usage.ClientTerminal
+			}
 		}
 	}
 }
@@ -590,9 +635,45 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
+	if x.strict() {
+		if x.actor == "playground" {
+			param := "client_contract"
+			return invalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
+		}
+		if x.semanticQueryInvalid {
+			param := "query"
+			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
+		}
+		if x.family.Surface() == "gemini" {
+			if keys, present := x.semanticQuery["key"]; present {
+				if len(keys) != 1 || keys[0] == "" {
+					param := "key"
+					return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
+				}
+				// Authentication already resolved the gateway key. It is neither
+				// native semantics nor an upstream query/default/receipt value.
+				delete(x.semanticQuery, "key")
+			}
+		}
+	}
 	var semantic error
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
+	var policyDecisions []contentpolicy.Decision
+	options := runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
+				return protocols.ParameterNames(x.parsed), requestDemand(x.parsed)
+			}
+			prepared, err := x.preparedProvider(&p, t.ProviderModel)
+			if err != nil {
+				return nil, nil
+			}
+			native := openai.NewSourceEnvelope(prepared.invocation.Wire, x.parsed.Route, x.parsed.Stream, prepared.invocation.Prepared.Document())
+			if prepared.plan != nil {
+				native = prepared.plan.EffectiveRequest()
+			}
+			return protocols.ParameterNames(native), requestDemand(native)
+		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
 			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
@@ -605,7 +686,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				semantic = errors.New("provider-state capability unavailable")
 				return semantic
 			}
-			if protocols.StructuredOutputRequested(x.parsed) {
+			if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
 				var metadata runtime.ModelMetadata
 				_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
 				if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
@@ -614,8 +695,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				}
 			}
 			var e error
-			if p.ProfileID != "" {
-				_, e = x.preparedProvider(&p, t.ProviderModel)
+			if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
+				var prepared preparedProvider
+				prepared, e = x.preparedProvider(&p, t.ProviderModel)
+				if e != nil {
+					policyDecisions = prepared.policyDecisions
+				}
 			} else {
 				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
 			}
@@ -623,7 +708,17 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				semantic = e
 			}
 			return e
-		}})
+		}}
+	if !x.strict() && route.ContentPolicy == nil {
+		hasProfile := false
+		for _, target := range route.Targets {
+			hasProfile = hasProfile || snapshot.Providers[target.ProviderID].ProfileID != ""
+		}
+		if !hasProfile {
+			options.Effective = nil
+		}
+	}
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
 		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
@@ -637,7 +732,17 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	x.budget = plan.Budget
 	if len(plan.Attempts) == 0 {
 		if semantic != nil {
+			for _, decision := range policyDecisions {
+				recordDecision(x, decision)
+			}
 			return requestError(semantic)
+		}
+		if x.strict() {
+			for _, decision := range plan.Decisions {
+				if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
+					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
+				}
+			}
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
@@ -734,6 +839,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 	if !sw.committed {
 		h := sw.w.Header()
 		h.Set("Content-Type", "text/event-stream; charset=utf-8")
+		if sw.family == openai.FamilyBedrock {
+			h.Set("Content-Type", "application/vnd.amazon.eventstream")
+		}
 		h.Set("X-Accel-Buffering", "no")
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
@@ -765,6 +873,16 @@ func (sw *streamWriter) finish(out *outcome) int {
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion
 	// marker so the client cannot mistake it for success.
+	if sw.family == openai.FamilyBedrock {
+		headers := eventstream.Headers{}
+		headers.Set(":message-type", eventstream.StringValue("exception"))
+		headers.Set(":exception-type", eventstream.StringValue("modelStreamErrorException"))
+		payload, _ := json.Marshal(map[string]string{"message": out.err.Message, "code": out.err.Code})
+		http.NewResponseController(sw.w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = eventstream.NewEncoder().Encode(sw.w, eventstream.Message{Headers: headers, Payload: payload})
+		_ = http.NewResponseController(sw.w).Flush()
+		return http.StatusOK
+	}
 	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
 	if sw.family == openai.FamilyResponses || sw.family.Surface() == "anthropic" {
 		frame = "event: error\n" + frame

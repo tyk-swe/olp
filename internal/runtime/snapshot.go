@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/interaction"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -122,18 +123,19 @@ type Target struct {
 
 // Route is the latest published revision of one slug.
 type Route struct {
-	ID             string    `json:"id"`
-	Slug           string    `json:"slug"`
-	Operations     []string  `json:"operations"`
-	OverallTimeout int64     `json:"overall_timeout"`
-	MaxAttempts    int       `json:"max_attempts"`
-	Targets        []Target  `json:"targets"`
-	RoutingID      string    `json:"routing_id"`
-	RevisionID     string    `json:"revision_id,omitempty"`
-	Revision       int       `json:"revision,omitempty"`
-	PublishedAt    time.Time `json:"published_at,omitempty"`
-	Policy         *Policy   `json:"policy,omitempty"`
-	ProjectID      *string   `json:"project_id,omitempty"`
+	compiledContentPolicy *contentpolicy.Compiled
+	ID                    string    `json:"id"`
+	Slug                  string    `json:"slug"`
+	Operations            []string  `json:"operations"`
+	OverallTimeout        int64     `json:"overall_timeout"`
+	MaxAttempts           int       `json:"max_attempts"`
+	Targets               []Target  `json:"targets"`
+	RoutingID             string    `json:"routing_id"`
+	RevisionID            string    `json:"revision_id,omitempty"`
+	Revision              int       `json:"revision,omitempty"`
+	PublishedAt           time.Time `json:"published_at,omitempty"`
+	Policy                *Policy   `json:"policy,omitempty"`
+	ProjectID             *string   `json:"project_id,omitempty"`
 
 	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
 	Fidelity      *RouteFidelity        `json:"fidelity,omitempty"`
@@ -141,6 +143,7 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
+	interactions       map[string]map[string]*interaction.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -178,6 +181,7 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // Validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) Validate() error {
+	s.interactions = make(map[string]map[string]*interaction.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
@@ -215,9 +219,6 @@ func (s *Snapshot) Validate() error {
 		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
 			return fmt.Errorf("route %q fidelity: %w", slug, err)
 		}
-		if err := RequireRouteExecution(r.Fidelity); err != nil {
-			return fmt.Errorf("route %q fidelity: %w", slug, err)
-		}
 		seen := map[string]bool{}
 		for _, t := range r.Targets {
 			if !validUUID(t.ID) || !validUUID(t.RoutingID) || seen[t.ID] || t.Weight < 1 || t.Timeout < 1 || t.ProviderModel == "" {
@@ -228,6 +229,13 @@ func (s *Snapshot) Validate() error {
 				return fmt.Errorf("route %q references unknown provider %s", slug, t.ProviderID)
 			}
 		}
+		templates, policy, err := s.compileRouteExecution(r)
+		if err != nil {
+			return fmt.Errorf("route %q interaction: %w", slug, err)
+		}
+		s.interactions[slug] = templates
+		r.compiledContentPolicy = policy
+		s.Routes[slug] = r
 	}
 	return nil
 }

@@ -65,7 +65,7 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 	case openai.FamilyGemini:
 		c, err = streamGeminiEvents(r, maxEvent, route, upstreamEmit, observe)
 	case "bedrock":
-		c, err = streamBedrockEvents(r, maxEvent, route, upstreamEmit, observe)
+		c, err = streamBedrockEvents(r, maxEvent, route, upstreamEmit, observe, native)
 	default:
 		err = protocolError("unknown stream family")
 	}

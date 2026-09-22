@@ -3,12 +3,14 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -86,6 +88,11 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	now := time.Now().UTC()
 	snapshot.Generation = Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
 	if err = snapshot.Validate(); err != nil {
+		var incompatible incompatibilityError
+		if errors.As(err, &incompatible) {
+			code, _, _, message := incompatible.Incompatibility()
+			return Published{}, access.Fail(422, code, message)
+		}
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
 	digest, err := snapshot.Digest()
