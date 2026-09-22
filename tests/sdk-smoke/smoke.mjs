@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 
 const metadataPath = process.env.OLP_SDK_SMOKE_METADATA;
 assert.ok(metadataPath, 'OLP_SDK_SMOKE_METADATA is required');
@@ -8,7 +9,9 @@ const {
   origin,
   api_key: apiKey,
   conflict_api_key: conflictApiKey,
-  route_slug: routeSlug
+  route_slug: routeSlug,
+  native_tool_route: nativeToolRoute,
+  verification_origin: verificationOrigin
 } = metadata;
 const invalidApiKey = 'olp_not-a-real-key';
 assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/);
@@ -16,6 +19,9 @@ assert.equal(routeSlug, 'sdk-smoke-route');
 assert.ok(apiKey.startsWith('olp_'), 'fixture returned an OLP proxy key');
 assert.ok(conflictApiKey.startsWith('olp_'), 'fixture returned a second OLP proxy key');
 assert.notEqual(conflictApiKey, apiKey, 'fixture keys must be distinct for conflict coverage');
+assert.equal(nativeToolRoute, 'sdk-native-tools-route');
+assert.match(verificationOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
+assert.notEqual(verificationOrigin, origin, 'fixture verification is separate from the gateway');
 
 if (process.argv.includes('--check-metadata')) process.exit(0);
 
@@ -148,6 +154,89 @@ async function smokeAnthropic() {
     messages: [{ role: 'user', content: 'official token count SDK smoke' }]
   });
   assert.equal(count.input_tokens, 13);
+}
+
+async function nativeAnthropicToolWorkflow() {
+  const reference = JSON.parse(await readFile(
+    new URL('../fixtures/fidelity/v1/anthropic-tool-next-request.json', import.meta.url),
+    'utf8'
+  ));
+  const { model: nativeModel, messages: expectedMessages, ...controls } = reference;
+  assert.equal(nativeModel, 'fixture-model');
+  const counts = async () => {
+    // This is a separate fixture listener, never an endpoint added to OLP.
+    const response = await nativeFetch(`${verificationOrigin}/native-tool-workflow`);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  assert.deepEqual(await counts(), {
+    dispatches: 0, initial_requests: 0, next_requests: 0,
+    rejected_requests: 0, complete: false
+  });
+  const client = anthropicClient();
+  const history = [expectedMessages[0]];
+  const stream = client.messages.stream({
+    ...controls, model: nativeToolRoute, messages: history
+  });
+  const events = [];
+  for await (const event of stream) events.push(event);
+  const assistant = await stream.finalMessage();
+  assert.equal(events.length, 19, 'all frozen native events reached the actual SDK');
+  assert.equal(events.at(-1)?.type, 'message_stop');
+  assert.deepEqual(
+    events.filter((event) => event.type === 'content_block_start').map((event) => event.index),
+    [0, 1, 2, 3, 4]
+  );
+  assert.equal(assistant.model, nativeToolRoute);
+  assert.equal(assistant.stop_reason, 'tool_use');
+  assert.equal(assistant.usage.input_tokens, 18);
+  assert.equal(assistant.usage.output_tokens, 28);
+  assert.ok(isDeepStrictEqual(assistant.content, expectedMessages[1].content),
+    'SDK assembly must retain thinking/signature and text/tool/text order');
+
+  const calls = assistant.content.filter((block) => block.type === 'tool_use');
+  assert.deepEqual(calls.map((call) => call.id), ['call-weather', 'call-clock']);
+  const executed = [];
+  const results = await Promise.all(calls.map(async (call) => {
+    executed.push(call.id);
+    let content;
+    if (call.name === 'weather') {
+      assert.deepEqual(call.input, { city: 'Paris' });
+      content = 'sunny';
+    } else if (call.name === 'clock') {
+      assert.deepEqual(call.input, { zone: 'Europe/Paris' });
+      content = '14:00';
+    } else {
+      assert.fail('unexpected native tool');
+    }
+    return { type: 'tool_result', tool_use_id: call.id, content };
+  }));
+  assert.equal(executed.length, 2);
+  assert.equal(new Set(executed).size, 2);
+
+  // Pass the actual SDK-assembled blocks back through its next-request
+  // serializer. The provider compares the entire received body to the frozen
+  // reference, including all controls, schemas, opaque state and both results.
+  const final = await client.messages.create({
+    ...controls,
+    model: nativeToolRoute,
+    messages: [
+      ...history,
+      { role: assistant.role, content: assistant.content },
+      { role: 'user', content: results }
+    ]
+  });
+  assert.equal(final.id, 'msg-native-tool-final');
+  assert.equal(final.model, nativeToolRoute);
+  assert.equal(final.stop_reason, 'end_turn');
+  assert.deepEqual(final.content, [{ type: 'text', text: 'Weather: sunny. Time: 14:00.' }]);
+  assert.equal(final.usage.input_tokens, 64);
+  assert.equal(final.usage.output_tokens, 8);
+  assert.deepEqual(await counts(), {
+    dispatches: 2, initial_requests: 1, next_requests: 1,
+    rejected_requests: 0, complete: true
+  });
+  process.stdout.write('Native Anthropic SDK reasoning/tool continuation passed: 19 events, 2 tools, 2 verified dispatches.\n');
 }
 
 async function smokeGoogle() {
@@ -284,7 +373,10 @@ async function errorContractGoogle() {
 if (surfaces.has('openai')) {
   for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);
 }
-if (surfaces.has('anthropic')) await smokeAnthropic();
+if (surfaces.has('anthropic')) {
+  await smokeAnthropic();
+  await nativeAnthropicToolWorkflow();
+}
 if (surfaces.has('gemini')) await smokeGoogle();
 if (surfaces.has('openai')) {
   for (const [label, baseURL] of openAIBaseURLs) await errorContractOpenAI(baseURL, label);
