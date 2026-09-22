@@ -25,6 +25,12 @@
   import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
   import OperationResult from './OperationResult.svelte';
   import StrictToolPlayground from './StrictToolPlayground.svelte';
+  import NativeOperationPlayground from './NativeOperationPlayground.svelte';
+  import {
+    nativeDialects,
+    nativeOperationRequest,
+    type NativeOperation
+  } from './nativeOperation';
   import {
     playgroundTemplates,
     templateFor
@@ -50,6 +56,7 @@
   let input = $state('');
   let rawJson = $state(JSON.stringify(playgroundTemplates[0].request, null, 2));
   let templateKey = $state(playgroundTemplates[0].key);
+  let nativeDialect = $state('');
   let streamEnabled = $state(false);
   let streamCheck = $state<
     'idle' | 'checking' | 'ok' | 'unsupported' | 'unknown'
@@ -103,7 +110,9 @@
     { value: 'token_count', label: 'Token count' },
     { value: 'embeddings', label: 'Embeddings' },
     { value: 'moderation', label: 'Moderation' },
-    { value: 'rerank', label: 'Rerank' }
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'classification', label: 'Classification' },
+    { value: 'scoring', label: 'Scoring' }
   ];
   const composerModes = [
     { value: 'basic', label: 'Basic' },
@@ -134,6 +143,7 @@
     if (!template) return;
     operation = template.operation;
     if (template.surface) surface = template.surface;
+    nativeDialect = template.nativeDialect ?? '';
     rawJson = JSON.stringify(template.request, null, 2);
   }
 
@@ -224,8 +234,14 @@
       routing,
       simulateKeyId,
       simulateSeed,
-      inspectDialect
+      inspectDialect,
+      nativeDialect
     ]);
+  }
+
+  function currentNativeDialect(): string {
+    const options = nativeDialects(operation);
+    return options.includes(nativeDialect) ? nativeDialect : (options[0] ?? '');
   }
 
   function advancedRequest(): Record<string, unknown> {
@@ -253,18 +269,39 @@
     }
     try {
       const version = inspectionInputs();
+      const registeredNative =
+        strictSelected &&
+        composer === 'advanced' &&
+        nativeDialects(operation).length > 0;
+      const selectedDialect = registeredNative
+        ? currentNativeDialect()
+        : inspectDialect || undefined;
       const input: InspectRoutingInput = {
         route: model.trim(),
         operation: composer === 'advanced' ? operation : 'generation',
-        surface,
-        mode: streamEnabled ? 'streaming' : 'unary',
+        surface: registeredNative ? 'native' : surface,
+        mode: registeredNative
+          ? 'unary'
+          : streamEnabled
+            ? 'streaming'
+            : 'unary',
         preferences: JSON.parse(routing),
         apiKeyId: simulateKeyId || null,
         seed: simulateSeed,
+        clientContract:
+          registeredNative && operation === 'embeddings'
+            ? 'raw-vector-storage/1'
+            : undefined,
         ...(composer === 'advanced'
           ? {
-              request: advancedRequest(),
-              dialect: (inspectDialect || undefined) as
+              request: registeredNative
+                ? nativeOperationRequest(
+                    rawJson,
+                    model.trim(),
+                    selectedDialect!
+                  )
+                : advancedRequest(),
+              dialect: selectedDialect as
                 InspectRoutingInput['dialect'] | undefined
             }
           : {})
@@ -339,6 +376,11 @@
     if (strictSelected) {
       validationError =
         'Use the qualified public client below for this strict route.';
+      return;
+    }
+    if (operation === 'classification' || operation === 'scoring') {
+      validationError =
+        'This operation requires a strict registered native route and the public client below.';
       return;
     }
     let request: PlaygroundRequest;
@@ -636,9 +678,19 @@
       {#if composer === 'advanced'}
         <div class="form-field">
           <label for="playground-inspect-dialect">Native request dialect</label>
-          <select id="playground-inspect-dialect" bind:value={inspectDialect}>
+          <select
+            id="playground-inspect-dialect"
+            value={strictSelected && nativeDialects(operation).length
+              ? currentNativeDialect()
+              : inspectDialect}
+            onchange={(event) => {
+              if (strictSelected && nativeDialects(operation).length)
+                nativeDialect = event.currentTarget.value;
+              else inspectDialect = event.currentTarget.value;
+            }}
+          >
             <option value="">Default for operation and surface</option>
-            {#each inspectionDialects(operation, surface) as dialect (dialect)}
+            {#each strictSelected && nativeDialects(operation).length ? nativeDialects(operation) : inspectionDialects(operation, surface) as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -857,6 +909,15 @@
   {#if composer === 'advanced' && operation === 'generation' && surface === 'openai'}
     {#key model.trim()}
       <StrictToolPlayground route={model.trim()} requestText={rawJson} />
+    {/key}
+  {:else if composer === 'advanced' && nativeDialects(operation).length}
+    {#key `${model.trim()}:${operation}:${templateKey}`}
+      <NativeOperationPlayground
+        route={model.trim()}
+        operation={operation as NativeOperation}
+        requestText={rawJson}
+        bind:dialect={nativeDialect}
+      />
     {/key}
   {:else}
     <section class="card strict-client-unavailable" role="status">

@@ -8775,6 +8775,10 @@
           "dialect": {
             "$ref": "#/components/schemas/SimulationDialect"
           },
+          "client_contract": {
+            "type": "string",
+            "description": "Explicit registered client contract for native operation inspection, such as raw-vector-storage/1. It does not execute an operation."
+          },
           "query_settings": {
             "$ref": "#/components/schemas/SimulationQuerySettings"
           },
@@ -8840,6 +8844,10 @@
           },
           "dialect": {
             "$ref": "#/components/schemas/SimulationDialect"
+          },
+          "client_contract": {
+            "type": "string",
+            "description": "Explicit registered client contract for native operation inspection, such as raw-vector-storage/1. It does not execute an operation."
           },
           "query_settings": {
             "$ref": "#/components/schemas/SimulationQuerySettings"
@@ -8961,7 +8969,8 @@
           "openai",
           "anthropic",
           "gemini",
-          "bedrock"
+          "bedrock",
+          "native"
         ],
         "type": "string"
       },
@@ -10132,9 +10141,23 @@
           "gemini-count-tokens",
           "openai-embeddings",
           "openai-moderation",
-          "rerank"
+          "rerank",
+          "voyage-embeddings",
+          "tei-embeddings",
+          "tei-sparse-embeddings",
+          "tei-multivector-embeddings",
+          "gemini-embeddings",
+          "gemini-batch-embeddings",
+          "vertex-embeddings",
+          "bedrock-embeddings",
+          "voyage-rerank",
+          "tei-rerank",
+          "tei-classification",
+          "tei-scoring",
+          "bedrock-count-tokens",
+          "tei-tokenize"
         ],
-        "description": "Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses."
+        "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
       },
       "SimulationOperation": {
         "type": "object",

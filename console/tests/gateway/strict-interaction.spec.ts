@@ -4,7 +4,9 @@ import { expect, test, type Page } from '../playwright';
 import { waitForRoutePublication } from '../journeys/fixtures';
 
 const fixture = 'http://127.0.0.1:4188';
+const nativeFixture = 'http://127.0.0.1:4189';
 const providerSecret = 'anthropic-browser-fixture-secret';
+const nativeProviderSecret = 'native-browser-fixture-secret';
 const expectedNext = JSON.parse(
   readFileSync(
     new URL(
@@ -84,6 +86,108 @@ function success(
 ) {
   expect(result.status, JSON.stringify(result.body)).toBe(status);
   return result.body;
+}
+
+async function publishNativeOperation(
+  page: Page,
+  profile: 'voyage-embeddings' | 'tei-rerank',
+  operation: 'embeddings' | 'rerank',
+  slug: string
+): Promise<string> {
+  const provider = success(
+    await management(page, 'POST', '/api/v3/providers', {
+      name: `${profile} browser fixture`,
+      configuration: {
+        kind: 'openai_compatible',
+        profile_id: profile,
+        profile_revision: '1',
+        endpoint: `${nativeFixture}/v1`,
+        auth_mode: 'api_key'
+      },
+      model: 'fixture-model',
+      credential: nativeProviderSecret
+    }),
+    201
+  );
+  const providerPath = `/api/v3/providers/${provider.id}`;
+  const models = success(
+    await management(page, 'GET', `${providerPath}/models`),
+    200
+  );
+  const reviewed = success(
+    await management(
+      page,
+      'PATCH',
+      `${providerPath}/models/${models.items[0].id}`,
+      {
+        enabled: true,
+        capabilities: [{ operation, surface: 'native', mode: 'unary' }]
+      },
+      provider.etag
+    ),
+    200
+  );
+  const certified = success(
+    await management(
+      page,
+      'POST',
+      `${providerPath}/models/${models.items[0].id}/certify`,
+      undefined,
+      reviewed.etag
+    ),
+    200
+  );
+  expect(certified.status).not.toBe('failed');
+  const current = success(await management(page, 'GET', providerPath), 200);
+  success(
+    await management(
+      page,
+      'POST',
+      `${providerPath}/activate`,
+      undefined,
+      current.etag
+    ),
+    200
+  );
+  const draft = success(
+    await management(page, 'POST', '/api/v3/route-drafts', {
+      slug,
+      operations: [operation],
+      overall_timeout_ms: 20_000,
+      max_attempts: 1,
+      fidelity: { mode: 'strict' },
+      targets: [
+        {
+          provider_id: provider.id,
+          provider_model: 'fixture-model',
+          priority: 0,
+          weight: 1,
+          timeout_ms: 15_000
+        }
+      ]
+    }),
+    201
+  );
+  success(
+    await management(
+      page,
+      'POST',
+      `/api/v3/route-drafts/${draft.id}/activate`,
+      undefined,
+      draft.etag
+    ),
+    200
+  );
+  const key = success(
+    await management(page, 'POST', '/api/v3/api-keys', {
+      name: `${profile} browser key`,
+      scopes: ['inference', 'models_read'],
+      allowed_routes: [slug]
+    }),
+    201
+  );
+  await waitForRoutePublication(page, key.secret, slug);
+  return key.secret;
 }
 
 test('strict inspector has zero inference effects and browser tool continuation preserves the native next request', async ({
@@ -382,4 +486,136 @@ test('native vector and rerank presentation keeps storage and score representati
   await result.screenshot({
     path: info.outputPath('native-rerank-scores.png')
   });
+});
+
+test('strict native operation client preserves packed vectors and rerank scores through the public gateway', async ({
+  page,
+  request
+}, info) => {
+  test.setTimeout(240_000);
+  await signIn(page);
+  const vectorRoute = `native-vector-${info.project.name}`;
+  const rankRoute = `native-rank-${info.project.name}`;
+  const vectorKey = await publishNativeOperation(
+    page,
+    'voyage-embeddings',
+    'embeddings',
+    vectorRoute
+  );
+  const rankKey = await publishNativeOperation(
+    page,
+    'tei-rerank',
+    'rerank',
+    rankRoute
+  );
+  expect((await request.post(`${nativeFixture}/__test__/reset`)).status()).toBe(
+    204
+  );
+
+  await page.goto('/playground');
+  await page.getByRole('radio', { name: 'Advanced' }).check();
+  await page.getByLabel('Route slug').fill(vectorRoute);
+  await page.getByLabel('Template').selectOption('voyage-packed-embeddings');
+  const native = page
+    .getByRole('heading', { name: /Run a registered embeddings operation/ })
+    .locator('..');
+  await expect(native).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run test' })).toBeDisabled();
+  await page.getByText('Inspect effective plan without running').click();
+  await page
+    .getByLabel('Evaluate as API key')
+    .selectOption({ label: 'voyage-embeddings browser key' });
+  await page.getByRole('button', { name: 'Inspect plan' }).click();
+  const nativePlan = page.getByLabel('Effective interaction plan');
+  await expect(nativePlan).toContainText('admitted');
+  await nativePlan.locator('summary').click();
+  await expect(nativePlan).toContainText('voyage-embeddings');
+  await expect(
+    (
+      await request
+        .get(`${nativeFixture}/__test__/requests`)
+        .then((response) => response.json())
+    ).calls
+  ).toHaveLength(0);
+  const missingContract = await page.evaluate(
+    async ({ secret, route }) => {
+      const response = await fetch(
+        `/native/voyage-embeddings/models/${route}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: route,
+            input: ['First document', 'Second document'],
+            output_dtype: 'ubinary',
+            output_dimension: 16,
+            encoding_format: 'base64'
+          })
+        }
+      );
+      return { status: response.status, body: await response.json() };
+    },
+    { secret: vectorKey, route: vectorRoute }
+  );
+  expect(missingContract.status).toBe(400);
+  expect(missingContract.body.error.code).toBe('state_carrier');
+  expect(
+    (
+      await request
+        .get(`${nativeFixture}/__test__/requests`)
+        .then((response) => response.json())
+    ).calls
+  ).toHaveLength(0);
+  await native.getByLabel('Inference API key').fill(vectorKey);
+  await native.getByRole('button', { name: 'Run billable operation' }).click();
+  await expect(
+    native.getByText('Base64 storage · ubinary').first()
+  ).toBeVisible();
+  await expect(native.getByText('2 stored bytes').first()).toBeVisible();
+  await native.locator('summary').click();
+  await expect(
+    native.locator('[data-testid="native-operation-result"]')
+  ).toContainText('9007199254740993');
+  await expect(
+    native.locator('[data-testid="native-operation-result"]')
+  ).toContainText('"negative_zero":-0');
+  const vectorCalls = await request
+    .get(`${nativeFixture}/__test__/requests`)
+    .then((response) => response.json());
+  expect(vectorCalls.calls).toHaveLength(1);
+  expect(vectorCalls.calls[0].path).toBe('/v1/embeddings');
+  expect(vectorCalls.calls[0].headers.authorization).toBe(
+    `Bearer ${nativeProviderSecret}`
+  );
+  expect(JSON.stringify(vectorCalls)).not.toContain(vectorKey);
+  await native.screenshot({
+    path: info.outputPath('strict-native-vector.png')
+  });
+
+  await page.getByLabel('Route slug').fill(rankRoute);
+  await page.getByLabel('Template').selectOption('tei-rerank');
+  const rank = page
+    .getByRole('heading', { name: /Run a registered rerank operation/ })
+    .locator('..');
+  await rank.getByLabel('Inference API key').fill(rankKey);
+  await rank.getByRole('button', { name: 'Run billable operation' }).click();
+  await expect(
+    rank.locator('td code').filter({ hasText: '0.1000000000000000000001' })
+  ).toHaveCount(2);
+  await expect(rank.locator('tbody tr').first()).toContainText('1');
+  await rank.locator('summary').click();
+  const rankCalls = await request
+    .get(`${nativeFixture}/__test__/requests`)
+    .then((response) => response.json());
+  expect(rankCalls.unexpected).toEqual([]);
+  expect(rankCalls.calls).toHaveLength(2);
+  expect(rankCalls.calls[1].path).toBe('/v1/rerank');
+  expect(rankCalls.calls[1].headers.authorization).toBe(
+    `Bearer ${nativeProviderSecret}`
+  );
+  expect(JSON.stringify(rankCalls)).not.toContain(rankKey);
+  await rank.screenshot({ path: info.outputPath('strict-native-rerank.png') });
 });

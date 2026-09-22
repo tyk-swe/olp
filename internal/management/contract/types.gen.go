@@ -959,16 +959,30 @@ func (e RoutingStrategy) Valid() bool {
 
 // Defines values for SimulationDialect.
 const (
-	SimulationDialectAnthropicCountTokens  SimulationDialect = "anthropic-count-tokens"
-	SimulationDialectAnthropicMessages     SimulationDialect = "anthropic-messages"
-	SimulationDialectGeminiCountTokens     SimulationDialect = "gemini-count-tokens"
-	SimulationDialectGeminiGenerateContent SimulationDialect = "gemini-generate-content"
-	SimulationDialectOpenaiChat            SimulationDialect = "openai-chat"
-	SimulationDialectOpenaiEmbeddings      SimulationDialect = "openai-embeddings"
-	SimulationDialectOpenaiInputTokens     SimulationDialect = "openai-input-tokens"
-	SimulationDialectOpenaiModeration      SimulationDialect = "openai-moderation"
-	SimulationDialectOpenaiResponses       SimulationDialect = "openai-responses"
-	SimulationDialectRerank                SimulationDialect = "rerank"
+	SimulationDialectAnthropicCountTokens     SimulationDialect = "anthropic-count-tokens"
+	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
+	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
+	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
+	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
+	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
+	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
+	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
+	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
+	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
+	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
+	SimulationDialectRerank                   SimulationDialect = "rerank"
+	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
+	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
+	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
+	SimulationDialectTeiRerank                SimulationDialect = "tei-rerank"
+	SimulationDialectTeiScoring               SimulationDialect = "tei-scoring"
+	SimulationDialectTeiSparseEmbeddings      SimulationDialect = "tei-sparse-embeddings"
+	SimulationDialectTeiTokenize              SimulationDialect = "tei-tokenize"
+	SimulationDialectVertexEmbeddings         SimulationDialect = "vertex-embeddings"
+	SimulationDialectVoyageEmbeddings         SimulationDialect = "voyage-embeddings"
+	SimulationDialectVoyageRerank             SimulationDialect = "voyage-rerank"
 )
 
 // Valid indicates whether the value is a known member of the SimulationDialect enum.
@@ -978,7 +992,15 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectAnthropicMessages:
 		return true
+	case SimulationDialectBedrockCountTokens:
+		return true
+	case SimulationDialectBedrockEmbeddings:
+		return true
+	case SimulationDialectGeminiBatchEmbeddings:
+		return true
 	case SimulationDialectGeminiCountTokens:
+		return true
+	case SimulationDialectGeminiEmbeddings:
 		return true
 	case SimulationDialectGeminiGenerateContent:
 		return true
@@ -994,6 +1016,26 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectRerank:
 		return true
+	case SimulationDialectTeiClassification:
+		return true
+	case SimulationDialectTeiEmbeddings:
+		return true
+	case SimulationDialectTeiMultivectorEmbeddings:
+		return true
+	case SimulationDialectTeiRerank:
+		return true
+	case SimulationDialectTeiScoring:
+		return true
+	case SimulationDialectTeiSparseEmbeddings:
+		return true
+	case SimulationDialectTeiTokenize:
+		return true
+	case SimulationDialectVertexEmbeddings:
+		return true
+	case SimulationDialectVoyageEmbeddings:
+		return true
+	case SimulationDialectVoyageRerank:
+		return true
 	default:
 		return false
 	}
@@ -1004,6 +1046,7 @@ const (
 	SurfaceAnthropic Surface = "anthropic"
 	SurfaceBedrock   Surface = "bedrock"
 	SurfaceGemini    Surface = "gemini"
+	SurfaceNative    Surface = "native"
 	SurfaceOpenai    Surface = "openai"
 )
 
@@ -1015,6 +1058,8 @@ func (e Surface) Valid() bool {
 	case SurfaceBedrock:
 		return true
 	case SurfaceGemini:
+		return true
+	case SurfaceNative:
 		return true
 	case SurfaceOpenai:
 		return true
@@ -3853,7 +3898,10 @@ type SimulateRouteRequest struct {
 	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+	// ClientContract Explicit registered client contract for native operation inspection, such as raw-vector-storage/1. It does not execute an operation.
+	ClientContract *string `json:"client_contract,omitempty"`
+
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
@@ -3873,7 +3921,7 @@ type SimulateRouteRequest struct {
 	Surface         string                     `json:"surface"`
 }
 
-// SimulationDialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+// SimulationDialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 type SimulationDialect string
 
 // SimulationOperation defines model for SimulationOperation.
@@ -3894,7 +3942,10 @@ type SimulationQuerySettings map[string]string
 type SimulationRequest struct {
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+	// ClientContract Explicit registered client contract for native operation inspection, such as raw-vector-storage/1. It does not execute an operation.
+	ClientContract *string `json:"client_contract,omitempty"`
+
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`

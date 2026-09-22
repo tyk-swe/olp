@@ -10,6 +10,7 @@ export type InspectRoutingInput = {
   mode: Schemas['TransportMode'];
   request?: Record<string, unknown>;
   dialect?: Schemas['SimulationDialect'];
+  clientContract?: string;
   preferences?: Schemas['RoutingPreferences'];
   apiKeyId?: string | null;
   seed?: string;
@@ -33,6 +34,7 @@ export async function inspectRouting(
       preferences: input.preferences,
       api_key_id: input.apiKeyId ?? null,
       dialect: input.dialect,
+      client_contract: input.clientContract,
       seed: input.seed ?? ''
     },
     signal
