@@ -652,6 +652,8 @@ func newRealtimeFixture(t *testing.T) *realtimeFixture {
 func TestRealtimeIngress(t *testing.T) {
 	fixture := newRealtimeFixture(t)
 	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
 	owner, _, slug, secret := provisionOpenAI(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "realtime", "surface": "openai", "mode": "realtime"}},
 		[]string{"realtime"})
@@ -697,6 +699,7 @@ func TestRealtimeIngress(t *testing.T) {
 		t.Fatalf("relay did not echo: %v %q", err, data)
 	}
 
+	beforeTerminal := sink.count()
 	if err := client.Write(ctx, websocket.MessageText, []byte("BIG")); err != nil {
 		t.Fatalf("size probe write: %v", err)
 	}
@@ -705,6 +708,13 @@ func TestRealtimeIngress(t *testing.T) {
 	}
 	client.Close(websocket.StatusNormalClosure, "")
 	admissionReleased("oversized frame")
+	if sink.count() != beforeTerminal+1 {
+		t.Fatalf("oversized frame terminal count=%d, want one new terminal", sink.count()-beforeTerminal)
+	}
+	oversized := sink.last()
+	if oversized.Outcome != "failure" || oversized.ErrorClass != "realtime_incomplete" || !oversized.Committed || len(oversized.Attempts) != 1 || oversized.Attempts[0].Class != "protocol" {
+		t.Fatalf("oversized frame was recorded as success: %+v", oversized)
+	}
 
 	client, _, err = websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + secret}}})
 	if err != nil {
@@ -732,6 +742,10 @@ func TestRealtimeIngress(t *testing.T) {
 		t.Fatalf("revocation close status %v, want policy violation", code)
 	}
 	admissionReleased("revoked key")
+	revoked := sink.last()
+	if revoked.Outcome != "failure" || revoked.ErrorClass != "key_revoked" || !revoked.Committed || len(revoked.Attempts) != 1 || revoked.Attempts[0].Class != "credential" {
+		t.Fatalf("revoked realtime session lost its failure category: %+v", revoked)
+	}
 }
 
 type bedrockFixture struct {

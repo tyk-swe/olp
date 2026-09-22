@@ -25,6 +25,8 @@ const realtimeReauth = 5 * time.Second
 
 const realtimePing = 30 * time.Second
 
+var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
+
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyRealtime, actor: "api_key"}
 	x.mode = "realtime"
@@ -146,16 +148,39 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(limit)
 	x.dispatched = true
 	x.delivered(s.now())
-	usage := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
+	usage, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
+	class := classProtocol
+	cancelled := false
+	if relayErr != nil {
+		switch {
+		case errors.Is(relayErr, errRealtimeAuthorityRevoked):
+			class = classCredential
+		case errors.Is(relayErr, context.Canceled):
+			class, cancelled = classCancelled, true
+		case errors.Is(relayErr, context.DeadlineExceeded):
+			class = classTimeout
+		}
+	}
 	if len(x.facts) > 0 {
 		fact := &x.facts[len(x.facts)-1]
 		if usage != nil {
 			fact.Usage = usage
-			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = true, true, false
+			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = true, relayErr == nil, relayErr != nil
 		} else {
 			fact.UsageComplete = false
 			fact.BillingUncertain = true
 		}
+		if relayErr != nil {
+			fact.Class = class
+		}
+	}
+	if relayErr != nil {
+		x.failure = serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
+		if class == classCredential {
+			x.failure = permissionError("key_revoked", "The realtime session no longer has route authority.")
+		}
+		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: cancelled}, x.failure.Status)
+		return
 	}
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
@@ -269,7 +294,7 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 	return openai.ParseErrorBody(body)
 }
 
-func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) *openai.Usage {
+func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) (*openai.Usage, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var usageMu sync.Mutex
@@ -284,12 +309,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 			if inspect {
 				if u := realtimeUsage(data); u != nil {
 					usageMu.Lock()
-					usage.InputTokens += u.InputTokens
-					usage.OutputTokens += u.OutputTokens
+					usage.InputTokens = addBounded(usage.InputTokens, u.InputTokens)
+					usage.OutputTokens = addBounded(usage.OutputTokens, u.OutputTokens)
 					if u.CachedInputTokens != nil {
 						cached := *u.CachedInputTokens
 						if usage.CachedInputTokens != nil {
-							cached += *usage.CachedInputTokens
+							cached = addBounded(cached, *usage.CachedInputTokens)
 						}
 						usage.CachedInputTokens = &cached
 					}
@@ -297,7 +322,10 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 					usageMu.Unlock()
 				}
 			}
-			if err := dst.Write(ctx, typ, data); err != nil {
+			writeCtx, stopWrite := context.WithTimeout(ctx, responseWriteTimeout)
+			err = dst.Write(writeCtx, typ, data)
+			stopWrite()
+			if err != nil {
 				return err
 			}
 		}
@@ -310,6 +338,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
 	var first error
+	closeCode := websocket.StatusCode(0)
 loop:
 	for {
 		select {
@@ -319,7 +348,8 @@ loop:
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
 			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) {
-				first = errors.New("key authority revoked")
+				first = errRealtimeAuthorityRevoked
+				closeCode = websocket.StatusPolicyViolation
 				client.Close(websocket.StatusPolicyViolation, "key revoked")
 				break loop
 			}
@@ -342,18 +372,27 @@ loop:
 	cancel()
 
 	code := websocket.CloseStatus(first)
-	if code < 0 {
-		code = websocket.StatusNormalClosure
+	if closeCode != 0 {
+		code = closeCode
+	} else if code < 0 {
+		code = websocket.StatusInternalError
 	}
 	conn.Close(code, "")
 	client.Close(code, "")
 	<-done
 	usageMu.Lock()
 	defer usageMu.Unlock()
-	if !have {
-		return nil
+	var observed *openai.Usage
+	if have {
+		observed = usage
 	}
-	return usage
+	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
+		return observed, nil
+	}
+	if !have {
+		return nil, first
+	}
+	return usage, first
 }
 
 func realtimeUsage(data []byte) *openai.Usage {
