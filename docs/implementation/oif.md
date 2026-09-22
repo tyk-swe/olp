@@ -46,6 +46,11 @@ graph TD
   planning --> barrier_baseline
   native_config_storage --> barrier_baseline
   barrier_baseline --> qualification
+  migration_foundation["#226 reviewed identity migration"]
+  planning --> migration_foundation
+  route_contracts --> migration_foundation
+  native_config_storage --> migration_foundation
+  migration_foundation --> qualification
   lifecycle --> qualification
   console --> qualification
 ```
@@ -70,6 +75,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Reference baseline integrated; translated candidate qualification pending | Source `29e18268`, capture `a99d0217`, merge `533ac161`; [36 repetitions, encrypted barrier reference and frozen criteria](../evidence/fidelity-performance/barrier-v1/README.md); replacement qualification remains #214/#218 |
+| [#226](https://github.com/tyk-swe/olp/issues/226) Enforce reviewed route identity migration across mixed versions | D23; T10 | Active; #213, #220 and #224 integrated | Forward migration 0027 reserved after shared operation-label migration 0026; actual old/new reader and writer qualification pending |
 | [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
 
 ## Qualification rules
