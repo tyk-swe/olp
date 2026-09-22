@@ -95,19 +95,19 @@ func (e AttemptInteractionMetadataUpstreamState) Valid() bool {
 
 // Defines values for AuditEventResponseActorType.
 const (
-	ManagementToken AuditEventResponseActorType = "management_token"
-	System          AuditEventResponseActorType = "system"
-	User            AuditEventResponseActorType = "user"
+	AuditEventResponseActorTypeManagementToken AuditEventResponseActorType = "management_token"
+	AuditEventResponseActorTypeSystem          AuditEventResponseActorType = "system"
+	AuditEventResponseActorTypeUser            AuditEventResponseActorType = "user"
 )
 
 // Valid indicates whether the value is a known member of the AuditEventResponseActorType enum.
 func (e AuditEventResponseActorType) Valid() bool {
 	switch e {
-	case ManagementToken:
+	case AuditEventResponseActorTypeManagementToken:
 		return true
-	case System:
+	case AuditEventResponseActorTypeSystem:
 		return true
-	case User:
+	case AuditEventResponseActorTypeUser:
 		return true
 	default:
 		return false
@@ -224,16 +224,16 @@ func (e ContentPolicyRuleAction) Valid() bool {
 
 // Defines values for ContentPolicyRulePhase.
 const (
-	Input  ContentPolicyRulePhase = "input"
-	Output ContentPolicyRulePhase = "output"
+	ContentPolicyRulePhaseInput  ContentPolicyRulePhase = "input"
+	ContentPolicyRulePhaseOutput ContentPolicyRulePhase = "output"
 )
 
 // Valid indicates whether the value is a known member of the ContentPolicyRulePhase enum.
 func (e ContentPolicyRulePhase) Valid() bool {
 	switch e {
-	case Input:
+	case ContentPolicyRulePhaseInput:
 		return true
-	case Output:
+	case ContentPolicyRulePhaseOutput:
 		return true
 	default:
 		return false
@@ -330,33 +330,153 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for InspectedPartKind.
+const (
+	InspectedPartKindAudio      InspectedPartKind = "audio"
+	InspectedPartKindDocument   InspectedPartKind = "document"
+	InspectedPartKindImage      InspectedPartKind = "image"
+	InspectedPartKindMedia      InspectedPartKind = "media"
+	InspectedPartKindNull       InspectedPartKind = "null"
+	InspectedPartKindOpaque     InspectedPartKind = "opaque"
+	InspectedPartKindReasoning  InspectedPartKind = "reasoning"
+	InspectedPartKindRefusal    InspectedPartKind = "refusal"
+	InspectedPartKindText       InspectedPartKind = "text"
+	InspectedPartKindToolCall   InspectedPartKind = "tool_call"
+	InspectedPartKindToolResult InspectedPartKind = "tool_result"
+	InspectedPartKindVideo      InspectedPartKind = "video"
+)
+
+// Valid indicates whether the value is a known member of the InspectedPartKind enum.
+func (e InspectedPartKind) Valid() bool {
+	switch e {
+	case InspectedPartKindAudio:
+		return true
+	case InspectedPartKindDocument:
+		return true
+	case InspectedPartKindImage:
+		return true
+	case InspectedPartKindMedia:
+		return true
+	case InspectedPartKindNull:
+		return true
+	case InspectedPartKindOpaque:
+		return true
+	case InspectedPartKindReasoning:
+		return true
+	case InspectedPartKindRefusal:
+		return true
+	case InspectedPartKindText:
+		return true
+	case InspectedPartKindToolCall:
+		return true
+	case InspectedPartKindToolResult:
+		return true
+	case InspectedPartKindVideo:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InspectedRequestFieldKind.
 const (
-	Absent  InspectedRequestFieldKind = "absent"
-	Array   InspectedRequestFieldKind = "array"
-	Boolean InspectedRequestFieldKind = "boolean"
-	Null    InspectedRequestFieldKind = "null"
-	Number  InspectedRequestFieldKind = "number"
-	Object  InspectedRequestFieldKind = "object"
-	String  InspectedRequestFieldKind = "string"
+	InspectedRequestFieldKindAbsent  InspectedRequestFieldKind = "absent"
+	InspectedRequestFieldKindArray   InspectedRequestFieldKind = "array"
+	InspectedRequestFieldKindBoolean InspectedRequestFieldKind = "boolean"
+	InspectedRequestFieldKindNull    InspectedRequestFieldKind = "null"
+	InspectedRequestFieldKindNumber  InspectedRequestFieldKind = "number"
+	InspectedRequestFieldKindObject  InspectedRequestFieldKind = "object"
+	InspectedRequestFieldKindString  InspectedRequestFieldKind = "string"
 )
 
 // Valid indicates whether the value is a known member of the InspectedRequestFieldKind enum.
 func (e InspectedRequestFieldKind) Valid() bool {
 	switch e {
-	case Absent:
+	case InspectedRequestFieldKindAbsent:
 		return true
-	case Array:
+	case InspectedRequestFieldKindArray:
 		return true
-	case Boolean:
+	case InspectedRequestFieldKindBoolean:
 		return true
-	case Null:
+	case InspectedRequestFieldKindNull:
 		return true
-	case Number:
+	case InspectedRequestFieldKindNumber:
 		return true
-	case Object:
+	case InspectedRequestFieldKindObject:
 		return true
-	case String:
+	case InspectedRequestFieldKindString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InspectedTurnRole.
+const (
+	InspectedTurnRoleAssistant   InspectedTurnRole = "assistant"
+	InspectedTurnRoleDeveloper   InspectedTurnRole = "developer"
+	InspectedTurnRoleFunction    InspectedTurnRole = "function"
+	InspectedTurnRoleInstruction InspectedTurnRole = "instruction"
+	InspectedTurnRoleModel       InspectedTurnRole = "model"
+	InspectedTurnRoleOther       InspectedTurnRole = "other"
+	InspectedTurnRoleSystem      InspectedTurnRole = "system"
+	InspectedTurnRoleTool        InspectedTurnRole = "tool"
+	InspectedTurnRoleUnspecified InspectedTurnRole = "unspecified"
+	InspectedTurnRoleUser        InspectedTurnRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the InspectedTurnRole enum.
+func (e InspectedTurnRole) Valid() bool {
+	switch e {
+	case InspectedTurnRoleAssistant:
+		return true
+	case InspectedTurnRoleDeveloper:
+		return true
+	case InspectedTurnRoleFunction:
+		return true
+	case InspectedTurnRoleInstruction:
+		return true
+	case InspectedTurnRoleModel:
+		return true
+	case InspectedTurnRoleOther:
+		return true
+	case InspectedTurnRoleSystem:
+		return true
+	case InspectedTurnRoleTool:
+		return true
+	case InspectedTurnRoleUnspecified:
+		return true
+	case InspectedTurnRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InspectedTurnScope.
+const (
+	InspectedTurnScopeContents          InspectedTurnScope = "contents"
+	InspectedTurnScopeInput             InspectedTurnScope = "input"
+	InspectedTurnScopeInstructions      InspectedTurnScope = "instructions"
+	InspectedTurnScopeMessages          InspectedTurnScope = "messages"
+	InspectedTurnScopeSystem            InspectedTurnScope = "system"
+	InspectedTurnScopeSystemInstruction InspectedTurnScope = "system_instruction"
+)
+
+// Valid indicates whether the value is a known member of the InspectedTurnScope enum.
+func (e InspectedTurnScope) Valid() bool {
+	switch e {
+	case InspectedTurnScopeContents:
+		return true
+	case InspectedTurnScopeInput:
+		return true
+	case InspectedTurnScopeInstructions:
+		return true
+	case InspectedTurnScopeMessages:
+		return true
+	case InspectedTurnScopeSystem:
+		return true
+	case InspectedTurnScopeSystemInstruction:
 		return true
 	default:
 		return false
@@ -458,13 +578,13 @@ func (e PlaygroundRequestOperation) Valid() bool {
 
 // Defines values for PlaygroundResponseFormat0Type.
 const (
-	Text PlaygroundResponseFormat0Type = "text"
+	PlaygroundResponseFormat0TypeText PlaygroundResponseFormat0Type = "text"
 )
 
 // Valid indicates whether the value is a known member of the PlaygroundResponseFormat0Type enum.
 func (e PlaygroundResponseFormat0Type) Valid() bool {
 	switch e {
-	case Text:
+	case PlaygroundResponseFormat0TypeText:
 		return true
 	default:
 		return false
@@ -578,28 +698,28 @@ func (e ProviderAuthMode) Valid() bool {
 
 // Defines values for ProviderConfigurationField.
 const (
-	ApiVersion   ProviderConfigurationField = "api_version"
-	CloudProject ProviderConfigurationField = "cloud_project"
-	CloudRegion  ProviderConfigurationField = "cloud_region"
-	Deployment   ProviderConfigurationField = "deployment"
-	Endpoint     ProviderConfigurationField = "endpoint"
-	Model        ProviderConfigurationField = "model"
+	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
+	ProviderConfigurationFieldCloudProject ProviderConfigurationField = "cloud_project"
+	ProviderConfigurationFieldCloudRegion  ProviderConfigurationField = "cloud_region"
+	ProviderConfigurationFieldDeployment   ProviderConfigurationField = "deployment"
+	ProviderConfigurationFieldEndpoint     ProviderConfigurationField = "endpoint"
+	ProviderConfigurationFieldModel        ProviderConfigurationField = "model"
 )
 
 // Valid indicates whether the value is a known member of the ProviderConfigurationField enum.
 func (e ProviderConfigurationField) Valid() bool {
 	switch e {
-	case ApiVersion:
+	case ProviderConfigurationFieldApiVersion:
 		return true
-	case CloudProject:
+	case ProviderConfigurationFieldCloudProject:
 		return true
-	case CloudRegion:
+	case ProviderConfigurationFieldCloudRegion:
 		return true
-	case Deployment:
+	case ProviderConfigurationFieldDeployment:
 		return true
-	case Endpoint:
+	case ProviderConfigurationFieldEndpoint:
 		return true
-	case Model:
+	case ProviderConfigurationFieldModel:
 		return true
 	default:
 		return false
@@ -767,16 +887,30 @@ func (e RoutingStrategy) Valid() bool {
 
 // Defines values for SimulationDialect.
 const (
-	SimulationDialectAnthropicCountTokens  SimulationDialect = "anthropic-count-tokens"
-	SimulationDialectAnthropicMessages     SimulationDialect = "anthropic-messages"
-	SimulationDialectGeminiCountTokens     SimulationDialect = "gemini-count-tokens"
-	SimulationDialectGeminiGenerateContent SimulationDialect = "gemini-generate-content"
-	SimulationDialectOpenaiChat            SimulationDialect = "openai-chat"
-	SimulationDialectOpenaiEmbeddings      SimulationDialect = "openai-embeddings"
-	SimulationDialectOpenaiInputTokens     SimulationDialect = "openai-input-tokens"
-	SimulationDialectOpenaiModeration      SimulationDialect = "openai-moderation"
-	SimulationDialectOpenaiResponses       SimulationDialect = "openai-responses"
-	SimulationDialectRerank                SimulationDialect = "rerank"
+	SimulationDialectAnthropicCountTokens     SimulationDialect = "anthropic-count-tokens"
+	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
+	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
+	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
+	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
+	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
+	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
+	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
+	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
+	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
+	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
+	SimulationDialectRerank                   SimulationDialect = "rerank"
+	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
+	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
+	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
+	SimulationDialectTeiRerank                SimulationDialect = "tei-rerank"
+	SimulationDialectTeiScoring               SimulationDialect = "tei-scoring"
+	SimulationDialectTeiSparseEmbeddings      SimulationDialect = "tei-sparse-embeddings"
+	SimulationDialectTeiTokenize              SimulationDialect = "tei-tokenize"
+	SimulationDialectVertexEmbeddings         SimulationDialect = "vertex-embeddings"
+	SimulationDialectVoyageEmbeddings         SimulationDialect = "voyage-embeddings"
+	SimulationDialectVoyageRerank             SimulationDialect = "voyage-rerank"
 )
 
 // Valid indicates whether the value is a known member of the SimulationDialect enum.
@@ -786,7 +920,15 @@ func (e SimulationDialect) Valid() bool {
 		return true
 	case SimulationDialectAnthropicMessages:
 		return true
+	case SimulationDialectBedrockCountTokens:
+		return true
+	case SimulationDialectBedrockEmbeddings:
+		return true
+	case SimulationDialectGeminiBatchEmbeddings:
+		return true
 	case SimulationDialectGeminiCountTokens:
+		return true
+	case SimulationDialectGeminiEmbeddings:
 		return true
 	case SimulationDialectGeminiGenerateContent:
 		return true
@@ -801,6 +943,26 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectOpenaiResponses:
 		return true
 	case SimulationDialectRerank:
+		return true
+	case SimulationDialectTeiClassification:
+		return true
+	case SimulationDialectTeiEmbeddings:
+		return true
+	case SimulationDialectTeiMultivectorEmbeddings:
+		return true
+	case SimulationDialectTeiRerank:
+		return true
+	case SimulationDialectTeiScoring:
+		return true
+	case SimulationDialectTeiSparseEmbeddings:
+		return true
+	case SimulationDialectTeiTokenize:
+		return true
+	case SimulationDialectVertexEmbeddings:
+		return true
+	case SimulationDialectVoyageEmbeddings:
+		return true
+	case SimulationDialectVoyageRerank:
 		return true
 	default:
 		return false
@@ -950,19 +1112,19 @@ func (e UserResponseAccessScope) Valid() bool {
 
 // Defines values for DownloadMediaJobContentParamsVariant.
 const (
-	Spritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
-	Thumbnail   DownloadMediaJobContentParamsVariant = "thumbnail"
-	Video       DownloadMediaJobContentParamsVariant = "video"
+	DownloadMediaJobContentParamsVariantSpritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
+	DownloadMediaJobContentParamsVariantThumbnail   DownloadMediaJobContentParamsVariant = "thumbnail"
+	DownloadMediaJobContentParamsVariantVideo       DownloadMediaJobContentParamsVariant = "video"
 )
 
 // Valid indicates whether the value is a known member of the DownloadMediaJobContentParamsVariant enum.
 func (e DownloadMediaJobContentParamsVariant) Valid() bool {
 	switch e {
-	case Spritesheet:
+	case DownloadMediaJobContentParamsVariantSpritesheet:
 		return true
-	case Thumbnail:
+	case DownloadMediaJobContentParamsVariantThumbnail:
 		return true
-	case Video:
+	case DownloadMediaJobContentParamsVariantVideo:
 		return true
 	default:
 		return false
@@ -1908,8 +2070,22 @@ type HealthResponse struct {
 // InspectedEffectiveRequest defines model for InspectedEffectiveRequest.
 type InspectedEffectiveRequest struct {
 	Fields               []InspectedRequestField `json:"fields"`
+	OmittedTurns         int                     `json:"omitted_turns"`
 	RedactedNativeFields int                     `json:"redacted_native_fields"`
+
+	// Structure Ordered role/scope and block kinds from the prepared request. No content, tool names, IDs, schema keys or opaque state.
+	Structure []InspectedTurn `json:"structure"`
 }
+
+// InspectedPart defines model for InspectedPart.
+type InspectedPart struct {
+	// CallOrdinal Content-free ordinal linking a result to a preceding call ID when that relationship is explicit.
+	CallOrdinal *int              `json:"call_ordinal,omitempty"`
+	Kind        InspectedPartKind `json:"kind"`
+}
+
+// InspectedPartKind defines model for InspectedPart.Kind.
+type InspectedPartKind string
 
 // InspectedRequestField Only allowlisted scalar controls expose values. Content, tools/schemas, identifiers and opaque state remain redacted; unknown property names are not returned.
 type InspectedRequestField struct {
@@ -1936,6 +2112,21 @@ type InspectedServingIdentity struct {
 	ResourceScopeDeclared bool               `json:"resource_scope_declared"`
 	SnapshotDeclared      bool               `json:"snapshot_declared"`
 }
+
+// InspectedTurn defines model for InspectedTurn.
+type InspectedTurn struct {
+	Index        int                `json:"index"`
+	OmittedParts int                `json:"omitted_parts"`
+	Parts        []InspectedPart    `json:"parts"`
+	Role         InspectedTurnRole  `json:"role"`
+	Scope        InspectedTurnScope `json:"scope"`
+}
+
+// InspectedTurnRole defines model for InspectedTurn.Role.
+type InspectedTurnRole string
+
+// InspectedTurnScope defines model for InspectedTurn.Scope.
+type InspectedTurnScope string
 
 // InteractionDisposition defines model for InteractionDisposition.
 type InteractionDisposition struct {
@@ -2324,7 +2515,10 @@ type PlaygroundResponse struct {
 	Refusal       nullable.Nullable[string] `json:"refusal,omitempty"`
 
 	// Response Parsed non-generation operation result (embeddings, moderation, rerank, token count).
-	Response         interface{}                        `json:"response,omitempty"`
+	Response interface{} `json:"response,omitempty"`
+
+	// ResponseRaw Original native JSON response bytes for an ephemeral non-generation playground result. Exact number tokens, ordering and storage representation remain available beside the interpreted view.
+	ResponseRaw      *string                            `json:"response_raw,omitempty"`
 	Routing          []RoutingDecision                  `json:"routing"`
 	StructuredOutput interface{}                        `json:"structured_output,omitempty"`
 	ToolCalls        []PlaygroundToolCall               `json:"tool_calls"`
@@ -3663,10 +3857,10 @@ type SimulateRouteRequest struct {
 	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// ClientContract Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field.
+	// ClientContract Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
 
-	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
@@ -3686,7 +3880,7 @@ type SimulateRouteRequest struct {
 	Surface         string                     `json:"surface"`
 }
 
-// SimulationDialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+// SimulationDialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 type SimulationDialect string
 
 // SimulationOperation defines model for SimulationOperation.
@@ -3707,10 +3901,10 @@ type SimulationQuerySettings map[string]string
 type SimulationRequest struct {
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// ClientContract Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field.
+	// ClientContract Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
 
-	// Dialect Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses.
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`

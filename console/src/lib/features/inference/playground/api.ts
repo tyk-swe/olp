@@ -11,7 +11,14 @@ export type PlaygroundRequest = Omit<
 export type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
 
 export type PlaygroundOperation =
-  'generation' | 'token_count' | 'embeddings' | 'moderation' | 'rerank';
+  | 'generation'
+  | 'token_count'
+  | 'embeddings'
+  | 'moderation'
+  | 'rerank'
+  | 'classification'
+  | 'scoring'
+  | 'realtime';
 
 export type PlaygroundStreamDone = {
   id?: string;

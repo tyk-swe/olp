@@ -13,7 +13,25 @@ import (
 // schemas/tool arguments can contain private content.
 type inspectedRequest struct {
 	Fields               []inspectedField `json:"fields"`
+	Structure            []inspectedTurn  `json:"structure"`
+	OmittedTurns         int              `json:"omitted_turns"`
 	RedactedNativeFields int              `json:"redacted_native_fields"`
+}
+
+// Structure is a bounded, content-free view of the *prepared* native request.
+// Only fixed vocabulary and ordinal relationships leave the server. Tool IDs,
+// names, schema keys, message text and opaque reasoning never leave it.
+type inspectedTurn struct {
+	Scope        string          `json:"scope"`
+	Index        int             `json:"index"`
+	Role         string          `json:"role"`
+	Parts        []inspectedPart `json:"parts"`
+	OmittedParts int             `json:"omitted_parts"`
+}
+
+type inspectedPart struct {
+	Kind        string `json:"kind"`
+	CallOrdinal *int   `json:"call_ordinal,omitempty"`
 }
 
 type inspectedField struct {
@@ -28,7 +46,8 @@ type inspectedField struct {
 var inspectedRequestFields = strings.Fields("model messages input instructions system systemInstruction contents prompt tools tool_choice toolConfig response_format text thinking reasoning generationConfig inferenceConfig additionalModelRequestFields safetySettings stop stop_sequences temperature top_p top_k max_tokens max_completion_tokens max_output_tokens frequency_penalty presence_penalty seed n candidateCount stream stream_options parallel_tool_calls logprobs top_logprobs reasoning_effort service_tier verbosity truncation store background previous_response_id conversation metadata user")
 
 func inspectRequest(document oif.Document, provenance []oif.Provenance) inspectedRequest {
-	result := inspectedRequest{Fields: []inspectedField{}}
+	result := inspectedRequest{Fields: []inspectedField{}, Structure: []inspectedTurn{}}
+	result.Structure, result.OmittedTurns = inspectStructure(document.Root())
 	for _, member := range document.Root().Members() {
 		if !slices.Contains(inspectedRequestFields, member.Name) {
 			result.RedactedNativeFields++

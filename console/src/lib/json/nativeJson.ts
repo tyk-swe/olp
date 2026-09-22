@@ -301,8 +301,9 @@ class NativeConfiguration {
   }
 }
 
-/** Only provider configuration is a native editable document; pagination,
- * status and other generated management scalars retain their ordinary types. */
+/** Provider configuration and operation results are native documents.
+ * Pagination, status and other generated management scalars retain ordinary
+ * generated-contract types. */
 export function parseManagementJSON(source: string): unknown {
   const parsed = parseNativeJSON(source);
   const normalize = (value: NativeValue, native = false): unknown => {
@@ -311,13 +312,22 @@ export function parseManagementJSON(source: string): unknown {
     if (Array.isArray(value))
       return value.map((item) => normalize(item, native));
     if (!nativeObject(value)) return value;
+    const playgroundResult =
+      Object.hasOwn(value, 'response') &&
+      Object.hasOwn(value, 'output_text') &&
+      Object.hasOwn(value, 'tool_calls') &&
+      Object.hasOwn(value, 'routing') &&
+      Object.hasOwn(value, 'latency_ms');
     const entries = nativeEntries(value).map(([key, child]) => {
       const configuration =
         key === 'configuration' &&
         nativeObject(child) &&
         Object.hasOwn(child, 'kind') &&
         Object.hasOwn(child, 'auth_mode');
-      const decoded = normalize(child, native || configuration);
+      const decoded = normalize(
+        child,
+        native || configuration || (playgroundResult && key === 'response')
+      );
       return [
         key,
         configuration

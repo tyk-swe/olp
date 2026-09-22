@@ -3,6 +3,7 @@
     orderedRows,
     type ExplanationRow
   } from '$lib/features/routes/routingExplanation';
+  import InteractionInspector from './InteractionInspector.svelte';
   let { rows }: { rows: ExplanationRow[] } = $props();
   const ordered = $derived(orderedRows(rows));
   const attempted = $derived(rows.some((row) => row.attempt !== null));
@@ -57,6 +58,10 @@
             : 'Unknown'}
         </dd>
       </dl>
+      <InteractionInspector
+        inspection={row.interaction}
+        incompatibility={row.incompatibility}
+      />
     </article>
   {/each}
 </div>

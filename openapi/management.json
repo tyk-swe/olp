@@ -4099,6 +4099,10 @@
           "response": {
             "description": "Parsed non-generation operation result (embeddings, moderation, rerank, token count)."
           },
+          "response_raw": {
+            "type": "string",
+            "description": "Original native JSON response bytes for an ephemeral non-generation playground result. Exact number tokens, ordering and storage representation remain available beside the interpreted view."
+          },
           "routing": {
             "items": {
               "$ref": "#/components/schemas/RoutingDecision"
@@ -8751,6 +8755,11 @@
           "dialect": {
             "$ref": "#/components/schemas/SimulationDialect"
           },
+          "client_contract": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation."
+          },
           "query_settings": {
             "$ref": "#/components/schemas/SimulationQuerySettings"
           },
@@ -8761,11 +8770,6 @@
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
-          },
-          "client_contract": {
-            "type": "string",
-            "maxLength": 128,
-            "description": "Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field."
           }
         },
         "required": [
@@ -8831,7 +8835,7 @@
           "client_contract": {
             "type": "string",
             "maxLength": 128,
-            "description": "Explicit versioned observation contract, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; never inferred from a user agent or an encoding field."
+            "description": "Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation."
           }
         },
         "required": [
@@ -9806,6 +9810,18 @@
               "$ref": "#/components/schemas/InspectedRequestField"
             }
           },
+          "structure": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/InspectedTurn"
+            },
+            "description": "Ordered role/scope and block kinds from the prepared request. No content, tool names, IDs, schema keys or opaque state."
+          },
+          "omitted_turns": {
+            "type": "integer",
+            "minimum": 0
+          },
           "redacted_native_fields": {
             "type": "integer",
             "minimum": 0
@@ -9813,8 +9829,49 @@
         },
         "required": [
           "fields",
+          "structure",
+          "omitted_turns",
           "redacted_native_fields"
         ]
+      },
+      "InspectedTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": ["system", "instructions", "system_instruction", "messages", "input", "contents"]
+          },
+          "index": { "type": "integer", "minimum": 0 },
+          "role": {
+            "type": "string",
+            "enum": ["system", "developer", "user", "assistant", "tool", "model", "function", "instruction", "unspecified", "other"]
+          },
+          "parts": {
+            "type": "array",
+            "maxItems": 16,
+            "items": { "$ref": "#/components/schemas/InspectedPart" }
+          },
+          "omitted_parts": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["scope", "index", "role", "parts", "omitted_parts"]
+      },
+      "InspectedPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["text", "image", "audio", "video", "media", "document", "tool_call", "tool_result", "reasoning", "refusal", "null", "opaque"]
+          },
+          "call_ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32,
+            "description": "Content-free ordinal linking a result to a preceding call ID when that relationship is explicit."
+          }
+        },
+        "required": ["kind"]
       },
       "InspectedRequestField": {
         "type": "object",
@@ -10066,9 +10123,23 @@
           "gemini-count-tokens",
           "openai-embeddings",
           "openai-moderation",
-          "rerank"
+          "rerank",
+          "voyage-embeddings",
+          "tei-embeddings",
+          "tei-sparse-embeddings",
+          "tei-multivector-embeddings",
+          "gemini-embeddings",
+          "gemini-batch-embeddings",
+          "vertex-embeddings",
+          "bedrock-embeddings",
+          "voyage-rerank",
+          "tei-rerank",
+          "tei-classification",
+          "tei-scoring",
+          "bedrock-count-tokens",
+          "tei-tokenize"
         ],
-        "description": "Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses."
+        "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
       },
       "SimulationOperation": {
         "type": "object",

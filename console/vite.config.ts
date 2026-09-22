@@ -6,10 +6,9 @@ const target = process.env.OLP_DEV_API_ORIGIN ?? 'http://127.0.0.1:8081';
 export default defineConfig({
   server: {
     proxy: Object.fromEntries(
-      ['/api/', '/v1/', '/anthropic/', '/gemini/', '/v1beta/'].map((prefix) => [
-        prefix,
-        { target, changeOrigin: false }
-      ])
+      ['/api/', '/v1/', '/native/', '/anthropic/', '/gemini/', '/v1beta/'].map(
+        (prefix) => [prefix, { target, changeOrigin: false }]
+      )
     )
   },
   build: {

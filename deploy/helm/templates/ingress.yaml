@@ -30,9 +30,9 @@ spec:
       http:
         paths:
           # Kubernetes Prefix matching chooses these inference routes before the
-          # root console route. No rewrite is used: Rust receives its public
+          # root console route. No rewrite is used: the gateway receives its public
           # protocol paths unchanged.
-          {{- range $path := list "/v1" "/v1beta" "/anthropic" "/gemini" }}
+          {{- range $path := list "/v1" "/v1beta" "/native" "/anthropic" "/gemini" }}
           - path: {{ $path }}
             pathType: Prefix
             backend:

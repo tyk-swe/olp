@@ -148,6 +148,7 @@
             revisionDiff.slug_changed && 'slug',
             revisionDiff.timeout_changed && 'deadline',
             revisionDiff.max_attempts_changed && 'attempts',
+            revisionDiff.fidelity_changed && 'fidelity contract',
             revisionDiff.routing_policy_changed && 'routing policy',
             revisionDiff.content_policy_changed && 'content policy'
           ]
@@ -155,6 +156,19 @@
             .join(', ') || 'unchanged'}</strong
         >
       </article>
+      {#if revisionDiff.fidelity_changed}
+        <article class="card">
+          <p>Fidelity contract</p>
+          <strong>
+            {revisionDiff.fidelity_before?.mode ?? 'historical legacy'} →
+            {revisionDiff.fidelity_after?.mode ?? 'historical legacy'}
+          </strong>
+          <p>
+            Review client, continuation, mutation-policy, and state obligations
+            before using the changed route.
+          </p>
+        </article>
+      {/if}
       <article class="card">
         <p>Operations added</p>
         {#if revisionDiff.operations_added.length}<ul>
