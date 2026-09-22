@@ -484,7 +484,9 @@ test('retained media records expose metadata, filters, and accessible details', 
   // by the gateway service suites; every read here uses the real Go API.
   const database = new URL(process.env.OLP_DATABASE_URL!);
   database.pathname =
-    info.project.name === 'go-packaged' ? '/olp_go_packaged' : '/olp_go_vite';
+    '/' +
+    (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') +
+    (info.project.name === 'go-packaged' ? 'olp_go_packaged' : 'olp_go_vite');
   const succeeded = randomUUID();
   const failed = randomUUID();
   const seed = await promisify(execFile)('psql', [
