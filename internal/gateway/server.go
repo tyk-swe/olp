@@ -625,7 +625,14 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		return modelNotFound(x.parsed.Route)
 	}
 	x.route = &route
+	if !permitted(route.Slug) {
+		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	}
 	if x.strict() {
+		if x.actor == "playground" {
+			param := "client_contract"
+			return invalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
+		}
 		if x.semanticQueryInvalid {
 			param := "query"
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
@@ -642,12 +649,9 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 			}
 		}
 	}
-	if !permitted(route.Slug) {
-		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
-	}
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
+	options := runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
@@ -675,7 +679,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				semantic = errors.New("provider-state capability unavailable")
 				return semantic
 			}
-			if protocols.StructuredOutputRequested(x.parsed) {
+			if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
 				var metadata runtime.ModelMetadata
 				_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
 				if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
@@ -697,7 +701,17 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				semantic = e
 			}
 			return e
-		}})
+		}}
+	if !x.strict() && route.ContentPolicy == nil {
+		hasProfile := false
+		for _, target := range route.Targets {
+			hasProfile = hasProfile || snapshot.Providers[target.ProviderID].ProfileID != ""
+		}
+		if !hasProfile {
+			options.Effective = nil
+		}
+	}
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
 		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {

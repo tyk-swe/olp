@@ -795,9 +795,17 @@ func newBedrockFixture(t *testing.T) *bedrockFixture {
 }
 
 func provisionBedrock(t *testing.T, h *accessHarness, endpoint, model string, capabilities []any, operations []string) (*browser, map[string]any, string, string) {
+	return provisionBedrockContract(t, h, endpoint, model, capabilities, operations, false)
+}
+
+func provisionBedrockContract(t *testing.T, h *accessHarness, endpoint, model string, capabilities []any, operations []string, strict bool) (*browser, map[string]any, string, string) {
 	t.Helper()
 	owner := h.owner()
 	create := map[string]any{"name": "Bedrock fixture", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": endpoint, "cloud_region": "us-east-1"}, "model": model, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789","session_token":"bedrock-session-token"}`}
+	if strict {
+		config := create["configuration"].(map[string]any)
+		config["profile_id"], config["profile_revision"] = "bedrock-converse", "1"
+	}
 	detail := h.want(owner, "POST", "/api/v3/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	path := "/api/v3/providers/" + detail["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
@@ -814,7 +822,11 @@ func provisionBedrock(t *testing.T, h *accessHarness, endpoint, model string, ca
 	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	slug := "bedrock-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	routeInput := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	if strict {
+		routeInput["fidelity"] = map[string]any{}
+	}
+	draft := h.want(owner, "POST", "/api/v3/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "bedrock key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.refresh()
@@ -837,13 +849,38 @@ func bedrockSDK(h *accessHarness, secret string) *bedrockruntime.Client {
 }
 
 func TestBedrockIngress(t *testing.T) {
+	testBedrockIngress(t, false)
+}
+
+func TestStrictBedrockIngress(t *testing.T) {
+	testBedrockIngress(t, true)
+}
+
+func testBedrockIngress(t *testing.T, strict bool) {
 	fixture := newBedrockFixture(t)
+	if strict {
+		fixture.streamBody = func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+			for _, message := range []eventstream.Message{
+				bedrockEvent("messageStart", map[string]any{"role": "assistant"}),
+				bedrockEvent("contentBlockDelta", map[string]any{"delta": map[string]any{"text": "OK"}, "contentBlockIndex": 0}),
+				bedrockEvent("contentBlockStop", map[string]any{"contentBlockIndex": 0}),
+				bedrockEvent("messageStop", map[string]any{"stopReason": "end_turn"}),
+				bedrockEvent("metadata", map[string]any{"usage": map[string]any{"inputTokens": 4, "outputTokens": 6, "totalTokens": 10}, "metrics": map[string]any{"latencyMs": 1}}),
+			} {
+				if err := eventstream.NewEncoder().Encode(w, message); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}
+	}
 	h := newAccessHarness(t)
-	owner, detail, slug, secret := provisionBedrock(t, h, fixture.URL, "anthropic.claude-3-haiku-20240307-v1:0",
+	owner, detail, slug, secret := provisionBedrockContract(t, h, fixture.URL, "anthropic.claude-3-haiku-20240307-v1:0",
 		[]any{
 			map[string]any{"operation": "generation", "surface": "bedrock", "mode": "unary"},
 			map[string]any{"operation": "generation", "surface": "bedrock", "mode": "streaming"},
-		}, []string{"generation"})
+		}, []string{"generation"}, strict)
 
 	client := bedrockSDK(h, secret)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)

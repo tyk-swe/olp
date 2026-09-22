@@ -3,10 +3,50 @@ package protocols
 import (
 	"bytes"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
+
+func TestNativeConverseRetainsResultAndAWSFrames(t *testing.T) {
+	body := []byte(`{"output":{"message":{"role":"assistant","content":[{"text":"native"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2,"totalTokens":3},"future":{"integer":9007199254740993}}`)
+	completion, err := Decode(openai.FamilyBedrock, openai.FamilyBedrock, body, "route", "")
+	if err != nil || !bytes.Equal(completion.Body, body) {
+		t.Fatalf("native result changed: %v %+v", err, completion)
+	}
+	var source bytes.Buffer
+	for _, event := range []struct{ name, body string }{
+		{"messageStart", `{"role":"assistant"}`},
+		{"contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"native"},"future":9007199254740993}`},
+		{"contentBlockStop", `{"contentBlockIndex":0}`},
+		{"messageStop", `{"stopReason":"end_turn"}`},
+		{"metadata", `{"usage":{"inputTokens":1,"outputTokens":2,"totalTokens":3}}`},
+	} {
+		headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue(event.name)}, {Name: "future-header", Value: eventstream.StringValue("preserved")}}
+		if err := eventstream.NewEncoder().Encode(&source, eventstream.Message{Headers: headers, Payload: []byte(event.body)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var observed bytes.Buffer
+	_, err = Stream(openai.FamilyBedrock, openai.FamilyBedrock, bytes.NewReader(source.Bytes()), 4096, "route", true, func(frame []byte) error { _, err := observed.Write(frame); return err })
+	if err != nil || !bytes.Equal(observed.Bytes(), source.Bytes()) {
+		t.Fatalf("AWS native framing changed: %v", err)
+	}
+}
+
+func TestConverseRejectsAmbiguousReservedAndExtensionHeaders(t *testing.T) {
+	for _, name := range []string{":message-type", ":event-type", ":exception-type", "future-header"} {
+		headers := eventstream.Headers{{Name: name, Value: eventstream.StringValue("first")}, {Name: name, Value: eventstream.StringValue("last")}}
+		var wire bytes.Buffer
+		if err := eventstream.NewEncoder().Encode(&wire, eventstream.Message{Headers: headers, Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadBedrockEvent(&wire, 4096); err == nil {
+			t.Fatalf("duplicate %s was decoded last-wins", name)
+		}
+	}
+}
 
 func TestBedrockInlineImagesAcrossSurfaces(t *testing.T) {
 	for _, tc := range []struct {

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/awsframe"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -327,7 +328,19 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	if size < 16 {
 		return eventstream.Message{}, protocolError("invalid AWS event length")
 	}
-	return eventstream.NewDecoder().Decode(io.MultiReader(bytes.NewReader(prelude[:]), io.LimitReader(r, int64(size)-12)), nil)
+	headerBytes := binary.BigEndian.Uint32(prelude[4:8])
+	if headerBytes > size-16 {
+		return eventstream.Message{}, protocolError("invalid AWS header length")
+	}
+	frame := make([]byte, int(size))
+	copy(frame, prelude[:])
+	if _, err := io.ReadFull(r, frame[12:]); err != nil {
+		return eventstream.Message{}, err
+	}
+	if err := awsframe.ValidateHeaders(frame[12 : 12+headerBytes]); err != nil {
+		return eventstream.Message{}, err
+	}
+	return eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 }
 func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
 	return streamBedrockEvents(r, limit, route, emit, nil, false)
