@@ -19,6 +19,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The frozen continuation benchmark verifies source bytes at its
+          # pre-replacement commit, not just the current checkout.
+          fetch-depth: 0
       - uses: ./.github/actions/setup
         with:
           services: false

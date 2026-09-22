@@ -41,7 +41,7 @@ export const comparisonScope = [
   ...[50, 95, 99].flatMap((p) => [`workflow-p${p}-us`, `action-ready-p${p}-us`])
 ];
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-function historicalHash(revision, path) {
+export function historicalHash(revision, path) {
   const result = spawnSync('git', ['show', `${revision}:${path}`], { maxBuffer: 16 << 20 });
   if (result.status !== 0) throw new Error(`Frozen source is unavailable: ${path}`);
   return createHash('sha256').update(result.stdout).digest('hex');
@@ -58,13 +58,16 @@ export function referenceEvidence() {
   const budgets = JSON.parse(readFileSync(frozenBudgets, 'utf8'));
   const failures = validateReference(baseline, budgets);
   if (failures.length) throw new Error(`Frozen reference does not self-compare: ${failures.join('; ')}`);
+  verifyHistoricalSources(baseline);
+  return { baseline, budgets };
+}
+export function verifyHistoricalSources(baseline) {
   for (const [path, digest] of Object.entries(baseline.dependency_sha256)) {
     if (historicalHash(baseline.source_revision, path) !== digest) throw new Error(`Frozen historical source changed: ${path}`);
   }
   if (historicalHash(baseline.source_revision, sharedSources[0]) !== baseline.harness_sha256 || historicalHash(baseline.source_revision, 'scripts/continuation-barrier-benchmark.mjs') !== baseline.runner_sha256 || hash(sharedSources[0]) !== baseline.harness_sha256 || hash('scripts/continuation-barrier-benchmark.mjs') !== baseline.runner_sha256) {
     throw new Error('Frozen reference harness or runner changed');
   }
-  return { baseline, budgets };
 }
 export function metricNames() {
   return ['elapsed_ns', 'ns/op', 'process-cpu-ns/op', 'B/op', 'allocs/op', 'sampled-heap-growth-B',
