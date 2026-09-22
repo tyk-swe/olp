@@ -532,7 +532,7 @@ test('retained media records expose metadata, filters, and accessible details', 
   await expect(
     page.getByRole('heading', { name: 'Recorded media lifecycle' })
   ).toBeVisible();
-  await expect(page.getByText('Last provider status check')).toBeVisible();
+  await expect(page.getByText('Terminal state recorded')).toBeVisible();
   await expect(
     page.locator('.job-detail audio, .job-detail video, .job-detail img')
   ).toHaveCount(0);
