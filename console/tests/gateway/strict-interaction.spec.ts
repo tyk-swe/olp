@@ -22,7 +22,9 @@ type ManagementBody = Record<string, unknown> & {
 
 async function signIn(page: Page) {
   await page.goto('/');
-  if (/\/setup$/.test(page.url())) {
+  if (
+    await page.getByRole('button', { name: 'Create owner account' }).isVisible()
+  ) {
     await page.getByLabel('Display name').fill('Owner');
     await page.getByLabel('Work email').fill('owner@example.com');
     await page
@@ -37,7 +39,9 @@ async function signIn(page: Page) {
     await page.getByRole('button', { name: 'Create owner account' }).click();
   } else {
     await page.getByLabel('Email').fill('owner@example.com');
-    await page.getByLabel('Password').fill('a long browser test password');
+    await page
+      .getByLabel('Password', { exact: true })
+      .fill('a long browser test password');
     await page.getByRole('button', { name: 'Sign in' }).click();
   }
   await expect(page).toHaveURL(/\/$/);
