@@ -3,6 +3,8 @@ package media
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"mime/multipart"
 	"net/http"
@@ -91,6 +93,14 @@ func TestParseMultipartStagesFilesAndFields(t *testing.T) {
 	if failure != nil || part == nil || part.Size != 4096 {
 		t.Fatalf("file: %+v %v", part, failure)
 	}
+	expected := sha256.Sum256(bytes.Repeat([]byte("i"), 4096))
+	if part.Digest != hex.EncodeToString(expected[:]) {
+		t.Fatal("multipart part lost the exact staged byte digest")
+	}
+	ref, err := part.BlobReference()
+	if err != nil || ref.ID() != string(part.Handle) || ref.Digest() != part.Digest || ref.Size() != part.Size {
+		t.Fatal("multipart part has no complete OIF byte identity", err)
+	}
 	if _, failure := form.TakeExtensions(); failure != nil {
 		t.Fatal(failure)
 	}
@@ -99,6 +109,9 @@ func TestParseMultipartStagesFilesAndFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	opened.File.Close()
+	if opened.Artifact.Digest != part.Digest {
+		t.Fatal("multipart/spool digest drifted across handoff")
+	}
 }
 
 func TestParseMultipartFileLimits(t *testing.T) {

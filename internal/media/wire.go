@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 // Operation tags match the runtime selection registry.
@@ -129,7 +130,8 @@ type Request struct {
 
 	// SourceFields retains JSON member presence and raw values before typed decoding.
 	// Multipart requests use their explicit typed fields and staged parts instead.
-	SourceFields map[string]json.RawMessage
+	SourceFields   map[string]json.RawMessage
+	sourceDocument oif.Document
 
 	// Video job operations.
 	JobID           string
@@ -138,6 +140,15 @@ type Request struct {
 	Limit           int64
 	Order           string
 	DeleteMissingOK bool
+}
+
+// SourceDocument is the immutable complete native JSON source, including member
+// order and exact numeric spellings. Multipart inputs use staged Parts instead.
+func (r *Request) SourceDocument() oif.Document {
+	if r == nil {
+		return oif.Document{}
+	}
+	return r.sourceDocument
 }
 
 // Uploads returns the staged handles this request owns.
@@ -321,13 +332,13 @@ func DecodeImageGeneration(body []byte) (*Request, *Error) {
 	if !validRouteSlug(wire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
-	source, sourceErr := sourceMediaFields(body)
+	document, source, sourceErr := sourceMediaFields(body)
 	if sourceErr != nil {
 		return nil, invalidMedia("The request body is not valid JSON.")
 	}
 	return &Request{
-		SourceFields: source,
-		Op:           OpImageGeneration, Route: wire.Model, Stream: wire.Stream,
+		SourceFields: source, sourceDocument: document,
+		Op: OpImageGeneration, Route: wire.Model, Stream: wire.Stream,
 		Prompt: wire.Prompt, Count: wire.N, Size: wire.Size, Quality: wire.Quality,
 		Format: wire.ResponseFormat, Style: wire.Style, User: wire.User,
 		Background: wire.Background, Moderation: wire.Moderation,
@@ -364,13 +375,13 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 	if !validRouteSlug(wire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
-	source, sourceErr := sourceMediaFields(body)
+	document, source, sourceErr := sourceMediaFields(body)
 	if sourceErr != nil {
 		return nil, invalidMedia("The request body is not valid JSON.")
 	}
 	return &Request{
-		SourceFields: source,
-		Op:           OpSpeech, Route: wire.Model, Stream: wire.StreamFormat != nil && *wire.StreamFormat == "sse",
+		SourceFields: source, sourceDocument: document,
+		Op: OpSpeech, Route: wire.Model, Stream: wire.StreamFormat != nil && *wire.StreamFormat == "sse",
 		Input: wire.Input, Voice: wire.Voice, Format: wire.ResponseFormat,
 		Instructions: wire.Instructions, Speed: wire.Speed,
 		StreamFormat: wire.StreamFormat, Extra: extra,

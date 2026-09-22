@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 const (
@@ -173,10 +175,17 @@ func (a *Admission) Release() {
 // Part is one staged file field.
 type Part struct {
 	Handle      Handle
+	Digest      string // SHA-256 of the exact staged file bytes
 	Filename    string
 	ContentType string
 	Size        int64
 	Limit       int64
+}
+
+// BlobReference identifies this already-authorized staged part, never a URL.
+// ContentType remains the caller's value, including omission.
+func (p Part) BlobReference() (oif.BlobReference, error) {
+	return (Artifact{Handle: p.Handle, Digest: p.Digest, ContentType: p.ContentType, ContentLength: p.Size}).BlobReference()
 }
 
 // Form holds a parsed multipart body. Staged files stay reserved in the
@@ -586,6 +595,7 @@ func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part,
 	output.handles = append(output.handles, artifact.Handle)
 	output.files[name] = append(output.files[name], Part{
 		Handle:      artifact.Handle,
+		Digest:      artifact.Digest,
 		Filename:    filename,
 		ContentType: contentType,
 		Size:        artifact.ContentLength,

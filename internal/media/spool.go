@@ -10,7 +10,9 @@ package media
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 const (
@@ -95,8 +98,20 @@ func ValidateHandle(value string) error {
 // Artifact describes a committed spool object.
 type Artifact struct {
 	Handle        Handle
+	Digest        string // SHA-256 of the exact committed bytes, lowercase hex
 	ContentType   string
 	ContentLength int64
+}
+
+// BlobReference uses this spool's opaque handle and original byte identity.
+// Missing caller Content-Type stays absent on the Part; the generic MIME here
+// describes storage bytes and does not invent a native request control.
+func (a Artifact) BlobReference() (oif.BlobReference, error) {
+	mediaType := a.ContentType
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	return oif.NewBlobReference(string(a.Handle), a.Digest, mediaType, a.ContentLength)
 }
 
 // Upload is a single bounded inbound media stream.
@@ -117,6 +132,7 @@ type Opened struct {
 type spoolEntry struct {
 	path          string
 	filename      string
+	digest        string
 	contentType   string
 	contentLength int64
 }
@@ -229,6 +245,7 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 		return nil, ErrUnavailable
 	}
 	var written int64
+	hash := sha256.New()
 	buffer := make([]byte, ReadChunkBytes)
 	for {
 		if err = ctx.Err(); err != nil {
@@ -250,11 +267,17 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 				pending.abort(nil)
 				return nil, ErrUnavailable
 			}
-			if _, err = file.Write(chunk); err != nil {
+			var nwrite int
+			nwrite, err = file.Write(chunk)
+			if err == nil && nwrite != len(chunk) {
+				err = io.ErrShortWrite
+			}
+			if err != nil {
 				file.Close()
 				pending.abort(err)
 				return nil, ErrUnavailable
 			}
+			_, _ = hash.Write(chunk)
 			written = next
 		}
 		if readErr == io.EOF {
@@ -270,10 +293,12 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 		pending.abort(err)
 		return nil, ErrUnavailable
 	}
+	digest := hex.EncodeToString(hash.Sum(nil))
 	s.mu.Lock()
 	s.entries[token] = spoolEntry{
 		path:          target,
 		filename:      filename,
+		digest:        digest,
 		contentType:   upload.ContentType,
 		contentLength: written,
 	}
@@ -281,6 +306,7 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 	pending.commit()
 	return &Artifact{
 		Handle:        Handle(token),
+		Digest:        digest,
 		ContentType:   upload.ContentType,
 		ContentLength: written,
 	}, nil
@@ -346,6 +372,7 @@ func (s *Spool) Open(handle Handle) (*Opened, error) {
 	return &Opened{
 		Artifact: Artifact{
 			Handle:        handle,
+			Digest:        entry.digest,
 			ContentType:   entry.contentType,
 			ContentLength: entry.contentLength,
 		},

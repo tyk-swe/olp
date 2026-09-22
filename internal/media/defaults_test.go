@@ -390,6 +390,9 @@ func TestMediaSourceRetainsNativeNumberLexemesAndOwnsInput(t *testing.T) {
 	if string(r.SourceFields["native_extension"]) != want {
 		t.Fatal("native source number or presence changed")
 	}
+	if r.SourceDocument().Raw() != string(input) {
+		t.Fatal("complete immutable media source changed before encoding")
+	}
 	start := bytes.Index(input, []byte(want))
 	if start < 0 {
 		t.Fatal("fixture has no native source")
@@ -397,6 +400,9 @@ func TestMediaSourceRetainsNativeNumberLexemesAndOwnsInput(t *testing.T) {
 	input[start] = 'x'
 	if string(r.SourceFields["native_extension"]) != want {
 		t.Fatal("caller mutation changed the retained native source")
+	}
+	if r.SourceDocument().Raw() == string(input) {
+		t.Fatal("complete immutable media source aliased caller bytes")
 	}
 	r.SourceFields["native_extension"][1] = 'X'
 	if input[start+1] != '"' {

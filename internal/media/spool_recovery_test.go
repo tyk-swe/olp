@@ -1,6 +1,8 @@
 package media
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,11 +60,19 @@ func TestSpoolCrashRecoveryPreservesLiveOwners(t *testing.T) {
 		t.Fatalf("live owner's artifact removed: %v", err)
 	}
 	opened.File.Close()
+	if opened.Artifact.Digest != artifact.Digest {
+		t.Fatal("live owner lost its original byte digest during another process recovery")
+	}
 	if recovered.UsedBytes() != 0 {
 		t.Fatal("other processes consume this spool's capacity")
 	}
-	if _, err := recovered.PutBytes(t.Context(), "new.wav", "audio/wav", []byte("new"), 3); err != nil {
+	newArtifact, err := recovered.PutBytes(t.Context(), "new.wav", "audio/wav", []byte("new"), 3)
+	if err != nil {
 		t.Fatalf("restart cannot accept uploads: %v", err)
+	}
+	digest := sha256.Sum256([]byte("new"))
+	if newArtifact.Digest != hex.EncodeToString(digest[:]) {
+		t.Fatal("recovered spool assigned the wrong new byte identity")
 	}
 }
 
