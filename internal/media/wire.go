@@ -127,6 +127,10 @@ type Request struct {
 
 	Extra map[string]any
 
+	// SourceFields retains JSON member presence and raw values before typed decoding.
+	// Multipart requests use their explicit typed fields and staged parts instead.
+	SourceFields map[string]json.RawMessage
+
 	// Video job operations.
 	JobID           string
 	Variant         string
@@ -317,8 +321,13 @@ func DecodeImageGeneration(body []byte) (*Request, *Error) {
 	if !validRouteSlug(wire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
+	source, sourceErr := sourceMediaFields(body)
+	if sourceErr != nil {
+		return nil, invalidMedia("The request body is not valid JSON.")
+	}
 	return &Request{
-		Op: OpImageGeneration, Route: wire.Model, Stream: wire.Stream,
+		SourceFields: source,
+		Op:           OpImageGeneration, Route: wire.Model, Stream: wire.Stream,
 		Prompt: wire.Prompt, Count: wire.N, Size: wire.Size, Quality: wire.Quality,
 		Format: wire.ResponseFormat, Style: wire.Style, User: wire.User,
 		Background: wire.Background, Moderation: wire.Moderation,
@@ -355,8 +364,13 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 	if !validRouteSlug(wire.Model) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
+	source, sourceErr := sourceMediaFields(body)
+	if sourceErr != nil {
+		return nil, invalidMedia("The request body is not valid JSON.")
+	}
 	return &Request{
-		Op: OpSpeech, Route: wire.Model, Stream: wire.StreamFormat != nil && *wire.StreamFormat == "sse",
+		SourceFields: source,
+		Op:           OpSpeech, Route: wire.Model, Stream: wire.StreamFormat != nil && *wire.StreamFormat == "sse",
 		Input: wire.Input, Voice: wire.Voice, Format: wire.ResponseFormat,
 		Instructions: wire.Instructions, Speed: wire.Speed,
 		StreamFormat: wire.StreamFormat, Extra: extra,
