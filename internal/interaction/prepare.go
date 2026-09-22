@@ -160,6 +160,13 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 		}
 		prepared = next
 	}
+	if t.wire == openai.FamilyChat {
+		_, legacyCap := prepared.Document().Root().Lookup("max_tokens")
+		_, completionCap := prepared.Document().Root().Lookup("max_completion_tokens")
+		if legacyCap && completionCap {
+			return oif.Prepared{}, incompatible("reasoning_budget", "/max_completion_tokens", "conflicting_budget_scopes", "The effective request combines token controls with distinct scopes; no precedence or equivalence is qualified.")
+		}
+	}
 	// The bound stream mode is request-owned, including controls introduced by
 	// a future/default extension; defaults may never select another execution path.
 	if prepared.Document().Len() > t.config.MaxBodyBytes {

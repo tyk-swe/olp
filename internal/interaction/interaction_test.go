@@ -437,3 +437,23 @@ func TestNativeAdapterCannotOverrideImmutableSourceIdentity(t *testing.T) {
 	_, err = compiled.Bind(source, Context{})
 	assertReason(t, err, "target_capability")
 }
+
+func TestNativeChatDefaultCannotIntroduceConflictingBudgetScope(t *testing.T) {
+	for _, test := range []struct{ caller, configured, value string }{
+		{"max_tokens", "max_completion_tokens", "64"},
+		{"max_completion_tokens", "max_tokens", "64"},
+		{"max_tokens", "max_completion_tokens", "null"},
+	} {
+		t.Run(test.caller+"_"+test.value, func(t *testing.T) {
+			config := configuration(t, "openai-chat")
+			config.Provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{test.configured: json.RawMessage(`128`)}}}
+			source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}],"`+test.caller+`":`+test.value+`}`)
+			before := source.OIF().Document().Bytes()
+			_, err := template(t, config).Bind(source, Context{})
+			assertReason(t, err, "reasoning_budget")
+			if !bytes.Equal(before, source.OIF().Document().Bytes()) {
+				t.Fatal("budget collision repaired the caller source")
+			}
+		})
+	}
+}
