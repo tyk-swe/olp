@@ -53,11 +53,36 @@ func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
 }
 
 func (s *Server) bedrockConverse(w http.ResponseWriter, r *http.Request) {
+	if s.strictBedrockConverse(w, r) {
+		return
+	}
 	s.bedrockServe(w, r, openai.FamilyBedrock, "generation", "unary", "converse")
 }
 
 func (s *Server) bedrockConverseStream(w http.ResponseWriter, r *http.Request) {
+	if s.strictBedrockConverse(w, r) {
+		return
+	}
 	s.bedrockServe(w, r, openai.FamilyBedrock, "generation", "streaming", "converse-stream")
+}
+
+// Strict Converse uses the same prepared invocation and Attempt owner as the
+// other generation dialects. AWS wire framing is retained by its native codec.
+func (s *Server) strictBedrockConverse(w http.ResponseWriter, r *http.Request) bool {
+	release := s.Runtime.Release()
+	if release == nil {
+		return false
+	}
+	route, ok := release.Snapshot.Routes[r.PathValue("model")]
+	if !ok || runtime.FidelityMode(route.Fidelity) != runtime.FidelityStrict {
+		return false
+	}
+	r = r.Clone(r.Context())
+	if token := strings.TrimSpace(r.Header.Get("X-OLP-API-Key")); token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	s.inference(openai.FamilyBedrock)(w, r)
+	return true
 }
 
 func (s *Server) bedrockInvoke(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +129,12 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		return
 	}
 	x.route = &route
+	if x.strict() {
+		// A release may have changed between the dispatch wrapper and begin.
+		// Never let that race serve strict work through the legacy resource path.
+		fail(invalidRequest("target_capability", "This interaction requires the compiled generation runner; retry against the current route.", nil))
+		return
+	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return

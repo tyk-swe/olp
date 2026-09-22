@@ -80,7 +80,10 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	draft := h.want(owner, "POST", "/api/v3/route-drafts", body, idem(uuid.NewString()), 201)
 	path := "/api/v3/route-drafts/" + draft["id"].(string)
 	beforeValidation := draft
-	draft = h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
+	if problemCode(t, h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 422)) != "target_capability" {
+		t.Fatal("strict draft accepted an implicit legacy provider profile")
+	}
+	draft = h.want(owner, "PUT", path, body, etagHeader(draft), 200)
 	oldClient := fidelityDraft(slug, provider["id"])
 	oldClient["content_policy"] = fidelityPolicy("block", "input")
 	oldClient["max_attempts"] = 2
@@ -90,11 +93,13 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 		t.Fatal("old-client edit downgraded the draft")
 	}
 	problem := h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)
-	if problemCode(t, problem) != "strict_execution_unavailable" {
+	if problemCode(t, problem) != "target_capability" {
 		t.Fatal("strict route reached the legacy dispatcher", problem)
 	}
-	if problemCode(t, h.want(owner, "POST", path+"/simulate", map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "strict-preview"}, nil, 422)) != "strict_execution_unavailable" {
-		t.Fatal("strict draft simulation reported a legacy plan")
+	preview := h.want(owner, "POST", path+"/simulate", map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "strict-preview"}, nil, 200)
+	inspection := preview["targets"].([]any)[0].(map[string]any)["decision"].(map[string]any)["interaction"].(map[string]any)
+	if inspection["status"] != "not_inspected" || inspection["fidelity"] != "strict" || inspection["class"] != nil || inspection["effective_request"] != nil {
+		t.Fatal("tuple-only simulation claimed semantic admission", inspection)
 	}
 	h.refresh()
 	if h.Runtime.Release().Digest != originalDigest || h.Runtime.Release().Sequence != sequence {
@@ -160,7 +165,7 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing.T) {
 	h := newAccessHarness(t)
 	fixture := newOpenAIFixture(t, "")
-	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
+	owner, provider, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
 	export := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
 	document := export["document"].(map[string]any)
 	route := document["routes"].([]any)[0].(map[string]any)
@@ -197,9 +202,17 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 		t.Fatal("import did not stage strict contract", draft)
 	}
 	path := "/api/v3/route-drafts/" + draft["id"].(string)
-	if problemCode(t, h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)) != "strict_execution_unavailable" {
+	if problemCode(t, h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)) != "target_capability" {
 		t.Fatal("imported strict draft activated")
 	}
+	// Explicitly migrate the provider profile so this draft can be validated by
+	// the real strict compiler while leaving the published route unchanged.
+	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	currentProvider := h.want(owner, "GET", providerPath, nil, nil, 200)
+	config := currentProvider["configuration"].(map[string]any)
+	config["profile_id"], config["profile_revision"] = "azure-legacy-chat", "1"
+	h.want(owner, "PATCH", providerPath, map[string]any{"name": currentProvider["name"], "configuration": config}, etagHeader(currentProvider), 200)
+	certifyProfileNetworkProvider(t, h, owner, provider["id"].(string))
 	// Validating an unpublished draft must not make promotion forget its mode
 	// and stage another draft under the published route's older contract.
 	h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)

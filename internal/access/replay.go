@@ -48,11 +48,23 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (Rep
 	if err != nil {
 		return c, nil, err
 	}
-	var response Reply
+	// The encrypted reply already contains its authoritative JSON. Decoding
+	// Body into any would round native integers/decimals and underflow exponents
+	// before the response writer serializes a replay.
+	var response struct {
+		Status   int             `json:"status"`
+		Body     json.RawMessage `json:"body"`
+		ETag     string          `json:"etag,omitempty"`
+		Location string          `json:"location,omitempty"`
+	}
 	if err = json.Unmarshal(data, &response); err != nil {
 		return c, nil, err
 	}
-	return c, &response, nil
+	result := Reply{Status: response.Status, ETag: response.ETag, Location: response.Location}
+	if len(response.Body) > 0 && string(response.Body) != "null" {
+		result.Body = response.Body
+	}
+	return c, &result, nil
 }
 func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, result Reply) error {
 	data, err := json.Marshal(result)

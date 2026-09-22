@@ -516,6 +516,9 @@
               "integer",
               "null"
             ]
+          },
+          "interaction": {
+            "$ref": "#/components/schemas/AttemptInteractionMetadata"
           }
         },
         "required": [
@@ -8187,6 +8190,12 @@
               "string",
               "null"
             ]
+          },
+          "incompatibility": {
+            "$ref": "#/components/schemas/InteractionIncompatibility"
+          },
+          "interaction": {
+            "$ref": "#/components/schemas/InteractionInspection"
           }
         },
         "required": [
@@ -8750,6 +8759,28 @@
           },
           "surface": {
             "type": "string"
+          },
+          "api_key_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected."
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/SimulationDialect"
+          },
+          "query_settings": {
+            "$ref": "#/components/schemas/SimulationQuerySettings"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated."
+          },
+          "semantic_headers": {
+            "$ref": "#/components/schemas/SimulationSemanticHeaders"
           }
         },
         "required": [
@@ -8758,7 +8789,8 @@
           "mode",
           "seed"
         ],
-        "type": "object"
+        "type": "object",
+        "additionalProperties": false
       },
       "SimulationRequest": {
         "additionalProperties": false,
@@ -8790,7 +8822,7 @@
             "$ref": "#/components/schemas/TransportMode"
           },
           "operation": {
-            "type": "object"
+            "$ref": "#/components/schemas/SimulationOperation"
           },
           "preferences": {
             "$ref": "#/components/schemas/RoutingPreferences"
@@ -8801,6 +8833,15 @@
           },
           "surface": {
             "$ref": "#/components/schemas/Surface"
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/SimulationDialect"
+          },
+          "query_settings": {
+            "$ref": "#/components/schemas/SimulationQuerySettings"
+          },
+          "semantic_headers": {
+            "$ref": "#/components/schemas/SimulationSemanticHeaders"
           }
         },
         "required": [
@@ -8930,7 +8971,7 @@
         "type": "string"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -9718,6 +9759,395 @@
           }
         },
         "type": "object"
+      },
+      "AttemptInteractionMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_state": {
+            "type": "string",
+            "enum": [
+              "unobserved",
+              "partially-observed",
+              "actionable",
+              "terminal"
+            ]
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "strict"
+            ]
+          },
+          "plan_class": {
+            "type": "string",
+            "enum": [
+              "native_identity",
+              "qualified_interaction"
+            ]
+          },
+          "upstream_state": {
+            "type": "string",
+            "enum": [
+              "not-sent",
+              "outcome-unknown",
+              "accepted",
+              "terminal"
+            ]
+          }
+        },
+        "required": [
+          "fidelity",
+          "plan_class",
+          "upstream_state",
+          "client_state"
+        ],
+        "description": "Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions."
+      },
+      "InspectedEffectiveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/InspectedRequestField"
+            }
+          },
+          "redacted_native_fields": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "fields",
+          "redacted_native_fields"
+        ]
+      },
+      "InspectedRequestField": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "absent",
+              "null",
+              "boolean",
+              "number",
+              "string",
+              "array",
+              "object"
+            ]
+          },
+          "origin": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "For present strings/arrays/objects only; distinguishes an empty value without exposing its contents."
+          },
+          "value_json": {
+            "type": "string",
+            "description": "Exact original JSON spelling of an allowlisted scalar setting. Kept as text so JSON clients cannot round integers or erase numeric precision. Omitted for redacted content.",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "field",
+          "kind",
+          "origin",
+          "redacted"
+        ],
+        "description": "Only allowlisted scalar controls expose values. Content, tools/schemas, identifiers and opaque state remain redacted; unknown property names are not returned."
+      },
+      "InteractionDisposition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "disposition",
+          "rule",
+          "evidence"
+        ]
+      },
+      "InteractionIncompatibility": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "requirement",
+          "message"
+        ],
+        "description": "Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values."
+      },
+      "InteractionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "dispositions": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/InteractionDisposition"
+            }
+          },
+          "effective_request": {
+            "$ref": "#/components/schemas/InspectedEffectiveRequest"
+          },
+          "egress_dialect": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "legacy",
+              "strict",
+              "transformed"
+            ]
+          },
+          "ingress_dialect": {
+            "type": "string"
+          },
+          "obligations": {
+            "$ref": "#/components/schemas/InteractionObligations"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "profile_revision": {
+            "type": "string"
+          },
+          "return_dialect": {
+            "type": "string"
+          },
+          "semantic_context": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/InspectedRequestField"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_inspected",
+              "not_evaluated",
+              "incompatible",
+              "blocked",
+              "legacy",
+              "admitted"
+            ]
+          },
+          "representation": {
+            "type": "string",
+            "enum": [
+              "oif"
+            ]
+          },
+          "serving": {
+            "$ref": "#/components/schemas/InspectedServingIdentity"
+          },
+          "omitted_dispositions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count collapsed by safe-pointer redaction or omitted by the 64-entry display bound. The execution planner retains its complete receipt."
+          }
+        },
+        "required": [
+          "status",
+          "fidelity",
+          "evidence"
+        ],
+        "description": "Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification."
+      },
+      "InteractionObligations": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string"
+          },
+          "guard_results": {
+            "type": "boolean"
+          },
+          "lifetime": {
+            "type": "string"
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_event_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reject_ambiguous_failover": {
+            "type": "boolean"
+          },
+          "retry": {
+            "type": "string"
+          },
+          "submission": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
+          }
+        },
+        "required": [
+          "delivery",
+          "lifetime",
+          "continuation",
+          "retry",
+          "max_body_bytes",
+          "max_event_bytes",
+          "reject_ambiguous_failover",
+          "guard_results",
+          "submission",
+          "effects"
+        ],
+        "description": "Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges."
+      },
+      "SimulationDialect": {
+        "type": "string",
+        "enum": [
+          "openai-chat",
+          "openai-responses",
+          "anthropic-messages",
+          "gemini-generate-content",
+          "openai-input-tokens",
+          "anthropic-count-tokens",
+          "gemini-count-tokens",
+          "openai-embeddings",
+          "openai-moderation",
+          "rerank"
+        ],
+        "description": "Native ingress dialect. Omission chooses the existing operation/surface default; select openai-responses explicitly for Responses."
+      },
+      "SimulationOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract."
+          },
+          "route": {
+            "type": "string",
+            "description": "Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported."
+          }
+        }
+      },
+      "SimulationQuerySettings": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "description": "Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output."
+      },
+      "SimulationSemanticHeaders": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "description": "Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output."
+      },
+      "InspectedServingIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal_declared": {
+            "type": "boolean"
+          },
+          "snapshot_declared": {
+            "type": "boolean"
+          },
+          "region_declared": {
+            "type": "boolean"
+          },
+          "resource_scope_declared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider_revision_id",
+          "model",
+          "principal_declared",
+          "snapshot_declared",
+          "region_declared",
+          "resource_scope_declared"
+        ],
+        "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
       }
     },
     "securitySchemes": {
@@ -9734,7 +10164,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_\u2026) authorizing exactly the management operations it scopes.",
+        "description": "Management automation token (olpm_…) authorizing exactly the management operations it scopes.",
         "scheme": "bearer",
         "type": "http"
       },

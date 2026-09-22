@@ -177,6 +177,9 @@ func TestDigestDeterministicAndExcludesExportedAt(t *testing.T) {
 		t.Fatalf("unexpected digest %q", first)
 	}
 	reversed := testDocument()
+	// The fixtures must differ only in ordering, not in a pricing activation
+	// time that can cross a wall-clock second between construction calls.
+	reversed.Pricing.EffectiveAt = doc.Pricing.EffectiveAt
 	reversed.Providers[0].Models[0].Capabilities = slices.Clone(reversed.Providers[0].Models[0].Capabilities)
 	slices.Reverse(reversed.Providers[0].Models[0].Capabilities)
 	third, err := Digest(reversed)
@@ -185,6 +188,18 @@ func TestDigestDeterministicAndExcludesExportedAt(t *testing.T) {
 	}
 	if third != first {
 		t.Fatalf("canonical ordering changed digest: %s != %s", third, first)
+	}
+	activation, err := time.Parse(time.RFC3339, reversed.Pricing.EffectiveAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed.Pricing.EffectiveAt = activation.Add(time.Second).Format(time.RFC3339)
+	changed, err := Digest(reversed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("pricing activation time must remain part of the digest")
 	}
 }
 

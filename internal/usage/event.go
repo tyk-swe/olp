@@ -96,14 +96,15 @@ type AttemptUsage struct {
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
-	Policy               *json.RawMessage `json:"policy,omitempty"`
-	Mode                 *string          `json:"mode,omitempty"`
-	FirstOutputMS        *int64           `json:"first_output_ms,omitempty"`
-	StreamedOutputTokens *int64           `json:"streamed_output_tokens,omitempty"`
-	CredentialSlotID     *string          `json:"credential_slot_id"`
-	CredentialVersionID  *string          `json:"credential_version_id"`
-	ProviderRevisionID   string           `json:"provider_revision_id"`
-	PricingRevisionID    *string          `json:"pricing_revision_id"`
+	Interaction          *InteractionEvidence `json:"interaction,omitempty"`
+	Policy               *json.RawMessage     `json:"policy,omitempty"`
+	Mode                 *string              `json:"mode,omitempty"`
+	FirstOutputMS        *int64               `json:"first_output_ms,omitempty"`
+	StreamedOutputTokens *int64               `json:"streamed_output_tokens,omitempty"`
+	CredentialSlotID     *string              `json:"credential_slot_id"`
+	CredentialVersionID  *string              `json:"credential_version_id"`
+	ProviderRevisionID   string               `json:"provider_revision_id"`
+	PricingRevisionID    *string              `json:"pricing_revision_id"`
 }
 
 // Encode renders the event as a versioned stream payload.
@@ -230,14 +231,15 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
-	Policy               *json.RawMessage `json:"policy"`
-	Mode                 *string          `json:"mode"`
-	FirstOutputMS        *uint64          `json:"first_output_ms"`
-	StreamedOutputTokens *uint64          `json:"streamed_output_tokens"`
-	CredentialSlotID     *string          `json:"credential_slot_id"`
-	CredentialVersionID  *string          `json:"credential_version_id"`
-	ProviderRevisionID   *string          `json:"provider_revision_id"`
-	PricingRevisionID    *string          `json:"pricing_revision_id"`
+	Interaction          *InteractionEvidence `json:"interaction"`
+	Policy               *json.RawMessage     `json:"policy"`
+	Mode                 *string              `json:"mode"`
+	FirstOutputMS        *uint64              `json:"first_output_ms"`
+	StreamedOutputTokens *uint64              `json:"streamed_output_tokens"`
+	CredentialSlotID     *string              `json:"credential_slot_id"`
+	CredentialVersionID  *string              `json:"credential_version_id"`
+	ProviderRevisionID   *string              `json:"provider_revision_id"`
+	PricingRevisionID    *string              `json:"pricing_revision_id"`
 }
 
 // knownOperations and knownSurfaces are the canonical labels; an event outside them would
@@ -427,7 +429,10 @@ func (w wireUsage) decode() (*AttemptUsage, error) {
 }
 
 func (w wireRouting) decode() (*Routing, error) {
-	routing := &Routing{Policy: w.Policy, Mode: w.Mode}
+	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
+	if err := routing.Interaction.validate(); err != nil {
+		return nil, err
+	}
 	var err error
 	if routing.FirstOutputMS, err = optionalMilliseconds("routing.first_output_ms", w.FirstOutputMS); err != nil {
 		return nil, err
@@ -669,6 +674,11 @@ func Validate(e *Event) (*Validated, error) {
 }
 
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
+	if attempt.Routing != nil {
+		if err := attempt.Routing.Interaction.validate(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
+	}
 	switch {
 	case attempt.Ordinal != index+1:
 		return nil, fmt.Errorf("%w: attempt %d has a non-contiguous ordinal", ErrInvalidEvent, index)

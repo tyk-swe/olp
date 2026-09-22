@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/protocols/awsframe"
 )
 
 // EventStream reports the hosting framing independently from the payload dialect.
@@ -61,7 +62,7 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	if _, err := io.ReadFull(r.reader, frameBytes[12:]); err != nil {
 		return 0, err
 	}
-	if err := validateBedrockHeaderMembers(frameBytes[12 : 12+headerBytes]); err != nil {
+	if err := awsframe.ValidateHeaders(frameBytes[12 : 12+headerBytes]); err != nil {
 		return 0, err
 	}
 	message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frameBytes), nil)
@@ -122,51 +123,4 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	}
 	r.frame = bytes.NewReader(frame)
 	return r.frame.Read(p)
-}
-
-func validateBedrockHeaderMembers(data []byte) error {
-	seen := map[string]bool{}
-	invalid := errors.New("malformed or ambiguous Bedrock event headers")
-	for len(data) > 0 {
-		length := int(data[0])
-		data = data[1:]
-		if length == 0 || len(data) < length+1 {
-			return invalid
-		}
-		name := string(data[:length])
-		kind := data[length]
-		data = data[length+1:]
-		if name == ":message-type" || name == ":event-type" {
-			if seen[name] || kind != 7 {
-				return invalid
-			}
-			seen[name] = true
-		}
-		width := 0
-		switch kind {
-		case 0, 1:
-		case 2:
-			width = 1
-		case 3:
-			width = 2
-		case 4:
-			width = 4
-		case 5, 8:
-			width = 8
-		case 9:
-			width = 16
-		case 6, 7:
-			if len(data) < 2 {
-				return invalid
-			}
-			width = 2 + int(binary.BigEndian.Uint16(data[:2]))
-		default:
-			return invalid
-		}
-		if len(data) < width {
-			return invalid
-		}
-		data = data[width:]
-	}
-	return nil
 }

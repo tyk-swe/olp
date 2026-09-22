@@ -60,6 +60,7 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	Interaction        *usage.InteractionEvidence
 	FirstOutput        *time.Duration
 	Strategy           string
 	PolicyDigest       string
@@ -147,6 +148,7 @@ func (l LogSink) Terminal(e Envelope) {
 			"usage_observed":       a.UsageObserved,
 			"usage_complete":       a.UsageComplete,
 			"billing_uncertain":    a.BillingUncertain,
+			"interaction":          a.Interaction,
 		})
 	}
 	args := []any{

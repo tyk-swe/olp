@@ -24,6 +24,14 @@ import (
 // configuration/certification/publication. Expected paths and bodies are authored
 // here; no production encoder generates the reference side of these assertions.
 func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
+	testPublishedProviderProfilesPreserveCloudInvocation(t, false)
+}
+
+func TestStrictPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
+	testPublishedProviderProfilesPreserveCloudInvocation(t, true)
+}
+
+func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +58,10 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 	t.Setenv("GCE_METADATA_HOST", strings.TrimPrefix(metadata.URL, "http://"))
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 	for _, profile := range connectors.Profiles() {
+		if strict && profile.ID == "bedrock-invoke" {
+			// The model-specific non-generation runner is qualified separately.
+			continue
+		}
 		t.Run(profile.ID, func(t *testing.T) {
 			h := newAccessHarness(t)
 			owner := h.owner()
@@ -165,7 +177,11 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 			if profile.ID == "bedrock-invoke" {
 				operation = "bedrock_invoke"
 			}
-			draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			routeInput := map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+			if strict {
+				routeInput["fidelity"] = map[string]any{}
+			}
+			draft := h.want(owner, "POST", "/api/v3/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 			key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Profile inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.refresh()
@@ -208,7 +224,11 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 			case "bedrock-anthropic-invoke":
 				expectedPath = "/model/" + model + "/invoke"
 			}
-			status, result, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			headers := map[string]string{"Content-Type": "application/json"}
+			if strict && profile.Dialect == "anthropic-messages" {
+				headers["Anthropic-Version"] = "2023-06-01"
+			}
+			status, result, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), headers)
 			if status != 200 {
 				t.Fatalf("published invocation: %d %s", status, result)
 			}
@@ -220,6 +240,24 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 			mu.Unlock()
 			if actual.path != expectedPath {
 				t.Fatalf("captured endpoint=%s want=%s", actual.path, expectedPath)
+			}
+			if strict {
+				// Independently construct only the contract's model/hosting identity
+				// changes. All input structure, controls and presence must be equal.
+				var expected map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(body), &expected); err != nil {
+					t.Fatal(err)
+				}
+				if _, exists := expected["model"]; exists {
+					expected["model"], _ = json.Marshal(model)
+				}
+				if profile.Hosting == "vertex-anthropic" || profile.Hosting == "bedrock-anthropic-invoke" {
+					delete(expected, "model")
+					expected["anthropic_version"], _ = json.Marshal(profile.DialectRevision)
+				}
+				want, _ := json.Marshal(expected)
+				got, _ := json.Marshal(actual.body)
+				requireProfileNetworkJSON(t, string(want), got)
 			}
 			if profile.Kind == "azure_openai" {
 				if actual.headers.Get("Api-Key") != vendorSecret {
@@ -239,6 +277,9 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 				t.Fatal("completed Bedrock invocation was not signed")
 			}
 			if profile.Hosting == "vertex-anthropic" || profile.Hosting == "bedrock-anthropic-invoke" {
+				if strict && actual.headers.Get("Anthropic-Version") != "" {
+					t.Fatal("cloud API version was sent in an unsupported header instead of its native body binding")
+				}
 				if _, found := actual.body["model"]; found {
 					t.Fatal("cloud model left in body")
 				}
@@ -255,6 +296,19 @@ func TestPublishedProviderProfilesPreserveCloudInvocation(t *testing.T) {
 				}
 				if !bytes.Contains(actual.body["input"], []byte(`"text":"capture"`)) {
 					t.Fatal("Responses input changed")
+				}
+			}
+			if strict && profile.Dialect == "anthropic-messages" {
+				mu.Lock()
+				before := len(calls)
+				mu.Unlock()
+				headers["Anthropic-Version"] = "2099-01-01"
+				status, reply, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), headers)
+				mu.Lock()
+				after := len(calls)
+				mu.Unlock()
+				if status != 400 || !bytes.Contains(reply, []byte(`"code":"target_capability"`)) || before != after {
+					t.Fatalf("unknown ingress API revision dispatched: %d %s", status, reply)
 				}
 			}
 		})
