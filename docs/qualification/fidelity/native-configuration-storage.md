@@ -78,10 +78,18 @@ Validation on 2026-09-22:
   through a temporary Go overlay: the public restore replay failed on native
   response conservation, independently confirming the replay regression.
 
-`make check` passed generation, formatting, vet and console type/lint checks,
-then encountered the separate existing egress proxy timeout classification
-failure in `TestConnectionPhaseTimeoutsAndCancellation/proxy-connect-timeout`.
-Its log is retained at `/tmp/olp-spec-context/native-config-check.log`; the root
-workflow owns that fix. This receipt does not claim that run passed or complete
-specification qualification. Frozen references and performance artifacts remain
-unchanged; the current release inventory is regenerated for the new tests.
+The initial `make check` encountered the separate existing egress proxy timeout
+classification failure in
+`TestConnectionPhaseTimeoutsAndCancellation/proxy-connect-timeout`. That failed
+run remains recorded in `/tmp/olp-spec-context/native-config-check.log`.
+
+After integrating the root workflow's validated proxy deadline fix `f39064c6`
+and independent digest-test timestamp correction `4f1f47f0`, a fresh **`make
+check` passed**: contract generation, Go formatting/vet/local tests, console
+formatting/types/lint, all 617 console tests and 19 script tests. The final log
+is `/tmp/olp-spec-context/native-config-check-final.log`. No storage test or
+assertion was weakened to obtain that result.
+
+This receipt does not claim complete specification qualification. Frozen
+references and performance artifacts remain unchanged; the current release
+inventory is regenerated for the new tests.
