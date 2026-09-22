@@ -87,17 +87,17 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Integrated; public extensibility and final G3/G7 qualification remain #218 | Operation branch `ebfd6d88`; [registered unary operation contracts and public qualification](../qualification/fidelity/unary-operations.md); forward schema 0026 |
 | [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Source foundation integrated; full strict media plans remain #216 | Media source branch `ad5558e5`, merge `22738e0d`; [native image/speech source parser and public ambiguity qualification](../qualification/fidelity/media-source-foundation.md) |
-| [#229](https://github.com/tyk-swe/olp/issues/229) Implement distinct Gemini Interactions and Live native lifecycle profiles | D06,D11-D15; T03-T05 | Ready; #212, #215 and #227 integrated | New native Gemini Interactions/Live API contracts and real JS/Python SDK gateway lifecycle qualification pending |
-| [#230](https://github.com/tyk-swe/olp/issues/230) Retain media OIF source and staged asset byte identities | D03-D04,D15,D19; T04,T07 | Active; #215 and #227 integrated | Immutable native image/speech source plus spool/multipart SHA-256 identity pending |
-| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending #214 continuation | #215 operations and #227 native media source are integrated; media resources, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need their own qualification |
+| [#229](https://github.com/tyk-swe/olp/issues/229) Implement distinct Gemini Interactions and Live native lifecycle profiles | D06,D11-D15; T03-T05 | Active; #212, #215 and #227 integrated | Native Gemini Interactions/Live API contracts and real JS/Python SDK gateway lifecycle qualification in progress |
+| [#230](https://github.com/tyk-swe/olp/issues/230) Retain media OIF source and staged asset byte identities | D03-D04,D15,D19; T04,T07 | Integrated; full strict media behavior remains #216 | Media source/digest branch `58afbe36`, merge `211fc8fa`; [source and streamed asset identity qualification](../qualification/fidelity/media-asset-identity.md) |
+| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Blocked by #214 and #229 | #215, #227 and #230 foundations are integrated; strict media resources, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need qualification |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
-| [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
-| [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
+| [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; #217 inspector and playground also integrated | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
+| [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Integrated; final #214 carrier interaction rerun remains | Console branch `5963e192`, merge `760bc795`; [inspector, evidence, operation and strict playground qualification](../qualification/fidelity/console-interaction.md) with six reviewed screenshots |
 | [#222](https://github.com/tyk-swe/olp/issues/222) Freeze native durable publication and duplex baselines | T09 prerequisite | Baseline integrated; replacement qualification pending | Harness `373c5846`, capture `033c611f`, merge `b11a55e4`; [48 measured repetitions and frozen criteria](../evidence/fidelity-performance/lifecycle-v1/README.md) |
 | [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Reference baseline integrated; translated candidate qualification pending | Source `29e18268`, capture `a99d0217`, merge `533ac161`; [36 repetitions, encrypted barrier reference and frozen criteria](../evidence/fidelity-performance/barrier-v1/README.md); replacement qualification remains #214/#218 |
 | [#226](https://github.com/tyk-swe/olp/issues/226) Enforce reviewed route identity migration across mixed versions | D23; T10 | Integrated; final mixed-version and release audit remain #218 | Migration branch `39bf2792`; [strict route migration, rollback and mixed-version qualification](../qualification/fidelity/strict-route-migration.md); forward schema 0027, reviewed console draft and screenshot |
-| [#228](https://github.com/tyk-swe/olp/issues/228) Prove provider, dialect and operation extensions through public behavior | D07,D15,D23; T10 | Active; #215 integrated | Test-only trusted fixture registrations, public provider/route dispatch and exact result/accounting proof pending |
-| [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Pending | — |
+| [#228](https://github.com/tyk-swe/olp/issues/228) Prove provider, dialect and operation extensions through public behavior | D07,D15,D23; T10 | Integrated; final G7 audit remains #218 | Extension branch `1ed196c2`, merge `f3204af1`; [three public registration/dispatch/result/accounting demonstrations](../qualification/fidelity/extension-demos.md) run in their own integration process |
+| [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Blocked by #214, #216 and #229 | Full G1–G7 and release qualification pending; integrated #217 and #228 evidence feeds the final audit |
 
 ## Qualification rules
 
@@ -233,6 +233,18 @@ and public native image/source tests passed with race detection in 6.125 s.
 Integration-tagged Go vet and current release inventory regeneration also
 passed. Strict media request/result/event plans and lifecycle recovery remain
 #216 scope; no frozen fixture or performance artifact changed.
+
+The #217 console (`760bc795`), #228 public extension (`f3204af1`) and #230
+media asset identity (`211fc8fa`) branches are integrated, alongside CI
+prerequisite and video quota test fixes. The combined tree passed `make check`
+with 647 console tests and 24 script tests. The separate public extension
+suite, shared video quota settlement suite and public native image/media source/
+management cases passed with race detection against disposable service data.
+The merged management schema has one bounded `client_contract` field in each
+simulation input and regenerated Go/TypeScript types; the integration script
+retains both old-binary migration coverage and the isolated extension suite.
+These checks establish the integrated prerequisites, not #214 continuation,
+#216 lifecycle, #218 qualification or G1–G7 completion.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.

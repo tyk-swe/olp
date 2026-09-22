@@ -3857,7 +3857,7 @@ type SimulateRouteRequest struct {
 	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// ClientContract Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation.
+	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
 
 	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
@@ -3901,7 +3901,7 @@ type SimulationQuerySettings map[string]string
 type SimulationRequest struct {
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
-	// ClientContract Explicit registered observation contract for native operation inspection, such as raw-vector-storage/1. Required for non-float, sparse or multivector native storage; inspection does not execute an operation.
+	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
 
 	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.

@@ -4,7 +4,7 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "e520e1f1a62fa04781837e55a02b7785c1e5b36a24642b9777602562fa933864",
+    "sha256": "7110df10d7bf2db89497e168ec25cb60e28c64f879f6abcc38b7f5f3380cad6a",
     "operations": 150
   },
   "behaviorMapping": {
@@ -6330,6 +6330,7 @@
     "internal/gateway/media_system_test.go",
     "internal/gateway/media_test.go",
     "internal/gateway/oif_source_test.go",
+    "internal/gateway/playground_native_result_test.go",
     "internal/gateway/policy_test.go",
     "internal/gateway/provider_connection_test.go",
     "internal/gateway/revocation_test.go",
