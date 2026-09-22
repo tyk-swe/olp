@@ -29,6 +29,12 @@ remain in exports and immutable revisions. Revision diffs report
 `fidelity_changed`, `fidelity_before` and `fidelity_after` so transitions are
 reviewable.
 
+The later [mixed-version route migration](../../adr/0004-migrate-strict-routes-to-new-identities.md)
+restricts activation across the strict boundary to a previously unpublished
+slug. Existing legacy and transformed modes can still change explicitly within
+the non-strict class. The revision diff remains useful for those changes and
+for comparing an older snapshot during review.
+
 Drafts may hold a policy conflict for review. Strict drafts with any input or
 output redaction fail validation and activation with `fidelity_policy_conflict`.
 Pure blocking policies pass that policy check. Configuration promotion checks

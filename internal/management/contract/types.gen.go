@@ -1857,6 +1857,15 @@ type CreateRouteDraftRequest struct {
 	Targets   []RouteTargetRequest                  `json:"targets"`
 }
 
+// CreateRouteMigrationDraftRequest defines model for CreateRouteMigrationDraftRequest.
+type CreateRouteMigrationDraftRequest struct {
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity *RouteFidelity `json:"fidelity,omitempty"`
+
+	// Slug Previously unpublished route identity; retired slugs cannot be reused.
+	Slug string `json:"slug"`
+}
+
 // CredentialListResponse defines model for CredentialListResponse.
 type CredentialListResponse struct {
 	Items      []CredentialResponse      `json:"items"`
@@ -4657,6 +4666,14 @@ type ListRoutesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CreateRouteMigrationDraftParams defines parameters for CreateRouteMigrationDraft.
+type CreateRouteMigrationDraftParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+
+	// IfMatch Current published route ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // RetireRouteParams defines parameters for RetireRoute.
 type RetireRouteParams struct {
 	IfMatch        string `json:"If-Match"`
@@ -4924,6 +4941,9 @@ type ReplaceRouteDraftJSONRequestBody = ReplaceRouteDraftRequest
 
 // SimulateRouteDraftJSONRequestBody defines body for SimulateRouteDraft for application/json ContentType.
 type SimulateRouteDraftJSONRequestBody = SimulateRouteRequest
+
+// CreateRouteMigrationDraftJSONRequestBody defines body for CreateRouteMigrationDraft for application/json ContentType.
+type CreateRouteMigrationDraftJSONRequestBody = CreateRouteMigrationDraftRequest
 
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy

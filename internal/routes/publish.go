@@ -82,6 +82,9 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
 		return access.Reply{}, err
 	}
+	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	if len(current.ContentPolicy) > 0 {
 		var policy contentpolicy.Policy
 		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
@@ -147,6 +150,9 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
 		return access.Reply{}, err
 	}
+	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	for i := range current.Targets {
 		t := &current.Targets[i]
 		if l := live[t.ProviderModelID]; l != nil {
@@ -161,7 +167,11 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		routeID, revision = access.NewID(), 1
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID); err != nil {
+		fidelity, err := runtime.DecodeFidelity(current.Fidelity)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id,strict_contract) VALUES($1,$2,$3,1,$4,$5,$6,$7)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID, runtime.FidelityMode(fidelity) == runtime.FidelityStrict); err != nil {
 			return access.Reply{}, err
 		}
 	case err != nil:
@@ -615,6 +625,9 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = ValidateFidelityMigration(r.Context(), tx, v.Slug, v.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	draftID, etag := access.NewID(), access.NewID()

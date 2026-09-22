@@ -189,11 +189,20 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	}
 	route["fidelity"] = map[string]any{}
 	route["content_policy"] = fidelityPolicy("block", "input")
+	planned := h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	if !strings.Contains(fmt.Sprint(planned["conflicts"]), "route_fidelity_migration_required") {
+		t.Fatal("import did not require a new strict identity", planned)
+	}
+	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 409)
+	// Review the same proposed contract under an unpublished identity. Existing
+	// non-strict readers continue to serve only the original route.
+	migrationSlug := slug + "-strict"
+	route["slug"] = migrationSlug
 	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	var draft map[string]any
 	for _, item := range h.want(owner, "GET", "/api/v3/route-drafts", nil, nil, 200)["items"].([]any) {
 		d := item.(map[string]any)
-		if d["slug"] == slug && d["state"] == "draft" && d["based_on_revision_id"] == nil {
+		if d["slug"] == migrationSlug && d["state"] == "draft" && d["based_on_revision_id"] == nil {
 			draft = d
 			break
 		}
@@ -225,7 +234,7 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	}
 
 	route["content_policy"] = fidelityPolicy("redact", "input")
-	planned := h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	planned = h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
 	if !strings.Contains(fmt.Sprint(planned["conflicts"]), "fidelity_policy_conflict") {
 		t.Fatal("import plan ignored inherited strict policy conflict", planned)
 	}

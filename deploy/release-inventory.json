@@ -4,8 +4,8 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "6efcf9e63a319e346d55898156a896eee36459f3fb0fea8ed3971836d7755ce8",
-    "operations": 148
+    "sha256": "710360d99d8d56270cb1647ca67e78e068f92b2aab98378133355ada019c9810",
+    "operations": 149
   },
   "behaviorMapping": {
     "path": "tests/release-behaviors.json",
@@ -6465,6 +6465,7 @@
     "tests/integration/master_key_startup_test.go",
     "tests/integration/media_management_test.go",
     "tests/integration/migration_recovery_test.go",
+    "tests/integration/mixed_version_strict_route_test.go",
     "tests/integration/mounted_parity_test.go",
     "tests/integration/native_configuration_storage_test.go",
     "tests/integration/native_operations_test.go",
@@ -6503,7 +6504,8 @@
     "tests/integration/shared_budgets_test.go",
     "tests/integration/simulation_authorization_test.go",
     "tests/integration/strict_generation_test.go",
-    "tests/integration/strict_plan_inspector_test.go"
+    "tests/integration/strict_plan_inspector_test.go",
+    "tests/integration/strict_route_migration_test.go"
   ],
   "browserJourneys": [
     "console/playwright.config.ts",

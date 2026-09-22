@@ -659,6 +659,14 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
 				continue
 			}
+			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
+				var failure *access.Problem
+				if !errors.As(err, &failure) {
+					return nil, err
+				}
+				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
+				continue
+			}
 		}
 		switch {
 		case !staged:
@@ -673,6 +681,14 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			}
 			if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
 				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
+				continue
+			}
+			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
+				var failure *access.Problem
+				if !errors.As(err, &failure) {
+					return nil, err
+				}
+				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
 				continue
 			}
 			if canonicalEqualRoute(rt, current) {
