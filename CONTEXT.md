@@ -55,6 +55,18 @@ and effects are preserved for a particular operation and client behavior.
 A permitted next interaction whose retained native dependencies correspond to
 the client's visible history and selected branch.
 
+**Continuation handle**:
+An opaque reference to the complete native dependencies for a permitted next
+interaction; possession does not replace authorization.
+
+**Submission identity**:
+A caller's identity for one inference request whose retries refer to the same
+accepted work and delivery, rather than another inference request.
+
+**Delivery replay**:
+Delivering already-recorded output from the same accepted work without
+performing inference again.
+
 **Route fidelity**:
 A route's declared legacy, strict, or transformed treatment of invocation
 semantics; native identity and qualified interaction describe individual plans.
