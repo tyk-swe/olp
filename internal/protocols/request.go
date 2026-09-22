@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"maps"
 	"regexp"
@@ -49,9 +50,13 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 	if family.Surface() == "openai" {
 		return openai.Parse(family, data)
 	}
-	f, err := object(data)
+	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, err
+		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+	}
+	f := doc.Fields()
+	if f == nil {
+		return nil, requestError("", "expected a JSON object")
 	}
 	stream := family == openai.FamilyGeminiStream
 	if family.Surface() == "anthropic" {
@@ -124,7 +129,7 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 	if family.Operation() != "generation" && stream {
 		return nil, requestError("stream", "token counting supports unary requests only")
 	}
-	return openai.NewEnvelope(family, model, stream, f), nil
+	return openai.NewSourceEnvelope(family, model, stream, doc), nil
 }
 
 // WireFamily selects the provider protocol while retaining the OpenAI endpoint
@@ -186,7 +191,24 @@ func ChatOnly(vendor string) bool {
 // extensions byte-for-byte as JSON values. The caller always owns model and mode.
 func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]byte, openai.Family, error) {
 	wire := WireFamily(kind, vendor, r.Family)
-	f := r.Document()
+	return EncodeTarget(r, wire, kind, vendor, model, defaults)
+}
+
+// EncodeTarget honors an explicitly linked destination dialect. Unlike the
+// legacy family selector it cannot silently fall back from Responses to Chat.
+func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object) ([]byte, openai.Family, error) {
+	prepared, family, err := PrepareTarget(r, wire, kind, vendor, model, defaults)
+	if err != nil {
+		return nil, family, err
+	}
+	return prepared.Document().Bytes(), family, nil
+}
+
+func encodeTargetLegacy(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
+	var f Object
+	if r.Family.Surface() != "openai" {
+		f = r.Document()
+	}
 	native := wire == r.Family || (wire == openai.FamilyGemini && r.Family == openai.FamilyGeminiStream)
 	sourceDefaults := defaults
 	if !native {
@@ -206,16 +228,16 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 			delete(sourceDefaults, "dimensions")
 		}
 	}
-	mergeDefaults(f, sourceDefaults)
+	if r.Family.Surface() != "openai" {
+		mergeDefaultsTracked(f, sourceDefaults, applied)
+	}
 	if r.Family.Surface() == "openai" {
-		encoded, err := r.Encode(model, sourceDefaults)
+		fields, provenance, err := r.EncodeFieldsWithProvenance(model, sourceDefaults)
+		*applied = append(*applied, provenance...)
 		if err != nil {
 			return nil, wire, err
 		}
-		f, err = object(encoded)
-		if err != nil {
-			return nil, wire, err
-		}
+		f = fields
 	}
 	if err := validateProfile(vendor, r.Family, f); err != nil {
 		return nil, wire, err
@@ -258,6 +280,9 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 	if wire == openai.FamilyAnthropic && !present(c.Parameters["max_output_tokens"]) {
 		if _, explicit := f["max_tokens"]; !explicit {
 			c.Parameters["max_output_tokens"] = defaults["max_tokens"]
+			if present(defaults["max_tokens"]) {
+				*applied = append(*applied, oif.Provenance{Pointer: "/max_tokens", Origin: oif.ProviderDefault, Reason: "absent translated token control inherited native provider default"})
+			}
 		}
 	}
 	out, err := encodeCanonical(c, wire, model, r.Family.Operation())
@@ -281,7 +306,7 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 			}
 		}
 	}
-	mergeDefaults(out, targetDefaults)
+	mergeDefaultsTracked(out, targetDefaults, applied)
 	if ChatOnly(vendor) {
 		if value, ok := out["max_completion_tokens"]; ok {
 			out["max_tokens"] = value
@@ -402,10 +427,19 @@ func StructuredOutputRequested(r *openai.Request) bool {
 }
 
 func mergeDefaults(fields, defaults Object) {
+	mergeDefaultsTracked(fields, defaults, nil)
+}
+func mergeDefaultsTracked(fields, defaults Object, applied *[]oif.Provenance) {
+	record := func(path string) {
+		if applied != nil {
+			*applied = append(*applied, oif.Provenance{Pointer: path, Origin: oif.ProviderDefault, Reason: "absent caller field inherited provider default"})
+		}
+	}
 	for key, value := range defaults {
 		current, exists := fields[key]
 		if !exists {
 			fields[key] = value
+			record(oif.Pointer("", key))
 			continue
 		}
 		if key == "generationConfig" && present(current) {
@@ -415,6 +449,7 @@ func mergeDefaults(fields, defaults Object) {
 				for k, v := range fallback {
 					if _, ok := caller[k]; !ok {
 						caller[k] = v
+						record(oif.Pointer(oif.Pointer("", key), k))
 					}
 				}
 				fields[key] = raw(caller)

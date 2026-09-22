@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"strings"
 
@@ -24,17 +25,21 @@ type Emit func(frame []byte) error
 // includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, true, emit)
+	return stream(family, r, maxEventBytes, route, includeUsage, true, emit, nil)
 }
 
 // StreamMetadata forwards the same validated frames as Stream, but retains only
 // completion metadata. The gateway must not accumulate output or tool arguments
 // for the lifetime of a stream; the unary response cap does not bound streams.
 func StreamMetadata(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit)
+	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, nil)
 }
 
-func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit) (*Completion, error) {
+func StreamMetadataEvents(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
+	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, observe)
+}
+
+func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
 	var s streamer
 	switch family {
 	case FamilyChat:
@@ -45,7 +50,25 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 	default:
 		return nil, errors.New("unknown request family")
 	}
-	err := sse.Decode(r, maxEventBytes, s.frame)
+	sequence := uint64(0)
+	err := sse.Decode(r, maxEventBytes, func(frame sse.Frame) error {
+		event, err := LiftSSE(family, frame, sequence, maxEventBytes)
+		if err != nil {
+			return err
+		}
+		sequence++
+		if observe != nil {
+			if err := observe(event); err != nil {
+				return err
+			}
+		}
+		if event.Source().Valid() {
+			frame.Data = event.Source().Raw()
+		} else {
+			frame.Data = event.Control()
+		}
+		return s.frame(frame, event)
+	})
 	completion, finishErr := s.finish()
 	if err != nil && !errors.Is(err, errStreamComplete) {
 		if errors.Is(err, sse.ErrEventTooLarge) {
@@ -60,7 +83,7 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 }
 
 type streamer interface {
-	frame(sse.Frame) error
+	frame(sse.Frame, oif.Event) error
 	finish() (*Completion, error)
 }
 
@@ -79,7 +102,7 @@ type chatStream struct {
 	c            Completion
 }
 
-func (s *chatStream) frame(f sse.Frame) error {
+func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Data == "[DONE]" {
 		if !s.finished[0] {
 			return &ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
@@ -95,8 +118,8 @@ func (s *chatStream) frame(f sse.Frame) error {
 		}
 		return errStreamComplete
 	}
-	fields, err := object([]byte(f.Data))
-	if err != nil {
+	fields := event.Source().Fields()
+	if fields == nil {
 		return &ProtocolError{Detail: "chunk is not a JSON object"}
 	}
 	if raw, present := fields["error"]; present && !isNull(raw) {
@@ -233,9 +256,9 @@ type responsesStream struct {
 	c       *Completion
 }
 
-func (s *responsesStream) frame(f sse.Frame) error {
-	fields, err := object([]byte(f.Data))
-	if err != nil {
+func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
+	fields := event.Source().Fields()
+	if fields == nil {
 		return &ProtocolError{Detail: "event is not a JSON object"}
 	}
 	kind, ok := stringField(fields, "type")

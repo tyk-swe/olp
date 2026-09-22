@@ -228,7 +228,17 @@ func (h *harness) do(ctx context.Context, method, path, key string, body []byte,
 func (h *harness) chat(key string, extra map[string]string, fields ...string) (*http.Response, map[string]any) {
 	h.t.Helper()
 	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]` + strings.Join(fields, "") + `}`
-	resp := h.do(h.t.Context(), http.MethodPost, "/v1/chat/completions", key, []byte(body), extra)
+	// Callers supply fixture overrides, not duplicate JSON members. Explicit
+	// malformed/ambiguous-wire tests use do with their original bytes.
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &merged); err != nil {
+		h.t.Fatal(err)
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	resp := h.do(h.t.Context(), http.MethodPost, "/v1/chat/completions", key, encoded, extra)
 	defer resp.Body.Close()
 	var decoded map[string]any
 	data, _ := io.ReadAll(resp.Body)
