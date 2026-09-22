@@ -304,7 +304,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   await page
     .getByRole('button', { name: 'Submit ordered tool results' })
     .click();
-  await expect(page.getByText('Both tools completed.')).toBeVisible();
+  await expect(page.locator('.assistant-result pre')).toHaveText('Both tools completed.');
   await expect(page.getByText(secret, { exact: true })).toHaveCount(0);
   const captured = await request
     .get(`${fixture}/__test__/requests`)
