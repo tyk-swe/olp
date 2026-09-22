@@ -37,12 +37,13 @@ import cannot evade validation by omitting the field. Transformed routes retain
 the existing intentional transformation behavior, and legacy routes retain
 their historical policy behavior.
 
-This foundation does **not** implement strict inference. Strict activation and
-runtime installation and draft routing simulation fail with
-`strict_execution_unavailable` until
-[#213](https://github.com/tyk-swe/olp/issues/213) supplies complete compiled
-interaction-plan admission. Activation checks policy conflicts before that
-availability condition. Plan-only configuration staging is still available.
+The initial foundation refused strict execution with
+`strict_execution_unavailable`. The [compiled planner](strict-planning.md) now
+replaces that temporary guard: explicit compatible profiles and generation
+interaction templates compile at activation and installation. An implicit legacy
+profile fails with `target_capability`; mutation policies still fail first with
+`fidelity_policy_conflict`. Tuple-only simulation reports `not_inspected` rather
+than claiming semantic admission. Plan-only configuration staging remains available.
 
 Migration 0023 only adds nullable fields; it does not reinterpret or republish
 existing routes. Unknown nonempty contract fields change the runtime digest,

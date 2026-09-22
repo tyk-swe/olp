@@ -63,6 +63,14 @@ semantics; native identity and qualified interaction describe individual plans.
 A route whose admitted interactions preserve execution, observation, permitted
 continuation, and effects relative to the selected target's native invocation.
 
+**Upstream acceptance**:
+What is known about provider work: not sent, outcome unknown, accepted, or
+terminal. Absence of client-visible bytes does not establish absence of work.
+
+**Client observation**:
+What the caller may have received: unobserved, partially observed, actionable,
+or terminal. This is independent of upstream acceptance and response commitment.
+
 **Transformed route**:
 A route declaring intentional model-significant changes to an invocation or
 its observed result.

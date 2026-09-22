@@ -58,11 +58,19 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 		return nil, err
 	}
 	effective := prepared.Document()
+	if err := checkAssetResources(effective, t.wire); err != nil {
+		return nil, err
+	}
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
 		return nil, err
 	}
 	if t.policy != nil && t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == openai.FamilyBedrock) {
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
+	}
+	if t.policy != nil && t.policy.HasOutput() {
+		if err := outputRequestCoverage(effective); err != nil {
+			return nil, err
+		}
 	}
 	if t.policy != nil && len(t.policy.Input) > 0 {
 		if err := checkInputCoverage(t.wire, effective); err != nil {

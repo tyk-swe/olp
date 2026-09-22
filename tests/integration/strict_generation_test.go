@@ -30,11 +30,12 @@ type strictProviderCall struct {
 
 type strictProviderFixture struct {
 	*httptest.Server
-	mu         sync.Mutex
-	calls      []strictProviderCall
-	profile    string
-	providerID string
-	failure    atomic.Int32
+	mu          sync.Mutex
+	calls       []strictProviderCall
+	profile     string
+	providerID  string
+	failure     atomic.Int32
+	extraOutput atomic.Bool
 }
 
 func newStrictProviderFixture(t *testing.T, profile string) *strictProviderFixture {
@@ -78,15 +79,31 @@ func newStrictProviderFixture(t *testing.T, profile string) *strictProviderFixtu
 			return
 		}
 		stream := string(body["stream"]) == "true" || strings.HasSuffix(r.URL.Path, ":streamGenerateContent")
+		nativeWriter := w
+		var buffered *httptest.ResponseRecorder
+		if f.extraOutput.Load() && !stream {
+			buffered = httptest.NewRecorder()
+			nativeWriter = buffered
+		}
 		switch profile {
 		case "compatible-responses", "azure-v1-responses":
-			writeResponsesFixture(w, vendorModel, vendorAnswer, stream)
+			writeResponsesFixture(nativeWriter, vendorModel, vendorAnswer, stream)
 		case "anthropic-messages":
-			parityGeneration(w, "anthropic", stream)
+			parityGeneration(nativeWriter, "anthropic", stream)
 		case "gemini-generation":
-			parityGeneration(w, "gemini", stream)
+			parityGeneration(nativeWriter, "gemini", stream)
 		default:
-			parityGeneration(w, "openai", stream)
+			parityGeneration(nativeWriter, "openai", stream)
+		}
+		if buffered != nil {
+			var result map[string]json.RawMessage
+			if err := json.Unmarshal(buffered.Body.Bytes(), &result); err != nil {
+				t.Error(err)
+				return
+			}
+			result["native_extension"] = json.RawMessage(`{"private_text":"private-marker"}`)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(result)
 		}
 	}))
 	t.Cleanup(f.Close)
@@ -221,6 +238,16 @@ func TestStrictPublicResponsesPreserveScalarAndArrayInputs(t *testing.T) {
 	if status != 400 || !bytes.Contains(response, []byte(`"param":"store"`)) || !bytes.Contains(response, []byte(`"code":"policy_conflict"`)) || len(f.captured()) != before {
 		t.Fatalf("native retention default bypassed policy: %d %s", status, response)
 	}
+	statefulKey := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	status, response, _ = h.gatewayRaw("POST", "/v1/responses", statefulKey, strings.NewReader(`{"model":"`+slug+`","input":"native default retention"}`), map[string]string{"Content-Type": "application/json"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"state_carrier"`)) || len(f.captured()) != before {
+		t.Fatalf("unqualified retained continuation dispatched: %d %s", status, response)
+	}
+	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","store":false,"input":[{"role":"user","content":[{"type":"input_file","file_id":"unowned-native-file"}]}]}`), map[string]string{"Content-Type": "application/json"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"unsupported_stateful_reference"`)) || len(f.captured()) != before {
+		t.Fatalf("unowned provider asset dispatched: %d %s", status, response)
+	}
 }
 
 func TestStrictPublicQualifiedTextAndPreciseRefusals(t *testing.T) {
@@ -317,6 +344,11 @@ func TestStrictPublicCallerSemanticHeadersArePreservedOrRejected(t *testing.T) {
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"target_capability"`)) || len(f.captured()) != before || bytes.Contains(response, []byte("conflicting-native-feature")) {
 		t.Fatalf("conflicting semantic header dispatched or leaked: %d %s", status, response)
 	}
+	asset := fmt.Sprintf(`{"model":%q,"max_tokens":32,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"unowned-native-file"}}]}]}`, slug)
+	status, response, _ = h.gatewayRaw("POST", "/anthropic/v1/messages", key, strings.NewReader(asset), map[string]string{"Content-Type": "application/json"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"resource_affinity"`)) || len(f.captured()) != before {
+		t.Fatalf("unowned Anthropic asset dispatched: %d %s", status, response)
+	}
 }
 
 func TestPublicEffectiveDefaultsAreInspectedBeforeDispatch(t *testing.T) {
@@ -348,6 +380,70 @@ func TestPublicEffectiveDefaultsAreInspectedBeforeDispatch(t *testing.T) {
 				if status != 200 || bytes.Contains(calls[len(calls)-1].body, []byte("private-marker")) || !bytes.Contains(calls[len(calls)-1].body, []byte("[MASK]")) {
 					t.Fatalf("default tool bypassed explicit transformation: %d %s", status, response)
 				}
+			}
+		})
+	}
+}
+
+func TestStrictPublicNativePresenceAndDefaultInheritance(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	f := newStrictProviderFixture(t, "compatible-chat")
+	options := map[string]any{"operation_defaults": map[string]any{"generation": map[string]any{"dialect": "openai-chat", "values": map[string]any{"temperature": 0.7, "top_p": 0.8, "max_tokens": 32, "parallel_tool_calls": true, "stop": []string{"stop-default"}}}}}
+	slug, key := publishStrictProvider(t, h, owner, f, options, nil, "strict")
+	base := `{"model":"` + slug + `","messages":[{"role":"user","content":"presence"}]`
+	for _, fixture := range []struct{ suffix, expected string }{
+		{"}", `{"model":"` + vendorModel + `","messages":[{"role":"user","content":"presence"}],"temperature":0.7,"top_p":0.8,"max_tokens":32,"parallel_tool_calls":true,"stop":["stop-default"]}`},
+		{`,"temperature":null,"top_p":0,"max_tokens":null,"parallel_tool_calls":false,"stop":[],"user":""}`, `{"model":"` + vendorModel + `","messages":[{"role":"user","content":"presence"}],"temperature":null,"top_p":0,"max_tokens":null,"parallel_tool_calls":false,"stop":[],"user":""}`},
+	} {
+		status, response, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(base+fixture.suffix), map[string]string{"Content-Type": "application/json"})
+		if status != 200 {
+			t.Fatalf("native presence: %d %s", status, response)
+		}
+		calls := f.captured()
+		requireProfileNetworkJSON(t, fixture.expected, calls[len(calls)-1].body)
+	}
+}
+
+func TestStrictPublicOutputPolicyRejectsUninspectedNativeExtensions(t *testing.T) {
+	for _, profile := range []string{"compatible-chat", "compatible-responses", "anthropic-messages", "gemini-generation"} {
+		t.Run(profile, func(t *testing.T) {
+			h := newAccessHarness(t)
+			owner := h.owner()
+			f := newStrictProviderFixture(t, profile)
+			slug, key := publishStrictProvider(t, h, owner, f, nil, fidelityPolicy("block", "output"), "strict")
+			path, body := "/v1/chat/completions", fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}],"max_tokens":32}`, slug)
+			switch profile {
+			case "compatible-responses":
+				path, body = "/v1/responses", fmt.Sprintf(`{"model":%q,"store":false,"input":"hello","max_output_tokens":32}`, slug)
+			case "anthropic-messages":
+				path = "/anthropic/v1/messages"
+			case "gemini-generation":
+				path, body = "/gemini/v1beta/models/"+slug+":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"maxOutputTokens":32}}`
+			}
+			status, response, _ := h.gatewayRaw("POST", path, key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if status != 200 {
+				t.Fatalf("known inspectable native output refused: %d %s", status, response)
+			}
+			sink := make(strictOutcomeSink, 1)
+			h.Gateway.Sink = sink
+			f.extraOutput.Store(true)
+			before := len(f.captured())
+			status, response, _ = h.gatewayRaw("POST", path, key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if status != 502 || bytes.Contains(response, []byte("private-marker")) || bytes.Contains(response, []byte("private_text")) || len(f.captured()) != before+1 {
+				t.Fatalf("native output bypassed policy: %d %s", status, response)
+			}
+			select {
+			case envelope := <-sink:
+				if len(envelope.Attempts) != 1 {
+					t.Fatalf("missing postdispatch accounting: %+v", envelope)
+				}
+				fact := envelope.Attempts[0]
+				if fact.Usage == nil || !fact.UsageObserved || fact.BillingUncertain || fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamTerminal || fact.Interaction.ClientState != usage.ClientUnobserved {
+					t.Fatalf("guard discarded terminal upstream usage: %+v", fact)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("missing blocked delivery evidence")
 			}
 		})
 	}

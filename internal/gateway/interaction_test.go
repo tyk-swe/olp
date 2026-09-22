@@ -147,3 +147,36 @@ func TestStrictRevokedCandidateDoesNotEstablishServingBaselineOrSpendBudget(t *t
 		t.Fatalf("attempts %+v", got)
 	}
 }
+
+func TestStrictFailoverCannotChangeDefaultsThroughModelAlias(t *testing.T) {
+	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+		for id, provider := range snapshot.Providers {
+			if provider.Name != "a" {
+				continue
+			}
+			provider.Bindings = map[string]connectors.Binding{
+				modelA:          {Model: "same-upstream", Defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage("1024")}}}},
+				"smaller-alias": {Model: "same-upstream", Defaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage("32")}}}},
+			}
+			provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: "smaller-alias", Operation: "generation", Surface: "openai", Mode: "unary"})
+			snapshot.Providers[id] = provider
+			route := snapshot.Routes[routeSlug]
+			first := route.Targets[0]
+			second := first
+			second.ID, second.RoutingID, second.ProviderModel, second.Priority = uuid.NewString(), uuid.NewString(), "smaller-alias", 1
+			route.Targets = []runtime.Target{first, second}
+			snapshot.Routes[routeSlug] = route
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if h.mock.count("a") == 1 {
+			status(400, `{"error":{"code":"context_length_exceeded","message":"capacity refusal"}}`)(w, r)
+			return
+		}
+		completion("same-upstream", answerText)(w, r)
+	})
+	resp, body := h.chat(fullKey, nil)
+	if resp.StatusCode != 400 || errorCode(t, body) != "upstream_rejected" || h.mock.count("a") != 1 {
+		t.Fatalf("strict defaults substituted: %d %v calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+}

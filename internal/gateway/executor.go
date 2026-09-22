@@ -66,6 +66,7 @@ type execution struct {
 	semanticQueryInvalid bool
 	serving              *interaction.ServingIdentity
 	servingSlot          string
+	servingBinding       string
 	preparedProviders    map[string]preparedProvider
 	request              request
 	family               openai.Family
@@ -619,9 +620,20 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			err = readErr
 		} else {
 			if contract != nil {
-				err = contract.ValidateUnary(raw)
+				var native *openai.Completion
+				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
+				if native != nil {
+					fact.Usage = native.Usage
+				}
+				if err == nil {
+					st.upstream.Store(3)
+					err = contract.ValidateResult(native.Native)
+				}
+				if err == nil && wire == x.family {
+					completion = native
+				}
 			}
-			if err == nil {
+			if err == nil && completion == nil {
 				completion, err = protocols.DecodeRequest(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
 			}
 		}

@@ -36,10 +36,11 @@ func (x *execution) servingAllowed(provider *runtime.Provider, model string, slo
 		if selectBaseline {
 			x.serving = &serving
 			x.servingSlot = slot.ID
+			x.servingBinding = model
 		}
 		return true
 	}
-	return serving == *x.serving && (serving.PrincipalID != "" || slot.ID == x.servingSlot)
+	return serving == *x.serving && model == x.servingBinding && (serving.PrincipalID != "" || slot.ID == x.servingSlot)
 }
 
 // eventActionable recognizes native tool representations before the admitted
