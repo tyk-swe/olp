@@ -329,6 +329,12 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
+	if cfg.ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
+		return s.certifyGeminiInteraction(ctx, cfg, credential, model, tuple.Mode, maxEventBytes)
+	}
+	if cfg.ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
+		return s.certifyGeminiLive(ctx, cfg, credential, model, maxEventBytes)
+	}
 	if codec, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return s.certifyOperation(ctx, cfg, credential, model, tuple, codec)
 	}

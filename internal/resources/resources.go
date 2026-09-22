@@ -21,6 +21,7 @@ const (
 	KindResponse       = "response"
 	KindContinuation   = "continuation"
 	KindStrictResponse = "strict_response"
+	KindInteraction    = "interaction"
 )
 
 const StateDeleted = "deleted"
@@ -72,7 +73,7 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	switch local[:i] {
-	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse:
+	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction:
 	default:
 		return uuid.Nil, ErrNotFound
 	}

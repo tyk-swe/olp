@@ -77,7 +77,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 		// profiles have their own public request/result suite in
 		// strict_operations_test.go; retain the
 		// existing Bedrock Invoke coverage in the non-strict run.
-		if !slices.Contains(profile.Operations, "generation") && profile.ID != "bedrock-invoke" {
+		if (!slices.Contains(profile.Operations, "generation") && profile.ID != "bedrock-invoke") || profile.ID == "gemini-interactions" {
 			continue
 		}
 		if strict && profile.ID == "bedrock-invoke" {

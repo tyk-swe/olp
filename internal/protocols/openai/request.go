@@ -25,16 +25,18 @@ const OperationGeneration = "generation"
 type Family string
 
 const (
-	FamilyChat           Family = "chat"
-	FamilyResponses      Family = "responses"
-	FamilyInputTokens    Family = "input_tokens"
-	FamilyEmbeddings     Family = "embeddings"
-	FamilyModeration     Family = "moderation"
-	FamilyAnthropic      Family = "anthropic"
-	FamilyAnthropicCount Family = "anthropic_count"
-	FamilyGemini         Family = "gemini"
-	FamilyGeminiStream   Family = "gemini_stream"
-	FamilyGeminiCount    Family = "gemini_count"
+	FamilyChat               Family = "chat"
+	FamilyResponses          Family = "responses"
+	FamilyInputTokens        Family = "input_tokens"
+	FamilyEmbeddings         Family = "embeddings"
+	FamilyModeration         Family = "moderation"
+	FamilyAnthropic          Family = "anthropic"
+	FamilyAnthropicCount     Family = "anthropic_count"
+	FamilyGemini             Family = "gemini"
+	FamilyGeminiStream       Family = "gemini_stream"
+	FamilyGeminiCount        Family = "gemini_count"
+	FamilyGeminiInteractions Family = "gemini_interactions"
+	FamilyGeminiLive         Family = "gemini_live"
 
 	FamilyGeminiEmbeddings      Family = "gemini_embeddings"
 	FamilyGeminiEmbeddingsBatch Family = "gemini_embeddings_batch"
@@ -75,7 +77,10 @@ func (f Family) Operation() string {
 	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
 		FamilyTranscription, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
 		FamilyVideoContent, FamilyVideoDelete, FamilyFile, FamilyBatch,
-		FamilyRealtime, FamilyBedrockInvoke:
+		FamilyRealtime, FamilyGeminiLive, FamilyBedrockInvoke:
+		if f == FamilyGeminiLive {
+			return "realtime"
+		}
 		return string(f)
 	}
 	return OperationGeneration
@@ -85,7 +90,7 @@ func (f Family) Surface() string {
 	switch f {
 	case FamilyAnthropic, FamilyAnthropicCount:
 		return "anthropic"
-	case FamilyGemini, FamilyGeminiStream, FamilyGeminiCount:
+	case FamilyGemini, FamilyGeminiStream, FamilyGeminiCount, FamilyGeminiInteractions, FamilyGeminiLive:
 		return "gemini"
 	case FamilyBedrock, FamilyBedrockInvoke:
 		return "bedrock"

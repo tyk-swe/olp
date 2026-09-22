@@ -53,6 +53,8 @@ var profileRegistry = []Profile{
 	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
 	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
 	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
+	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
+	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
 	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
@@ -120,6 +122,19 @@ func init() {
 				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
 			}
 		}
+		// Interactions and Live have independent request and event grammars.
+		// Their profile tuples cannot fall through GenerateContent's codec.
+		switch p.Dialect {
+		case "gemini-interactions":
+			p.Operations = []string{"generation"}
+			p.Authentication = []string{"api_key"}
+			p.Documentation = "https://ai.google.dev/gemini-api/docs/interactions-overview"
+		case "gemini-live":
+			p.Operations = []string{"realtime"}
+			p.Authentication = []string{"api_key"}
+			p.Transport = "websocket"
+			p.Documentation = "https://ai.google.dev/api/live"
+		}
 		completeProfileMetadata(p)
 	}
 	registerUnaryProfiles()
@@ -186,6 +201,16 @@ func (c Config) ValidateProfile() error {
 	}
 	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
 		return errors.New("profile, connector kind and authentication are not a supported composition")
+	}
+	if p.Dialect == "gemini-interactions" || p.Dialect == "gemini-live" {
+		if len(c.OperationDefaults) > 0 {
+			return errors.New("Gemini lifecycle profile does not admit unimplemented provider defaults")
+		}
+		for _, binding := range c.Bindings {
+			if len(binding.Defaults) > 0 {
+				return errors.New("Gemini lifecycle profile does not admit unimplemented model defaults")
+			}
+		}
 	}
 	if p.Dialect == "openai-responses" && slices.Contains([]string{"deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere"}, c.VendorID) {
 		return errors.New("this vendor's declared dialect does not include Responses")
@@ -289,6 +314,12 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID != "" {
 		if p, err := c.Profile(); err == nil {
+			switch p.Dialect {
+			case "gemini-interactions":
+				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
+			case "gemini-live":
+				return operation == "realtime" && surface == "gemini" && mode == "realtime"
+			}
 			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
 				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
 					return true
@@ -369,6 +400,11 @@ func (c Config) profileBase() string {
 
 func (c Config) validateProfileEndpoint(u *url.URL) error {
 	switch c.Hosting() {
+	case "direct-gemini-interactions", "direct-gemini-live":
+		if u.Path != "/v1beta" {
+			return errors.New("Gemini lifecycle endpoint must end at /v1beta")
+		}
+		return nil
 	case "azure-v1":
 		if u.Path != "" && u.Path != "/openai/v1" {
 			return errors.New("Azure v1 endpoint must be the resource origin or /openai/v1")

@@ -22,6 +22,9 @@ func configuredOperation(cfg *Configuration, operation string) (operations.Diale
 	return codec, ok && codec.Operation.ID == operation
 }
 func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
+	if cfg.ProfileID == "gemini-live" {
+		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	}
 	if _, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}

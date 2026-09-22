@@ -242,6 +242,7 @@ func init() {
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "video_create", Surface: "openai", Mode: "async"})
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "batch", Surface: "openai", Mode: "unary"})
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "realtime"})
+	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "realtime", Surface: "gemini", Mode: "realtime"})
 	for _, operation := range []string{"generation", "bedrock_invoke"} {
 		for _, mode := range []string{"unary", "streaming"} {
 			CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "bedrock", Mode: mode})

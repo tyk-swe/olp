@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const stateRouteHeader = "X-OLP-Route"
@@ -240,9 +241,17 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
+		if fact.Interaction != nil && x.family == openai.FamilyGeminiInteractions {
+			switch {
+			case f.status > 0:
+				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+			case f.dispatched:
+				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			}
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		// Stored-response lifecycle calls do not generate billable work.
-		fact.recordEvidence(x.family != openai.FamilyResponses)
+		fact.recordEvidence(x.family != openai.FamilyResponses && x.actor != "api_key_resource")
 		x.facts = append(x.facts, fact)
 		return f
 	}
@@ -267,6 +276,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
+	if x.family == openai.FamilyGeminiInteractions && x.mode == "streaming" {
+		req.Header.Set("Accept", "text/event-stream")
+	}
 	cfg := p.provider.Connector()
 	if _, err := s.auth.Apply(ctx, req, cfg, s.pinSecret(x, p), body); err != nil {
 		if ctx.Err() != nil {
@@ -295,9 +307,17 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		fact.Class = "success"
 		fact.Committed = true
+		if x.family == openai.FamilyGeminiInteractions {
+			// The upstream has answered, but the client cannot observe a new
+			// Interaction until its encrypted ID mapping commits.
+			fact.Committed = false
+			if fact.Interaction != nil {
+				fact.Interaction.UpstreamState = usage.UpstreamAccepted
+			}
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		// Stored-response lifecycle calls do not generate billable work.
-		fact.recordEvidence(x.family != openai.FamilyResponses)
+		fact.recordEvidence(x.family != openai.FamilyResponses && x.actor != "api_key_resource")
 		x.facts = append(x.facts, fact)
 		return resp, nil
 	}

@@ -41,6 +41,11 @@ func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.T
 		if !ok {
 			return nil, nil, fmt.Errorf("route target references an unavailable provider")
 		}
+		// Interactions has its own step and resource contract. Its public runner
+		// compiles that contract at admission and never uses GenerateContent.
+		if provider.ProfileID == "gemini-interactions" {
+			continue
+		}
 		template, err := interaction.Compile(interaction.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
 		if err != nil {
 			return nil, nil, err
@@ -94,6 +99,10 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			provider, ok := s.Providers[target.ProviderID]
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
+			}
+			// Live owns a duplex setup-first contract rather than a unary codec.
+			if op == "realtime" && provider.ProfileID == "gemini-live" {
+				continue
 			}
 			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
 			if err != nil {

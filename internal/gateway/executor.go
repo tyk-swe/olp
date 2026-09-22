@@ -406,6 +406,10 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 	}
 	if x.strict() {
 		provider := x.snapshot().Providers[a.ProviderID]
+		if x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyGeminiLive {
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			return fact
+		}
 		if x.unary != nil {
 			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}

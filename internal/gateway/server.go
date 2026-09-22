@@ -131,6 +131,7 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerNative(mux)
+	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))

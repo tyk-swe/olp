@@ -19,6 +19,9 @@ func requestSurface(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, "/gemini/") {
 		return "gemini"
 	}
+	if strings.HasPrefix(r.URL.Path, "/ws/google.ai.generativelanguage.") {
+		return "gemini"
+	}
 	return "openai"
 }
 func (s *Server) registerNative(mux *http.ServeMux) {
