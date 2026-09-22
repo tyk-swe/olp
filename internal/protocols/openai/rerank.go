@@ -13,7 +13,7 @@ var rerankKnown = map[string]bool{
 }
 
 func (r *Request) validateRerank() error {
-	fields := r.fields
+	fields := r.Document()
 	for name := range fields {
 		if !rerankKnown[name] {
 			return invalid(name, "The rerank request supports model, query, documents, top_n, return_documents, and truncation only.")
