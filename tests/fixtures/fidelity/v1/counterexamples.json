@@ -1,0 +1,597 @@
+{
+  "version": 1,
+  "authorship": "Hand-authored native expectations and legacy characterizations; no production encoder used to produce expected values.",
+  "baseline_revision": "8580b39905dc4da9278de8e53ceac7d2412ad6a5",
+  "native_allowed_adaptations": [
+    "Configured route model becomes fixture-model; no other changes allowed in these unary cases."
+  ],
+  "scenarios": [
+    {
+      "id": "ordered-text-tool-text",
+      "source_family": "anthropic_messages",
+      "native_kind": "anthropic",
+      "native_vendor": "anthropic",
+      "target_kind": "gemini",
+      "target_vendor": "gemini",
+      "target_family": "gemini_generate_content",
+      "source": {
+        "model": "fidelity-route",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "user",
+            "content": "Check Paris weather"
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "before"
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "weather",
+                "input": {
+                  "city": "Paris"
+                }
+              },
+              {
+                "type": "text",
+                "text": "after"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "sunny"
+              }
+            ]
+          }
+        ]
+      },
+      "native": {
+        "model": "fixture-model",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "user",
+            "content": "Check Paris weather"
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "before"
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "weather",
+                "input": {
+                  "city": "Paris"
+                }
+              },
+              {
+                "type": "text",
+                "text": "after"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "sunny"
+              }
+            ]
+          }
+        ]
+      },
+      "legacy_target": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Check Paris weather"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "text": "before"
+              },
+              {
+                "text": "after"
+              },
+              {
+                "functionCall": {
+                  "name": "weather",
+                  "id": "call-1",
+                  "args": {
+                    "city": "Paris"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "name": "weather",
+                  "id": "call-1",
+                  "response": {
+                    "output": "sunny"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "maxOutputTokens": 32
+        }
+      },
+      "legacy_loss": "text after the tool call moved before the call",
+      "strict_reason": "ordered_content",
+      "paths": [
+        "/messages/1/content"
+      ],
+      "preserved_target": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Check Paris weather"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "text": "before"
+              },
+              {
+                "functionCall": {
+                  "name": "weather",
+                  "id": "call-1",
+                  "args": {
+                    "city": "Paris"
+                  }
+                }
+              },
+              {
+                "text": "after"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "name": "weather",
+                  "id": "call-1",
+                  "response": {
+                    "output": "sunny"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "maxOutputTokens": 32
+        }
+      }
+    },
+    {
+      "id": "distinct-instruction-scopes",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "anthropic",
+      "target_vendor": "anthropic",
+      "target_family": "anthropic_messages",
+      "source": {
+        "model": "fidelity-route",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "system",
+            "content": "system instruction"
+          },
+          {
+            "role": "developer",
+            "content": "developer instruction"
+          },
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ]
+      },
+      "native": {
+        "model": "fixture-model",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "system",
+            "content": "system instruction"
+          },
+          {
+            "role": "developer",
+            "content": "developer instruction"
+          },
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ]
+      },
+      "legacy_target": {
+        "model": "fixture-model",
+        "max_tokens": 32,
+        "stream": false,
+        "system": [
+          {
+            "type": "text",
+            "text": "system instruction"
+          },
+          {
+            "type": "text",
+            "text": "developer instruction"
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ]
+      },
+      "legacy_loss": "system and developer roles collapse to one system scope",
+      "strict_reason": "instruction_scope",
+      "paths": [
+        "/messages/1/role"
+      ]
+    },
+    {
+      "id": "structured-output-metadata",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "anthropic",
+      "target_vendor": "anthropic",
+      "target_family": "anthropic_messages",
+      "source": {
+        "model": "fidelity-route",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "response_format": {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "answer",
+            "description": "answer contract",
+            "strict": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answer"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "native": {
+        "model": "fixture-model",
+        "max_tokens": 32,
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "response_format": {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "answer",
+            "description": "answer contract",
+            "strict": true,
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answer"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "legacy_target": {
+        "model": "fixture-model",
+        "max_tokens": 32,
+        "stream": false,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ],
+        "output_config": {
+          "format": {
+            "type": "json_schema",
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answer"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "legacy_loss": "schema name, description and explicit strictness disappear",
+      "strict_reason": "structured_output_contract",
+      "paths": [
+        "/response_format/json_schema/name",
+        "/response_format/json_schema/description",
+        "/response_format/json_schema/strict"
+      ]
+    },
+    {
+      "id": "explicit-null-control",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "gemini",
+      "target_vendor": "gemini",
+      "target_family": "gemini_generate_content",
+      "source": {
+        "model": "fidelity-route",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "temperature": null
+      },
+      "native": {
+        "model": "fixture-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "temperature": null
+      },
+      "legacy_target": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello"
+              }
+            ]
+          }
+        ]
+      },
+      "legacy_loss": "explicit null temperature becomes absent",
+      "strict_reason": "control_presence",
+      "paths": [
+        "/temperature"
+      ]
+    },
+    {
+      "id": "completion-token-budget-scope",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "anthropic",
+      "target_vendor": "anthropic",
+      "target_family": "anthropic_messages",
+      "source": {
+        "model": "fidelity-route",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "max_completion_tokens": 64
+      },
+      "native": {
+        "model": "fixture-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "max_completion_tokens": 64
+      },
+      "legacy_target": {
+        "model": "fixture-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ],
+        "max_tokens": 64,
+        "stream": false
+      },
+      "legacy_loss": "a native completion-budget name and scope become an unqualified max_tokens budget",
+      "strict_reason": "reasoning_budget",
+      "paths": [
+        "/max_completion_tokens"
+      ]
+    },
+    {
+      "id": "native-unknown-presence-values",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "anthropic",
+      "target_vendor": "anthropic",
+      "target_family": "anthropic_messages",
+      "source": {
+        "model": "fidelity-route",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "max_tokens": 32,
+        "temperature": 0,
+        "parallel_tool_calls": false,
+        "stop": [],
+        "fixture_extension": {
+          "null_value": null,
+          "zero": 0,
+          "false_value": false,
+          "empty_string": "",
+          "empty_array": [],
+          "precise_integer": 9007199254740993
+        }
+      },
+      "native": {
+        "model": "fixture-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "max_tokens": 32,
+        "temperature": 0,
+        "parallel_tool_calls": false,
+        "stop": [],
+        "fixture_extension": {
+          "null_value": null,
+          "zero": 0,
+          "false_value": false,
+          "empty_string": "",
+          "empty_array": [],
+          "precise_integer": 9007199254740993
+        }
+      },
+      "legacy_error": "/fixture_extension",
+      "strict_reason": "target_capability",
+      "paths": [
+        "/fixture_extension"
+      ]
+    },
+    {
+      "id": "basic-qualified-translation-control",
+      "source_family": "openai_chat",
+      "native_kind": "openai",
+      "native_vendor": "openai",
+      "target_kind": "gemini",
+      "target_vendor": "gemini",
+      "target_family": "gemini_generate_content",
+      "source": {
+        "model": "fidelity-route",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ]
+      },
+      "native": {
+        "model": "fixture-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ]
+      },
+      "legacy_target": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello"
+              }
+            ]
+          }
+        ]
+      },
+      "preserved_target": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello"
+              }
+            ]
+          }
+        ]
+      },
+      "strict_reason": "",
+      "paths": []
+    }
+  ]
+}
