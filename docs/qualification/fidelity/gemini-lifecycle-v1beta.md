@@ -46,7 +46,9 @@ their client-frame order, and base64 audio/video bytes without resampling or
 transcoding. A tool call is delivered before its matching response returns.
 Synchronous writes,
 read limits, one session deadline, periodic reauthorization and ping bound
-memory and slow peers. The public `/gemini` base path supports the JavaScript
+memory and slow peers. Abnormal peer disconnects close both sockets immediately
+so a stalled opposite writer releases its session slot; normal closure retains
+the WebSocket close handshake. The public `/gemini` base path supports the JavaScript
 SDK's custom-origin WebSocket construction and Python's WSS/header-key shape.
 The qualification explicitly observes the pinned JavaScript SDK's origin-only
 `//ws/...?...` upgrade failure and its supported `/gemini/ws/...?...` path, plus

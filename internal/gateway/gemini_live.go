@@ -400,8 +400,15 @@ loop:
 	if code < 0 {
 		code = websocket.StatusInternalError
 	}
-	upstream.Close(code, "")
-	client.Close(code, "")
+	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
+		upstream.Close(code, "")
+		client.Close(code, "")
+	} else {
+		// An abruptly disconnected peer cannot finish a close handshake. Tear
+		// down both transports so a blocked opposite writer releases its slot.
+		upstream.CloseNow()
+		client.CloseNow()
+	}
 	<-done
 	mu.Lock()
 	defer mu.Unlock()
