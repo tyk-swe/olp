@@ -45,6 +45,7 @@ type stressVideoFixture struct {
 	content     []byte
 	mu          sync.Mutex
 	stages      map[string]int
+	posts       atomic.Int64
 	creates     atomic.Int64
 	gets        atomic.Int64
 	contents    atomic.Int64
@@ -75,6 +76,7 @@ func newStressVideoFixture(t *testing.T, image []byte) *stressVideoFixture {
 		writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel, "object": "model"}}})
 	})
 	mux.HandleFunc("POST /v1/videos", func(w http.ResponseWriter, r *http.Request) {
+		f.posts.Add(1)
 		if r.Header.Get("Authorization") != "Bearer "+vendorSecret {
 			http.Error(w, "credential", http.StatusUnauthorized)
 			return
@@ -444,7 +446,7 @@ func stressPercentile(values []time.Duration, percentile int) float64 {
 
 func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideoFixture, slug, key string, image []byte) {
 	t.Helper()
-	before := fixture.creates.Load()
+	before := fixture.posts.Load()
 	tooLarge := make([]byte, 21<<20)
 	copy(tooLarge, image)
 	body, contentType := stressMultipart(t, slug, tooLarge)
@@ -460,7 +462,7 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 	}
 	io.Copy(io.Discard, response.Body)
 	response.Body.Close()
-	if response.StatusCode != http.StatusRequestEntityTooLarge || fixture.creates.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
+	if response.StatusCode != http.StatusRequestEntityTooLarge || fixture.posts.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
 		t.Fatalf("oversized media was dispatched or retained: status=%d", response.StatusCode)
 	}
 	t.Logf("LIFECYCLE_STRESS_NEGATIVE %s", `{"name":"oversize_upload","path":"gateway","admitted":0,"rejected":1,"provider_dispatches":0,"spool_final_bytes":0}`)
@@ -512,7 +514,7 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 	for h.Media.Transport.Spool.UsedBytes() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if fixture.creates.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
+	if fixture.posts.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
 		t.Fatal("cancelled upload dispatched or leaked spool reservation")
 	}
 	t.Logf("LIFECYCLE_STRESS_NEGATIVE %s", `{"name":"cancelled_upload","path":"gateway","admitted":0,"rejected":1,"provider_dispatches":0,"spool_final_bytes":0}`)
@@ -584,7 +586,7 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 	for h.Media.Transport.Spool.UsedBytes() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if second.StatusCode != http.StatusServiceUnavailable || fixture.creates.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
+	if second.StatusCode != http.StatusServiceUnavailable || fixture.posts.Load() != before || h.Media.Transport.Spool.UsedBytes() != 0 {
 		t.Fatalf("parser contention did not refuse locally and release bytes: status=%d", second.StatusCode)
 	}
 	t.Logf("LIFECYCLE_STRESS_NEGATIVE %s", `{"name":"parser_contention","path":"gateway","admitted":0,"rejected":1,"provider_dispatches":0,"spool_final_bytes":0}`)
@@ -697,7 +699,7 @@ func TestLifecycleStressPerformance(t *testing.T) {
 							}
 						}
 					}()
-					beforeDispatches := video.creates.Load() + video.gets.Load() + video.contents.Load() + duplex.dispatches.Load()
+					beforeDispatches := video.posts.Load() + video.gets.Load() + video.contents.Load() + duplex.dispatches.Load()
 					cpu, started := stressCPU(), time.Now()
 					results := make([]stressSample, samples)
 					errs := make(chan error, samples)
@@ -718,7 +720,7 @@ func TestLifecycleStressPerformance(t *testing.T) {
 					workers.Wait()
 					elapsed := time.Since(started)
 					cpu = stressCPU() - cpu
-					dispatches := video.creates.Load() + video.gets.Load() + video.contents.Load() + duplex.dispatches.Load() - beforeDispatches
+					dispatches := video.posts.Load() + video.gets.Load() + video.contents.Load() + duplex.dispatches.Load() - beforeDispatches
 					close(stop)
 					<-stopped
 					runtime.ReadMemStats(&after)
