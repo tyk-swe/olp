@@ -31,6 +31,152 @@ const realtimePing = 30 * time.Second
 var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
 var errRealtimeProviderCredentialRevoked = errors.New("realtime provider credential revoked")
 var errRealtimeClientClosed = errors.New("realtime client disconnected")
+var errRealtimeResponseIncomplete = errors.New("realtime response ended before its terminal event")
+
+// The wire relay does not buffer native frames. This small state machine only
+// records whether a response is still owed when either peer closes normally.
+// A provider-controlled ID set is bounded; an untrackable event conservatively
+// makes a clean socket close incomplete instead of claiming terminal delivery.
+const maxRealtimePendingResponses = 128
+const maxRealtimeTrackedFrameBytes = 1 << 20
+
+type realtimeResponseState struct {
+	requested int
+	active    map[string]struct{}
+	anonymous bool
+	unknown   bool
+}
+
+func (s *realtimeResponseState) pending() bool {
+	return s.requested > 0 || len(s.active) > 0 || s.anonymous || s.unknown
+}
+
+func (s *realtimeResponseState) add(id string) {
+	if id == "" || len(id) > 512 {
+		s.unknown = true
+		return
+	}
+	if s.active == nil {
+		s.active = make(map[string]struct{})
+	}
+	if _, found := s.active[id]; found {
+		return
+	}
+	if len(s.active) >= maxRealtimePendingResponses {
+		s.unknown = true
+		return
+	}
+	s.active[id] = struct{}{}
+}
+
+func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []byte) {
+	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
+		s.unknown = true
+		return
+	}
+	var event struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(data, &event) != nil {
+		s.unknown = true
+		return
+	}
+	if event.Type == "response.create" || event.Type == "input_audio_buffer.commit" {
+		if s.requested == maxRealtimePendingResponses {
+			s.unknown = true
+		} else {
+			s.requested++
+		}
+	}
+}
+
+type realtimeFrame struct {
+	Type       string `json:"type"`
+	ResponseID string `json:"response_id"`
+	Response   *struct {
+		ID    string `json:"id"`
+		Usage *struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+			InputDetails *struct {
+				CachedTokens *int64 `json:"cached_tokens"`
+			} `json:"input_token_details"`
+		} `json:"usage"`
+	} `json:"response"`
+}
+
+func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte) *openai.Usage {
+	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
+		s.unknown = true
+		return nil
+	}
+	var event realtimeFrame
+	if json.Unmarshal(data, &event) != nil {
+		s.unknown = true
+		return nil
+	}
+	id := event.ResponseID
+	if event.Response != nil && event.Response.ID != "" {
+		id = event.Response.ID
+	}
+	switch event.Type {
+	case "response.created":
+		if s.requested > 0 {
+			s.requested--
+		}
+		s.add(id)
+	case "response.done":
+		if s.anonymous && len(s.active) > 0 {
+			// Without a response ID on a preceding fragment, this terminal
+			// cannot prove which concurrent response that fragment belonged to.
+			s.unknown = true
+		}
+		if id != "" {
+			if _, found := s.active[id]; found {
+				delete(s.active, id)
+			} else if s.requested > 0 {
+				s.requested--
+			} else if len(s.active) > 0 {
+				s.unknown = true
+			}
+		} else if len(s.active) > 0 {
+			s.unknown = true
+		} else if s.requested > 0 {
+			s.requested--
+		}
+		// Some native response fragments do not identify their response.
+		// A terminal response closes that observation, while an unparseable or
+		// unmatched event remains uncertain for the rest of the session.
+		s.anonymous = false
+	default:
+		if strings.HasPrefix(event.Type, "response.") {
+			if id != "" {
+				if _, found := s.active[id]; !found && s.requested > 0 {
+					s.requested--
+				}
+				s.add(id)
+			} else {
+				s.anonymous = true
+			}
+		}
+	}
+	if event.Type != "response.done" || event.Response == nil || event.Response.Usage == nil {
+		return nil
+	}
+	u := event.Response.Usage
+	if u.InputTokens < 0 || u.OutputTokens < 0 {
+		return nil
+	}
+	out := &openai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+	if u.InputDetails != nil && u.InputDetails.CachedTokens != nil {
+		cached := *u.InputDetails.CachedTokens
+		if cached < 0 || cached > u.InputTokens {
+			return nil
+		}
+		out.CachedInputTokens = &cached
+	}
+	return out
+}
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyRealtime, actor: "api_key"}
@@ -389,9 +535,11 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 	usage := &openai.Usage{}
 	have := false
 	observed := false
+	var responses realtimeResponseState
 	type relayEnd struct {
-		err    error
-		client bool
+		err            error
+		client         bool
+		deliveryFailed bool
 	}
 	forward := func(dst, src *websocket.Conn, inspect bool) relayEnd {
 		for {
@@ -400,8 +548,8 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				return relayEnd{err: err, client: !inspect}
 			}
 			if inspect {
-				if u := realtimeUsage(data); u != nil {
-					usageMu.Lock()
+				usageMu.Lock()
+				if u := responses.providerFrame(typ, data); u != nil {
 					usage.InputTokens = addBounded(usage.InputTokens, u.InputTokens)
 					usage.OutputTokens = addBounded(usage.OutputTokens, u.OutputTokens)
 					if u.CachedInputTokens != nil {
@@ -412,14 +560,18 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 						usage.CachedInputTokens = &cached
 					}
 					have = true
-					usageMu.Unlock()
 				}
+				usageMu.Unlock()
+			} else if x.strict() {
+				usageMu.Lock()
+				responses.clientFrame(typ, data)
+				usageMu.Unlock()
 			}
 			writeCtx, stopWrite := context.WithTimeout(ctx, responseWriteTimeout)
 			err = dst.Write(writeCtx, typ, data)
 			stopWrite()
 			if err != nil {
-				return relayEnd{err: err, client: inspect}
+				return relayEnd{err: err, client: inspect, deliveryFailed: inspect}
 			}
 			if inspect {
 				observed = true
@@ -435,12 +587,13 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 	defer heartbeat.Stop()
 	var first error
 	clientClosed := false
+	clientDeliveryFailed := false
 	closeCode := websocket.StatusCode(0)
 loop:
 	for {
 		select {
 		case end := <-done:
-			first, clientClosed = end.err, end.client
+			first, clientClosed, clientDeliveryFailed = end.err, end.client, end.deliveryFailed
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
@@ -480,14 +633,31 @@ loop:
 	} else if code < 0 {
 		code = websocket.StatusInternalError
 	}
+	usageMu.Lock()
+	pending := x.strict() && responses.pending()
+	usageMu.Unlock()
+	if !clientClosed && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+		// The provider closed a socket while a native response still owed
+		// its response.done terminal event. Never mirror its 1000/1001 as
+		// a successful client-visible session end.
+		code = websocket.StatusInternalError
+	}
 	conn.Close(code, "")
 	client.Close(code, "")
-	<-done
+	second := <-done
+	clientDeliveryFailed = clientDeliveryFailed || second.deliveryFailed
 	usageMu.Lock()
 	defer usageMu.Unlock()
 	var observedUsage *openai.Usage
 	if have {
 		observedUsage = usage
+	}
+	pending = x.strict() && responses.pending()
+	if clientClosed && (pending || clientDeliveryFailed) {
+		return observedUsage, observed, fmt.Errorf("%w: %v", errRealtimeClientClosed, first)
+	}
+	if !clientClosed && pending && (websocket.CloseStatus(first) == websocket.StatusNormalClosure || websocket.CloseStatus(first) == websocket.StatusGoingAway) {
+		return observedUsage, observed, fmt.Errorf("%w: %v", errRealtimeResponseIncomplete, first)
 	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
 		return observedUsage, observed, nil
@@ -499,40 +669,6 @@ loop:
 		return nil, observed, first
 	}
 	return usage, observed, first
-}
-
-func realtimeUsage(data []byte) *openai.Usage {
-	var event struct {
-		Type     string `json:"type"`
-		Response *struct {
-			Usage *struct {
-				InputTokens  int64 `json:"input_tokens"`
-				OutputTokens int64 `json:"output_tokens"`
-				InputDetails *struct {
-					CachedTokens *int64 `json:"cached_tokens"`
-				} `json:"input_token_details"`
-			} `json:"usage"`
-		} `json:"response"`
-	}
-	if len(data) > 1<<20 || json.Unmarshal(data, &event) != nil {
-		return nil
-	}
-	if event.Type != "response.done" || event.Response == nil || event.Response.Usage == nil {
-		return nil
-	}
-	usage := event.Response.Usage
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
-		return nil
-	}
-	out := &openai.Usage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens}
-	if usage.InputDetails != nil && usage.InputDetails.CachedTokens != nil {
-		cached := *usage.InputDetails.CachedTokens
-		if cached < 0 || cached > usage.InputTokens {
-			return nil
-		}
-		out.CachedInputTokens = &cached
-	}
-	return out
 }
 
 func strPtr(value string) *string { return &value }
