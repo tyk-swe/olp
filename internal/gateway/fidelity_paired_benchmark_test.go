@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // This is an additive measurement adapter for the frozen fidelity fixture. The
@@ -279,5 +281,37 @@ func TestFidelityPairedLookupPreservesFrozenInventory(t *testing.T) {
 	}
 	if _, _, _, ok := fidelityPairedLookup(strings.Replace("native_unary/c1/relay", "c1", "c4", 1)); ok {
 		t.Fatal("unregistered concurrency accepted")
+	}
+}
+
+// The frozen source fixture uses fakeRuntime, whose authority is an in-memory
+// key map rather than runtime.Manager's periodically refreshed authority. Run
+// this diagnostic explicitly once before a long B-only capture; ordinary
+// checks skip the wall-clock wait.
+func TestFidelityPairedFixturePastManagerStaleWindow(t *testing.T) {
+	if os.Getenv("OLP_SOURCE_PAIRED_LONG_LIVED_TEST") != "1" {
+		t.Skip("select the >60s in-memory authority diagnostic explicitly")
+	}
+	var completed bool
+	result := testing.Benchmark(func(b *testing.B) {
+		if b.N != 1 {
+			b.Fatal("run semantic diagnostic with -test.benchtime=1x")
+		}
+		workload := fidelityWorkloads()[0]
+		fixture := newFidelityFixture(b, workload, false)
+		if _, err := fixture.request(workload, false); err != nil {
+			b.Fatal(err)
+		}
+		time.Sleep(runtime.AuthorityStaleAfter + time.Second)
+		if _, err := fixture.request(workload, false); err != nil {
+			b.Fatalf("in-memory authority stopped serving after Manager TTL: %v", err)
+		}
+		if fixture.dispatches.Load() != 2 || fixture.completed.Load() != 2 {
+			b.Fatalf("long-lived provider effects changed: dispatched=%d completed=%d", fixture.dispatches.Load(), fixture.completed.Load())
+		}
+		completed = true
+	})
+	if result.N != 1 || !completed {
+		t.Fatal("long-lived in-memory authority diagnostic did not complete")
 	}
 }

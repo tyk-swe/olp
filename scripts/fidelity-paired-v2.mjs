@@ -48,6 +48,9 @@ const oldFiles = {
   pairedRunner: 'scripts/fidelity-paired-v2.mjs'
 };
 const B_ONLY_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json';
+const B_ONLY_JOURNAL_PATH = `${B_ONLY_EVIDENCE_PATH}.journal.jsonl`;
+const PAIRED_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json';
+const PAIRED_JOURNAL_PATH = `${PAIRED_EVIDENCE_PATH}.journal.jsonl`;
 const affectedProductionPrefixes = ['internal/gateway/', 'internal/resources/', 'internal/interaction/'];
 
 export function sourceOrder(group, variant, baselineOnly = false, outer = 'relay') {
@@ -134,10 +137,11 @@ export function makeManifest(root) {
   invariant(Object.values(addedLatency).flatMap(Object.keys).length === 30, 'added latency inventory changed');
   const schedule = sourceSchedule();
   return {
-    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'post-baseline-product-r3',
-    supersedes_manifest_sha256: 'eaa1d50764d550c81b27f6566615fe12fadc3a4d6a6f3089b616f1441a901ad1',
-    B_only_evidence_path: B_ONLY_EVIDENCE_PATH,
-    chronology: 'exact committed B-only blob is in a strict ancestor of a non-merge affected production Go change, itself an ancestor of locked C; test-only changes and merge commits do not count',
+    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'write-once-evidence-r4',
+    supersedes_manifest_sha256: '3014471018afccaee491353e6cc095db2e77b6b83ba94017c2e8459c42c95cff',
+    B_only_evidence_path: B_ONLY_EVIDENCE_PATH, B_only_journal_path: B_ONLY_JOURNAL_PATH,
+    paired_evidence_path: PAIRED_EVIDENCE_PATH, paired_journal_path: PAIRED_JOURNAL_PATH,
+    chronology: 'one normal commit creates the exact B-only JSON and append-only journal together; unchanged no-ff merge propagation is allowed, later edits/deletions/recreations are not; a strict later non-merge affected production Go change precedes locked C',
     C_route_contract: strictRouteContracts, B_product_revision: B_PRODUCT,
     old_baseline_sha256: digest(full('baseline')), old_budgets_sha256: digest(full('budgets')),
     old_harness_sha256: digest(full('harness')), old_runner_sha256: digest(full('runner')),
@@ -189,19 +193,78 @@ function isAffectedProductionFile(path) {
   return affectedProductionPrefixes.some((prefix) => path.startsWith(prefix)) && path.endsWith('.go') && !path.endsWith('_test.go');
 }
 
+export function validateOutputReservation(mode, output, root, manifest) {
+  const evidence = mode === 'B-only' ? manifest.B_only_evidence_path : manifest.paired_evidence_path;
+  const journal = mode === 'B-only' ? manifest.B_only_journal_path : manifest.paired_journal_path;
+  invariant(mode === 'B-only' || mode === 'paired', 'unknown source study mode');
+  invariant(resolve(output) === resolve(root, evidence), `${mode} output must use the single frozen evidence path`);
+  invariant(resolve(`${output}.journal.jsonl`) === resolve(root, journal), `${mode} journal must use the single frozen reservation path`);
+  invariant(!existsSync(output) && !existsSync(resolve(root, journal)), `${mode} output or journal already reserves this attempt`);
+  return { output: resolve(root, evidence), journal: resolve(root, journal) };
+}
+
+function gitBlob(root, revision, path, cache) {
+  const key = `${revision}:${path}`;
+  if (cache.has(key)) return cache.get(key);
+  const result = spawnSync('git', ['rev-parse', '--verify', key], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 20 });
+  const value = result.status === 0 ? result.stdout.trim() : null;
+  cache.set(key, value);
+  return value;
+}
+
+export function verifyJournal(capture, journalPath) {
+  invariant(capture.journal_sha256 === digest(journalPath), 'capture does not bind its exact reservation journal bytes');
+  const lines = readFileSync(journalPath, 'utf8').trimEnd().split('\n').map((line) => JSON.parse(line));
+  invariant(lines.length === capture.blocks.length + 2, 'reservation journal block count or terminal record changed');
+  const header = lines[0]?.header;
+  invariant(header?.schema === capture.schema && header.mode === capture.mode && header.status === 'in_progress' &&
+    header.manifest_sha256 === capture.manifest_sha256 && isDeepStrictEqual(header.B, capture.B) &&
+    isDeepStrictEqual(header.C, capture.C) && isDeepStrictEqual(header.provenance, capture.provenance), 'reservation journal header differs from captured source identity');
+  for (let index = 0; index < capture.blocks.length; index++) {
+    invariant(isDeepStrictEqual(lines[index + 1]?.block, capture.blocks[index]), `reservation journal block ${index} differs from JSON artifact`);
+  }
+  invariant(lines.at(-1)?.completion?.status === 'complete' &&
+    lines.at(-1).completion.block_count === capture.blocks.length, 'reservation journal lacks a complete terminal record');
+  return true;
+}
+
 // Resolve against the recorded C revision, not the checkout's current HEAD:
 // a later documentation-only descendant must not erase or create chronology.
 export function resolvePairedProvenance(root, baselinePath, CRevision, manifest) {
   invariant(/^[0-9a-f]{40}$/.test(CRevision) && gitSucceeds(['cat-file', '-e', `${CRevision}^{commit}`], root), 'locked C commit is unavailable');
   const trackedPath = relative(root, resolve(baselinePath));
   invariant(trackedPath === manifest.B_only_evidence_path, 'B-only evidence path differs from frozen manifest');
+  const journalPath = resolve(root, manifest.B_only_journal_path);
+  invariant(existsSync(journalPath), 'B-only reservation journal is missing');
   const baselineSHA256 = digest(baselinePath);
+  const journalSHA256 = digest(journalPath);
   const baselineBlob = command('git', ['hash-object', resolve(baselinePath)], root);
-  const lockedBlob = command('git', ['rev-parse', `${CRevision}:${trackedPath}`], root);
-  invariant(lockedBlob === baselineBlob, 'locked C does not contain the exact B-only artifact blob');
-  const evidenceCommit = command('git', ['log', '-1', '--format=%H', CRevision, '--', trackedPath], root);
-  invariant(/^[0-9a-f]{40}$/.test(evidenceCommit), 'B-only evidence has no historical commit');
-  invariant(command('git', ['rev-parse', `${evidenceCommit}:${trackedPath}`], root) === baselineBlob, 'evidence commit has a different B-only artifact blob');
+  const journalBlob = command('git', ['hash-object', journalPath], root);
+  const cache = new Map();
+  invariant(gitBlob(root, CRevision, trackedPath, cache) === baselineBlob, 'locked C does not contain the exact B-only artifact blob');
+  invariant(gitBlob(root, CRevision, manifest.B_only_journal_path, cache) === journalBlob, 'locked C does not contain the exact B-only journal blob');
+  const graph = command('git', ['rev-list', '--parents', CRevision], root).split('\n').filter(Boolean)
+    .map((line) => { const [revision, ...parents] = line.split(/\s+/); return { revision, parents }; });
+  const creations = { [trackedPath]: [], [manifest.B_only_journal_path]: [] };
+  for (const { revision, parents } of graph) {
+    for (const path of [trackedPath, manifest.B_only_journal_path]) {
+      const current = gitBlob(root, revision, path, cache);
+      const before = parents.map((parent) => gitBlob(root, parent, path, cache));
+      if (!current) {
+        invariant(before.every((blob) => !blob), `${path}: committed evidence was deleted in C ancestry`);
+      } else if (before.every((blob) => !blob)) {
+        creations[path].push(revision);
+      } else {
+        invariant(before.every((blob) => !blob || blob === current), `${path}: committed evidence was edited in C ancestry`);
+      }
+    }
+  }
+  invariant(creations[trackedPath].length === 1 && creations[manifest.B_only_journal_path].length === 1 &&
+    creations[trackedPath][0] === creations[manifest.B_only_journal_path][0], 'B-only JSON and journal require one shared creation commit');
+  const evidenceCommit = creations[trackedPath][0];
+  invariant(graph.find((item) => item.revision === evidenceCommit)?.parents.length === 1, 'B-only evidence must be created in a normal commit, not a merge');
+  invariant(gitBlob(root, evidenceCommit, trackedPath, cache) === baselineBlob &&
+    gitBlob(root, evidenceCommit, manifest.B_only_journal_path, cache) === journalBlob, 'evidence creation commit has different JSON or journal bytes');
   invariant(evidenceCommit !== CRevision && gitSucceeds(['merge-base', '--is-ancestor', evidenceCommit, CRevision], root), 'B-only evidence must be a strict ancestor of C');
   const descendants = command('git', ['rev-list', '--ancestry-path', '--reverse', `${evidenceCommit}..${CRevision}`], root).split('\n').filter(Boolean);
   let productCommit = null;
@@ -220,20 +283,25 @@ export function resolvePairedProvenance(root, baselinePath, CRevision, manifest)
   invariant(productCommit, 'no affected production Go commit follows B-only evidence before locked C');
   invariant(productCommit !== evidenceCommit && gitSucceeds(['merge-base', '--is-ancestor', productCommit, CRevision], root), 'product change is not after evidence and within locked C');
   return { B_only_path: trackedPath, B_only_sha256: baselineSHA256, B_only_blob_oid: baselineBlob,
+    B_journal_path: manifest.B_only_journal_path, B_journal_sha256: journalSHA256, B_journal_blob_oid: journalBlob,
     evidence_commit: evidenceCommit, product_commit: productCommit, production_paths: productionPaths,
     C_revision: CRevision };
 }
 
 export function verifyPairedProvenance(capture, baseline, manifest, root, baselinePath) {
   invariant(capture.B_only_sha256 === digest(baselinePath) && capture.B_only_sha256 === hash(JSON.stringify(baseline, null, 2) + '\n'), 'B-only artifact bytes differ from capture');
+  verifyJournal(baseline, resolve(root, manifest.B_only_journal_path));
+  verifyJournal(capture, resolve(root, manifest.paired_journal_path));
   const expected = resolvePairedProvenance(root, baselinePath, capture.C?.revision, manifest);
   invariant(isDeepStrictEqual(capture.provenance, expected), 'paired artifact chronology or blob provenance differs from Git history');
   return expected;
 }
-function sourceIdentity(root, manifest, B) {
+function sourceIdentity(root, manifest, B, allowedUntracked = []) {
   const revision = command('git', ['rev-parse', 'HEAD'], root);
   const status = command('git', ['status', '--porcelain', '--untracked-files=normal'], root);
-  invariant(status === '', `${B ? 'B' : 'C'} source tree is dirty: ${status}`);
+  const allowed = new Set(allowedUntracked.map((path) => relative(root, path)));
+  const unexpected = status.split('\n').filter(Boolean).filter((line) => !line.startsWith('?? ') || !allowed.has(line.slice(3)));
+  invariant(unexpected.length === 0, `${B ? 'B' : 'C'} source tree is dirty: ${unexpected.join(', ')}`);
   invariant(digest(resolve(root, oldFiles.harness)) === manifest.old_harness_sha256, 'frozen v1 harness differs');
   invariant(digest(resolve(root, oldFiles.runner)) === manifest.old_runner_sha256, 'frozen v1 runner differs');
   invariant(digest(resolve(root, oldFiles.baseline)) === manifest.old_baseline_sha256, 'frozen v1 baseline differs');
@@ -243,21 +311,21 @@ function sourceIdentity(root, manifest, B) {
   invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
-    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
+    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
 }
 
-function buildBinary(binaryPath, root, manifest, B) {
+function buildBinary(binaryPath, root, manifest, B, allowedUntracked = []) {
   const absolute = resolve(binaryPath);
   const withinRoot = relative(root, absolute);
   invariant(isAbsolute(withinRoot) || withinRoot.startsWith('..'), 'benchmark binary output must be outside the source checkout');
   invariant(!existsSync(absolute), `refusing to reuse or overwrite benchmark binary: ${absolute}`);
-  const before = sourceIdentity(root, manifest, B);
+  const before = sourceIdentity(root, manifest, B, allowedUntracked);
   const args = ['test', '-c', '-mod=readonly', '-o', absolute, './internal/gateway'];
   const result = spawnSync('go', args, { cwd: root, encoding: 'utf8', maxBuffer: 4 << 20 });
   invariant(result.status === 0 && existsSync(absolute), `fresh ${B ? 'B' : 'C'} test binary build failed: ${result.stderr}`);
-  const after = sourceIdentity(root, manifest, B);
+  const after = sourceIdentity(root, manifest, B, allowedUntracked);
   invariant(isDeepStrictEqual(before, after), 'source checkout changed during binary build');
   return { ...before, binary_sha256: digest(absolute), build_command: ['go', ...args], built_at: new Date().toISOString() };
 }
@@ -496,19 +564,26 @@ export function analyzePaired(capture, baseline, manifest) {
 }
 
 async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, Cbinary, Croot) {
-  invariant(!existsSync(output) && !existsSync(`${output}.journal.jsonl`), 'output or journal already exists');
   const manifest = json(manifestPath);
   validateManifest(manifest, Broot);
+  const reservation = validateOutputReservation(mode, output, mode === 'B-only' ? Broot : Croot, manifest);
   const frozenBaseline = mode === 'paired' ? json(baselinePath) : null;
   if (frozenBaseline) {
     const baselineAnalysis = analyzeBaseline(frozenBaseline, manifest);
     invariant(baselineAnalysis.passed, 'frozen B-only baseline envelope failed; C capture is forbidden');
     const trackedPath = relative(Croot, resolve(baselinePath));
-    invariant(!isAbsolute(trackedPath) && !trackedPath.startsWith('..'), 'B-only artifact must be in the locked C checkout');
+    invariant(trackedPath === manifest.B_only_evidence_path, 'B-only artifact must use the frozen evidence path in locked C');
     command('git', ['ls-files', '--error-unmatch', '--', trackedPath], Croot);
-    invariant(command('git', ['status', '--porcelain', '--', trackedPath], Croot) === '', 'B-only artifact must be committed before C capture');
+    command('git', ['ls-files', '--error-unmatch', '--', manifest.B_only_journal_path], Croot);
+    invariant(command('git', ['status', '--porcelain', '--', trackedPath, manifest.B_only_journal_path], Croot) === '', 'B-only JSON and journal must be committed before C capture');
+    invariant(frozenBaseline.journal_sha256 === digest(resolve(Croot, manifest.B_only_journal_path)), 'B-only JSON and journal bytes disagree');
   }
-  sourceIdentity(Broot, manifest, true);
+  const BReserved = mode === 'paired' ? [resolve(Broot, manifest.B_only_evidence_path), resolve(Broot, manifest.B_only_journal_path)] : [];
+  if (mode === 'paired') {
+    invariant(BReserved.every(existsSync), 'original B-only output and journal reservation are missing from B checkout');
+    invariant(digest(BReserved[0]) === digest(baselinePath) && digest(BReserved[1]) === digest(resolve(Croot, manifest.B_only_journal_path)), 'B checkout reservations differ from committed B evidence');
+  }
+  sourceIdentity(Broot, manifest, true, BReserved);
   const CSource = mode === 'paired' ? sourceIdentity(Croot, manifest, false) : null;
   const provenance = CSource ? resolvePairedProvenance(Croot, baselinePath, CSource.revision, manifest) : null;
   if (mode === 'paired') invariant(resolve(Bbinary) !== resolve(Cbinary), 'B and C require distinct binary output paths');
@@ -523,7 +598,7 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   const toolchain = command('go', ['version'], Broot);
   const goBuildEnvironment = command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS'], Broot);
   invariant(toolchain === manifest.old_toolchain && goBuildEnvironment === manifest.old_go_build_environment, 'toolchain/build environment differs from v1');
-  const B = buildBinary(Bbinary, Broot, manifest, true);
+  const B = buildBinary(Bbinary, Broot, manifest, true, BReserved);
   const C = mode === 'paired' ? buildBinary(Cbinary, Croot, manifest, false) : null;
   invariant(mode === 'B-only' || C.revision !== B.revision, 'paired study requires a distinct locked C revision');
   const artifact = { schema: SCHEMA, mode, status: 'in_progress', started_at: new Date().toISOString(),
@@ -533,7 +608,7 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     hardware: currentHardware, toolchain, go_build_environment: goBuildEnvironment,
     runtime_environment: { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' },
     conditions: manifest.conditions, diagnostics_before: diagnostics(), blocks: [] };
-  writeFileSync(`${output}.journal.jsonl`, JSON.stringify({ header: { ...artifact, blocks: undefined } }) + '\n', { flag: 'wx' });
+  writeFileSync(reservation.journal, JSON.stringify({ header: { ...artifact, blocks: undefined } }) + '\n', { flag: 'wx' });
   const Bprocess = new GoArm(Bbinary, 'B', { OLP_FIDELITY_BENCH_ROUTE_CONTRACT: '', OLP_FIDELITY_BENCH_PROVIDER_CONTRACT: '' });
   const Cprocess = C ? new GoArm(Cbinary, 'C', { OLP_FIDELITY_BENCH_ROUTE_CONTRACT: JSON.stringify(routeContract), OLP_FIDELITY_BENCH_PROVIDER_CONTRACT: providerContract ? JSON.stringify(providerContract) : '' }) : null;
   try {
@@ -551,18 +626,20 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
       }
       entry.diagnostics_after = diagnostics();
       artifact.blocks.push(entry);
-      appendFileSync(`${output}.journal.jsonl`, JSON.stringify({ block: entry }) + '\n');
+      appendFileSync(reservation.journal, JSON.stringify({ block: entry }) + '\n');
     }
     artifact.status = 'complete';
     artifact.completed_at = new Date().toISOString();
     artifact.diagnostics_after = diagnostics();
+    appendFileSync(reservation.journal, JSON.stringify({ completion: { status: 'complete', block_count: artifact.blocks.length } }) + '\n');
+    artifact.journal_sha256 = digest(reservation.journal);
     if (C) {
-      invariant(sourceIdentity(Croot, manifest, false).revision === C.revision, 'C checkout changed during paired capture');
+      invariant(sourceIdentity(Croot, manifest, false, [reservation.journal]).revision === C.revision, 'C checkout changed during paired capture');
       verifyPairedProvenance(artifact, frozenBaseline, manifest, Croot, baselinePath);
     }
     const analysis = mode === 'B-only' ? analyzeBaseline(artifact, manifest) : analyzePaired(artifact, frozenBaseline, manifest);
     artifact.analysis = analysis;
-    writeFileSync(output, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
+    writeFileSync(reservation.output, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
     console.log(`${mode} capture ${analysis.status || (analysis.passed ? 'passed' : 'inconclusive')}: ${output}`);
     if (analysis.status !== 'passed' && !analysis.passed) process.exitCode = 1;
   } catch (error) {
@@ -570,9 +647,10 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     artifact.error = error.message;
     artifact.completed_at = new Date().toISOString();
     artifact.diagnostics_after = diagnostics();
-    const failurePath = `${output}.failed-${Date.now()}.json`;
-    writeFileSync(failurePath, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
-    throw new Error(`${error.message}; retained ${failurePath}`);
+    appendFileSync(reservation.journal, JSON.stringify({ failure: { status: 'invalid', block_count: artifact.blocks.length, error: error.message } }) + '\n');
+    artifact.journal_sha256 = digest(reservation.journal);
+    writeFileSync(reservation.output, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
+    throw new Error(`${error.message}; retained ${reservation.output} and ${reservation.journal}`);
   } finally {
     Bprocess.kill();
     Cprocess?.kill();
@@ -589,13 +667,19 @@ function main() {
   if (action === 'record-paired' && args.length === 7) return record('paired', ...args);
   if (action === 'compare-B' && args.length === 2) {
     const manifest = json(args[1]); validateManifest(manifest, process.cwd());
-    const result = analyzeBaseline(json(args[0]), manifest);
+    invariant(resolve(args[0]) === resolve(process.cwd(), manifest.B_only_evidence_path), 'B-only comparison requires fixed evidence path');
+    const capture = json(args[0]);
+    verifyJournal(capture, resolve(process.cwd(), manifest.B_only_journal_path));
+    const result = analyzeBaseline(capture, manifest);
     console.log(JSON.stringify(result, null, 2));
     if (!result.passed) process.exitCode = 1;
     return;
   }
   if (action === 'compare-paired' && args.length === 5) {
     const manifest = json(args[2]); validateManifest(manifest, args[3]);
+    invariant(resolve(args[0]) === resolve(args[3], manifest.paired_evidence_path) &&
+      resolve(args[1]) === resolve(args[3], manifest.B_only_evidence_path) &&
+      resolve(args[4]) === resolve(args[3], manifest.B_only_evidence_path), 'paired comparison requires fixed JSON and journal paths');
     const capture = json(args[0]), baseline = json(args[1]);
     verifyPairedProvenance(capture, baseline, manifest, args[3], args[4]);
     const result = analyzePaired(capture, baseline, manifest);

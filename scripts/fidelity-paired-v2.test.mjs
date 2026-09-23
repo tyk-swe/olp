@@ -5,12 +5,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateStrictRouteContracts, validateSubrun, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
+import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateOutputReservation, validateStrictRouteContracts, validateSubrun, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
 
 const manifest = makeManifest(process.cwd());
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const diagnostics = { loadavg: '0.1 0.1 0.1 1/100 100', cpu_pressure: 'some avg10=0.00 total=0', memory_pressure: 'some avg10=0.00 total=0' };
 const metadata = { revision: 'B-measurement-only', binary_sha256: 'same-B-binary' };
+
+function syntheticJournal(capture) {
+  const header = { schema: capture.schema, mode: capture.mode, status: 'in_progress',
+    manifest_sha256: capture.manifest_sha256, B: capture.B, C: capture.C, provenance: capture.provenance };
+  return JSON.stringify({ header }) + '\n' + JSON.stringify({ completion: { status: 'complete', block_count: capture.blocks.length } }) + '\n';
+}
 
 function gitFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'olp-source-v2-history-'));
@@ -27,9 +33,17 @@ function gitFixture(t) {
   put(source, 'package gateway\nfunc dispatch() int { return 1 }\n');
   const initial = commit('Initial product');
   const baselinePath = join(root, manifest.B_only_evidence_path);
-  const baseline = { baseline: true };
-  const addBaseline = () => { put(manifest.B_only_evidence_path, JSON.stringify(baseline, null, 2) + '\n'); return commit('Record B-only evidence'); };
-  return { root, git, put, commit, source, initial, baselinePath, baseline, addBaseline };
+  const journalPath = join(root, manifest.B_only_journal_path);
+  const baseline = { schema: 'openllmproxy.dev/fidelity-source-paired-v2', mode: 'B-only', status: 'complete',
+    manifest_sha256: digest(JSON.stringify(manifest)), B: metadata, C: null, provenance: null, blocks: [] };
+  const journal = syntheticJournal(baseline);
+  baseline.journal_sha256 = digest(journal);
+  const addBaseline = () => {
+    put(manifest.B_only_evidence_path, JSON.stringify(baseline, null, 2) + '\n');
+    put(manifest.B_only_journal_path, journal);
+    return commit('Record B-only JSON and journal together');
+  };
+  return { root, git, put, commit, source, initial, baselinePath, journalPath, journal, baseline, addBaseline };
 }
 
 function rawSamples(metrics, stream) {
@@ -73,8 +87,10 @@ test('manifest derives exactly 224 path and 30 added-latency margins from immuta
   assert.equal(Object.values(manifest.comparisons).flatMap(Object.keys).length, 224);
   assert.equal(Object.values(manifest.added_latency).flatMap(Object.keys).length, 30);
   assert.equal(manifest.B_product_revision, '8e52f775df815c3a1a25d75064c3ffd540fb07f5');
-  assert.equal(manifest.manifest_revision, 'post-baseline-product-r3');
+  assert.equal(manifest.manifest_revision, 'write-once-evidence-r4');
   assert.equal(manifest.B_only_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json');
+  assert.equal(manifest.B_only_journal_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl');
+  assert.equal(manifest.paired_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json');
   assert.deepEqual(manifest.C_route_contract, { native: { fidelity: { mode: 'strict' } }, translated: { fidelity: { mode: 'strict' } }, rejected: { fidelity: { mode: 'strict' } } });
   for (const metrics of Object.values(manifest.comparisons)) for (const value of Object.values(metrics)) {
     assert.equal(value.margin, value.old_limit - value.old_B_median);
@@ -91,12 +107,21 @@ test('exact B-only blob precedes a real production change and stays verifiable a
   assert.equal(provenance.evidence_commit, evidence);
   assert.equal(provenance.product_commit, product);
   assert.deepEqual(provenance.production_paths, [fixture.source]);
+  assert.equal(provenance.B_journal_sha256, digest(fixture.journal));
   fixture.put('docs/after.md', 'Later qualification note\n');
   const docs = fixture.commit('Add later docs');
   assert.equal(resolvePairedProvenance(fixture.root, fixture.baselinePath, docs, manifest).product_commit, product);
-  const capture = { C: { revision: product }, B_only_sha256: digest(JSON.stringify(fixture.baseline, null, 2) + '\n'), provenance };
+  const capture = { schema: fixture.baseline.schema, mode: 'paired', status: 'complete', manifest_sha256: fixture.baseline.manifest_sha256,
+    B: fixture.baseline.B, C: { revision: product }, provenance, blocks: [],
+    B_only_sha256: digest(JSON.stringify(fixture.baseline, null, 2) + '\n') };
+  const pairedJournal = syntheticJournal(capture);
+  fixture.put(manifest.paired_journal_path, pairedJournal);
+  capture.journal_sha256 = digest(pairedJournal);
   assert.deepEqual(verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), provenance);
   capture.provenance = { ...provenance, evidence_commit: fixture.initial };
+  const forgedJournal = syntheticJournal(capture);
+  fixture.put(manifest.paired_journal_path, forgedJournal);
+  capture.journal_sha256 = digest(forgedJournal);
   assert.throws(() => verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), /chronology/);
   fixture.put(manifest.B_only_evidence_path, '{"tampered":true}\n');
   assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, product, manifest), /exact B-only artifact blob/);
@@ -105,9 +130,75 @@ test('exact B-only blob precedes a real production change and stays verifiable a
 test('same commit for baseline and production change cannot qualify', (t) => {
   const fixture = gitFixture(t);
   fixture.put(manifest.B_only_evidence_path, JSON.stringify(fixture.baseline, null, 2) + '\n');
+  fixture.put(manifest.B_only_journal_path, fixture.journal);
   fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
   const same = fixture.commit('Bundle evidence and candidate');
   assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, same, manifest), /strict ancestor/);
+});
+
+test('edited or recommitted B JSON fails even after later restoration', (t) => {
+  const fixture = gitFixture(t);
+  fixture.addBaseline();
+  fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  fixture.commit('Improve dispatch');
+  fixture.put(manifest.B_only_evidence_path, '{"edited":true}\n');
+  fixture.commit('Edit B evidence');
+  fixture.put(manifest.B_only_evidence_path, JSON.stringify(fixture.baseline, null, 2) + '\n');
+  const restored = fixture.commit('Restore B bytes');
+  assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, restored, manifest), /edited in C ancestry/);
+});
+
+test('missing, separately committed, or later edited reservation journal fails', (t) => {
+  const missing = gitFixture(t);
+  missing.put(manifest.B_only_evidence_path, JSON.stringify(missing.baseline, null, 2) + '\n');
+  missing.commit('Record JSON only');
+  missing.put(missing.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  const missingC = missing.commit('Improve dispatch');
+  assert.throws(() => resolvePairedProvenance(missing.root, missing.baselinePath, missingC, manifest), /journal is missing/);
+
+  const separate = gitFixture(t);
+  separate.put(manifest.B_only_evidence_path, JSON.stringify(separate.baseline, null, 2) + '\n');
+  separate.commit('Record JSON first');
+  separate.put(manifest.B_only_journal_path, separate.journal);
+  separate.commit('Record journal later');
+  separate.put(separate.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  const separateC = separate.commit('Improve dispatch');
+  assert.throws(() => resolvePairedProvenance(separate.root, separate.baselinePath, separateC, manifest), /one shared creation commit/);
+
+  const edited = gitFixture(t);
+  edited.addBaseline();
+  edited.put(edited.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  edited.commit('Improve dispatch');
+  edited.put(manifest.B_only_journal_path, '{"reservation":"changed"}\n');
+  const editedC = edited.commit('Edit journal');
+  assert.throws(() => resolvePairedProvenance(edited.root, edited.baselinePath, editedC, manifest), /edited in C ancestry/);
+});
+
+test('a no-ff evidence-branch merge may carry one unchanged JSON+journal creation', (t) => {
+  const fixture = gitFixture(t);
+  fixture.git('checkout', '-q', '-b', 'evidence');
+  const evidence = fixture.addBaseline();
+  fixture.git('checkout', '-q', 'main');
+  fixture.put('docs/main.md', 'Main branch note\n');
+  fixture.commit('Parallel docs');
+  fixture.git('merge', '-q', '--no-ff', '-m', 'Merge evidence branch', 'evidence');
+  fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  const product = fixture.commit('Improve dispatch after evidence merge');
+  const result = resolvePairedProvenance(fixture.root, fixture.baselinePath, product, manifest);
+  assert.equal(result.evidence_commit, evidence);
+  assert.equal(result.product_commit, product);
+});
+
+test('fixed output paths reject alternate attempts and existing journals', (t) => {
+  const fixture = gitFixture(t);
+  const B = join(fixture.root, manifest.B_only_evidence_path);
+  const C = join(fixture.root, manifest.paired_evidence_path);
+  assert.equal(validateOutputReservation('B-only', B, fixture.root, manifest).output, B);
+  assert.equal(validateOutputReservation('paired', C, fixture.root, manifest).output, C);
+  assert.throws(() => validateOutputReservation('B-only', join(fixture.root, 'retry.json'), fixture.root, manifest), /single frozen evidence path/);
+  assert.throws(() => validateOutputReservation('paired', join(fixture.root, 'retry-paired.json'), fixture.root, manifest), /single frozen evidence path/);
+  fixture.put(manifest.B_only_journal_path, fixture.journal);
+  assert.throws(() => validateOutputReservation('B-only', B, fixture.root, manifest), /already reserves this attempt/);
 });
 
 test('a pre-evidence product side branch hidden behind a no-ff merge cannot qualify', (t) => {
