@@ -1,37 +1,41 @@
 # Compatibility and evidence matrix, version 1
 
 The [machine-readable matrix](compatibility-matrix-v1.json) assesses source
-`37ad4b0f0ae9350611ace6d5ffd27c451bfe7721` on 2026-09-23. It maps
+`6f1aa0eb2d145b24e9171f001ca22cba6155d477` on 2026-09-23. It maps
 **all 47 original inventory rows exactly once**, using the frozen whole-file
-and individual-row SHA-256 values, and records 44 later operation/profile/mode/
+and individual-row SHA-256 values, and records 45 later operation/profile/mode/
 client combinations separately. The frozen
 `tests/fixtures/fidelity/v1/inventory.json` remains unchanged, including its
 historical `unqualified` labels; those are a fixed denominator, not a release
 result. The 18-fixture `tests/fixtures/reference-inventory.json` and
 `tests/release-behaviors.json` retain their independent purposes.
 
-| Assessed rows | Native | Qualified translation | Incompatible before dispatch | Unavailable | Unknown |
+| Assessed rows | Native | Qualified mapping | Incompatible before dispatch | Unavailable | Unknown |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Frozen 47 | 7 | 0 | 0 | 5 | 35 |
-| Additive 44 | 37 | 4 | 2 | 0 | 1 |
-| All 91 | 44 | 4 | 2 | 5 | 36 |
+| Frozen 47 | 8 | 0 | 0 | 4 | 35 |
+| Additive 45 | 23 | 19 | 2 | 0 | 1 |
+| All 92 | 31 | 19 | 2 | 4 | 36 |
 
-These are **scoped deterministic contract statuses**. The 48 positive rows
+These are **scoped deterministic contract statuses**. The 50 positive rows
 are the admitted/completed combinations actually exercised at their named
 fixture, profile revision and client boundary. Two rows record executed
-pre-dispatch incompatibility with zero provider work. Forty-one remain
-unqualified: five unavailable and 36 unknown. Neither a successful fixture
+pre-dispatch incompatibility with zero provider work. Forty remain
+unqualified: four unavailable and 36 unknown. Neither a successful fixture
 nor a connectivity probe establishes provider-model intelligence parity, and
 no alternate profile removes a difficult frozen row from the denominator.
-All 91 empirical-quality fields remain `unknown` under the
+All 92 empirical-quality fields remain `unknown` under the
 [preregistered quality plan](quality-plan.md); no approved paid live trials
 were run.
 
 `native` means the listed direct native behavior was exercised within the
-row's explicit constraints. It does not imply a translated client carrier,
-live serving stability or provider-wide compatibility. `qualified` means the
-named cross-dialect mapping's supported subset completed through the public
-strict route. `incompatible` requires an executed pre-dispatch refusal with
+row's explicit constraints without translating a retained upstream resource
+identity into an OLP-owned one. It does not imply a translated client carrier,
+live serving stability or provider-wide compatibility. `qualified` means a
+named cross-dialect mapping **or a same-dialect owned resource-ID mapping**
+completed its supported subset through the public strict route. Local file,
+batch, video, response and Gemini Interaction IDs require this latter status
+even when the media bytes and native event grammar are preserved.
+`incompatible` requires an executed pre-dispatch refusal with
 zero provider work for that exact class. `unavailable` means the complete row
 contract is not exposed; `unknown` means existing evidence does not justify a
 stronger classification for the full feature combination. The separately
@@ -50,9 +54,10 @@ exact combined-tree public and official SDK runs. Its run revisions and
 source/receipt hashes are repeated in machine-readable evidence entries so a
 later edit cannot silently inherit these claims.
 
-The seven frozen native rows are official Anthropic JavaScript/Python two-tool
+The eight frozen native rows are official Anthropic JavaScript/Python two-tool
 next turns, OpenAI moderation, native OpenAI/Anthropic/Gemini counts, and the
-public strict Anthropic inline-PDF document block. The document fixture keeps
+public strict Anthropic inline-PDF document block, plus direct OpenAI realtime.
+The document fixture keeps
 the original base64 bytes, text/document ordering, title and citation setting
 without OCR. The two official Anthropic tool clients run the historical
 direct-native route; they do not prove translated recovery. The 20 raw
@@ -74,24 +79,39 @@ that public strict route. They make one provider create each. The frozen media
 and video rows instead name the direct OpenAI profile, so they remain
 `unknown` with integrated **partial** evidence; these compatible-hosting
 positives appear in additive rows. Strict audio translation has no exposed
-endpoint and remains `unavailable`. Original OpenAI realtime and streaming
-background combinations remain `unavailable` at this assessment; Gemini Live
-and Azure unary background are distinct contracts.
+endpoint and remains `unavailable`. Strict Responses streaming background
+remains `unavailable` at this assessment; Gemini Live and Azure unary
+background are distinct contracts.
 
-The Azure OpenAI additive rows cover strict file upload/retrieval/content,
+The direct `openai-responses` revision 1 realtime fixture exercises the frozen
+OpenAI duplex row's VAD/session controls, interruption, tool-output identity
+and audio timing through the public strict WebSocket. Exact native frames are
+checked in both directions and unsupported query or semantic headers refuse
+before provider dial. Early normal client/provider closes remain cancelled or
+incomplete until a native `response.done`, with explicit Attempt/observation
+states. `azure-v1-responses` revision 1 passes the same operation-owned
+`openai-realtime` contract as a separate additive row. These are scripted
+same-dialect raw WebSocket results, not WebRTC, sideband, session resumption or
+live speech-quality claims. The older frozen lifecycle-stress fixture lacks a
+versioned video profile, so its strict timed comparison is not inferred from
+this functional realtime test.
+
+The qualified Azure OpenAI additive rows cover strict file upload/retrieval/content,
 batch item identity, exact separate partial output/error JSONL, cancellation,
 expiry, and official pinned OpenAI JavaScript/Python upload-to-result journeys.
 The file rows deliberately omit deletion; the direct OpenAI frozen file/batch
-rows remain `unknown`. A separate Azure Responses row admits **unary**
-background accepted work and one terminal usage record. Strict streaming
+rows remain `unknown`. A separate qualified Azure Responses row admits **unary**
+background accepted work and one terminal usage record through an encrypted
+local `strict_response` ID. Strict streaming
 background remains refused, so that frozen streaming row stays unavailable.
 
-The direct Gemini Interactions additive rows cover public two-turn encrypted
+The qualified Gemini Interactions additive rows cover public two-turn encrypted
 state, SSE native steps and cursor retrieval; official pinned JavaScript and
 Python clients passed the streaming next-turn path over trusted local TLS. The
 separate background row reopens the **same** encrypted accepted resource on
 fresh gateway instances, closes an SSE reader early and resumes its native
-cursor without another provider POST. This is reader-loss recovery, not a
+cursor without another provider POST. Its local Interaction ID maps to the
+encrypted upstream ID. This is reader-loss recovery, not a
 process-crash or provider-stop claim. Direct Gemini Live raw WebSocket covers
 native audio/video, activity/VAD, tool ordering, interruption and turn
 completion. The pinned SDK rows are narrower: audio, activity start,
@@ -104,8 +124,11 @@ The two negotiated OpenAI Chat-to-Anthropic rows are `qualified` only
 for their pinned official JavaScript/Python clients and the exact streamed
 reasoning/two-tool/encrypted-continuation contract. Each sends the exact
 second native request, while unsupported carrier/controls fail before
-dispatch. The other two qualified rows are OpenAI float embeddings to Voyage
-float and compatible rerank to Voyage rerank. A plain-text OpenAI Chat to
+dispatch. Two further qualified cross-dialect rows are OpenAI float embeddings
+to Voyage float and compatible rerank to Voyage rerank. The remaining fifteen
+qualified rows are native-dialect resource mappings: three video, three Azure
+batch, three Azure file, one Azure unary background and five Gemini
+Interactions combinations. A plain-text OpenAI Chat to
 Anthropic subset does not admit an OpenAI `reasoning_effort` budget: its
 separate `incompatible` row passed the public zero-dispatch refusal. Native
 Voyage rerank remains `unknown` without a complete direct-native client

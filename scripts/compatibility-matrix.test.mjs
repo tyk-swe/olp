@@ -11,9 +11,9 @@ const validate = (value, readArtifact) => validateCompatibilityMatrix(inventory,
 test('all 47 frozen rows and additive operation/client rows have scoped evidence', () => {
   const result = validate(matrix);
   assert.equal(result.frozen, 47);
-  assert.equal(result.additive, 44);
+  assert.equal(result.additive, 45);
   assert.deepEqual(result.statuses, {
-    native: 44, qualified: 4, incompatible: 2, unavailable: 5, unknown: 36
+    native: 31, qualified: 19, incompatible: 2, unavailable: 4, unknown: 36
   });
   assert.ok(matrix.rows.every((row) => row.empirical_quality === 'unknown'));
   assert.ok(matrix.additions.every((row) => row.empirical_quality === 'unknown'));

@@ -1,44 +1,51 @@
 # Qualification status receipt, version 1
 
 This status belongs to the [compatibility matrix](compatibility-matrix-v1.json)
-assessed at `37ad4b0f0ae9350611ace6d5ffd27c451bfe7721`. It keeps three
+assessed at `6f1aa0eb2d145b24e9171f001ca22cba6155d477`. It keeps three
 different units separate: matrix rows, scripted request outcomes, and timed
 benchmark workloads. The test receipts are [row-evidence-v1.md](row-evidence-v1.md)
 and the per-row source/run hashes in the JSON artifact. No paid provider calls
 or empirical model-quality trials were performed.
 
-| Compatibility-row outcome | Frozen 47 | Additive 44 | Total 91 |
+| Compatibility-row outcome | Frozen 47 | Additive 45 | Total 92 |
 | --- | ---: | ---: | ---: |
-| Admitted and positive (`native` or `qualified`) | 7 | 41 | 48 |
+| Direct native behavior | 8 | 23 | 31 |
+| Qualified dialect/resource mapping | 0 | 19 | 19 |
+| Admitted and positive (`native` or `qualified`) | 8 | 42 | 50 |
 | Pre-dispatch refused (`incompatible`) | 0 | 2 | 2 |
-| Incomplete qualification (`unavailable` or `unknown`) | 40 | 1 | 41 |
+| Incomplete qualification (`unavailable` or `unknown`) | 39 | 1 | 40 |
 | Ambiguous as a compatibility status | 0 | 0 | 0 |
 
 The two refused rows are the OpenAI Chat reasoning-budget request against
 Anthropic Messages and a nonempty unowned Gemini Live resumption handle. Both
-were executed through the public route with **zero provider work**. The 41
+were executed through the public route with **zero provider work**. The 40
 unqualified rows remain visible in the denominator; 36 have unknown evidence
-and five have no complete exposed contract. Forty-eight positives count
-specific operation/profile/mode/client combinations, not 48 live inference
+and four have no complete exposed contract. Nineteen of the fifty positives
+qualify bounded dialect or owner-scoped upstream-to-local resource-ID mappings;
+they are not raw native identity. These positives count
+specific operation/profile/mode/client combinations, not 50 live inference
 successes or provider-wide support. The 47 frozen rows themselves contain
-seven scoped positives; adding another profile cannot turn a frozen row green.
+eight scoped positives; adding another profile cannot turn a frozen row green.
 
-Accepted-work ambiguity is not a compatibility status. Two named classes
+Accepted-work ambiguity is not a compatibility status. Three named classes
 were exercised as negative controls and counted **zero** positive completions:
 an upstream file acceptance before the full client upload was sent
 (`TestStrictFileEarlyProviderAcceptanceNeverLooksComplete`), and an accepted
 continuation whose response was lost before ready state
 (`TestContinuationConnectionLossDoesNotInventAcceptedWork` and the before-ready
-process-loss case). Neither may trigger fresh provider inference or publish a
-completed resource. The selected public suite also exercises runtime contract
-violations separately, including wrong accepted batch input identity and four
-late continuation terminal/signature/event corruptions. Those five named
+process-loss case), and a realtime provider's normal WebSocket close after a
+partial response but before `response.done` (`TestStrictRealtimeNormalCloseContracts`).
+None may trigger fresh provider inference or publish a completed resource.
+The selected public suite also exercises runtime contract violations
+separately, including wrong accepted batch input identity, four late
+continuation terminal/signature/event corruptions, and that premature realtime
+close. Those six named
 violation cases are refused or surfaced as failures; they are not included in
-the 48 successful row completions. The repo's full test suite contains other
-negative controls, so five is the count of these explicitly enumerated cases,
+the 50 successful row completions. The repo's full test suite contains other
+negative controls, so six is the count of these explicitly enumerated cases,
 not a global number of possible protocol violations.
 
-The full 47-row fixed inventory, all 91 matrix tuples, the seven independent
+The full 47-row fixed inventory, all 92 matrix tuples, the seven independent
 counterexamples, and the original benchmark workloads remain unchanged.
 Selected public row checks passed under `-race`, including real pinned
 JavaScript/Python SDK serialization and public media/resource/duplex behavior.
@@ -66,11 +73,14 @@ predeclared numeric budgets. Its strict replacement comparison has not passed;
 the first correctly configured strict semantic attempt failed at route
 activation because the frozen fixture used an unversioned media profile. The
 fixture and budget cannot be silently rewritten to make a strict workload
-positive. The original native lifecycle and encrypted barrier references are
+positive. Versioned `lifecycle-stress-v2` source now uses explicit registered
+profiles and passed a non-timed strict semantic smoke; its native reference,
+frozen budgets and strict candidate comparisons have not yet been captured.
+The original native lifecycle and encrypted barrier references are
 also separate from this matrix. Rejected, incomplete and ambiguous workflows
 must remain visible outside successful timing samples.
 
-All 91 rows have `empirical_quality: unknown`. The
+All 92 rows have `empirical_quality: unknown`. The
 [preregistered study](quality-plan.md) requires approved same-serving-identity
 direct/direct and randomized direct/OLP trials before any intelligence parity
 claim. Local scripted providers establish deterministic wire and effect
@@ -81,9 +91,10 @@ or inconclusive trials remain unknown rather than passing by default.
 
 G1 conservation and G2 complete-interaction have selected public positives,
 preserve-or-reject negatives, official next-turn clients and recovery checks.
-G3 breadth has scoped unary, media, durable and Gemini duplex positives, while
-direct OpenAI translation/realtime and strict streaming background remain
-unavailable in the fixed inventory. G4 configuration/security and G5 control
+G3 breadth has scoped unary, media, durable, direct OpenAI/Azure realtime and
+Gemini duplex positives, while audio translation and strict Responses
+streaming background remain unavailable in the fixed inventory. G4
+configuration/security and G5 control
 plane have targeted public and browser evidence in their own receipts. G6
 performance remains open at the failed/pending frozen comparisons above;
 empirical model quality remains unknown by design without approved trials. G7

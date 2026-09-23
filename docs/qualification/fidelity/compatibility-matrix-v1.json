@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "assessed_revision": "37ad4b0f0ae9350611ace6d5ffd27c451bfe7721",
+  "assessed_revision": "6f1aa0eb2d145b24e9171f001ca22cba6155d477",
   "frozen_inventory": {
     "path": "tests/fixtures/fidelity/v1/inventory.json",
     "sha256": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd",
@@ -16,7 +16,7 @@
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "anthropic-js-tool-workflow": {
@@ -71,7 +71,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "native-sparse-multivector": {
@@ -82,7 +82,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "native-hosted-embeddings": {
@@ -93,7 +93,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "native-rerank": {
@@ -104,7 +104,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "native-count-classification": {
@@ -115,7 +115,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "pinned-vector-sdk": {
@@ -126,7 +126,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "qualified-unary": {
@@ -137,7 +137,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "native-media-source": {
@@ -148,7 +148,7 @@
       "receipt_sha256": "60f82c4303c695f50fca2207359c9d47dd25b8287f7191e081866f75206260e1",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "matrix-assessment": {
@@ -171,7 +171,7 @@
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "zero-dispatch-refusal"
     },
     "anthropic-document-public": {
@@ -179,10 +179,10 @@
       "source": "tests/integration/strict_generation_test.go#TestStrictPublicAnthropicDocumentAssetIdentity",
       "source_sha256": "a40e70baca4fe63f6f454312d16ea2ed5b1000cfb41f794180b01e9f6c3fd0c5",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-media-public": {
@@ -190,10 +190,10 @@
       "source": "tests/integration/strict_media_test.go#TestStrictMediaPublicNativeSourcesAndAssets",
       "source_sha256": "845aa8b9293d1a50fcf8073a8064c64ebc7553efd821d90ece4cbb2ce87aecb9",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d58921db6591516f40d698c99d22228ff434615a",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-video-public": {
@@ -201,10 +201,10 @@
       "source": "tests/integration/strict_video_test.go#TestStrictVideoPublicOriginalAssetsAndDurableIdentity",
       "source_sha256": "33a74a06bf791620d89b9e1268ea9dcac682935dcf254d3c28ed56a2c80af7cd",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-video-sdk-harness": {
@@ -212,10 +212,10 @@
       "source": "tests/integration/strict_video_sdk_test.go#TestStrictVideoPinnedOpenAISDKs",
       "source_sha256": "e8160a413b9fe60694fcde09c85dde609c569b5feb36554fa113057044d65845",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-video-sdk-js": {
@@ -223,10 +223,10 @@
       "source": "tests/sdk-smoke/strict-video.mjs",
       "source_sha256": "455554e0abadd27b0d405b504d29fa4ffa2a460e1068ce47ba8dfa8a7bfdfe17",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-video-sdk-python": {
@@ -234,21 +234,43 @@
       "source": "tests/sdk-smoke-python/strict_video.py",
       "source_sha256": "3ced9e6a64f37014db0af85ef0de92f032cb81e8eb678a056f59914f26ca1d60",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
+    },
+    "strict-realtime-public": {
+      "kind": "test",
+      "source": "tests/integration/strict_realtime_test.go#TestStrictRealtimeNativeIdentityAndRefusals",
+      "source_sha256": "dfe66ffad81e1036e2bc050b0e42ed4cfa3b7dad17a2be0d8f1353d4f97b2ece",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "outcome": "positive"
+    },
+    "strict-realtime-terminal": {
+      "kind": "test",
+      "source": "tests/integration/strict_realtime_terminal_test.go#TestStrictRealtimeNormalCloseContracts",
+      "source_sha256": "9aece52fe5a898755e842cbb592202708f7e1fa6ef993ffeed3e6f4d2d5823ad",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "outcome": "incomplete-control"
     },
     "strict-batch-public": {
       "kind": "test",
       "source": "tests/integration/strict_durable_test.go#TestStrictBatchSourcePartialFilesAndLifecycle",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-batch-sdk-harness": {
@@ -256,10 +278,10 @@
       "source": "tests/integration/strict_durable_test.go#TestStrictBatchPinnedOpenAISDKs",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-batch-sdk-js": {
@@ -267,10 +289,10 @@
       "source": "tests/sdk-smoke/durable-batch.mjs",
       "source_sha256": "73ef95ca5110a742e6b1f70d009bcb98bb1ebdbcb329c274c8e5b2a5c30e9bb3",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-batch-sdk-python": {
@@ -278,10 +300,10 @@
       "source": "tests/sdk-smoke-python/durable_batch.py",
       "source_sha256": "a38033a81dc2daddf8d67b0c026275f18fac8a55c3b697367c4bddb8cc692982",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "strict-background-unary": {
@@ -289,10 +311,10 @@
       "source": "tests/integration/strict_durable_test.go#TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-interactions-public": {
@@ -300,10 +322,10 @@
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle",
       "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-live-public": {
@@ -311,10 +333,10 @@
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLivePublicNativeAudioAndSetupAffinity",
       "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-sdk-harness": {
@@ -322,10 +344,10 @@
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecyclePinnedOfficialSDKsThroughTrustedTLS",
       "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-sdk-js": {
@@ -333,10 +355,10 @@
       "source": "tests/sdk-smoke/gemini-lifecycle.mjs",
       "source_sha256": "7c2c3a73eca0104a7e6bd97196ea4f9a0e72737acfb0665193ca4b18e9c07036",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-sdk-python": {
@@ -344,10 +366,10 @@
       "source": "tests/sdk-smoke-python/gemini_lifecycle.py",
       "source_sha256": "4ccf081953cb32a6f546cfe3afdbbeacb4b9708dd55837ce22c81c5947c474c5",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "gemini-live-resumption-refusal": {
@@ -355,10 +377,10 @@
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWork",
       "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "zero-dispatch-refusal"
     },
     "gemini-background-stream": {
@@ -366,10 +388,10 @@
       "source": "tests/integration/gemini_background_stream_test.go#TestGeminiBackgroundStreamResumesSameOwnedWorkAfterReaderLoss",
       "source_sha256": "8d7351129cdc9cdfd36e7a58314715c807272e0e3a5d219d9f5b2ff7baf3cc84",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d58921db6591516f40d698c99d22228ff434615a",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "negotiated-sdk-js-public": {
@@ -377,10 +399,10 @@
       "source": "tests/integration/continuation_sdk_test.go#TestNegotiatedContinuationOfficialJavaScriptSDK",
       "source_sha256": "7f975a374ebebc92e09fe96798838daf9cfa8684dc0dc5bca213b8d58e9b847e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "negotiated-sdk-js-script": {
@@ -388,10 +410,10 @@
       "source": "tests/sdk-smoke/negotiated-continuation.mjs",
       "source_sha256": "e50ece24bc7bb27f920bacfb1c2eaab63e44f7ba32d016fa163b056159dd4d7c",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "negotiated-sdk-python-public": {
@@ -399,10 +421,10 @@
       "source": "tests/integration/continuation_python_sdk_test.go#TestNegotiatedContinuationOfficialPythonSDK",
       "source_sha256": "94ff7725af0420480c90af1dbaf5b7e99ef09eb5beca54fe6e631976b44654d4",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "95f4deb281b1c6cb34a26049b9e63be3c89c30da",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     },
     "negotiated-sdk-python-script": {
@@ -410,10 +432,10 @@
       "source": "tests/sdk-smoke-python/negotiated_continuation.py",
       "source_sha256": "aa855862a378499492d5cbeb562dce3356872743f061340ae447ece6a5dd3dfb",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "04b9ed5daaae4cfb975e2990af36ec8f87b3dbba2d1ca2596a17540f1818eb4e",
+      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "95f4deb281b1c6cb34a26049b9e63be3c89c30da",
+      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
       "outcome": "positive"
     }
   },
@@ -930,12 +952,13 @@
     {
       "id": "openai-realtime-duplex",
       "frozen_row_sha256": "92aee1ef2848d1c3e12fdf79fd021bada7df73bc771c427717a42aae346767fa",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "matrix-assessment"
+        "strict-realtime-public",
+        "strict-realtime-terminal"
       ],
-      "constraints": "The frozen direct OpenAI profile/client VAD, interruption and tool-timing combination has no complete strict public proof at this revision; Gemini Live and Azure realtime scopes are separate.",
+      "constraints": "Direct openai-responses revision 1 strict public WebSocket fixture preserves exact session/VAD, interruption, function-call output and audio-timing frame bytes/order; unsupported query and semantic headers refuse before provider dial. Early normal client/provider closes are not success. Raw client only, no live audio quality or session resumption claim.",
       "empirical_quality": "unknown"
     },
     {
@@ -1296,12 +1319,12 @@
         "two-turn",
         "encrypted-state"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "gemini-interactions-public"
       ],
-      "constraints": "Direct Gemini Interactions v1beta two-turn public fixture retains an encrypted provider ID and current owner/credential authority.",
+      "constraints": "Direct Gemini Interactions v1beta two-turn public fixture retains an encrypted provider ID and current owner/credential authority. An encrypted owner-scoped local Interaction ID overlays the upstream resource ID.",
       "empirical_quality": "unknown"
     },
     {
@@ -1315,12 +1338,12 @@
         "sse",
         "cursor"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "gemini-interactions-public"
       ],
-      "constraints": "Direct public Interactions SSE preserves native step order and event cursor on an owned resource.",
+      "constraints": "Direct public Interactions SSE preserves native step order and event cursor on an owned resource. An encrypted owner-scoped local Interaction ID overlays the upstream resource ID.",
       "empirical_quality": "unknown"
     },
     {
@@ -1334,13 +1357,13 @@
         "two-turn",
         "cursor"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "gemini-sdk-harness",
         "gemini-sdk-js"
       ],
-      "constraints": "Pinned @google/genai 2.16.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim.",
+      "constraints": "Pinned @google/genai 2.16.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim. An encrypted owner-scoped local Interaction ID overlays the upstream resource ID.",
       "empirical_quality": "unknown"
     },
     {
@@ -1354,13 +1377,13 @@
         "two-turn",
         "cursor"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "gemini-sdk-harness",
         "gemini-sdk-python"
       ],
-      "constraints": "Pinned google-genai 2.22.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim.",
+      "constraints": "Pinned google-genai 2.22.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim. An encrypted owner-scoped local Interaction ID overlays the upstream resource ID.",
       "empirical_quality": "unknown"
     },
     {
@@ -1641,12 +1664,12 @@
         "expiry",
         "encrypted-source"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-video-public"
       ],
-      "constraints": "Certified compatible-chat revision 1 local fixture; one accepted create, exact original image reference and native metadata, owner-scoped encrypted job source, video/thumbnail bytes, delete and expiry.",
+      "constraints": "Certified compatible-chat revision 1 local fixture; one accepted create, exact original image reference and native metadata, encrypted owner-scoped local job ID mapped to the upstream ID, video/thumbnail bytes, delete and expiry.",
       "empirical_quality": "unknown"
     },
     {
@@ -1664,13 +1687,13 @@
         "delete",
         "reference-bytes"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-video-sdk-harness",
         "strict-video-sdk-js"
       ],
-      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads and exact uploaded reference/model. Provider-wide list and direct OpenAI hosting are not qualified.",
+      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads, exact uploaded reference/model and encrypted local-to-upstream job ID mapping. Provider-wide list and direct OpenAI hosting are not qualified.",
       "empirical_quality": "unknown"
     },
     {
@@ -1688,13 +1711,13 @@
         "delete",
         "reference-bytes"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-video-sdk-harness",
         "strict-video-sdk-python"
       ],
-      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads and exact uploaded reference/model. Provider-wide list and direct OpenAI hosting are not qualified.",
+      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads, exact uploaded reference/model and encrypted local-to-upstream job ID mapping. Provider-wide list and direct OpenAI hosting are not qualified.",
       "empirical_quality": "unknown"
     },
     {
@@ -1710,12 +1733,12 @@
         "cancel",
         "expiry"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-public"
       ],
-      "constraints": "Versioned Azure legacy-chat local fixture; certified embeddings items, immutable source/result, separate exact output/error JSONL, cancellation, owner/credential authority and expiry.",
+      "constraints": "Versioned Azure legacy-chat local fixture; certified embeddings items, immutable source/result, encrypted owner-scoped local batch/file IDs over upstream IDs, separate exact output/error JSONL, cancellation, credential authority and expiry.",
       "empirical_quality": "unknown"
     },
     {
@@ -1732,13 +1755,13 @@
         "retrieve",
         "partial-output-error"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-sdk-harness",
         "strict-batch-sdk-js"
       ],
-      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation and exact distinct output/error file content.",
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation, owner-scoped local batch/file ID mapping and exact distinct output/error file content.",
       "empirical_quality": "unknown"
     },
     {
@@ -1755,13 +1778,13 @@
         "retrieve",
         "partial-output-error"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-sdk-harness",
         "strict-batch-sdk-python"
       ],
-      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation and exact distinct output/error file content.",
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation, owner-scoped local batch/file ID mapping and exact distinct output/error file content.",
       "empirical_quality": "unknown"
     },
     {
@@ -1777,12 +1800,12 @@
         "content",
         "owner-scoped-identity"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-public"
       ],
-      "constraints": "Versioned Azure legacy-chat local fixture; encrypted strict_file resource, exact input/output/error file bytes and owner authority. Delete is outside this row.",
+      "constraints": "Versioned Azure legacy-chat local fixture; encrypted strict_file local ID mapped to upstream file identity, exact input/output/error file bytes and owner authority. Delete is outside this row.",
       "empirical_quality": "unknown"
     },
     {
@@ -1798,13 +1821,13 @@
         "error-content",
         "owner-scoped-identity"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-sdk-harness",
         "strict-batch-sdk-js"
       ],
-      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content. Delete is outside this row.",
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content under owner-scoped local file IDs. Delete is outside this row.",
       "empirical_quality": "unknown"
     },
     {
@@ -1820,13 +1843,13 @@
         "error-content",
         "owner-scoped-identity"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-batch-sdk-harness",
         "strict-batch-sdk-python"
       ],
-      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content. Delete is outside this row.",
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content under owner-scoped local file IDs. Delete is outside this row.",
       "empirical_quality": "unknown"
     },
     {
@@ -1841,12 +1864,12 @@
         "poll",
         "one-terminal-usage"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "strict-background-unary"
       ],
-      "constraints": "Versioned Azure legacy-responses local fixture; strict unary background creates one encrypted accepted response and reconciles terminal usage once. Streaming background is refused.",
+      "constraints": "Versioned Azure legacy-responses local fixture; strict unary background creates one encrypted accepted response with owner-scoped local strict_response ID over the upstream ID and reconciles terminal usage once. Streaming background is refused.",
       "empirical_quality": "unknown"
     },
     {
@@ -1863,12 +1886,35 @@
         "cursor-resume",
         "same-resource"
       ],
-      "status": "native",
+      "status": "qualified",
       "evidence_state": "integrated-executed",
       "evidence": [
         "gemini-background-stream"
       ],
-      "constraints": "Direct Gemini Interactions local fixture; accepted background POST, fresh gateway SSE GET, early reader close and another fresh gateway cursor retrieval use one encrypted owned resource and one provider POST. Process crash is not claimed.",
+      "constraints": "Direct Gemini Interactions local fixture; accepted background POST, fresh gateway SSE GET, early reader close and another fresh gateway cursor retrieval use one encrypted owner-scoped local Interaction ID mapped to upstream work and one provider POST. Process crash is not claimed.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-v1-realtime-duplex-raw-websocket",
+      "operation": "realtime",
+      "profile": "azure-v1-responses",
+      "dialect": "openai-realtime",
+      "mode": "duplex",
+      "client": "raw-websocket",
+      "features": [
+        "session-vad",
+        "interruption",
+        "tool-output",
+        "audio-timing",
+        "zero-dial-refusals"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-realtime-public",
+        "strict-realtime-terminal"
+      ],
+      "constraints": "Azure v1 Responses revision 1 strict public WebSocket fixture preserves exact session/VAD, interruption, tool-output and audio-timing frame bytes/order; unsupported query and semantic headers refuse before provider dial and early normal closes are not success. Preview-hosted Azure and WebRTC are outside this row.",
       "empirical_quality": "unknown"
     }
   ]

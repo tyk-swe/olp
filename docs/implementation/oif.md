@@ -89,7 +89,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Source foundation integrated; full strict media plans remain #216 | Media source branch `ad5558e5`, merge `22738e0d`; [native image/speech source parser and public ambiguity qualification](../qualification/fidelity/media-source-foundation.md) |
 | [#229](https://github.com/tyk-swe/olp/issues/229) Implement distinct Gemini Interactions and Live native lifecycle profiles | D06,D11-D15; T03-T05 | Native foundation integrated; full resource/media lifecycle remains #216 | Feature commit `6d361ba8`, integrated as `508cfb4a`; [Gemini Interactions/Live scripted public and pinned SDK qualification](../qualification/fidelity/gemini-lifecycle-v1beta.md); forward schema 0028 |
 | [#230](https://github.com/tyk-swe/olp/issues/230) Retain media OIF source and staged asset byte identities | D03-D04,D15,D19; T04,T07 | Integrated; full strict media behavior remains #216 | Media source/digest branch `58afbe36`, merge `211fc8fa`; [source and streamed asset identity qualification](../qualification/fidelity/media-asset-identity.md) |
-| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Active; prerequisites integrated | Strict media resources, retained duplex continuation and durable/queued/batch lifecycle behavior still need qualification |
+| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Scoped functional implementation integrated; final G3/G6 release qualification remains #218 | Strict media/video and encrypted file/batch/background merged in `4be7abc7` and `a5edce21`; direct OpenAI/Azure realtime merged in `d923fee` with terminal correction `250defcb`; forward schemas 0029/0030. [Media](../qualification/fidelity/media-strict.md), [durable resources](../qualification/fidelity/durable-lifecycle.md), [Gemini background recovery](../qualification/fidelity/gemini-background-stream.md) and [strict realtime](../qualification/fidelity/strict-realtime.md) record exact public scope and exclusions. |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; #217 inspector and playground also integrated | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Integrated; final #214 carrier interaction rerun remains | Console branch `5963e192`, merge `760bc795`; [inspector, evidence, operation and strict playground qualification](../qualification/fidelity/console-interaction.md) with six reviewed screenshots |
@@ -97,7 +97,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#225](https://github.com/tyk-swe/olp/issues/225) Freeze encrypted continuation barrier reference and budgets | T09 prerequisite | Reference baseline integrated; translated candidate qualification pending | Source `29e18268`, capture `a99d0217`, merge `533ac161`; [36 repetitions, encrypted barrier reference and frozen criteria](../evidence/fidelity-performance/barrier-v1/README.md); replacement qualification remains #214/#218 |
 | [#226](https://github.com/tyk-swe/olp/issues/226) Enforce reviewed route identity migration across mixed versions | D23; T10 | Integrated; final mixed-version and release audit remain #218 | Migration branch `39bf2792`; [strict route migration, rollback and mixed-version qualification](../qualification/fidelity/strict-route-migration.md); forward schema 0027, reviewed console draft and screenshot |
 | [#228](https://github.com/tyk-swe/olp/issues/228) Prove provider, dialect and operation extensions through public behavior | D07,D15,D23; T10 | Integrated; final G7 audit remains #218 | Extension branch `1ed196c2`, merge `f3204af1`; [three public registration/dispatch/result/accounting demonstrations](../qualification/fidelity/extension-demos.md) run in their own integration process |
-| [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Historical compatibility matrix integrated; blocked by #216 and final qualification | [47 frozen and 27 additive scoped rows at pinned `e0534816`](../qualification/fidelity/compatibility-matrix-v1.md) are preparatory evidence, not final PR statuses. Full G1–G7, frozen-budget candidate timing, integrated SDK/browser/service matrix, release qualification and code review remain pending; integrated #214, #217, #228 and #229 evidence feeds the final audit |
+| [#218](https://github.com/tyk-swe/olp/issues/218) Complete extensibility migration and release qualification | D07,D19-D23; T01-T10; G1-G7 | Scoped functional matrix and public row evidence integrated; G6 timed comparisons and final release/review gates remain open | [47 frozen and 45 additive rows at `6f1aa0eb`](../qualification/fidelity/compatibility-matrix-v1.md) report 31 native, 19 qualified mappings, two zero-dispatch incompatibilities and 40 unqualified rows, with [31 selected combined-tree public/SDK race checks](../qualification/fidelity/row-evidence-v1.md). [Gate status](../qualification/fidelity/qualification-status-v1.md) keeps failed/pending frozen performance and empirical quality unknown. Full integration/browser/CI, final G1–G7 audit and mandatory review remain separate. |
 
 ## Qualification rules
 
@@ -167,9 +167,10 @@ network-revocation regressions, and public network-profile/inspector race checks
 passed after this merge. Existing timeout, cancellation and bounded-header tests
 remain unchanged; this is distinct from the test-only pricing fixture correction.
 
-Strict continuation/resource authority (#214), media/durable/duplex contracts
-(#216), and the console playground projection (#217) remain guarded until their
-own qualification. Full G2 and G6 remain unqualified. #224 supplies forward
+At that checkpoint, strict continuation/resource authority (#214), media/durable/
+duplex contracts (#216), and the console playground projection (#217) remained
+guarded until their own qualification. The current status is in the delivery
+table above; G6 still needs its unchanged frozen comparisons. #224 supplies forward
 migration 0024 and native configuration/release storage conservation. Forward
 migration 0025 provides the shared encrypted continuation schema; #214 still
 owns production continuation and resource behavior. #223 supplies the
@@ -268,6 +269,23 @@ five-second abnormal-close handshake delay three times; immediate abnormal
 transport teardown made it pass three times in isolation and in the combined
 service rerun. The captured failing log remains outside the tracked evidence;
 the frozen performance artifacts and budgets were not edited.
+
+The current #216 composition includes strict compatible media/video,
+encrypted Azure file/batch and unary background resources, direct Gemini
+Interactions/Live, and direct OpenAI/Azure v1 realtime. Forward-only migrations
+0029/0030 preserve strict resource and encrypted video source authority. The
+realtime terminal correction in `250defcb` distinguishes early graceful client
+cancellation, premature provider close, and a clean close after `response.done`
+in public Attempt evidence. #218's [scoped matrix](../qualification/fidelity/compatibility-matrix-v1.md)
+uses 47 unchanged frozen rows plus 45 additive tuples; its
+[execution receipt](../qualification/fidelity/row-evidence-v1.md) records 31
+combined-tree race-tested public/official SDK symbols, including Python tool
+continuation, video and batch journeys. The generated release inventory
+includes the new suites. The separately versioned lifecycle-stress-v2 source
+is registered-profile aware, but its native timed reference and strict
+candidate are still pending. Earlier failed original and barrier captures
+remain visible. None of these scripted fixtures establishes empirical model
+quality or passes G6 without the frozen comparisons.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
