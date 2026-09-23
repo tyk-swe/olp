@@ -1,12 +1,36 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { analyzeBaseline, analyzePaired, makeManifest, sourceOrder, sourceSchedule, validateStrictRouteContracts, validateSubrun } from './fidelity-paired-v2.mjs';
+import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateStrictRouteContracts, validateSubrun, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
 
 const manifest = makeManifest(process.cwd());
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const diagnostics = { loadavg: '0.1 0.1 0.1 1/100 100', cpu_pressure: 'some avg10=0.00 total=0', memory_pressure: 'some avg10=0.00 total=0' };
 const metadata = { revision: 'B-measurement-only', binary_sha256: 'same-B-binary' };
+
+function gitFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'olp-source-v2-history-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: {
+    ...process.env, GIT_AUTHOR_NAME: 'Benchmark Test', GIT_AUTHOR_EMAIL: 'benchmark@example.test',
+    GIT_COMMITTER_NAME: 'Benchmark Test', GIT_COMMITTER_EMAIL: 'benchmark@example.test'
+  } }).trim();
+  git('init', '-q', '--initial-branch=main');
+  git('config', 'commit.gpgsign', 'false');
+  const put = (path, content) => { const full = join(root, path); mkdirSync(dirname(full), { recursive: true }); writeFileSync(full, content); return full; };
+  const commit = (message) => { git('add', '.'); git('commit', '-q', '-m', message); return git('rev-parse', 'HEAD'); };
+  const source = 'internal/gateway/dispatch.go';
+  put(source, 'package gateway\nfunc dispatch() int { return 1 }\n');
+  const initial = commit('Initial product');
+  const baselinePath = join(root, manifest.B_only_evidence_path);
+  const baseline = { baseline: true };
+  const addBaseline = () => { put(manifest.B_only_evidence_path, JSON.stringify(baseline, null, 2) + '\n'); return commit('Record B-only evidence'); };
+  return { root, git, put, commit, source, initial, baselinePath, baseline, addBaseline };
+}
 
 function rawSamples(metrics, stream) {
   const at = (prefix, index) => index < 32 ? metrics[`${prefix}-p50-us`] : index < 61 ? metrics[`${prefix}-p95-us`] : metrics[`${prefix}-p99-us`];
@@ -49,12 +73,63 @@ test('manifest derives exactly 224 path and 30 added-latency margins from immuta
   assert.equal(Object.values(manifest.comparisons).flatMap(Object.keys).length, 224);
   assert.equal(Object.values(manifest.added_latency).flatMap(Object.keys).length, 30);
   assert.equal(manifest.B_product_revision, '8e52f775df815c3a1a25d75064c3ffd540fb07f5');
-  assert.equal(manifest.manifest_revision, 'strict-contract-r2');
+  assert.equal(manifest.manifest_revision, 'post-baseline-product-r3');
+  assert.equal(manifest.B_only_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json');
   assert.deepEqual(manifest.C_route_contract, { native: { fidelity: { mode: 'strict' } }, translated: { fidelity: { mode: 'strict' } }, rejected: { fidelity: { mode: 'strict' } } });
   for (const metrics of Object.values(manifest.comparisons)) for (const value of Object.values(metrics)) {
     assert.equal(value.margin, value.old_limit - value.old_B_median);
     assert.ok(value.margin > 0);
   }
+});
+
+test('exact B-only blob precedes a real production change and stays verifiable after a docs descendant', (t) => {
+  const fixture = gitFixture(t);
+  const evidence = fixture.addBaseline();
+  fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  const product = fixture.commit('Improve dispatch');
+  const provenance = resolvePairedProvenance(fixture.root, fixture.baselinePath, product, manifest);
+  assert.equal(provenance.evidence_commit, evidence);
+  assert.equal(provenance.product_commit, product);
+  assert.deepEqual(provenance.production_paths, [fixture.source]);
+  fixture.put('docs/after.md', 'Later qualification note\n');
+  const docs = fixture.commit('Add later docs');
+  assert.equal(resolvePairedProvenance(fixture.root, fixture.baselinePath, docs, manifest).product_commit, product);
+  const capture = { C: { revision: product }, B_only_sha256: digest(JSON.stringify(fixture.baseline, null, 2) + '\n'), provenance };
+  assert.deepEqual(verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), provenance);
+  capture.provenance = { ...provenance, evidence_commit: fixture.initial };
+  assert.throws(() => verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), /chronology/);
+  fixture.put(manifest.B_only_evidence_path, '{"tampered":true}\n');
+  assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, product, manifest), /exact B-only artifact blob/);
+});
+
+test('same commit for baseline and production change cannot qualify', (t) => {
+  const fixture = gitFixture(t);
+  fixture.put(manifest.B_only_evidence_path, JSON.stringify(fixture.baseline, null, 2) + '\n');
+  fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  const same = fixture.commit('Bundle evidence and candidate');
+  assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, same, manifest), /strict ancestor/);
+});
+
+test('a pre-evidence product side branch hidden behind a no-ff merge cannot qualify', (t) => {
+  const fixture = gitFixture(t);
+  fixture.git('checkout', '-q', '-b', 'product');
+  fixture.put(fixture.source, 'package gateway\nfunc dispatch() int { return 2 }\n');
+  fixture.commit('Product on side branch before evidence');
+  fixture.git('checkout', '-q', 'main');
+  fixture.addBaseline();
+  fixture.git('merge', '-q', '--no-ff', '-m', 'Merge pre-evidence product', 'product');
+  const merged = fixture.git('rev-parse', 'HEAD');
+  assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, merged, manifest), /no affected production Go commit follows/);
+});
+
+test('test-only and docs-only descendants do not satisfy the product chronology', (t) => {
+  const fixture = gitFixture(t);
+  fixture.addBaseline();
+  fixture.put('internal/gateway/dispatch_test.go', 'package gateway\nfunc TestDispatch() {}\n');
+  fixture.commit('Add only a test');
+  fixture.put('docs/after.md', 'Only docs\n');
+  const docs = fixture.commit('Add only docs');
+  assert.throws(() => resolvePairedProvenance(fixture.root, fixture.baselinePath, docs, manifest), /no affected production Go commit follows/);
 });
 
 test('legacy, transformed, omitted and ambiguous C fidelity contracts fail closed', () => {

@@ -9,13 +9,14 @@ quality claim.
 
 Historical product B is `8e52f775df815c3a1a25d75064c3ffd540fb07f5`.
 The branch containing this file adds only measurement code and byte-identical
-copies of the v1 baseline and budgets to that checkout. The first
-`manifest.json` is retained as a superseded, pre-data design revision: review
-found that it accepted any nonempty C route contract, including legacy.
-**`manifest-r2.json` is the active manifest** and requires the exact explicit
-`{"fidelity":{"mode":"strict"}}` overlay for every native, translated and
-rejected route category. It must be committed with this runner before any B-only
-baseline or C observation. The Go v2
+copies of the v1 baseline and budgets to that checkout. `manifest.json` and
+`manifest-r2.json` remain visible as superseded pre-data design revisions.
+The first accepted a non-strict C route; r2 did not require a product change
+after the B-only evidence. **`manifest-r3.json` is active.** It requires the
+exact explicit `{"fidelity":{"mode":"strict"}}` overlay for every native,
+translated and rejected route category, plus Git proof that the exact B-only
+artifact was committed before an affected production Go change. It must be
+committed with this runner before any B-only baseline or C observation. The Go v2
 adapter calls the **unchanged** v1 fixture/request/stream oracle, including the
 provider-bound native document, exact PNG, authentication, complete SSE
 content/identity/usage/terminal grammar, and zero-dispatch unmapped-extension
@@ -59,17 +60,29 @@ its pass/fail result must be committed before building or observing a locked C
 confirmatory capture. Historical C observations from v1 are disclosed but may
 not change this rule.
 
+After the B-only artifact is committed, C must have a **later non-merge commit**
+changing a production `.go` file in `internal/gateway/`, `internal/resources/`
+or `internal/interaction/`; `_test.go` files do not count. The evidence commit
+must be a strict ancestor of that product commit, which must be an ancestor of
+the locked C revision. The runner checks the exact Git blob and SHA-256 of
+`baseline.json`, records both commit IDs and changed paths, and rechecks them
+after timed capture. `compare-paired` repeats this proof against the recorded C
+revision even if the checkout's HEAD later advances through documentation-only
+commits. A product change on a pre-evidence side branch does not become a
+post-evidence change just because it was later merged.
+
 ```sh
 # In the clean B measurement checkout, after pre-baseline review and before C measurement:
-node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json
+node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json
 node --test scripts/fidelity-paired-v2.test.mjs
 go test -mod=readonly ./internal/gateway -run 'TestFidelityBenchmarkOracleDetectsCorruption|TestFidelityPairedLookupPreservesFrozenInventory' -count=1
-node scripts/fidelity-paired-v2.mjs record-B /tmp/oif-source-B-only.json docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json /tmp/oif-source-B.test "$PWD"
+node scripts/fidelity-paired-v2.mjs record-B /tmp/oif-source-B-only.json docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json /tmp/oif-source-B.test "$PWD"
 
 # Commit the complete, passing B-only artifact and its SHA-256 before C.
 # The runner builds fresh B/C binaries into unused paths before timed blocks.
 export OLP_FIDELITY_BENCH_ROUTE_CONTRACT='{"native":{"fidelity":{"mode":"strict"}},"translated":{"fidelity":{"mode":"strict"}},"rejected":{"fidelity":{"mode":"strict"}}}'
-node scripts/fidelity-paired-v2.mjs record-paired /tmp/oif-source-paired.json docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/clean/B /tmp/oif-source-C.test "$PWD"
+node scripts/fidelity-paired-v2.mjs record-paired /tmp/oif-source-paired.json docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/clean/B /tmp/oif-source-C.test "$PWD"
+node scripts/fidelity-paired-v2.mjs compare-paired /tmp/oif-source-paired.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json "$PWD" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json"
 ```
 
 The route-contract JSON shown is the exact required C shape from the current

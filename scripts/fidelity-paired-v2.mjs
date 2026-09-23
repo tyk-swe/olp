@@ -47,6 +47,8 @@ const oldFiles = {
   pairedHarness: 'internal/gateway/fidelity_paired_benchmark_test.go',
   pairedRunner: 'scripts/fidelity-paired-v2.mjs'
 };
+const B_ONLY_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json';
+const affectedProductionPrefixes = ['internal/gateway/', 'internal/resources/', 'internal/interaction/'];
 
 export function sourceOrder(group, variant, baselineOnly = false, outer = 'relay') {
   invariant(variant === 'ABBA' || variant === 'BAAB', 'unknown order');
@@ -132,8 +134,10 @@ export function makeManifest(root) {
   invariant(Object.values(addedLatency).flatMap(Object.keys).length === 30, 'added latency inventory changed');
   const schedule = sourceSchedule();
   return {
-    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'strict-contract-r2',
-    supersedes_manifest_sha256: 'cbdd9e12470dff758d3d7f1f73332f4a94dbb4577a510e1e1cedf5dbf195fc7e',
+    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'post-baseline-product-r3',
+    supersedes_manifest_sha256: 'eaa1d50764d550c81b27f6566615fe12fadc3a4d6a6f3089b616f1441a901ad1',
+    B_only_evidence_path: B_ONLY_EVIDENCE_PATH,
+    chronology: 'exact committed B-only blob is in a strict ancestor of a non-merge affected production Go change, itself an ancestor of locked C; test-only changes and merge commits do not count',
     C_route_contract: strictRouteContracts, B_product_revision: B_PRODUCT,
     old_baseline_sha256: digest(full('baseline')), old_budgets_sha256: digest(full('budgets')),
     old_harness_sha256: digest(full('harness')), old_runner_sha256: digest(full('runner')),
@@ -178,6 +182,54 @@ function command(program, args, cwd) {
   invariant(result.status === 0, `${program} failed: ${result.stderr}`);
   return result.stdout.trim();
 }
+function gitSucceeds(args, cwd) {
+  return spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 20 }).status === 0;
+}
+function isAffectedProductionFile(path) {
+  return affectedProductionPrefixes.some((prefix) => path.startsWith(prefix)) && path.endsWith('.go') && !path.endsWith('_test.go');
+}
+
+// Resolve against the recorded C revision, not the checkout's current HEAD:
+// a later documentation-only descendant must not erase or create chronology.
+export function resolvePairedProvenance(root, baselinePath, CRevision, manifest) {
+  invariant(/^[0-9a-f]{40}$/.test(CRevision) && gitSucceeds(['cat-file', '-e', `${CRevision}^{commit}`], root), 'locked C commit is unavailable');
+  const trackedPath = relative(root, resolve(baselinePath));
+  invariant(trackedPath === manifest.B_only_evidence_path, 'B-only evidence path differs from frozen manifest');
+  const baselineSHA256 = digest(baselinePath);
+  const baselineBlob = command('git', ['hash-object', resolve(baselinePath)], root);
+  const lockedBlob = command('git', ['rev-parse', `${CRevision}:${trackedPath}`], root);
+  invariant(lockedBlob === baselineBlob, 'locked C does not contain the exact B-only artifact blob');
+  const evidenceCommit = command('git', ['log', '-1', '--format=%H', CRevision, '--', trackedPath], root);
+  invariant(/^[0-9a-f]{40}$/.test(evidenceCommit), 'B-only evidence has no historical commit');
+  invariant(command('git', ['rev-parse', `${evidenceCommit}:${trackedPath}`], root) === baselineBlob, 'evidence commit has a different B-only artifact blob');
+  invariant(evidenceCommit !== CRevision && gitSucceeds(['merge-base', '--is-ancestor', evidenceCommit, CRevision], root), 'B-only evidence must be a strict ancestor of C');
+  const descendants = command('git', ['rev-list', '--ancestry-path', '--reverse', `${evidenceCommit}..${CRevision}`], root).split('\n').filter(Boolean);
+  let productCommit = null;
+  let productionPaths = [];
+  for (const revision of descendants) {
+    const ancestry = command('git', ['rev-list', '--parents', '-n', '1', revision], root).split(/\s+/);
+    if (ancestry.length !== 2) continue; // a no-ff merge cannot supply the product change.
+    const changed = command('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', ancestry[1], revision], root).split('\n').filter(Boolean);
+    const affected = changed.filter(isAffectedProductionFile);
+    if (!affected.length) continue;
+    invariant(gitSucceeds(['merge-base', '--is-ancestor', evidenceCommit, revision], root), 'product commit predates B-only evidence');
+    productCommit = revision;
+    productionPaths = affected;
+    break;
+  }
+  invariant(productCommit, 'no affected production Go commit follows B-only evidence before locked C');
+  invariant(productCommit !== evidenceCommit && gitSucceeds(['merge-base', '--is-ancestor', productCommit, CRevision], root), 'product change is not after evidence and within locked C');
+  return { B_only_path: trackedPath, B_only_sha256: baselineSHA256, B_only_blob_oid: baselineBlob,
+    evidence_commit: evidenceCommit, product_commit: productCommit, production_paths: productionPaths,
+    C_revision: CRevision };
+}
+
+export function verifyPairedProvenance(capture, baseline, manifest, root, baselinePath) {
+  invariant(capture.B_only_sha256 === digest(baselinePath) && capture.B_only_sha256 === hash(JSON.stringify(baseline, null, 2) + '\n'), 'B-only artifact bytes differ from capture');
+  const expected = resolvePairedProvenance(root, baselinePath, capture.C?.revision, manifest);
+  invariant(isDeepStrictEqual(capture.provenance, expected), 'paired artifact chronology or blob provenance differs from Git history');
+  return expected;
+}
 function sourceIdentity(root, manifest, B) {
   const revision = command('git', ['rev-parse', 'HEAD'], root);
   const status = command('git', ['status', '--porcelain', '--untracked-files=normal'], root);
@@ -191,7 +243,7 @@ function sourceIdentity(root, manifest, B) {
   invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
-    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
+    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
 }
@@ -457,7 +509,8 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     invariant(command('git', ['status', '--porcelain', '--', trackedPath], Croot) === '', 'B-only artifact must be committed before C capture');
   }
   sourceIdentity(Broot, manifest, true);
-  if (mode === 'paired') sourceIdentity(Croot, manifest, false);
+  const CSource = mode === 'paired' ? sourceIdentity(Croot, manifest, false) : null;
+  const provenance = CSource ? resolvePairedProvenance(Croot, baselinePath, CSource.revision, manifest) : null;
   if (mode === 'paired') invariant(resolve(Bbinary) !== resolve(Cbinary), 'B and C require distinct binary output paths');
   const routeContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT || 'null') : null;
   const providerContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT || 'null') : null;
@@ -476,7 +529,7 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   const artifact = { schema: SCHEMA, mode, status: 'in_progress', started_at: new Date().toISOString(),
     manifest_sha256: hash(JSON.stringify(manifest)), schedule_sha256: manifest.schedule_sha256,
     B_only_sha256: frozenBaseline ? digest(baselinePath) : null,
-    B, C, C_route_contract: routeContract, C_provider_contract: providerContract,
+    B, C, provenance, C_route_contract: routeContract, C_provider_contract: providerContract,
     hardware: currentHardware, toolchain, go_build_environment: goBuildEnvironment,
     runtime_environment: { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' },
     conditions: manifest.conditions, diagnostics_before: diagnostics(), blocks: [] };
@@ -503,6 +556,10 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     artifact.status = 'complete';
     artifact.completed_at = new Date().toISOString();
     artifact.diagnostics_after = diagnostics();
+    if (C) {
+      invariant(sourceIdentity(Croot, manifest, false).revision === C.revision, 'C checkout changed during paired capture');
+      verifyPairedProvenance(artifact, frozenBaseline, manifest, Croot, baselinePath);
+    }
     const analysis = mode === 'B-only' ? analyzeBaseline(artifact, manifest) : analyzePaired(artifact, frozenBaseline, manifest);
     artifact.analysis = analysis;
     writeFileSync(output, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
@@ -537,14 +594,16 @@ function main() {
     if (!result.passed) process.exitCode = 1;
     return;
   }
-  if (action === 'compare-paired' && args.length === 3) {
-    const manifest = json(args[2]); validateManifest(manifest, process.cwd());
-    const result = analyzePaired(json(args[0]), json(args[1]), manifest);
+  if (action === 'compare-paired' && args.length === 5) {
+    const manifest = json(args[2]); validateManifest(manifest, args[3]);
+    const capture = json(args[0]), baseline = json(args[1]);
+    verifyPairedProvenance(capture, baseline, manifest, args[3], args[4]);
+    const result = analyzePaired(capture, baseline, manifest);
     console.log(JSON.stringify(result, null, 2));
     if (result.status !== 'passed') process.exitCode = 1;
     return;
   }
-  throw new Error('Usage: fidelity-paired-v2.mjs freeze-manifest OUT | record-B OUT MANIFEST B_BINARY B_ROOT | record-paired OUT MANIFEST B_BASELINE B_BINARY B_ROOT C_BINARY C_ROOT | compare-B B_CAPTURE MANIFEST | compare-paired PAIRED_CAPTURE B_CAPTURE MANIFEST');
+  throw new Error('Usage: fidelity-paired-v2.mjs freeze-manifest OUT | record-B OUT MANIFEST B_BINARY B_ROOT | record-paired OUT MANIFEST B_BASELINE B_BINARY B_ROOT C_BINARY C_ROOT | compare-B B_CAPTURE MANIFEST | compare-paired PAIRED_CAPTURE B_CAPTURE MANIFEST C_REPO B_BASELINE');
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
