@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -237,6 +239,60 @@ func TestMediaStrictParameterFiltering(t *testing.T) {
 		}
 		h.rt.release.Snapshot.Providers[id] = p
 	}
+	setProfile := func(h *harness, defaults map[string]json.RawMessage) {
+		profile, err := connectors.LookupProfile("compatible-chat", "1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"a", "b"} {
+			id, p := mediaProvider(t, h, name)
+			p.ProfileID, p.ProfileRevision = profile.ID, profile.Revision
+			p.OperationDefaults = map[string]connectors.DefaultSet{media.OpImageGeneration: {
+				Dialect: profile.OperationDialect(media.OpImageGeneration), Values: defaults,
+			}}
+			h.rt.release.Snapshot.Providers[id] = p
+		}
+	}
+	t.Run("explicit native null is a supplied parameter", func(t *testing.T) {
+		h := newMediaHarness(t)
+		setSupported(h, "a", `"prompt"`)
+		setSupported(h, "b", `"prompt"`)
+		setProfile(h, nil)
+		resp, decoded := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
+			[]byte(`{"model":"team-chat","prompt":"photo","n":null}`),
+			map[string]string{routingHeader: `{"require_parameters":true}`})
+		if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "upstream_unavailable" || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("native null escaped parameter filter: status=%d calls=%d body=%v", resp.StatusCode, h.mock.count("a")+h.mock.count("b"), decoded)
+		}
+	})
+	t.Run("profile default is an effective parameter", func(t *testing.T) {
+		h := newMediaHarness(t)
+		setSupported(h, "a", `"prompt"`)
+		setSupported(h, "b", `"prompt"`)
+		setProfile(h, map[string]json.RawMessage{"quality": json.RawMessage(`"high"`)})
+		resp, decoded := mediaRequest(t, h, http.MethodPost, "/v1/images/generations",
+			[]byte(`{"model":"team-chat","prompt":"photo"}`),
+			map[string]string{routingHeader: `{"require_parameters":true}`})
+		if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "upstream_unavailable" || h.mock.count("a")+h.mock.count("b") != 0 {
+			t.Fatalf("default escaped parameter filter: status=%d calls=%d body=%v", resp.StatusCode, h.mock.count("a")+h.mock.count("b"), decoded)
+		}
+	})
+	t.Run("staged file bytes are not a metadata parameter", func(t *testing.T) {
+		h := newMediaHarness(t)
+		setSupported(h, "a", `"prompt"`)
+		setSupported(h, "b", `"prompt"`)
+		setProfile(h, nil)
+		h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"created":1,"data":[{"b64_json":"iVBORw=="}]}`)
+		})
+		body, contentType := imageEditBody(t)
+		resp, decoded := mediaRequest(t, h, http.MethodPost, "/v1/images/edits", body,
+			map[string]string{"Content-Type": contentType, routingHeader: `{"require_parameters":true}`})
+		if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 {
+			t.Fatalf("staged image became metadata parameter: status=%d calls=%d body=%v", resp.StatusCode, h.mock.count("a"), decoded)
+		}
+	})
 	t.Run("unsupported supplied control rejects before dispatch", func(t *testing.T) {
 		h := newMediaHarness(t)
 		setSupported(h, "a", `"prompt"`)

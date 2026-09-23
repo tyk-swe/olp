@@ -94,12 +94,29 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 		return call, effective, failure
 	}
 	if !multipart {
-		// Source members remain raw JSON, including native null, exact numbers,
-		// arrays and schema definitions. Only the authorized model is replaced.
-		fields["model"], _ = json.Marshal(cfg.Model(model))
-		body, err := json.Marshal(fields)
-		if err != nil {
-			return nil, nil, invalidMedia("The configured media body could not be encoded.")
+		// The validated OIF document owns source order and native value bytes.
+		// Defaults and serving identity are explicit overlays; the detached
+		// typed request remains metadata for accounting and response decoding.
+		modelValue, _ := json.Marshal(cfg.Model(model))
+		var body []byte
+		if source := request.SourceDocument(); source.Valid() {
+			changes := make([]oif.Change, 0, len(applied)+1)
+			for _, name := range slices.Sorted(maps.Keys(applied)) {
+				changes = append(changes, oif.Change{Pointer: oif.Pointer("", name), Value: string(applied[name]), Origin: oif.ProviderDefault, Reason: "declared absent-only media default"})
+			}
+			changes = append(changes, oif.Change{Pointer: "/model", Value: string(modelValue), Origin: oif.IdentityBinding, Reason: "selected provider model"})
+			effectiveSource, err := oif.Apply(source, changes)
+			if err != nil {
+				return nil, nil, invalidMedia("The configured media body could not be encoded.")
+			}
+			body = effectiveSource.Bytes()
+		} else {
+			fields["model"] = modelValue
+			var err error
+			body, err = json.Marshal(fields)
+			if err != nil {
+				return nil, nil, invalidMedia("The configured media body could not be encoded.")
+			}
 		}
 		call, failure := Encode(effective, cfg.Kind, cfg.Model(model))
 		if failure != nil {
@@ -124,6 +141,53 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 		}
 		call.Fields = append(call.Fields, added...)
 	}
+	return call, effective, nil
+}
+
+// EncodeStrictConfigured keeps the caller's accepted multipart member order
+// and exact text values. Only the model binding and declared absent-only
+// defaults may change; the existing parser/spool still own all bytes.
+func EncodeStrictConfigured(request *Request, cfg connectors.Config, model string) (*UpstreamCall, *Request, *Error) {
+	call, effective, failure := EncodeConfigured(request, cfg, model)
+	if failure != nil || call == nil || len(call.Fields) == 0 {
+		return call, effective, failure
+	}
+	if request.SourceNormalized || len(request.SourceParts) == 0 {
+		return nil, nil, configuredFailure("multipart", "has a caller source that cannot be preserved exactly")
+	}
+	defaults, _, err := cfg.DefaultsFor(request.Op, model)
+	if err != nil {
+		return nil, nil, invalidMedia(err.Error())
+	}
+	fields := make([]Field, 0, len(request.SourceParts)+len(defaults))
+	seen := map[string]bool{}
+	for _, source := range request.SourceParts {
+		field := Field{Name: source.Name, Raw: source.Raw}
+		if source.Text != nil {
+			text := *source.Text
+			if field.Name == "model" {
+				text = cfg.Model(model)
+			}
+			field.Text = &text
+		}
+		if source.File != nil {
+			part := *source.File
+			field.File = &part
+		}
+		fields = append(fields, field)
+		seen[field.Name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(defaults)) {
+		if seen[name] || seen[name+"[]"] {
+			continue
+		}
+		added, failure := configuredMultipartFields(name, defaults[name])
+		if failure != nil {
+			return nil, nil, failure
+		}
+		fields = append(fields, added...)
+	}
+	call.Fields = fields
 	return call, effective, nil
 }
 

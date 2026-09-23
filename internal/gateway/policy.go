@@ -110,6 +110,12 @@ func applySlotRules(x *execution, rules []contentpolicy.CompiledRule, phase stri
 }
 
 func (s *Server) enforceMediaInput(x *execution, request *media.Request) *Error {
+	if x.strict() {
+		// Every strict target was checked against its actual effective native
+		// call during selection. Mutating this detached typed adapter would not
+		// mutate the immutable outbound OIF source.
+		return nil
+	}
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
