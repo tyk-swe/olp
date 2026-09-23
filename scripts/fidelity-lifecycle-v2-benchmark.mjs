@@ -57,6 +57,24 @@ export function verifyCandidateLineage({ methodAncestor, productAncestor, baseli
     throw new Error('Pre-candidate method/reference ancestry or strict product change missing');
   }
 }
+export function selectEvidenceAncestor(head, baselineBlob, budgetBlob, candidates) {
+  const found = candidates.find((item) => item.commit !== head &&
+    item.baselineBlob === baselineBlob && item.budgetBlob === budgetBlob);
+  if (!found) throw new Error('No strict ancestor commit contains the exact B capture and budget');
+  return found.commit;
+}
+function evidenceAncestor() {
+  const head = command('git', ['rev-parse', 'HEAD']);
+  const baselineBlob = command('git', ['rev-parse', `HEAD:${evidencePaths.baseline}`]);
+  const budgetBlob = command('git', ['rev-parse', `HEAD:${evidencePaths.budget}`]);
+  const commits = command('git', ['rev-list', 'HEAD', '--', evidencePaths.budget]).split('\n').filter(Boolean);
+  const candidates = commits.map((commit) => {
+    const check = spawnSync('git', ['rev-parse', `${commit}:${evidencePaths.baseline}`, `${commit}:${evidencePaths.budget}`], { encoding: 'utf8' });
+    const [b, u] = check.status === 0 ? check.stdout.trim().split('\n') : [];
+    return { commit, baselineBlob: b, budgetBlob: u };
+  });
+  return selectEvidenceAncestor(head, baselineBlob, budgetBlob, candidates);
+}
 function committedClean(path) {
   if (!existsSync(path) || !command('git', ['ls-files', '--error-unmatch', path]) || command('git', ['status', '--short', '--', path]) !== '') {
     throw new Error(`Committed clean evidence required: ${path}`);
@@ -162,6 +180,7 @@ function record(strict) {
   const source = command('git', ['rev-parse', 'HEAD']);
   const workingTree = command('git', ['status', '--short']);
   if (workingTree !== '') throw new Error('A clean source worktree is required before reserving lifecycle evidence');
+  let baselineEvidenceCommit = null;
   if (strict) {
     committedClean(evidencePaths.baseline);
     committedClean(evidencePaths.budget);
@@ -176,6 +195,7 @@ function record(strict) {
     verifyCandidateLineage({ methodAncestor: isAncestor(methodCommit), productAncestor: isAncestor(strictProductCommit),
       baselineAncestor: isAncestor(b.artifact.source_revision),
       productDiff: Boolean(command('git', ['diff', '--name-only', historicalProduct, 'HEAD', '--', 'internal/gateway/response_contract.go'])) });
+    baselineEvidenceCommit = evidenceAncestor();
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY !== '{"mode":"strict"}') throw new Error('Explicit strict route fidelity required');
   } else {
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY) throw new Error('Historical B reference must use the legacy route');
@@ -201,6 +221,7 @@ function record(strict) {
     const artifact = {
       schema, contract, started_at: startedAt, completed_at: new Date().toISOString(),
       source_revision: source, working_tree: workingTree,
+      baseline_evidence_commit: baselineEvidenceCommit,
       reference_product_diff: strict ? null : referenceProductDiff(),
       harness_sha256: hash(harness), frozen_harness_sha256: hash(frozenHarness), runner_sha256: hash(runner),
       historical_baseline_sha256: hash(historicalBaseline), historical_budget_sha256: hash(historicalBudget),
@@ -221,6 +242,7 @@ function record(strict) {
     let partialRuns = [];
     try { partialRuns = parseRuns(result?.stdout ?? ''); } catch { /* raw output is preserved below */ }
     completeCapture(path, captureID, 'failed', { schema, contract, source_revision: source, started_at: startedAt,
+      baseline_evidence_commit: baselineEvidenceCommit,
       completed_at: new Date().toISOString(), reason: error.message, exit_status: result?.status ?? null,
       signal: result?.signal ?? null, partial_runs: partialRuns, raw_output: result?.stdout ?? '', raw_error: result?.stderr ?? '',
       system_load: { before: loadBefore, after: optional('/proc/loadavg') } });
@@ -267,6 +289,7 @@ export function freeze(baseline, historical, captureSHA) {
 }
 export function compare(candidate, budget) {
   if (candidate.schema !== schema || budget.schema !== budgetSchema || !isDeepStrictEqual(candidate.contract, { mode: 'strict' }) || candidate.working_tree !== '') throw new Error('Clean strict lifecycle-v2 candidate required');
+  if (!/^[0-9a-f]{40}$/.test(candidate.baseline_evidence_commit ?? '')) throw new Error('Missing pre-candidate B evidence commit');
   if (candidate.source_revision === budget.baseline.source_revision || candidate.harness_sha256 !== budget.harness_sha256 || candidate.runner_sha256 !== budget.runner_sha256 || candidate.frozen_harness_sha256 !== budget.frozen_harness_sha256 || candidate.historical_baseline_sha256 !== budget.historical_baseline_sha256 || candidate.historical_budget_sha256 !== budget.historical_budget_sha256) throw new Error('Fixture, historical anchor or measured source changed');
   if (candidate.setup_sha256 !== budget.expected_candidate_setup_sha256) throw new Error('Unreviewed candidate setup helper changed');
   const candidateMeasurement = measurement(candidate);
@@ -310,6 +333,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       verifyBaselineReceipt(readCapture(evidencePaths.baseline), budget, hash(evidencePaths.baseline));
       const c = readCapture(evidencePaths.candidate);
       if (c.phase !== 'complete') throw new Error('Failed or partial C capture remains failed');
+      if (c.artifact.source_revision !== command('git', ['rev-parse', 'HEAD']) || c.artifact.baseline_evidence_commit !== evidenceAncestor()) throw new Error('C source or pre-candidate B evidence ancestry changed');
       const failures = compare(c.artifact, budget);
       console.log(JSON.stringify({ passed: failures.length === 0, failures }, null, 2)); if (failures.length) process.exitCode = 1;
     } else throw new Error('Usage: record-baseline | freeze | record-strict | compare (fixed lifecycle-v2 paths only)');

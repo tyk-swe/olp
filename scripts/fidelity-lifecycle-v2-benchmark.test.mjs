@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { names } from './fidelity-lifecycle-benchmark.mjs';
 import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare, candidateSetupSHA256,
-  evidencePaths, reserveCapture, completeCapture, readCapture, verifyBaselineReceipt, verifyCandidateLineage } from './fidelity-lifecycle-v2-benchmark.mjs';
+  evidencePaths, reserveCapture, completeCapture, readCapture, verifyBaselineReceipt, verifyCandidateLineage,
+  selectEvidenceAncestor } from './fidelity-lifecycle-v2-benchmark.mjs';
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const syntheticCaptureSHA = 'a'.repeat(64);
 const originalBudget = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'));
@@ -44,7 +45,8 @@ function historical() {
   return structuredClone(originalBudget);
 }
 function candidate(a) {
-  return { ...structuredClone(a), contract: { mode: 'strict' }, source_revision: 'candidate', reference_product_diff: null, setup_sha256: candidateSetupSHA256 };
+  return { ...structuredClone(a), contract: { mode: 'strict' }, source_revision: 'candidate', reference_product_diff: null,
+    setup_sha256: candidateSetupSHA256, baseline_evidence_commit: 'b'.repeat(40) };
 }
 test('the complete v2 native inventory and strict candidate compare to pre-change limits', () => {
   const b = baseline();
@@ -177,4 +179,24 @@ test('candidate requires all method, historical B, and strict product ancestry',
   for (const field of Object.keys(complete)) {
     assert.throws(() => verifyCandidateLineage({ ...complete, [field]: false }), /ancestry or strict product change/);
   }
+});
+test('B artifact and budget must exist with exact blobs in a strict ancestor of C', () => {
+  const head = 'c'.repeat(40);
+  const older = 'b'.repeat(40);
+  const bBlob = 'b-blob';
+  const budgetBlob = 'budget-blob';
+  assert.equal(selectEvidenceAncestor(head, bBlob, budgetBlob, [
+    { commit: head, baselineBlob: bBlob, budgetBlob },
+    { commit: older, baselineBlob: bBlob, budgetBlob }
+  ]), older);
+  assert.throws(() => selectEvidenceAncestor(head, bBlob, budgetBlob,
+    [{ commit: head, baselineBlob: bBlob, budgetBlob }]), /strict ancestor/);
+  assert.throws(() => selectEvidenceAncestor(head, bBlob, budgetBlob,
+    [{ commit: older, baselineBlob: 'different', budgetBlob }]), /strict ancestor/);
+  assert.throws(() => selectEvidenceAncestor(head, bBlob, budgetBlob,
+    [{ commit: older, baselineBlob: bBlob, budgetBlob: 'different' }]), /strict ancestor/);
+  const budget = freeze(baseline(), historical(), syntheticCaptureSHA);
+  const c = candidate(baseline());
+  delete c.baseline_evidence_commit;
+  assert.throws(() => compare(c, budget), /B evidence commit/);
 });
