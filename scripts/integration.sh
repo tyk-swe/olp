@@ -55,7 +55,9 @@ OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-go-local >/dev/null
 export OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-go-local@$(docker port "$restore_valkey" 6379/tcp)/0"
-go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration ./internal/gateway ./internal/providers ./internal/media
+# The lifecycle-v2 timed recorder is write-once qualification, invoked only by
+# its fixed evidence runner. Its public semantic smoke still runs in this suite.
+go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v -skip '^TestFidelityLifecycleV2Performance$' ./tests/integration ./internal/gateway ./internal/providers ./internal/media
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
