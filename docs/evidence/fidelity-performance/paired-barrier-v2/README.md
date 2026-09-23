@@ -22,6 +22,8 @@ temporary PostgreSQL databases on the same local PostgreSQL 18.6/no-TLS
 server and stay running with warmed HTTP connections while timed blocks are
 serialized. Compilation, setup and one checked warmup per subrun are excluded
 from each 24-workflow measurement.
+The C measurement loop and its SDK-equivalent workflow oracle must retain the
+exact hashes committed with this method before B-only timing.
 
 [criteria.json](criteria.json) is mechanically derived from the original three
 B repetitions and original frozen limits, before any v2 C observation. For

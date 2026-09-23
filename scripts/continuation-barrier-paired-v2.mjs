@@ -236,6 +236,10 @@ const buildEnvironment = () => command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOAR
 const sourceRevision = (cwd) => git(['rev-parse', 'HEAD'], cwd);
 const clean = (cwd) => check(git(['status', '--short'], cwd) === '', `Dirty checkout: ${cwd}`);
 const tracked = (cwd, path) => git(['ls-files', '--error-unmatch', path], cwd);
+export function verifyCandidateOracle(methodRevision, hashes = { harness: fileHash(candidateHarness), workflow: fileHash('tests/integration/continuation_candidate_benchmark_test.go') }) {
+  check(hashes.harness === gitBlobHash(methodRevision, candidateHarness) && hashes.workflow === gitBlobHash(methodRevision, 'tests/integration/continuation_candidate_benchmark_test.go'), 'Candidate measurement or SDK-equivalent oracle changed after method freeze');
+  return true;
+}
 
 function verifyReferenceCheckout(root) {
   clean(root);
@@ -328,6 +332,7 @@ async function capture(mode, output, baselinePath) {
     check(baseline.mode === 'baseline' && baseline.analysis?.passed && baseline.criteria_sha256 === fileHash(criteriaPath) && baseline.runner_sha256 === fileHash(runnerPath) && baseline.reference_harness_sha256 === fileHash(referenceHarness), 'Frozen B-only baseline or method is unavailable/failed');
     validateArtifact(baseline, 'baseline', criteria);
     check(baseline.method_revision && baseline.method_revision !== sourceRevision(process.cwd()), 'C must follow the committed pre-candidate method');
+    verifyCandidateOracle(baseline.method_revision);
     const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', baseline.method_revision, 'HEAD']);
     check(ancestor.status === 0, 'Frozen B-only method is not an ancestor of candidate C');
     const changedProduct = git(['diff', '--name-only', baseline.method_revision, 'HEAD']).split('\n').some((path) => path.startsWith('internal/') && path.endsWith('.go'));
@@ -401,6 +406,7 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
   if (mode === 'paired') {
     const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', artifact.method_revision, artifact.candidate_revision]);
     check(ancestor.status === 0, 'Candidate does not descend from frozen method');
+    verifyCandidateOracle(artifact.method_revision, { harness: artifact.candidate_harness_sha256, workflow: artifact.candidate_workflow_sha256 });
     check(git(['diff', '--name-only', artifact.method_revision, artifact.candidate_revision]).split('\n').some((path) => path.startsWith('internal/') && path.endsWith('.go')), 'No candidate product implementation change after method');
   }
   check(isDeepStrictEqual(artifact.schedule, schedule(criteria)), 'Schedule changed');

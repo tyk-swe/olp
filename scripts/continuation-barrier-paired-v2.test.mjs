@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
-  analyze, deriveCriteria, schedule, validateInventory, validateRun, verifyCriteria,
+  analyze, deriveCriteria, schedule, validateInventory, validateRun, verifyCandidateOracle, verifyCriteria,
   blocksPerStratum, candidateHarness, criteriaPath, primaryMetrics, referencePaths, samples, strata
 } from './continuation-barrier-paired-v2.mjs';
 
@@ -170,4 +172,13 @@ test('criteria mutation cannot reset a frozen margin or erase a comparison', () 
   const erased = structuredClone(criteria);
   delete erased.margins['small/c1/reference']['workflow-p99-us'];
   assert.throws(() => verifyCriteria(erased));
+});
+
+test('post-baseline candidate harness or SDK-equivalent oracle edits are refused', () => {
+  const method = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+  const harness = hash(candidateHarness), workflow = hash('tests/integration/continuation_candidate_benchmark_test.go');
+  assert.equal(verifyCandidateOracle(method), true);
+  assert.throws(() => verifyCandidateOracle(method, { harness: 'changed', workflow }));
+  assert.throws(() => verifyCandidateOracle(method, { harness, workflow: 'changed' }));
 });
