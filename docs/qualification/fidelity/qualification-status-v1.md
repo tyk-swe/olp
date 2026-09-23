@@ -1,16 +1,15 @@
 # Qualification status receipt, version 1
 
 This status belongs to the [compatibility matrix](compatibility-matrix-v1.json)
-for product source `66a3ccb3fc737010a345d309ee280a541d4176f5`, with a
-docs-only evidence anchor at `2426aec0c6f6c39c1fcb48fdc8924b58f198862c`.
-It keeps three
-different units separate: matrix rows, scripted request outcomes, and timed
-benchmark workloads. The test receipts are [row-evidence-v1.md](row-evidence-v1.md)
-and the per-row source/run hashes in the JSON artifact. No paid provider calls
-or empirical model-quality trials were performed. This matrix was reassessed
-through the selected [public/SDK receipt](row-evidence-v1.md); no unqualified
-row was promoted. Benchmark revisions below update only scoped performance
-evidence and do not turn a failed frozen control into a pass.
+for locked product source `bc325da50c575803c771531dc4e3aab1ac203a53`.
+It keeps three units separate: matrix rows, scripted request outcomes, and
+timed benchmark workloads. The selected [public/SDK receipt](row-evidence-v1.md)
+ran at ancestor `66a3ccb3fc737010a345d309ee280a541d4176f5`; all 38
+pinned test-source hashes remain identical at the locked product, but the
+receipt does not claim an exact-head rerun. No unqualified row was promoted.
+No paid provider calls or empirical model-quality trials were performed.
+Later benchmark revisions provide scoped performance evidence without
+turning a failed frozen control into a pass.
 
 | Compatibility-row outcome | Frozen 47 | Additive 45 | Total 92 |
 | --- | ---: | ---: | ---: |
@@ -83,9 +82,10 @@ budgets. The `fa6e42f8` request-summary revision measured lower small/c1 CPU
 and allocations than `517455c3`, but failed three wall/latency limits. The
 isolated `66fb41f9` combination with an authorized one-statement submission
 lookup failed four limits, including large/c8 sampled heap, and remains
-unmerged. Neither capture qualifies G6; source changes after `fa6e42f8`
-require another final-source comparison. A one-iteration semantic smoke or a
-complete workload count is not a timed pass.
+unmerged. These historical failed captures remain part of the denominator;
+the newer versioned paired barrier result below does not rewrite their
+unchanged v1 budgets. A one-iteration semantic smoke or a complete workload
+count is not a timed pass.
 
 The separate native [lifecycle-stress-v1 reference](../../evidence/fidelity-performance/lifecycle-stress-v1/README.md)
 has a frozen 4 MiB input/1 MiB slow content/64-duplex-event workload and
@@ -100,8 +100,27 @@ and legacy workload and numeric limit** at product source `38358293`. That is
 scoped scripted media/duplex evidence; it does not replace either old v1
 strict attempt, the original slow-relay control, or the failed encrypted
 continuation barrier. Rejected, incomplete and ambiguous workflows remain
-visible outside successful timing samples. Later product revisions require
-their own appropriate frozen comparison before an exact-head performance pass.
+visible outside successful timing samples.
+
+The [locked `bc325da5` final-source
+record](../../evidence/fidelity-performance/final-bc325-v2/README.md) adds
+four successful **scoped** local comparisons without changing those old
+results. Strict native lifecycle v2 passed 48 repetitions, 1,152 exact
+dispatches, 288 independent mapping/retrieval checks and 12 wrong-owner
+zero-dispatch negatives. Registered-profile stress v2 passed separately in
+strict and legacy modes, each with 36 repetitions, 288 workflows, 576 exact
+dispatches and three zero-dispatch negatives. Paired encrypted-barrier attempt
+2 passed its committed B-only reference and all candidate bounds over 128
+blocks, 18,432 B and 6,144 C workflows, 49,152 exact dispatches and zero
+rejects. The original barrier-v1 failures still fail their old limits.
+
+The exact-source [paired source r6
+attempt](../../evidence/fidelity-performance/source-paired-v2/README.md) is
+**invalid**, with zero complete paired blocks and an incomplete reservation
+journal. Its generic first-C-subrun oracle/effect/count error does not identify
+a cause or establish a source-cost pass. The registered attempt remains visible
+without selecting another timing sample. Thus G6 remains **open**, even though
+the lifecycle, stress and barrier v2 scopes passed.
 
 All 92 rows have `empirical_quality: unknown`. The
 [preregistered study](quality-plan.md) requires approved same-serving-identity
@@ -110,18 +129,24 @@ claim. Local scripted providers establish deterministic wire and effect
 behavior, not live quality, latency, billing or provider stability. Missing
 or inconclusive trials remain unknown rather than passing by default.
 
-## Gate disposition for the assessed matrix and later scoped benchmarks
+## #218 completion-gate crosswalk at the locked product
 
-G1 conservation and G2 complete-interaction have selected public positives,
-preserve-or-reject negatives, official next-turn clients and recovery checks.
-G3 breadth has scoped unary, media, durable, direct OpenAI/Azure realtime and
-Gemini duplex positives, while audio translation and strict Responses
-streaming background remain unavailable in the fixed inventory. G4
-configuration/security and G5 control
-plane have targeted public and browser evidence in their own receipts. G6
-performance remains open at the failed original-v1 and encrypted-barrier
-comparisons, despite the scoped registered-profile stress-v2 passes above;
-empirical model quality remains unknown by design without approved trials. G7
-requires the final integrated checks, additive inventory reconciliation,
-migration/rollback, and mandatory two-axis review. A gate is not marked passed
-merely because one positive tuple exists in this matrix.
+The [specification's G1–G7 gates](../../../OLP-implementation-spec.md) are
+broader than a positive compatibility row. This crosswalk states what is
+actually recorded at `bc325da5` and what remains for the final release audit.
+
+| Gate | Recorded scope | Disposition |
+| --- | --- | --- |
+| G1 conservation | [Frozen fixtures](baseline-validation.md), [source conservation](oif-source.md), and [public preserve-or-reject rows](row-evidence-v1.md). | Scoped evidence integrated; final counterexample audit pending. |
+| G2 complete interaction | [Native SDK](native-sdk.md), [negotiated continuation/recovery](continuation.md), and [paired barrier](../../evidence/fidelity-performance/paired-barrier-v2-attempt2/README.md). | Public next-turn and actionability evidence recorded; final exact-head audit pending. |
+| G3 operation breadth | [Unary operations](unary-operations.md), [strict media](media-strict.md), [durable resources](durable-lifecycle.md), and [realtime](strict-realtime.md). | Scoped positives; 40 matrix rows remain unavailable or unknown, and final breadth audit is pending. |
+| G4 configuration/security | [Provider profiles](../../provider-profiles.md), [native configuration storage](native-configuration-storage.md), and [route migration](strict-route-migration.md). | Targeted authority, policy, egress and migration evidence; final integrated audit pending. |
+| G5 usable control plane | [Configuration editors](console-configuration.md) and [inspector/playgrounds](console-interaction.md), including reviewed screenshots. | Targeted UI/API evidence; exact-head browser and CI checks pending. |
+| G6 quality/performance | [Final-source v2 captures](../../evidence/fidelity-performance/final-bc325-v2/README.md), [invalid source r6](../../evidence/fidelity-performance/source-paired-v2/README.md), immutable v1 failures and the [quality plan](quality-plan.md). | **Open:** no passing source r6 result; frozen v1 failures remain and empirical model quality is unknown. |
+| G7 sustainable delivery | [Extension demos](extension-demos.md), [mixed-version migration](strict-route-migration.md), the [release inventory](../../../deploy/release-inventory.json), and generated contracts. | Functional scope recorded; exact-head integration, SDK, recovery, browser/CI and two-axis review pending. |
+
+[#218](https://github.com/tyk-swe/olp/issues/218) remains open. The selected
+31-case public/SDK run was at ancestor `66a3ccb3`; final exact-head repository,
+service, recovery, SDK and browser checks, inventory reconciliation and the
+mandatory two-axis review must be reported separately. A passing matrix
+validator or one positive tuple does not complete a specification gate.

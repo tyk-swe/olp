@@ -1,10 +1,12 @@
 # Compatibility and evidence matrix, version 1
 
-The [machine-readable matrix](compatibility-matrix-v1.json) assesses product
-source `66a3ccb3fc737010a345d309ee280a541d4176f5` on 2026-09-23. Its
-evidence anchor `2426aec0c6f6c39c1fcb48fdc8924b58f198862c` is a
-docs-only descendant that pins the execution receipt in Git; no product or
-test source changed between those revisions. It maps
+The [machine-readable matrix](compatibility-matrix-v1.json) assesses locked
+product source `bc325da50c575803c771531dc4e3aab1ac203a53` on
+2026-09-23. Its 38 pinned test-source hashes match the selected public/SDK
+run at `66a3ccb3fc737010a345d309ee280a541d4176f5`; the original
+[execution receipt](row-evidence-v1.md) remains a historical run, not an
+exact-head rerun. The later product change does not promote any row status.
+The matrix maps
 **all 47 original inventory rows exactly once**, using the frozen whole-file
 and individual-row SHA-256 values, and records 45 later operation/profile/mode/
 client combinations separately. The frozen
@@ -20,9 +22,11 @@ result. The 18-fixture `tests/fixtures/reference-inventory.json` and
 | All 92 | 31 | 19 | 2 | 4 | 36 |
 
 These are **scoped deterministic contract statuses**. The 50 positive rows
-are the admitted/completed combinations actually exercised at their named
-fixture, profile revision and client boundary. Two rows record executed
-pre-dispatch incompatibility with zero provider work. Forty remain
+are the admitted/completed combinations exercised at their named fixture,
+profile revision and client boundary in the pinned `66a3ccb3` execution.
+Their named test bytes are unchanged at `bc325da5`, but this receipt does not
+claim a full exact-head rerun. Two rows record executed pre-dispatch
+incompatibility with zero provider work. Forty remain
 unqualified: four unavailable and 36 unknown. Neither a successful fixture
 nor a connectivity probe establishes provider-model intelligence parity, and
 no alternate profile removes a difficult frozen row from the denominator.
@@ -139,8 +143,8 @@ round trip.
 
 The [gate status receipt](qualification-status-v1.md) separates ledger counts
 from actual runtime violations, accepted-unknown outcomes, incomplete work,
-performance and quality evidence. In particular, the original frozen
-slow-stream relay budget, encrypted continuation barrier, and native
-lifecycle/media stress comparisons are independent of this matrix. No
-historical failed capture or frozen budget was rewritten to make these rows
-positive.
+performance and quality evidence. The [final-source performance
+record](../../evidence/fidelity-performance/final-bc325-v2/README.md) has
+scoped local lifecycle, stress and paired-barrier passes, but the source r6
+attempt is invalid and full G6 remains open. Original frozen v1 failures and
+budgets remain unchanged. No timed result promotes a compatibility row.
