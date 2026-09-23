@@ -30,11 +30,29 @@ func NewResolver(pool *pgxpool.Pool, installation string, keys *secrets.KeyRing)
 	return &Resolver{pool: pool, installation: installation, keys: keys}
 }
 
+// ResolveCurrent reads historical revisions and current authority through one
+// connection. READ COMMITTED already gives each SELECT a fresh snapshot, so
+// this read-only path does not need an explicit transaction round trip. A
+// secret expiring during resolution is now rejected at the secret SELECT's
+// statement time rather than remaining valid from the old BEGIN time.
+func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	defer conn.Release()
+	return r.resolve(ctx, conn, res, operation)
+}
+
 func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
+	return r.resolve(ctx, tx, res, operation)
+}
+
+func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
 	var providerID, providerName, providerState string
 	var providerProject *string
 	var configuration, models, slots []byte
-	err := tx.QueryRow(ctx,
+	err := query.QueryRow(ctx,
 		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text FROM olp_go.provider_revisions r JOIN olp_go.providers p ON p.id=r.provider_id WHERE r.id=$1",
 		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots, &providerName, &providerState, &providerProject)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -107,7 +125,7 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 
 	route := &runtime.Route{RevisionID: res.RouteRevisionID}
 	var operations, targets, policy, fidelity, contentPolicy []byte
-	err = tx.QueryRow(ctx,
+	err = query.QueryRow(ctx,
 		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy
          FROM olp_go.route_revisions v JOIN olp_go.routes r ON r.id=v.route_id WHERE v.id=$1`,
 		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
@@ -155,7 +173,7 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	var secret []byte
 	if res.CredentialID != nil {
 		var revoked bool
-		err = tx.QueryRow(ctx,
+		err = query.QueryRow(ctx,
 			"SELECT revoked_at IS NOT NULL FROM olp_go.provider_credentials WHERE id=$1",
 			*res.CredentialID).Scan(&revoked)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revoked) {
@@ -164,7 +182,7 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-		secret, err = r.keys.Read(ctx, tx, r.installation, *res.CredentialID, "provider_credential")
+		secret, err = r.keys.Read(ctx, query, r.installation, *res.CredentialID, "provider_credential")
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
 		}

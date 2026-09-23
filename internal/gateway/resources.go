@@ -119,12 +119,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	tx, err := s.Resources.Begin(ctx)
-	if err != nil {
-		return nil, nil, serverError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
-	}
-	defer tx.Rollback(ctx)
-	provider, route, slot, secret, err := s.Resolver.Resolve(ctx, tx, res, operation)
+	provider, route, slot, secret, err := s.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return nil, nil, pinUnavailable()
 	}
