@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '../playwright';
 import { waitForRoutePublication } from '../journeys/fixtures';
+import { signInGatewayOwner as signIn } from './signIn';
 
 const fixture = 'http://127.0.0.1:4188';
 const nativeFixture = 'http://127.0.0.1:4189';
@@ -22,34 +23,6 @@ type ManagementBody = Record<string, unknown> & {
   secret: string;
   items: { id: string }[];
 };
-
-async function signIn(page: Page) {
-  await page.goto('/');
-  await expect(page).toHaveURL(/\/(setup|login)(\?.*)?$/);
-  if (
-    await page.getByRole('button', { name: 'Create owner account' }).isVisible()
-  ) {
-    await page.getByLabel('Display name').fill('Owner');
-    await page.getByLabel('Work email').fill('owner@example.com');
-    await page
-      .getByLabel('Password', { exact: true })
-      .fill('a long browser test password');
-    await page
-      .getByLabel('Confirm password')
-      .fill('a long browser test password');
-    await page
-      .getByLabel('Setup token')
-      .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
-    await page.getByRole('button', { name: 'Create owner account' }).click();
-  } else {
-    await page.getByLabel('Email').fill('owner@example.com');
-    await page
-      .getByLabel('Password', { exact: true })
-      .fill('a long browser test password');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-  }
-  await expect(page).toHaveURL(/\/$/);
-}
 
 async function management(
   page: Page,
@@ -408,7 +381,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   await page
     .getByRole('button', { name: 'Submit ordered tool results' })
     .click();
-  await expect(page.locator('.assistant-result pre')).toHaveText(
+  await expect(page.locator('.assistant-result > pre')).toHaveText(
     'Both tools completed.'
   );
   await expect(page.getByText(secret, { exact: true })).toHaveCount(0);
