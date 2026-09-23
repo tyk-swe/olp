@@ -1,13 +1,16 @@
 # Qualification status receipt, version 1
 
 This status belongs to the [compatibility matrix](compatibility-matrix-v1.json)
-assessed at `6f1aa0eb2d145b24e9171f001ca22cba6155d477`. It keeps three
+for product source `66a3ccb3fc737010a345d309ee280a541d4176f5`, with a
+docs-only evidence anchor at `2426aec0c6f6c39c1fcb48fdc8924b58f198862c`.
+It keeps three
 different units separate: matrix rows, scripted request outcomes, and timed
 benchmark workloads. The test receipts are [row-evidence-v1.md](row-evidence-v1.md)
 and the per-row source/run hashes in the JSON artifact. No paid provider calls
-or empirical model-quality trials were performed. Later benchmark revisions
-below update only scoped performance evidence; they do not promote a row in
-the `6f1aa0eb` matrix or make its historical assessment current-head evidence.
+or empirical model-quality trials were performed. This matrix was reassessed
+through the selected [public/SDK receipt](row-evidence-v1.md); no unqualified
+row was promoted. Benchmark revisions below update only scoped performance
+evidence and do not turn a failed frozen control into a pass.
 
 | Compatibility-row outcome | Frozen 47 | Additive 45 | Total 92 |
 | --- | ---: | ---: | ---: |

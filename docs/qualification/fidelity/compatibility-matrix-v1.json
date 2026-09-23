@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "assessed_revision": "6f1aa0eb2d145b24e9171f001ca22cba6155d477",
+  "assessed_revision": "2426aec0c6f6c39c1fcb48fdc8924b58f198862c",
   "frozen_inventory": {
     "path": "tests/fixtures/fidelity/v1/inventory.json",
     "sha256": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd",
@@ -16,7 +16,7 @@
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "anthropic-js-tool-workflow": {
@@ -27,7 +27,7 @@
       "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "anthropic-python-tool-workflow": {
@@ -38,7 +38,7 @@
       "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "sdk-js-smoke": {
@@ -49,7 +49,7 @@
       "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "sdk-python-smoke": {
@@ -60,7 +60,7 @@
       "receipt_sha256": "566471c0de4bdaf551ca57363e80794736fe546701ce265a0e2643dbc2a8d14b",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "d62b0eb12628d05fc84f0dcfec32f7240bfdec37",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-vector-storage": {
@@ -71,7 +71,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-sparse-multivector": {
@@ -82,7 +82,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-hosted-embeddings": {
@@ -93,7 +93,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-rerank": {
@@ -104,7 +104,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-count-classification": {
@@ -115,7 +115,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "pinned-vector-sdk": {
@@ -126,7 +126,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "qualified-unary": {
@@ -137,7 +137,7 @@
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "native-media-source": {
@@ -148,7 +148,7 @@
       "receipt_sha256": "60f82c4303c695f50fca2207359c9d47dd25b8287f7191e081866f75206260e1",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "matrix-assessment": {
@@ -171,7 +171,7 @@
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "zero-dispatch-refusal"
     },
     "anthropic-document-public": {
@@ -179,10 +179,10 @@
       "source": "tests/integration/strict_generation_test.go#TestStrictPublicAnthropicDocumentAssetIdentity",
       "source_sha256": "a40e70baca4fe63f6f454312d16ea2ed5b1000cfb41f794180b01e9f6c3fd0c5",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-media-public": {
@@ -190,10 +190,10 @@
       "source": "tests/integration/strict_media_test.go#TestStrictMediaPublicNativeSourcesAndAssets",
       "source_sha256": "845aa8b9293d1a50fcf8073a8064c64ebc7553efd821d90ece4cbb2ce87aecb9",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-video-public": {
@@ -201,10 +201,10 @@
       "source": "tests/integration/strict_video_test.go#TestStrictVideoPublicOriginalAssetsAndDurableIdentity",
       "source_sha256": "33a74a06bf791620d89b9e1268ea9dcac682935dcf254d3c28ed56a2c80af7cd",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-video-sdk-harness": {
@@ -212,10 +212,10 @@
       "source": "tests/integration/strict_video_sdk_test.go#TestStrictVideoPinnedOpenAISDKs",
       "source_sha256": "e8160a413b9fe60694fcde09c85dde609c569b5feb36554fa113057044d65845",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-video-sdk-js": {
@@ -223,10 +223,10 @@
       "source": "tests/sdk-smoke/strict-video.mjs",
       "source_sha256": "455554e0abadd27b0d405b504d29fa4ffa2a460e1068ce47ba8dfa8a7bfdfe17",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-video-sdk-python": {
@@ -234,32 +234,32 @@
       "source": "tests/sdk-smoke-python/strict_video.py",
       "source_sha256": "3ced9e6a64f37014db0af85ef0de92f032cb81e8eb678a056f59914f26ca1d60",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-realtime-public": {
       "kind": "test",
       "source": "tests/integration/strict_realtime_test.go#TestStrictRealtimeNativeIdentityAndRefusals",
-      "source_sha256": "dfe66ffad81e1036e2bc050b0e42ed4cfa3b7dad17a2be0d8f1353d4f97b2ece",
+      "source_sha256": "f538beea80953cdc9a53ec1f5c48d1324841e3ec70ef8a8ab7945c48bfb5a6eb",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-realtime-terminal": {
       "kind": "test",
       "source": "tests/integration/strict_realtime_terminal_test.go#TestStrictRealtimeNormalCloseContracts",
-      "source_sha256": "9aece52fe5a898755e842cbb592202708f7e1fa6ef993ffeed3e6f4d2d5823ad",
+      "source_sha256": "63b4ec456bfc401372b0a8df35f92b6eb5883e84ea8a5f117bac70af9462ea2e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "incomplete-control"
     },
     "strict-batch-public": {
@@ -267,10 +267,10 @@
       "source": "tests/integration/strict_durable_test.go#TestStrictBatchSourcePartialFilesAndLifecycle",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-batch-sdk-harness": {
@@ -278,10 +278,10 @@
       "source": "tests/integration/strict_durable_test.go#TestStrictBatchPinnedOpenAISDKs",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-batch-sdk-js": {
@@ -289,10 +289,10 @@
       "source": "tests/sdk-smoke/durable-batch.mjs",
       "source_sha256": "73ef95ca5110a742e6b1f70d009bcb98bb1ebdbcb329c274c8e5b2a5c30e9bb3",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-batch-sdk-python": {
@@ -300,10 +300,10 @@
       "source": "tests/sdk-smoke-python/durable_batch.py",
       "source_sha256": "a38033a81dc2daddf8d67b0c026275f18fac8a55c3b697367c4bddb8cc692982",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "strict-background-unary": {
@@ -311,43 +311,43 @@
       "source": "tests/integration/strict_durable_test.go#TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork",
       "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-interactions-public": {
       "kind": "test",
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle",
-      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "source_sha256": "98a8cf87e46ce98141507d6c31b21270e06aba20b730c4a789940b1e332aa85e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-live-public": {
       "kind": "test",
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLivePublicNativeAudioAndSetupAffinity",
-      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "source_sha256": "98a8cf87e46ce98141507d6c31b21270e06aba20b730c4a789940b1e332aa85e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-sdk-harness": {
       "kind": "test",
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecyclePinnedOfficialSDKsThroughTrustedTLS",
-      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "source_sha256": "98a8cf87e46ce98141507d6c31b21270e06aba20b730c4a789940b1e332aa85e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-sdk-js": {
@@ -355,10 +355,10 @@
       "source": "tests/sdk-smoke/gemini-lifecycle.mjs",
       "source_sha256": "7c2c3a73eca0104a7e6bd97196ea4f9a0e72737acfb0665193ca4b18e9c07036",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-sdk-python": {
@@ -366,21 +366,21 @@
       "source": "tests/sdk-smoke-python/gemini_lifecycle.py",
       "source_sha256": "4ccf081953cb32a6f546cfe3afdbbeacb4b9708dd55837ce22c81c5947c474c5",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "gemini-live-resumption-refusal": {
       "kind": "test",
       "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWork",
-      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "source_sha256": "98a8cf87e46ce98141507d6c31b21270e06aba20b730c4a789940b1e332aa85e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "zero-dispatch-refusal"
     },
     "gemini-background-stream": {
@@ -388,10 +388,10 @@
       "source": "tests/integration/gemini_background_stream_test.go#TestGeminiBackgroundStreamResumesSameOwnedWorkAfterReaderLoss",
       "source_sha256": "8d7351129cdc9cdfd36e7a58314715c807272e0e3a5d219d9f5b2ff7baf3cc84",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "negotiated-sdk-js-public": {
@@ -399,10 +399,10 @@
       "source": "tests/integration/continuation_sdk_test.go#TestNegotiatedContinuationOfficialJavaScriptSDK",
       "source_sha256": "7f975a374ebebc92e09fe96798838daf9cfa8684dc0dc5bca213b8d58e9b847e",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "negotiated-sdk-js-script": {
@@ -410,10 +410,10 @@
       "source": "tests/sdk-smoke/negotiated-continuation.mjs",
       "source_sha256": "e50ece24bc7bb27f920bacfb1c2eaab63e44f7ba32d016fa163b056159dd4d7c",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "negotiated-sdk-python-public": {
@@ -421,10 +421,10 @@
       "source": "tests/integration/continuation_python_sdk_test.go#TestNegotiatedContinuationOfficialPythonSDK",
       "source_sha256": "94ff7725af0420480c90af1dbaf5b7e99ef09eb5beca54fe6e631976b44654d4",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     },
     "negotiated-sdk-python-script": {
@@ -432,10 +432,10 @@
       "source": "tests/sdk-smoke-python/negotiated_continuation.py",
       "source_sha256": "aa855862a378499492d5cbeb562dce3356872743f061340ae447ece6a5dd3dfb",
       "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
-      "receipt_sha256": "a28e719bf53bead450f19ba7ee629187b774c7de018e4104b328bcc76fd3843e",
+      "receipt_sha256": "232aaefffd028bf0323c6e6a0dd1faded9187cf065c6d1ad2f2c1b1a053bfe96",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "7d8f4106d8a27abf2606661468ad1057e82b8c13",
+      "run_revision": "66a3ccb3fc737010a345d309ee280a541d4176f5",
       "outcome": "positive"
     }
   },
