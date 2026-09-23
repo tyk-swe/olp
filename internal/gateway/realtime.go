@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -69,6 +70,18 @@ func (s *realtimeResponseState) add(id string) {
 	s.active[id] = struct{}{}
 }
 
+func decodeRealtimeEvent(data []byte, event any, strict bool) bool {
+	if strict {
+		// Only an unambiguous native event may discharge a strict response.
+		// OIF rejects duplicate members and invalid Unicode within the frame.
+		doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
+		if err != nil || doc.Root().Kind() != oif.Object {
+			return false
+		}
+	}
+	return json.Unmarshal(data, event) == nil
+}
+
 func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []byte) {
 	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
 		s.unknown = true
@@ -77,7 +90,7 @@ func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []by
 	var event struct {
 		Type string `json:"type"`
 	}
-	if json.Unmarshal(data, &event) != nil {
+	if !decodeRealtimeEvent(data, &event, true) {
 		s.unknown = true
 		return
 	}
@@ -105,13 +118,13 @@ type realtimeFrame struct {
 	} `json:"response"`
 }
 
-func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte) *openai.Usage {
+func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *openai.Usage {
 	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
 		s.unknown = true
 		return nil
 	}
 	var event realtimeFrame
-	if json.Unmarshal(data, &event) != nil {
+	if !decodeRealtimeEvent(data, &event, strict) {
 		s.unknown = true
 		return nil
 	}
@@ -549,7 +562,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 			}
 			if inspect {
 				usageMu.Lock()
-				if u := responses.providerFrame(typ, data); u != nil {
+				if u := responses.providerFrame(typ, data, x.strict()); u != nil {
 					usage.InputTokens = addBounded(usage.InputTokens, u.InputTokens)
 					usage.OutputTokens = addBounded(usage.OutputTokens, u.OutputTokens)
 					if u.CachedInputTokens != nil {

@@ -179,6 +179,34 @@ func (p *geminiLifecycleProvider) live(t *testing.T, w http.ResponseWriter, r *h
 		}
 		return
 	}
+	if bytes.Contains(setup, []byte("terminal-fixture-")) {
+		_, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Errorf("Live terminal fixture did not receive client work: %v", err)
+			return
+		}
+		p.mu.Lock()
+		p.calls = append(p.calls, geminiLifecycleCall{Method: "WS", Path: r.URL.Path, Body: bytes.Clone(payload), Key: r.Header.Get("X-Goog-Api-Key")})
+		p.mu.Unlock()
+		if !bytes.Contains(payload, []byte(`"clientContent"`)) {
+			t.Errorf("Live terminal fixture received changed work: %s", payload)
+			return
+		}
+		frame := `{"serverContent":{"modelTurn":{"parts":[{"text":"partial"}]}}}`
+		if bytes.Contains(setup, []byte("terminal-fixture-error")) {
+			frame = `{"error":{"code":500,"message":"native failure"}}`
+		}
+		if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
+			t.Errorf("Live terminal fixture write: %v", err)
+			return
+		}
+		if bytes.Contains(setup, []byte("terminal-fixture-client-close")) {
+			_, _, _ = conn.Read(ctx)
+			return
+		}
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+		return
+	}
 	// Certification only needs setup; a public Live session also sends ordered
 	// realtime input and receives exact audio, interruption and turn completion.
 	for {
@@ -348,6 +376,8 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 
 func TestGeminiLivePublicNativeAudioAndSetupAffinity(t *testing.T) {
 	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
 	provider := newGeminiLifecycleProvider(t)
 	owner := h.owner()
 	slug, key, _ := provisionGeminiLifecycle(t, h, owner, "gemini-live", provider)
@@ -384,7 +414,24 @@ func TestGeminiLivePublicNativeAudioAndSetupAffinity(t *testing.T) {
 	if err != nil || !bytes.Contains(audio, []byte(`"data":"AQIDBA=="`)) || !bytes.Contains(audio, []byte(`"interrupted":true`)) || !bytes.Contains(audio, []byte(`"turnComplete":true`)) {
 		t.Fatalf("Live audio/interruption %s: %v", audio, err)
 	}
-	client.Close(websocket.StatusNormalClosure, "")
+	if err := client.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatalf("completed Live client close: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for sink.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sink.count() != 1 {
+		t.Fatalf("completed Live session emitted %d terminal records", sink.count())
+	}
+	terminal := sink.last()
+	if terminal.Outcome != "success" || terminal.Status != http.StatusSwitchingProtocols || terminal.ErrorClass != "" || !terminal.Committed || len(terminal.Attempts) != 1 {
+		t.Fatalf("completed Live work lost successful terminal: %+v", terminal)
+	}
+	attempt := terminal.Attempts[0]
+	if attempt.Class != "success" || attempt.Interaction == nil || attempt.Interaction.UpstreamState != "terminal" || attempt.Interaction.ClientState != "terminal" || attempt.Usage == nil || attempt.Usage.InputTokens != 3 || attempt.Usage.OutputTokens != 2 || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain {
+		t.Fatalf("completed Live work lost exact usage and terminal states: %+v", attempt)
+	}
 	var sawSetup, sawAudio, sawVideo, sawTool, sawText bool
 	var nativeOrder []string
 	publicSession := false
@@ -429,6 +476,75 @@ func TestGeminiLivePublicNativeAudioAndSetupAffinity(t *testing.T) {
 	}
 	if !slices.Equal(nativeOrder, []string{"setup", "client_turn", "activity_start", "video", "audio", "tool_result"}) {
 		t.Fatalf("Live lost native client frame order: %v", nativeOrder)
+	}
+}
+
+func TestGeminiLiveStrictTerminalContracts(t *testing.T) {
+	for _, scenario := range []struct {
+		name, marker, frame, outcome, code, class, upstream string
+		clientCloses                                        bool
+	}{
+		{name: "provider_closes_partial_turn", marker: "terminal-fixture-partial", frame: `{"serverContent":{"modelTurn":{"parts":[{"text":"partial"}]}}}`, outcome: "failure", code: "live_incomplete", class: "ambiguous", upstream: "outcome-unknown"},
+		{name: "provider_closes_after_native_error", marker: "terminal-fixture-error", frame: `{"error":{"code":500,"message":"native failure"}}`, outcome: "failure", code: "live_provider_error", class: "upstream_server", upstream: "terminal"},
+		{name: "client_closes_partial_turn", marker: "terminal-fixture-client-close", frame: `{"serverContent":{"modelTurn":{"parts":[{"text":"partial"}]}}}`, outcome: "cancelled", code: "client_cancelled", class: "cancelled", upstream: "outcome-unknown", clientCloses: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h := newAccessHarness(t)
+			sink := &captureSink{}
+			h.Gateway.Sink = sink
+			provider := newGeminiLifecycleProvider(t)
+			slug, key, _ := provisionGeminiLifecycle(t, h, h.owner(), "gemini-live", provider)
+			beforeCalls, beforeTerminals := len(provider.captured()), sink.count()
+			address := "ws" + strings.TrimPrefix(h.HTTP.URL, "http") + "/gemini/ws/" + connectors.GeminiLiveMethod + "?key=" + url.QueryEscape(key)
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			defer cancel()
+			client, response, err := websocket.Dial(ctx, address, nil)
+			if err != nil {
+				t.Fatalf("Live strict handshake: %v status=%v", err, response)
+			}
+			defer client.CloseNow()
+			setup := []byte(fmt.Sprintf(`{"setup":{"model":"models/%s","systemInstruction":{"parts":[{"text":%q}]}}}`, slug, scenario.marker))
+			if err := client.Write(ctx, websocket.MessageText, setup); err != nil {
+				t.Fatal(err)
+			}
+			kind, ack, err := client.Read(ctx)
+			if err != nil || kind != websocket.MessageText || !bytes.Equal(ack, []byte(`{"setupComplete":{}}`)) {
+				t.Fatalf("Live setup acknowledgement changed: kind=%v err=%v frame=%s", kind, err, ack)
+			}
+			work := []byte(`{"clientContent":{"turns":[{"role":"user","parts":[{"text":"hello"}]}],"turnComplete":true}}`)
+			if err := client.Write(ctx, websocket.MessageText, work); err != nil {
+				t.Fatal(err)
+			}
+			kind, got, err := client.Read(ctx)
+			if err != nil || kind != websocket.MessageText || !bytes.Equal(got, []byte(scenario.frame)) {
+				t.Fatalf("Live native event changed: kind=%v err=%v frame=%s", kind, err, got)
+			}
+			if scenario.clientCloses {
+				if err := client.Close(websocket.StatusNormalClosure, ""); err != nil {
+					t.Fatalf("Live client close: %v", err)
+				}
+			} else {
+				_, _, err = client.Read(ctx)
+				if err == nil || websocket.CloseStatus(err) == websocket.StatusNormalClosure || websocket.CloseStatus(err) == websocket.StatusGoingAway {
+					t.Fatalf("failed Live work ended with successful close: %v", err)
+				}
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for sink.count() == beforeTerminals && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if sink.count() != beforeTerminals+1 || len(provider.captured()) != beforeCalls+2 {
+				t.Fatalf("Live close duplicated or lost the Attempt: calls=%d terminals=%d", len(provider.captured())-beforeCalls, sink.count()-beforeTerminals)
+			}
+			terminal := sink.last()
+			if terminal.Outcome != scenario.outcome || terminal.ErrorClass != scenario.code || terminal.Status != map[bool]int{true: 0, false: http.StatusSwitchingProtocols}[scenario.clientCloses] || !terminal.Committed || len(terminal.Attempts) != 1 {
+				t.Fatalf("Live terminal outcome disagrees with native frame: %+v", terminal)
+			}
+			attempt := terminal.Attempts[0]
+			if attempt.Class != scenario.class || attempt.Interaction == nil || attempt.Interaction.Fidelity != "strict" || attempt.Interaction.PlanClass != "native_identity" || attempt.Interaction.UpstreamState != scenario.upstream || attempt.Interaction.ClientState != "partially-observed" || attempt.UsageObserved || attempt.UsageComplete || !attempt.BillingUncertain {
+				t.Fatalf("Live terminal Attempt falsely completed work or usage: %+v", attempt)
+			}
+		})
 	}
 }
 

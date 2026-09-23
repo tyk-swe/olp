@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -24,6 +25,15 @@ import (
 
 const geminiLiveSession = time.Hour
 const geminiLiveFrameWriteTimeout = 5 * time.Second
+
+var (
+	errGeminiLiveProviderError  = errors.New("Gemini Live provider reported an error")
+	errGeminiLiveIncomplete     = errors.New("Gemini Live provider closed with work in flight")
+	errGeminiLiveClientClosed   = errors.New("Gemini Live client closed with work in flight")
+	errGeminiLiveProtocol       = errors.New("Gemini Live provider protocol violation")
+	errGeminiLiveClientProtocol = errors.New("Gemini Live client protocol violation")
+	errGeminiLiveAuthority      = errors.New("Gemini Live authority revoked")
+)
 
 func (s *Server) registerGeminiLifecycle(mux *http.ServeMux) {
 	live := connectors.GeminiLiveMethod
@@ -276,6 +286,25 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
 	usageRecord, usageComplete, relayErr := s.relayGeminiLive(ctx, x, p, client, upstream, token, int(limit))
+	class := classProtocol
+	cancelled := false
+	if x.strict() && relayErr != nil {
+		class = classAmbiguous
+		switch {
+		case errors.Is(relayErr, errGeminiLiveProviderError):
+			class = classUpstreamServer
+		case errors.Is(relayErr, errGeminiLiveClientClosed):
+			class, cancelled = classCancelled, true
+		case errors.Is(relayErr, errGeminiLiveClientProtocol), errors.Is(relayErr, errGeminiLiveProtocol):
+			class = classProtocol
+		case errors.Is(relayErr, errGeminiLiveAuthority):
+			class = classCredential
+		case errors.Is(relayErr, context.Canceled):
+			class, cancelled = classCancelled, true
+		case errors.Is(relayErr, context.DeadlineExceeded):
+			class = classTimeout
+		}
+	}
 	if len(x.facts) > 0 {
 		fact := &x.facts[len(x.facts)-1]
 		fact.Usage = usageRecord
@@ -285,9 +314,13 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			fact.UsageComplete, fact.BillingUncertain = false, true
 		}
 		if relayErr != nil {
-			fact.Class = classProtocol
+			fact.Class = class
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				if errors.Is(relayErr, errGeminiLiveProviderError) {
+					fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				} else {
+					fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				}
 			}
 		} else if fact.Interaction != nil {
 			fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
@@ -295,9 +328,30 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	if relayErr != nil {
 		x.failure, status = serverError(http.StatusBadGateway, "live_incomplete", "The Live session ended without a complete transport contract."), http.StatusBadGateway
+		if x.strict() {
+			switch {
+			case errors.Is(relayErr, errGeminiLiveProviderError):
+				x.failure = serverError(http.StatusBadGateway, "live_provider_error", "The Live provider reported an error.")
+			case errors.Is(relayErr, errGeminiLiveProtocol):
+				x.failure = serverError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent an invalid frame.")
+			case errors.Is(relayErr, errGeminiLiveClientProtocol):
+				x.failure = invalidRequest("invalid_live_frame", "The Live client sent an invalid frame.", nil)
+			case errors.Is(relayErr, errGeminiLiveAuthority):
+				x.failure = permissionError("key_revoked", "The Live session no longer has route authority.")
+			case class == classCancelled:
+				x.failure = (&attemptFailure{class: classCancelled}).toError()
+			case class == classTimeout:
+				x.failure = (&attemptFailure{class: classTimeout}).toError()
+			}
+			status = http.StatusSwitchingProtocols
+			out = &outcome{err: x.failure, committed: true, cancelled: cancelled}
+		}
 		return
 	}
 	status, out = http.StatusOK, &outcome{committed: true}
+	if x.strict() {
+		status = http.StatusSwitchingProtocols
+	}
 }
 
 func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, client, upstream *websocket.Conn, token string, maxBytes int) (*openai.Usage, bool, error) {
@@ -306,26 +360,48 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 	var mu sync.Mutex
 	var observed *openai.Usage
 	var turn *openai.Usage
-	forward := func(dst, src *websocket.Conn, fromProvider bool) error {
+	var inFlight bool
+	type relayEnd struct {
+		err            error
+		fromProvider   bool
+		sourceClosed   bool
+		deliveryFailed bool
+	}
+	forward := func(dst, src *websocket.Conn, fromProvider bool) relayEnd {
+		end := func(err error) relayEnd { return relayEnd{err: err, fromProvider: fromProvider} }
 		for {
 			kind, payload, err := src.Read(ctx)
 			if err != nil {
-				return err
+				return relayEnd{err: err, fromProvider: fromProvider, sourceClosed: true}
 			}
 			if kind != websocket.MessageText {
-				return errors.New("Gemini Live requires JSON text frames")
+				if fromProvider {
+					return end(errGeminiLiveProtocol)
+				}
+				return end(errGeminiLiveClientProtocol)
 			}
+			providerError := false
 			if fromProvider {
 				if err := geminilifecycle.ValidateLiveServerFrame(payload, maxBytes); err != nil {
-					return err
+					return end(fmt.Errorf("%w: %v", errGeminiLiveProtocol, err))
 				}
-				if doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: maxBytes}); err != nil {
-					return err
-				} else if _, repeated := doc.Root().Lookup("setupComplete"); repeated {
-					return errors.New("Live provider repeated setup completion")
+				doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: maxBytes})
+				if err != nil {
+					return end(fmt.Errorf("%w: %v", errGeminiLiveProtocol, err))
+				}
+				if _, repeated := doc.Root().Lookup("setupComplete"); repeated {
+					return end(fmt.Errorf("%w: repeated setup completion", errGeminiLiveProtocol))
 				}
 				usageValue := geminiLiveUsage(payload, maxBytes)
 				turnComplete := geminiLiveTurnComplete(payload, maxBytes)
+				_, serverContent := doc.Root().Lookup("serverContent")
+				_, toolCall := doc.Root().Lookup("toolCall")
+				_, providerError = doc.Root().Lookup("error")
+				if x.strict() && (serverContent || toolCall) {
+					mu.Lock()
+					inFlight = !turnComplete
+					mu.Unlock()
+				}
 				if usageValue != nil || turnComplete {
 					mu.Lock()
 					if usageValue != nil {
@@ -350,24 +426,33 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 					mu.Unlock()
 				}
 			} else if err := geminilifecycle.ValidateLiveClientFrame(payload, maxBytes); err != nil {
-				return err
+				return end(fmt.Errorf("%w: %v", errGeminiLiveClientProtocol, err))
+			} else if x.strict() {
+				// A client message can start or continue model work. Retain only
+				// whether a turn still needs its provider completion.
+				mu.Lock()
+				inFlight = true
+				mu.Unlock()
 			}
 			if err := writeGeminiLiveFrame(ctx, dst, kind, payload); err != nil {
-				return err
+				return relayEnd{err: err, fromProvider: fromProvider, deliveryFailed: fromProvider}
 			}
 			if fromProvider {
 				x.delivered(s.now())
+				if x.strict() && providerError {
+					return end(errGeminiLiveProviderError)
+				}
 			}
 		}
 	}
-	done := make(chan error, 2)
+	done := make(chan relayEnd, 2)
 	go func() { done <- forward(upstream, client, false) }()
 	go func() { done <- forward(client, upstream, true) }()
 	reauth := time.NewTicker(realtimeReauth)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
-	var first error
+	var first relayEnd
 loop:
 	for {
 		select {
@@ -376,27 +461,37 @@ loop:
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
 			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || p.slot.CredentialID != nil && s.Runtime.Revoked(*p.slot.CredentialID) || p.provider.Network != nil && p.provider.Network.CredentialID != "" && s.Runtime.Revoked(p.provider.Network.CredentialID) {
-				first = errors.New("Live authority revoked")
+				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
 			}
 		case <-heartbeat.C:
 			pingCtx, pingCancel := context.WithTimeout(ctx, realtimeReauth)
-			first = upstream.Ping(pingCtx)
-			if first == nil {
-				first = client.Ping(pingCtx)
+			first.err = upstream.Ping(pingCtx)
+			if first.err == nil {
+				first.err = client.Ping(pingCtx)
 			}
 			pingCancel()
-			if first != nil {
+			if first.err != nil {
 				break loop
 			}
 		case <-ctx.Done():
-			first = ctx.Err()
+			first.err = ctx.Err()
 			break loop
 		}
 	}
 	cancel()
-	code := websocket.CloseStatus(first)
+	mu.Lock()
+	pending := inFlight
+	mu.Unlock()
+	code := websocket.CloseStatus(first.err)
+	if x.strict() && first.fromProvider && pending && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+		first.err = fmt.Errorf("%w: %v", errGeminiLiveIncomplete, first.err)
+		code = websocket.StatusInternalError
+	}
+	if x.strict() && errors.Is(first.err, errGeminiLiveProviderError) {
+		code = websocket.StatusInternalError
+	}
 	if code < 0 {
 		code = websocket.StatusInternalError
 	}
@@ -409,13 +504,18 @@ loop:
 		upstream.CloseNow()
 		client.CloseNow()
 	}
-	<-done
+	second := <-done
 	mu.Lock()
 	defer mu.Unlock()
+	if x.strict() && !errors.Is(first.err, context.DeadlineExceeded) {
+		if first.deliveryFailed || !first.fromProvider && first.sourceClosed && (inFlight || second.deliveryFailed) {
+			return observed, false, fmt.Errorf("%w: %v", errGeminiLiveClientClosed, first.err)
+		}
+	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
 		return observed, turn == nil && observed != nil, nil
 	}
-	return observed, false, first
+	return observed, false, first.err
 }
 
 func geminiLiveTurnComplete(payload []byte, maxBytes int) bool {

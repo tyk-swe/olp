@@ -19,16 +19,19 @@ const realtimeCreate = `{"type":"response.create","event_id":"create_1"}`
 const realtimeCreated = `{"type":"response.created","event_id":"created_1","response":{"id":"resp_1","status":"in_progress"}}`
 const realtimeDelta = `{"type":"response.audio.delta","event_id":"delta_1","response_id":"resp_1","delta":"AQID"}`
 const realtimeDone = `{"type":"response.done","event_id":"done_1","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":3,"output_tokens":2}}}`
+const realtimeAmbiguousDone = `{"type":"response.audio.delta","type":"response.done","event_id":"done_1","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":3,"output_tokens":2}}}`
 
 func TestStrictRealtimeNormalCloseContracts(t *testing.T) {
 	for _, scenario := range []struct {
 		name          string
 		providerEarly bool
 		complete      bool
+		ambiguousDone bool
 	}{
 		{name: "client_closes_pending_response"},
 		{name: "provider_closes_pending_response", providerEarly: true},
 		{name: "client_closes_completed_response", complete: true},
+		{name: "provider_closes_after_duplicate_terminal_type", ambiguousDone: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			h := newAccessHarness(t)
@@ -72,6 +75,13 @@ func TestStrictRealtimeNormalCloseContracts(t *testing.T) {
 					_ = conn.Close(websocket.StatusNormalClosure, "")
 					return
 				}
+				if scenario.ambiguousDone {
+					if err := conn.Write(ctx, websocket.MessageText, []byte(realtimeAmbiguousDone)); err != nil {
+						return
+					}
+					_ = conn.Close(websocket.StatusNormalClosure, "")
+					return
+				}
 				if scenario.complete {
 					if err := conn.Write(ctx, websocket.MessageText, []byte(realtimeDone)); err != nil {
 						return
@@ -106,10 +116,16 @@ func TestStrictRealtimeNormalCloseContracts(t *testing.T) {
 					t.Fatalf("native terminal event changed: kind=%v err=%v got=%q", kind, err, got)
 				}
 			}
-			if scenario.providerEarly {
+			if scenario.ambiguousDone {
+				kind, got, err := conn.Read(ctx)
+				if err != nil || kind != websocket.MessageText || !bytes.Equal(got, []byte(realtimeAmbiguousDone)) {
+					t.Fatalf("ambiguous native event changed: kind=%v err=%v got=%q", kind, err, got)
+				}
+			}
+			if scenario.providerEarly || scenario.ambiguousDone {
 				_, _, err = conn.Read(ctx)
 				if err == nil || websocket.CloseStatus(err) == websocket.StatusNormalClosure || websocket.CloseStatus(err) == websocket.StatusGoingAway {
-					t.Fatalf("premature provider 1000 became normal client close: %v", err)
+					t.Fatalf("incomplete provider 1000 became normal client close: %v", err)
 				}
 			} else if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
 				t.Fatalf("normal client close: %v", err)
@@ -131,11 +147,11 @@ func TestStrictRealtimeNormalCloseContracts(t *testing.T) {
 				t.Fatalf("strict response lost native plan evidence: %+v", interaction)
 			}
 			switch {
-			case scenario.providerEarly:
+			case scenario.providerEarly || scenario.ambiguousDone:
 				if terminal.Outcome != "failure" || terminal.ErrorClass != "realtime_incomplete" || fact.Class != "protocol" ||
 					interaction.UpstreamState != "outcome-unknown" || interaction.ClientState != "partially-observed" ||
 					fact.UsageObserved || fact.UsageComplete || !fact.BillingUncertain {
-					t.Fatalf("premature provider close looked terminal: %+v", terminal)
+					t.Fatalf("incomplete provider close looked terminal: %+v", terminal)
 				}
 			case scenario.complete:
 				if terminal.Outcome != "success" || terminal.Status != http.StatusSwitchingProtocols || terminal.ErrorClass != "" || fact.Class != "success" ||
