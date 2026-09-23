@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,9 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -52,7 +55,7 @@ func (s *realtimeResponseState) pending() bool {
 	return s.requested > 0 || len(s.active) > 0 || s.anonymous || s.unknown
 }
 
-func (s *realtimeResponseState) add(id string) {
+func (s *realtimeResponseState) add(id string, strict bool) {
 	if id == "" || len(id) > 512 {
 		s.unknown = true
 		return
@@ -67,19 +70,192 @@ func (s *realtimeResponseState) add(id string) {
 		s.unknown = true
 		return
 	}
+	if strict {
+		// A strict decoder may return a view into the source frame. Keep
+		// only the bounded identifier, never the audio-bearing frame.
+		id = strings.Clone(id)
+	}
 	s.active[id] = struct{}{}
 }
 
-func decodeRealtimeEvent(data []byte, event any, strict bool) bool {
-	if strict {
-		// Only an unambiguous native event may discharge a strict response.
-		// OIF rejects duplicate members and invalid Unicode within the frame.
-		doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
-		if err != nil || doc.Root().Kind() != oif.Object {
-			return false
+// realtimeObject validates the entire native frame, including unknown nested
+// controls, without materializing a second JSON tree for the few observed
+// response fields. OIF rejects duplicate keys and invalid Unicode throughout.
+func realtimeObject(data []byte) (oif.Value, bool) {
+	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return oif.Value{}, false
+	}
+	return doc.Root(), true
+}
+
+// realtimeFlatFrame recognizes the common native audio/event shape without
+// building an index for fields the relay never interprets. It accepts only a
+// flat object with unescaped keys and string values; every other shape falls
+// through to OIF. The fixed key table catches duplicate members, while
+// json.Valid and UTF-8 validation cover the complete flat document. Escapes
+// fall through so OIF still enforces surrogate-pair and decoded-key rules.
+func realtimeFlatFrame(data []byte) (realtimeFrame, bool) {
+	var event realtimeFrame
+	if len(data) > maxRealtimeTrackedFrameBytes || !utf8.Valid(data) {
+		return event, false
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
+		return event, false
+	}
+	var keys [16][]byte
+	count, at := 0, 1
+	space := func() {
+		for at < len(data) && (data[at] == ' ' || data[at] == '\t' || data[at] == '\r' || data[at] == '\n') {
+			at++
 		}
 	}
-	return json.Unmarshal(data, event) == nil
+	for {
+		space()
+		if at >= len(data) {
+			return realtimeFrame{}, false
+		}
+		if data[at] == '}' {
+			at++
+			break
+		}
+		if data[at] != '"' || count == len(keys) {
+			return realtimeFrame{}, false
+		}
+		at++
+		start := at
+		for at < len(data) && data[at] != '"' {
+			if data[at] == '\\' {
+				return realtimeFrame{}, false
+			}
+			at++
+		}
+		if at >= len(data) {
+			return realtimeFrame{}, false
+		}
+		key := data[start:at]
+		// encoding/json's struct fields accept case-insensitive spellings and
+		// assign the last matching member. Let the fallback preserve that rule;
+		// response is structured even if a caller sends a scalar value.
+		if bytes.EqualFold(key, []byte("response")) ||
+			bytes.EqualFold(key, []byte("type")) && !bytes.Equal(key, []byte("type")) ||
+			bytes.EqualFold(key, []byte("response_id")) && !bytes.Equal(key, []byte("response_id")) {
+			return realtimeFrame{}, false
+		}
+		for _, prior := range keys[:count] {
+			if bytes.Equal(prior, key) {
+				return realtimeFrame{}, false
+			}
+		}
+		keys[count], count = key, count+1
+		at++
+		space()
+		if at >= len(data) || data[at] != ':' {
+			return realtimeFrame{}, false
+		}
+		at++
+		space()
+		if at >= len(data) || data[at] == '{' || data[at] == '[' {
+			return realtimeFrame{}, false
+		}
+		quoted := data[at] == '"'
+		if quoted {
+			at++
+		}
+		start = at
+		if quoted {
+			for at < len(data) && data[at] != '"' {
+				if data[at] == '\\' {
+					return realtimeFrame{}, false
+				}
+				at++
+			}
+		} else {
+			for at < len(data) && data[at] != ',' && data[at] != '}' {
+				at++
+			}
+		}
+		if at >= len(data) {
+			return realtimeFrame{}, false
+		}
+		value := data[start:at]
+		if quoted {
+			at++
+		}
+		switch {
+		case bytes.Equal(key, []byte("type")):
+			if !quoted {
+				return realtimeFrame{}, false
+			}
+			event.Type = string(value)
+		case bytes.Equal(key, []byte("response_id")):
+			if !quoted {
+				return realtimeFrame{}, false
+			}
+			event.ResponseID = string(value)
+		}
+		space()
+		if at >= len(data) {
+			return realtimeFrame{}, false
+		}
+		if data[at] == '}' {
+			at++
+			break
+		}
+		if data[at] != ',' {
+			return realtimeFrame{}, false
+		}
+		at++
+	}
+	if at != len(data) || !json.Valid(data) {
+		return realtimeFrame{}, false
+	}
+	return event, true
+}
+
+func realtimeMember(object oif.Value, name string) (oif.Value, bool) {
+	var value oif.Value
+	found := false
+	for _, member := range object.Members() {
+		if strings.EqualFold(member.Name, name) {
+			value, found = member.Value, true
+		}
+	}
+	return value, found
+}
+
+func realtimeStringField(object oif.Value, name string) (string, bool) {
+	value, present := realtimeMember(object, name)
+	if !present || value.Kind() == oif.Null {
+		return "", true
+	}
+	if value.Kind() != oif.String {
+		return "", false
+	}
+	raw := value.Raw()
+	if !strings.ContainsRune(raw, '\\') {
+		return raw[1 : len(raw)-1], true
+	}
+	// Escaped strings are uncommon on the hot path. JSON, rather than Go's
+	// Unquote, keeps surrogate-pair interpretation identical to the old decode.
+	var decoded string
+	if json.Unmarshal([]byte(raw), &decoded) != nil {
+		return "", false
+	}
+	return decoded, true
+}
+
+func realtimeIntField(object oif.Value, name string) (int64, bool) {
+	value, present := realtimeMember(object, name)
+	if !present || value.Kind() == oif.Null {
+		return 0, true
+	}
+	if value.Kind() != oif.Number {
+		return 0, false
+	}
+	number, err := strconv.ParseInt(value.Raw(), 10, 64)
+	return number, err == nil
 }
 
 func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []byte) {
@@ -87,14 +263,22 @@ func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []by
 		s.unknown = true
 		return
 	}
-	var event struct {
-		Type string `json:"type"`
+	eventType := ""
+	if flat, ok := realtimeFlatFrame(data); ok {
+		eventType = flat.Type
+	} else {
+		root, valid := realtimeObject(data)
+		if !valid {
+			s.unknown = true
+			return
+		}
+		eventType, valid = realtimeStringField(root, "type")
+		if !valid {
+			s.unknown = true
+			return
+		}
 	}
-	if !decodeRealtimeEvent(data, &event, true) {
-		s.unknown = true
-		return
-	}
-	if event.Type == "response.create" || event.Type == "input_audio_buffer.commit" {
+	if eventType == "response.create" || eventType == "input_audio_buffer.commit" {
 		if s.requested == maxRealtimePendingResponses {
 			s.unknown = true
 		} else {
@@ -118,13 +302,99 @@ type realtimeFrame struct {
 	} `json:"response"`
 }
 
+// decodeStrictRealtimeFrame extracts only the fields used by terminal and
+// usage accounting from one duplicate-safe OIF parse. Unknown members remain
+// byte-identical in the forwarded frame and are still fully syntax checked.
+func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
+	if flat, ok := realtimeFlatFrame(data); ok {
+		*event = flat
+		return true
+	}
+	root, valid := realtimeObject(data)
+	if !valid {
+		return false
+	}
+	if event.Type, valid = realtimeStringField(root, "type"); !valid {
+		return false
+	}
+	if event.ResponseID, valid = realtimeStringField(root, "response_id"); !valid {
+		return false
+	}
+	response, present := realtimeMember(root, "response")
+	if !present || response.Kind() == oif.Null {
+		return true
+	}
+	if response.Kind() != oif.Object {
+		return false
+	}
+	event.Response = new(struct {
+		ID    string `json:"id"`
+		Usage *struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+			InputDetails *struct {
+				CachedTokens *int64 `json:"cached_tokens"`
+			} `json:"input_token_details"`
+		} `json:"usage"`
+	})
+	if event.Response.ID, valid = realtimeStringField(response, "id"); !valid {
+		return false
+	}
+	usageValue, present := realtimeMember(response, "usage")
+	if !present || usageValue.Kind() == oif.Null {
+		return true
+	}
+	if usageValue.Kind() != oif.Object {
+		return false
+	}
+	event.Response.Usage = new(struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+		InputDetails *struct {
+			CachedTokens *int64 `json:"cached_tokens"`
+		} `json:"input_token_details"`
+	})
+	if event.Response.Usage.InputTokens, valid = realtimeIntField(usageValue, "input_tokens"); !valid {
+		return false
+	}
+	if event.Response.Usage.OutputTokens, valid = realtimeIntField(usageValue, "output_tokens"); !valid {
+		return false
+	}
+	details, present := realtimeMember(usageValue, "input_token_details")
+	if !present || details.Kind() == oif.Null {
+		return true
+	}
+	if details.Kind() != oif.Object {
+		return false
+	}
+	event.Response.Usage.InputDetails = new(struct {
+		CachedTokens *int64 `json:"cached_tokens"`
+	})
+	cached, present := realtimeMember(details, "cached_tokens")
+	if !present || cached.Kind() == oif.Null {
+		return true
+	}
+	value, valid := realtimeIntField(details, "cached_tokens")
+	if !valid {
+		return false
+	}
+	event.Response.Usage.InputDetails.CachedTokens = &value
+	return true
+}
+
 func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *openai.Usage {
 	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
 		s.unknown = true
 		return nil
 	}
 	var event realtimeFrame
-	if !decodeRealtimeEvent(data, &event, strict) {
+	valid := false
+	if strict {
+		valid = decodeStrictRealtimeFrame(data, &event)
+	} else {
+		valid = json.Unmarshal(data, &event) == nil
+	}
+	if !valid {
 		s.unknown = true
 		return nil
 	}
@@ -137,7 +407,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 		if s.requested > 0 {
 			s.requested--
 		}
-		s.add(id)
+		s.add(id, strict)
 	case "response.done":
 		if s.anonymous && len(s.active) > 0 {
 			// Without a response ID on a preceding fragment, this terminal
@@ -167,7 +437,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 				if _, found := s.active[id]; !found && s.requested > 0 {
 					s.requested--
 				}
-				s.add(id)
+				s.add(id, strict)
 			} else {
 				s.anonymous = true
 			}
