@@ -6337,6 +6337,7 @@
     "internal/gateway/policy_test.go",
     "internal/gateway/provider_connection_test.go",
     "internal/gateway/realtime_frame_test.go",
+    "internal/gateway/realtime_write_test.go",
     "internal/gateway/revocation_test.go",
     "internal/gateway/stream_limits_test.go",
     "internal/gateway/stream_terminal_test.go",
