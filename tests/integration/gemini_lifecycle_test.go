@@ -733,7 +733,15 @@ func TestGeminiLifecyclePinnedOfficialSDKsThroughTrustedTLS(t *testing.T) {
 		"SSL_CERT_FILE=" + caFile,
 		"NODE_EXTRA_CA_CERTS=" + caFile,
 	}
-	for _, command := range [][]string{{"node", "tests/sdk-smoke/gemini-lifecycle.mjs"}, {"uv", "run", "--project", "tests/sdk-smoke-python", "--frozen", "python", "tests/sdk-smoke-python/gemini_lifecycle.py"}} {
+	// The fixture CA is scoped to the SDK's local TLS connection. uv also
+	// consumes SSL_CERT_FILE while installing packages; giving it only this
+	// fixture CA would make a fresh CI worker reject the package index.
+	sync := exec.CommandContext(t.Context(), "uv", "sync", "--project", "tests/sdk-smoke-python", "--frozen")
+	sync.Dir = root
+	if output, err := sync.CombinedOutput(); err != nil {
+		t.Fatalf("sync pinned Gemini Python SDK before fixture TLS: %v\n%s", err, output)
+	}
+	for _, command := range [][]string{{"node", "tests/sdk-smoke/gemini-lifecycle.mjs"}, {"uv", "run", "--project", "tests/sdk-smoke-python", "--frozen", "--no-sync", "python", "tests/sdk-smoke-python/gemini_lifecycle.py"}} {
 		cmd := exec.CommandContext(t.Context(), command[0], command[1:]...)
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), shared...)

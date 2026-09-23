@@ -155,7 +155,14 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	}
 	// Model an unpublished intermediate writer that once put strictness under
 	// an older legacy slug, then apply the new forward migration to that data.
-	_, err := h.Pool.Exec(t.Context(), `DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
+	// The fixture also reverses later 0028 so migration history remains a
+	// sequential prefix; production migrations themselves stay forward-only.
+	_, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_kind_check;
+	    ALTER TABLE olp_go.provider_resources ADD CONSTRAINT provider_resources_kind_check
+	        CHECK (kind IN ('file', 'batch', 'response', 'continuation', 'strict_response'));
+	    DELETE FROM olp_go.migrations WHERE version='0028_gemini_interaction_resources.sql';
+	    DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
 	    DROP FUNCTION olp_go.check_runtime_route_contracts();
 	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
 	    DROP FUNCTION olp_go.check_route_revision_contract();
@@ -172,10 +179,11 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	if err = database.Migrate(t.Context(), h.Pool); err == nil {
 		t.Fatal("ambiguous legacy/strict slug history was accepted")
 	}
-	var schemaRolledBack, historyMissing bool
+	var schemaRolledBack, historyMissing, laterHistoryMissing bool
 	if err = h.Pool.QueryRow(t.Context(), `SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns
 	    WHERE table_schema='olp_go' AND table_name='routes' AND column_name='strict_contract'),
-	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql')`).Scan(&schemaRolledBack, &historyMissing); err != nil || !schemaRolledBack || !historyMissing {
+	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql'),
+	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0028_gemini_interaction_resources.sql')`).Scan(&schemaRolledBack, &historyMissing, &laterHistoryMissing); err != nil || !schemaRolledBack || !historyMissing || !laterHistoryMissing {
 		t.Fatal("failed strict identity migration left partial schema/history", err)
 	}
 	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp_go.route_revisions SET fidelity=NULL WHERE id=$1`, secondRevision); err != nil {
