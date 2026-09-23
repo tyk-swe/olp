@@ -400,6 +400,9 @@ func stressDuplex(ctx context.Context, h *accessHarness, fixture *lifecycleFixtu
 	if len(result.roundTrips) != stressEvents {
 		return stressSample{}, fmt.Errorf("duplex event count %d", len(result.roundTrips))
 	}
+	if result.cancellation <= 0 {
+		return stressSample{}, fmt.Errorf("provider closure was not observed")
+	}
 	sample := stressSample{elapsed: result.elapsed, cancellation: result.cancellation, eventRTT: result.roundTrips, events: stressEvents}
 	for i := 1; i < len(result.roundTrips); i++ {
 		delta := result.roundTrips[i] - result.roundTrips[i-1]
@@ -425,6 +428,8 @@ type stressRun struct {
 	Retrieved       int                `json:"retrieved"`
 	Content         int                `json:"content"`
 	Events          int                `json:"events"`
+	RTTObservations int                `json:"rtt_observations"`
+	JitterSamples   int                `json:"jitter_observations"`
 	UploadedBytes   int                `json:"uploaded_bytes"`
 	DownloadedBytes int                `json:"downloaded_bytes"`
 	Metrics         map[string]float64 `json:"metrics"`
@@ -748,6 +753,8 @@ func TestLifecycleStressPerformance(t *testing.T) {
 						run.Retrieved += result.retrieved
 						run.Content += result.content
 						run.Events += result.events
+						run.RTTObservations += len(result.eventRTT)
+						run.JitterSamples += len(result.eventJitter)
 						run.UploadedBytes += result.uploaded
 						run.DownloadedBytes += result.downloaded
 					}

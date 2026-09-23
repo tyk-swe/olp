@@ -20,6 +20,7 @@ function evidence() {
       ambiguous: 0, dispatches: mediaCycle ? 32 : 8, accepted: mediaCycle ? 8 : 0,
       partial: mediaCycle ? 8 : 0, retrieved: mediaCycle ? 16 : mediaSlow ? 8 : 0,
       content: media ? 8 : 0, events: media ? 0 : 512,
+      rtt_observations: media ? 0 : 512, jitter_observations: media ? 0 : 504,
       uploaded_bytes: mediaCycle ? 8 * (4 << 20) : 0,
       downloaded_bytes: media ? 8 * (1 << 20) : 0, metrics
     };
@@ -56,6 +57,7 @@ test('dropped workload, accepted work, partial status, retrieval, bytes, or even
     (a) => a.runs[0].uploaded_bytes--,
     (a) => a.runs[0].dispatches--,
     (a) => a.runs.find((r) => r.name.startsWith('duplex_jitter_64')).events--,
+    (a) => a.runs.find((r) => r.name.startsWith('duplex_jitter_64')).jitter_observations--,
     (a) => a.runs[0].rejected++,
     (a) => a.runs[0].incomplete++,
     (a) => a.runs[0].ambiguous++,

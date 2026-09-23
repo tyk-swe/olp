@@ -54,17 +54,18 @@ function expected(name) {
   const workload = workloadFor(name);
   if (workload === 'media_cycle_4m') return {
     dispatches: 4 * samples, accepted: samples, partial: samples, retrieved: 2 * samples,
-    content: samples, events: 0, uploaded_bytes: inputBytes * samples,
+    content: samples, events: 0, rtt_observations: 0, jitter_observations: 0, uploaded_bytes: inputBytes * samples,
     downloaded_bytes: contentBytes * samples
   };
   if (workload === 'media_slow_content_1m') return {
     dispatches: samples, accepted: 0, partial: 0, retrieved: samples,
-    content: samples, events: 0, uploaded_bytes: 0,
+    content: samples, events: 0, rtt_observations: 0, jitter_observations: 0, uploaded_bytes: 0,
     downloaded_bytes: contentBytes * samples
   };
   return {
     dispatches: samples, accepted: 0, partial: 0, retrieved: 0,
-    content: 0, events: events * samples, uploaded_bytes: 0, downloaded_bytes: 0
+    content: 0, events: events * samples, rtt_observations: events * samples,
+    jitter_observations: (events - 1) * samples, uploaded_bytes: 0, downloaded_bytes: 0
   };
 }
 function metricNames(name) {
