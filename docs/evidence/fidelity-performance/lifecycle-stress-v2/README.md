@@ -33,4 +33,15 @@ The frozen limit rule is declared before candidate capture: the maximum of three
 
 The registered-profile public semantic smoke and six runner mutation tests passed before timed capture. The v1 source and runner hashes exactly match their frozen artifact. A first quiet-window `record` attempt was rejected by the runner: it exported the v1 measurement variable, so the Go test produced only one repetition of two samples instead of the required three repetitions of eight. The write-once [failed capture](baseline.json.failed-20260923T025739193Z.json) retains that incomplete output. The runner was corrected before any baseline or budget was frozen.
 
-Clean pre-#216 source `d78be007` then recorded the [native baseline](baseline.json) on 2026-09-23 with 36/36 repetitions, 288 completed workflows, 576 exact provider dispatches, all accepted/partial/retrieval/media-byte/duplex-event observations and three local rejections with zero provider work or spool residue. The Go test took 22.33 seconds; one-minute host load was 0.69 before and 0.96 after, with PostgreSQL 18.6 local without TLS. The separate [replacement budgets](replacement-budgets.json) were frozen from this reference before any v2 replacement candidate. The baseline self-comparison passes, establishing artifact integrity only. Legacy and strict replacement comparisons, original-v1 relay control, encrypted continuation barrier, empirical quality and full G6 remain pending.
+Clean pre-#216 source `d78be007` then recorded the [native baseline](baseline.json) on 2026-09-23 with 36/36 repetitions, 288 completed workflows, 576 exact provider dispatches, all accepted/partial/retrieval/media-byte/duplex-event observations and three local rejections with zero provider work or spool residue. The Go test took 22.33 seconds; one-minute host load was 0.69 before and 0.96 after, with PostgreSQL 18.6 local without TLS. The separate [replacement budgets](replacement-budgets.json) were frozen from this reference before any v2 replacement candidate. The baseline self-comparison passes, establishing artifact integrity only.
+
+The clean final source `bc325da5` separately captured
+[strict](../final-bc325-v2/stress-strict.json) and
+[legacy](../final-bc325-v2/stress-legacy.json) replacements. Each offline
+comparison passed the unchanged v2 limits with 36 repetitions, 288 completed
+workflows, 576 exact dispatches and three zero-dispatch negatives. The strict
+and legacy SHA-256 values are respectively
+`e172116d960f7a7e3c17f36fd3c1839235a2b35441173022dfbc9b14d54ec0df`
+and `2975425365c11e8104cc63cedca95a2e220a1746f7e4323b65f61155882997b1`.
+The frozen v1 failure is unchanged; source-cost and empirical-quality gaps
+still leave full G6 open.

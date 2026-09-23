@@ -1,5 +1,10 @@
 # Fidelity performance evidence
 
+The [exact final-source v2 record](final-bc325-v2/README.md) preserves passing
+local lifecycle, stress and encrypted-barrier captures alongside the invalid
+source paired attempt. The original v1 baselines, limits and failures remain
+unchanged. Full G6 is still open.
+
 This harness records an authenticated native relay and the current gateway before
 replacement of its dispatch representation. It sends HTTP requests through the
 real gateway to an independently scripted local provider and validates every final

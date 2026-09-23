@@ -17,8 +17,9 @@ fix the output paths; r4 left B checkout reuse ambiguous after committing
 evidence. The r5 B-only attempt was invalidated before any C observation by
 sustained unrelated PacketCraftr/Rust CPU load; its [partial JSON, journal and
 receipt](attempt-r5-invalid.md) remain immutable at commit
-c104953720f7817d2367eb68f99cc2e812bdf91d. **`manifest-r6.json` is the
-active single retry.** It requires the
+c104953720f7817d2367eb68f99cc2e812bdf91d. **The registered
+`manifest-r6.json` retry produced an invalid final-source C attempt, retained
+below.** It requires the
 exact explicit `{"fidelity":{"mode":"strict"}}` overlay for every native,
 translated and rejected route category, plus Git proof that the exact B-only
 artifact was committed before an affected production Go change. It must be
@@ -147,3 +148,18 @@ processes are built before timed blocks; B always has legacy environment and C
 receives only the recorded explicit contract. The runner never selects a later
 block, threshold or retry after seeing a C result. A failed study requires a
 new named attempt and prospective sequential-testing rule.
+
+## Final-source r6 C attempt
+
+The write-once [paired-r6.json](paired-r6.json) and
+[reservation journal](paired-r6.json.journal.jsonl) used clean final source
+`bc325da50c575803c771531dc4e3aab1ac203a53`. Their SHA-256 values are
+`33f5efb6dc681b2be570e5e2352e53ea35f01d8adfbaff836a05083a8bf1f023`
+and `25f76f751721fa4252d4969e5c0583ea354a1deecd34eeb13e0953552c41bdde`.
+The capture is `invalid`: its first C subrun returned the generic
+`C: oracle, effect count or fixed sample count failed` error, leaving **zero
+complete paired blocks**. Offline `compare-paired` rejects the incomplete
+reservation journal. The record does not isolate which part of the check
+failed, or support a source-cost pass. The files are retained unchanged; this
+registered r6 attempt is not retried as a selective performance sample. The
+[final-source summary](../final-bc325-v2/README.md) keeps G6 open.
