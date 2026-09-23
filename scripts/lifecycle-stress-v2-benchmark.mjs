@@ -30,7 +30,7 @@ const commandArgs = [
   '-count=1', '-v', '-timeout=15m', './tests/integration'
 ];
 const environment = {
-  GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_LIFECYCLE_STRESS_MEASURE: '1'
+  GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_LIFECYCLE_STRESS_V2_MEASURE: '1'
 };
 const conditions = {
   network: 'IPv4 loopback, two HTTP/1.1 or WebSocket hops, warmed connections, no TLS on measured hops',
