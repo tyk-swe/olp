@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { names } from './fidelity-lifecycle-benchmark.mjs';
-import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare } from './fidelity-lifecycle-v2-benchmark.mjs';
+import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare, candidateSetupSHA256 } from './fidelity-lifecycle-v2-benchmark.mjs';
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const originalBudget = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'));
 const originalBaseline = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/baseline.json'));
@@ -38,7 +38,7 @@ function historical() {
   return structuredClone(originalBudget);
 }
 function candidate(a) {
-  return { ...structuredClone(a), contract: { mode: 'strict' }, source_revision: 'candidate', reference_product_diff: null };
+  return { ...structuredClone(a), contract: { mode: 'strict' }, source_revision: 'candidate', reference_product_diff: null, setup_sha256: candidateSetupSHA256 };
 }
 test('the complete v2 native inventory and strict candidate compare to pre-change limits', () => {
   const b = baseline();
