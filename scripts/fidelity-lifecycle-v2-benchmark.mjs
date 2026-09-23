@@ -19,7 +19,7 @@ const runner = 'scripts/fidelity-lifecycle-v2-benchmark.mjs';
 // The reviewed source delta replaces the legacy unencrypted resource store
 // with NewEncrypted and extracts the same harness constructor for migration
 // tests. An unreviewed setup-helper revision invalidates this qualification.
-const candidateSetupSHA256 = '0f7230293d2e325dafcaf9dc56d4c02dc29b12c61ce105ce281dbc126954cb93';
+export const candidateSetupSHA256 = '0f7230293d2e325dafcaf9dc56d4c02dc29b12c61ce105ce281dbc126954cb93';
 const addedNames = workloads.flatMap((workload) => [1, 4].map((c) => `${workload}/c${c}`));
 const args = ['test', '-mod=readonly', '-tags=integration', '-run', '^TestFidelityLifecycleV2Performance$', '-count=1', '-v', '-timeout=10m', './tests/integration'];
 const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_LIFECYCLE_V2_MEASURE: '1' };
