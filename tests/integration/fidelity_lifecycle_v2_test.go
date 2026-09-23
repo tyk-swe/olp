@@ -221,9 +221,16 @@ func lifecycleV2MappedID(ctx context.Context, h *accessHarness, f *lifecycleV2Fi
 	var actualKind, actualOwner, actualSlug, upstream, state string
 	var contract *string
 	var encrypted bool
-	err = h.Pool.QueryRow(ctx, `SELECT r.kind,r.api_key_id::text,r.route_slug,r.upstream_id,r.state,r.contract_version,
+	if strict {
+		err = h.Pool.QueryRow(ctx, `SELECT r.kind,r.api_key_id::text,r.route_slug,r.upstream_id,r.state,r.contract_version,
 	  EXISTS(SELECT 1 FROM olp_go.secrets s WHERE s.id=r.id AND s.purpose='provider_continuation')
 	  FROM olp_go.provider_resources r WHERE replace(r.id::text,'-','')=$1`, suffix).Scan(&actualKind, &actualOwner, &actualSlug, &upstream, &state, &contract, &encrypted)
+	} else {
+		// The pre-#216 product has no contract_version column. Its original
+		// legacy durable owner/mapping table is still checked independently.
+		err = h.Pool.QueryRow(ctx, `SELECT r.kind,r.api_key_id::text,r.route_slug,r.upstream_id,r.state
+	  FROM olp_go.provider_resources r WHERE replace(r.id::text,'-','')=$1`, suffix).Scan(&actualKind, &actualOwner, &actualSlug, &upstream, &state)
+	}
 	expectedState := "completed"
 	if stream {
 		expectedState = "in_progress"
