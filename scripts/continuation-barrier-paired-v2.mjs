@@ -33,6 +33,26 @@ export const corpusPaths = [
   'tests/fixtures/fidelity/v1/anthropic-tool-next-request.json',
   'tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse'
 ];
+export const candidateDependencies = [
+  referenceHarness, candidateHarness,
+  'tests/integration/continuation_barrier_benchmark_test.go',
+  'tests/integration/continuation_candidate_benchmark_test.go',
+  'tests/integration/access_test.go',
+  'tests/integration/strict_generation_test.go',
+  'tests/integration/fidelity_lifecycle_performance_test.go',
+  'tests/integration/provider_parity_test.go',
+  'tests/integration/provider_resources_test.go',
+  'tests/integration/continuation_workflow_test.go',
+  'tests/integration/responses_fixture_test.go',
+  'tests/integration/services_test.go',
+  'tests/integration/gateway_test.go',
+  'tests/integration/route_fidelity_test.go',
+  'tests/integration/resource_scope_test.go',
+  'tests/fidelity/reference.go',
+  'tests/fixtures/fidelity/fixtures.go',
+  'tests/fixtures/fidelity/v1/anthropic-tool-next-request.json',
+  'tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse'
+];
 const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' };
 export const conditions = { network: 'IPv4 loopback, two warm HTTP/1.1 inference hops, no inference TLS', reference: 'Historical native strict gateway plus independently authored encrypted submission/journal/atomic-ready barrier', candidate: 'Production negotiated OpenAI Chat-to-Anthropic translated continuation', resources: 'Client, provider, gateway or relay, oracle and instrumentation in arm process; PostgreSQL process excluded', exclusions: ['WAN/TLS', 'isolated gateway RSS', 'live-model quality', 'actual SDK process CPU'] };
 const digest = (data) => createHash('sha256').update(data).digest('hex');
@@ -240,6 +260,11 @@ export function verifyCandidateOracle(methodRevision, hashes = { harness: fileHa
   check(hashes.harness === gitBlobHash(methodRevision, candidateHarness) && hashes.workflow === gitBlobHash(methodRevision, 'tests/integration/continuation_candidate_benchmark_test.go'), 'Candidate measurement or SDK-equivalent oracle changed after method freeze');
   return true;
 }
+export function verifyCandidateDependencies(methodRevision, hashes = Object.fromEntries(candidateDependencies.map((path) => [path, fileHash(path)]))) {
+  check(isDeepStrictEqual(Object.keys(hashes ?? {}).sort(), candidateDependencies.slice().sort()), 'Candidate measurement dependency inventory changed');
+  for (const path of candidateDependencies) check(hashes[path] === gitBlobHash(methodRevision, path), `Candidate measurement dependency changed after method freeze: ${path}`);
+  return true;
+}
 
 function verifyReferenceCheckout(root) {
   clean(root);
@@ -332,7 +357,7 @@ async function capture(mode, output, baselinePath) {
     check(baseline.mode === 'baseline' && baseline.analysis?.passed && baseline.criteria_sha256 === fileHash(criteriaPath) && baseline.runner_sha256 === fileHash(runnerPath) && baseline.reference_harness_sha256 === fileHash(referenceHarness), 'Frozen B-only baseline or method is unavailable/failed');
     validateArtifact(baseline, 'baseline', criteria);
     check(baseline.method_revision && baseline.method_revision !== sourceRevision(process.cwd()), 'C must follow the committed pre-candidate method');
-    verifyCandidateOracle(baseline.method_revision);
+    verifyCandidateDependencies(baseline.method_revision);
     const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', baseline.method_revision, 'HEAD']);
     check(ancestor.status === 0, 'Frozen B-only method is not an ancestor of candidate C');
     const changedProduct = git(['diff', '--name-only', baseline.method_revision, 'HEAD']).split('\n').some((path) => path.startsWith('internal/') && path.endsWith('.go'));
@@ -353,6 +378,7 @@ async function capture(mode, output, baselinePath) {
     reference_harness_sha256: fileHash(referenceHarness), candidate_harness_sha256: c ? fileHash(candidateHarness) : null,
     original_oracle_sha256: fileHash('tests/integration/continuation_barrier_benchmark_test.go'),
     fixture_sha256: Object.fromEntries(corpusPaths.filter((path) => existsSync(path)).map((path) => [path, fileHash(path)])),
+    candidate_dependency_sha256: Object.fromEntries(candidateDependencies.map((path) => [path, fileHash(path)])),
     candidate_workflow_sha256: c ? fileHash('tests/integration/continuation_candidate_benchmark_test.go') : null,
     toolchain: toolchain(), go_build_environment: buildEnvironment(), runtime_environment: runtimeEnvironment,
     hardware: hardware(), system_load: { before: load(), after: null }, storage: null, schedule: schedule(criteria),
@@ -395,6 +421,8 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
   check(artifact.criteria_sha256 === fileHash(criteriaPath) && artifact.runner_sha256 === fileHash(runnerPath) && artifact.historical_baseline_sha256 === fileHash(frozenReference) && artifact.historical_budget_sha256 === fileHash(frozenBudget), 'Frozen paired method changed');
   check(artifact.reference_product_revision === anchor && artifact.original_oracle_sha256 === readJSON(frozenReference).harness_sha256 && artifact.reference_harness_sha256 === fileHash(referenceHarness), 'Reference product/oracle changed');
   check(artifact.method_revision && gitBlobHash(artifact.method_revision, runnerPath) === artifact.runner_sha256 && gitBlobHash(artifact.method_revision, criteriaPath) === artifact.criteria_sha256, 'Pre-candidate method commit changed');
+  verifyCandidateDependencies(artifact.method_revision, artifact.candidate_dependency_sha256);
+  verifyCandidateDependencies(artifact.method_revision);
   check(isDeepStrictEqual(git(['diff', '--name-only', anchor, artifact.reference_overlay_revision]).split('\n').filter(Boolean), [referenceHarness]), 'B overlay touched product or oracle');
   check(gitBlobHash(artifact.reference_overlay_revision, referenceHarness) === artifact.reference_harness_sha256, 'Recorded B overlay changed');
   check(isDeepStrictEqual(artifact.conditions, conditions), 'Measurement conditions changed');

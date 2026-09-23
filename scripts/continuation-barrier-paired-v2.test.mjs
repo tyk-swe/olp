@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  analyze, deriveCriteria, schedule, validateInventory, validateRun, verifyCandidateOracle, verifyCriteria,
-  blocksPerStratum, candidateHarness, criteriaPath, primaryMetrics, referencePaths, samples, strata
+  analyze, deriveCriteria, schedule, validateInventory, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria,
+  blocksPerStratum, candidateDependencies, candidateHarness, criteriaPath, primaryMetrics, referencePaths, samples, strata
 } from './continuation-barrier-paired-v2.mjs';
 
 const criteria = verifyCriteria();
@@ -181,4 +181,16 @@ test('post-baseline candidate harness or SDK-equivalent oracle edits are refused
   assert.equal(verifyCandidateOracle(method), true);
   assert.throws(() => verifyCandidateOracle(method, { harness: 'changed', workflow }));
   assert.throws(() => verifyCandidateOracle(method, { harness, workflow: 'changed' }));
+});
+
+test('shared setup, route, provider, percentile and corpus helpers are pinned before B timing', () => {
+  const method = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const hashes = Object.fromEntries(candidateDependencies.map((path) => [path, createHash('sha256').update(readFileSync(path)).digest('hex')]));
+  assert.equal(verifyCandidateDependencies(method, hashes), true);
+  for (const path of ['tests/integration/access_test.go', 'tests/integration/strict_generation_test.go', 'tests/integration/fidelity_lifecycle_performance_test.go', 'tests/integration/provider_parity_test.go', 'tests/integration/provider_resources_test.go', 'tests/integration/continuation_workflow_test.go', 'tests/integration/route_fidelity_test.go', 'tests/fixtures/fidelity/fixtures.go']) {
+    const changed = { ...hashes, [path]: 'changed' };
+    assert.throws(() => verifyCandidateDependencies(method, changed), path);
+  }
+  const missing = { ...hashes }; delete missing['tests/integration/access_test.go'];
+  assert.throws(() => verifyCandidateDependencies(method, missing));
 });

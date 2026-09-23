@@ -23,7 +23,10 @@ server and stay running with warmed HTTP connections while timed blocks are
 serialized. Compilation, setup and one checked warmup per subrun are excluded
 from each 24-workflow measurement.
 The C measurement loop and its SDK-equivalent workflow oracle must retain the
-exact hashes committed with this method before B-only timing.
+exact hashes committed with this method before B-only timing. The same rule
+pins their shared integration setup, route/key publication, provider fixture,
+percentile/CPU helpers, native oracle and embedded corpus files. Product
+implementation code remains free to change for the reviewed hot-path improvement.
 
 [criteria.json](criteria.json) is mechanically derived from the original three
 B repetitions and original frozen limits, before any v2 C observation. For
