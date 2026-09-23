@@ -70,6 +70,7 @@ type execution struct {
 	servingSlot          string
 	servingBinding       string
 	preparedProviders    map[string]preparedProvider
+	sourceSummary        *requestSummary
 	request              request
 	family               openai.Family
 	parsed               *openai.Request
