@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -21,6 +22,9 @@ func (s *Snapshot) CompileRouteExecution(route Route) error {
 	}
 	if err == nil {
 		_, err = s.compileMedia(route)
+	}
+	if err == nil {
+		_, err = s.compileDurable(route)
 	}
 	return err
 }
@@ -96,7 +100,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 	}
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
-		if op == "generation" || mediacontract.IsMediaOperation(op) {
+		if op == "generation" || op == "batch" || mediacontract.IsMediaOperation(op) {
 			continue
 		}
 		for _, target := range route.Targets {
@@ -144,6 +148,30 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 
 func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract.Template, bool) {
 	template, ok := s.media[slug][operation+"/"+target]
+	return template, ok
+}
+
+func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Template, error) {
+	if FidelityMode(route.Fidelity) != FidelityStrict || !slices.Contains(route.Operations, "batch") {
+		return nil, nil
+	}
+	templates := make(map[string]*durablecontract.Template, len(route.Targets))
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) DurableTemplate(slug, target string) (*durablecontract.Template, bool) {
+	template, ok := s.durable[slug][target]
 	return template, ok
 }
 func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {

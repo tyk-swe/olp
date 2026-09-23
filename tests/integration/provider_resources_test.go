@@ -63,16 +63,22 @@ func (c *captureSink) all() []gateway.Envelope {
 
 type openaiFixture struct {
 	*httptest.Server
-	files        map[string]map[string]any
-	batches      map[string]map[string]any
-	resps        map[string]map[string]any
-	mu           sync.Mutex
-	lastReq      atomic.Value
-	lastBatchRaw atomic.Value
-	lastPath     atomic.Value
-	content      atomic.Value
-	respID       atomic.Value
-	dials        atomic.Int64
+	files          map[string]map[string]any
+	batches        map[string]map[string]any
+	resps          map[string]map[string]any
+	mu             sync.Mutex
+	lastReq        atomic.Value
+	lastBatchRaw   atomic.Value
+	batchCreates   atomic.Int64
+	batchCreateRaw atomic.Value
+	batchFetchRaw  atomic.Value
+	fileCreateRaw  atomic.Value
+	fileFetchRaw   atomic.Value
+	contentByID    sync.Map
+	lastPath       atomic.Value
+	content        atomic.Value
+	respID         atomic.Value
+	dials          atomic.Int64
 }
 
 func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
@@ -107,6 +113,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	mux.HandleFunc("POST /openai/files", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
 		_ = r.ParseMultipartForm(1 << 20)
+		if raw := f.fileCreateRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
+			return
+		}
 		writeJSON(w, f.files["file-up-1"])
 	})
 	mux.HandleFunc("GET /openai/files/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +124,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		file, ok := f.files[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such file"}}`, http.StatusNotFound)
+			return
+		}
+		if raw := f.fileFetchRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
 		writeJSON(w, file)
@@ -125,6 +139,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
+		if custom, ok := f.contentByID.Load(r.PathValue("id")); ok {
+			_, _ = io.WriteString(w, custom.(string))
+			return
+		}
 		io.WriteString(w, f.content.Load().(string))
 	})
 	mux.HandleFunc("DELETE /openai/files/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +158,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("POST /openai/batches", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		f.batchCreates.Add(1)
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "invalid batch fixture body", http.StatusBadRequest)
@@ -154,6 +173,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		f.lastReq.Store(body)
 		f.lastBatchRaw.Store(string(raw))
 		f.mu.Unlock()
+		if result := f.batchCreateRaw.Load(); result != nil {
+			_, _ = io.WriteString(w, result.(string))
+			return
+		}
 		batch := map[string]any{}
 		for k, v := range f.batches["batch-up-1"] {
 			batch[k] = v
@@ -166,6 +189,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		batch, ok := f.batches[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such batch"}}`, http.StatusNotFound)
+			return
+		}
+		if raw := f.batchFetchRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
 		writeJSON(w, batch)
@@ -203,6 +230,34 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			return
 		}
 		writeJSON(w, out)
+	})
+	// Azure's reviewed legacy Responses profile uses the resource-level path;
+	// the deployment path above remains the older compatibility fixture.
+	mux.HandleFunc("POST /openai/responses", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		body := decodeBody(t, r)
+		f.lastReq.Store(body)
+		out := map[string]any{}
+		for k, v := range f.resps["resp-up-1"] {
+			out[k] = v
+		}
+		out["id"] = f.respID.Load().(string)
+		if stream, _ := body["stream"].(bool); stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": out})
+			fmt.Fprintf(w, "event: response.created\ndata: %s\n\n", created)
+			return
+		}
+		writeJSON(w, out)
+	})
+	mux.HandleFunc("GET /openai/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		res, ok := f.resps[r.PathValue("id")]
+		if !ok {
+			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, res)
 	})
 	mux.HandleFunc("GET /openai/deployments/{dep}/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
@@ -310,10 +365,16 @@ func provisionOpenAI(t *testing.T, h *accessHarness, endpoint string, capabiliti
 	return provisionOpenAIWith(t, h, endpoint, capabilities, operations, nil)
 }
 
-func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabilities []any, operations []string, draftFields map[string]any) (*browser, map[string]any, string, string) {
+func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabilities []any, operations []string, draftFields map[string]any, providerFields ...map[string]any) (*browser, map[string]any, string, string) {
 	t.Helper()
 	owner := h.owner()
-	create := map[string]any{"name": "Provider state fixture", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}, "model": vendorModel, "credential": vendorSecret}
+	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}
+	if len(providerFields) > 0 {
+		for name, value := range providerFields[0] {
+			configuration[name] = value
+		}
+	}
+	create := map[string]any{"name": "Provider state fixture", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}
 	detail := h.want(owner, "POST", "/api/v3/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	path := "/api/v3/providers/" + detail["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)

@@ -162,7 +162,12 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	    DROP TRIGGER preserve_route_contract_identity ON olp_go.routes;
 	    DROP FUNCTION olp_go.preserve_route_contract_identity();
 	    ALTER TABLE olp_go.routes DROP COLUMN strict_contract;
-	    DELETE FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql'`)
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_strict_durable_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_kind_check;
+	    ALTER TABLE olp_go.provider_resources ADD CONSTRAINT provider_resources_kind_check
+	        CHECK (kind IN ('file','batch','response','continuation','strict_response'));
+	    DELETE FROM olp_go.migrations WHERE version>='0027_strict_route_identity.sql'`)
 	if err != nil {
 		t.Fatal(err)
 	}

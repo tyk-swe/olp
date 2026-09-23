@@ -210,6 +210,16 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	if !ok {
 		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
+	var target runtime.Target
+	for _, candidate := range route.Targets {
+		if candidate.ID == attempt.TargetID {
+			target = candidate
+			break
+		}
+	}
+	if target.ID == "" {
+		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+	}
 	x.decisions = plan.Decisions
 	x.policy = plan.Policy
 	x.budget = 1
@@ -230,7 +240,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		gate := s.gateSlot(ctx, &provider, slot, resourceEstimate, deadline)
 		switch gate.verdict {
 		case gateAdmitted:
-			return &pin{provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
+			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
 		case gateRejected:
 			return nil, gate.rejection.toError()
 		case gateExpired:
@@ -250,7 +260,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
-		if fact.Interaction != nil && x.family == openai.FamilyGeminiInteractions {
+		if fact.Interaction != nil && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
 			switch {
 			case f.status > 0:
 				fact.Interaction.UpstreamState = usage.UpstreamTerminal
@@ -316,6 +326,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		fact.Class = "success"
 		fact.Committed = true
+		if fact.Interaction != nil && (x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
+			fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		}
 		if x.family == openai.FamilyGeminiInteractions {
 			// The upstream has answered, but the client cannot observe a new
 			// Interaction until its encrypted ID mapping commits.
@@ -430,7 +443,17 @@ func rewriteID(body []byte, name, value string) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-func fileObject(res *resources.Resource) ([]byte, error) {
+func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
+	if res.Kind == resources.KindStrictFile {
+		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(contract.Result) != 0 {
+			return durableProjection(contract.Result, res.ID, nil)
+		}
+		return json.Marshal(map[string]any{"id": res.ID, "object": "file", "status": res.State})
+	}
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
@@ -460,6 +483,36 @@ func fileObject(res *resources.Resource) ([]byte, error) {
 }
 
 func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
+	if res.Kind == resources.KindStrictBatch {
+		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
+		if err != nil || len(contract.Result) == 0 {
+			return nil, resources.ErrContract
+		}
+		doc, _, err := strictBatchResult(contract.Result, res.UpstreamID)
+		if err != nil {
+			return nil, err
+		}
+		if !strictBatchInputMatches(doc, contract.Effective) {
+			return nil, resources.ErrContract
+		}
+		files := map[string]string{}
+		for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+			field, present := doc.Root().Lookup(name)
+			if !present || field.Kind() == oif.Null {
+				continue
+			}
+			upstream, valid := field.Text()
+			if !valid || upstream == "" {
+				return nil, resources.ErrContract
+			}
+			mapped, err := s.mapUpstreamFile(ctx, res, upstream)
+			if err != nil {
+				return nil, err
+			}
+			files[name] = mapped.ID
+		}
+		return durableProjection(contract.Result, res.ID, files)
+	}
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
@@ -499,12 +552,21 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 }
 
 func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamID string) (*resources.Resource, error) {
-	if existing, err := s.Resources.GetByUpstream(ctx, resources.KindFile, owner.APIKeyID, owner.ProviderID, upstreamID); err == nil {
-		return existing, nil
+	kind := resources.KindFile
+	if owner.Kind == resources.KindStrictBatch {
+		kind = resources.KindStrictFile
 	}
-	metadata, _ := json.Marshal(map[string]any{"upstream_model": resourceModel(owner)})
-	return s.Resources.Put(ctx, &resources.Resource{
-		Kind:               resources.KindFile,
+	if existing, err := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); err == nil {
+		if existing.RouteSlug != owner.RouteSlug || existing.ProviderRevisionID != owner.ProviderRevisionID || existing.SlotID != owner.SlotID || existing.CredentialID == nil && owner.CredentialID != nil || existing.CredentialID != nil && owner.CredentialID == nil || existing.CredentialID != nil && owner.CredentialID != nil && *existing.CredentialID != *owner.CredentialID {
+			return nil, resources.ErrContract
+		}
+		return existing, nil
+	} else if !errors.Is(err, resources.ErrNotFound) {
+		return nil, err
+	}
+	metadata := durableMetadata(resourceModel(owner))
+	resource := &resources.Resource{
+		Kind:               kind,
 		APIKeyID:           owner.APIKeyID,
 		RouteSlug:          owner.RouteSlug,
 		ProviderID:         owner.ProviderID,
@@ -515,7 +577,20 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		UpstreamID:         upstreamID,
 		State:              "processed",
 		Metadata:           metadata,
-	})
+	}
+	if kind == resources.KindStrictFile {
+		_, batch, err := s.readDurable(ctx, owner.Kind, owner.APIKeyID, owner.ID)
+		if err != nil {
+			return nil, err
+		}
+		version := resources.DurableContractVersion
+		resource.ContractVersion = &version
+		resource.ExpiresAt = owner.ExpiresAt
+		source, _ := json.Marshal(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
+		payload, _ := json.Marshal(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
+		return s.Resources.PutDurableContract(ctx, resource, payload)
+	}
+	return s.Resources.Put(ctx, resource)
 }
 
 func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time) {
@@ -595,6 +670,10 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
+	if x.strict() && (!authority.Policy.AllowProviderState || !s.Resources.Encrypted()) {
+		s.stateFail(x, w, providerStateForbidden(), x.family)
+		return
+	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		s.stateFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."), x.family)
 		return
@@ -632,6 +711,32 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, mediaError(mErr), x.family)
 		return
 	}
+	var strictSource []byte
+	fileFirst := false
+	if x.strict() {
+		fields, normalized := form.SourceFields()
+		fileFirst = len(fields) == 2 && fields[0].Name == "file" && fields[0].File != nil && fields[1].Name == "purpose" && fields[1].Text != nil
+		purposeFirst := len(fields) == 2 && fields[0].Name == "purpose" && fields[0].Text != nil && fields[1].Name == "file" && fields[1].File != nil
+		if normalized || !purposeFirst && !fileFirst || len(extra) != 0 || purpose != "batch" ||
+			file.ContentType == "" || strings.ContainsAny(file.Filename, "\"\\\r\n") || r.Header.Get("Idempotency-Key") != "" {
+			s.stateFail(x, w, invalidRequest("target_capability", "Strict batch file upload requires one purpose=batch and one typed file field without unqualified options.", nil), x.family)
+			return
+		}
+		type sourceField struct {
+			Name  string        `json:"name"`
+			Value string        `json:"value,omitempty"`
+			Asset *durableAsset `json:"asset,omitempty"`
+		}
+		ordered := make([]sourceField, 0, 2)
+		for _, field := range fields {
+			if field.Text != nil {
+				ordered = append(ordered, sourceField{Name: field.Name, Value: *field.Text})
+			} else {
+				ordered = append(ordered, sourceField{Name: field.Name, Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size}})
+			}
+		}
+		strictSource, _ = json.Marshal(ordered)
+	}
 	form.Disarm()
 	defer func() {
 		if err := s.transport().Spool.Remove(file.Handle); err != nil {
@@ -642,6 +747,23 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
+	}
+	var strictServing oif.ServingIdentity
+	var strictEndpoint string
+	var strictItems int
+	if x.strict() {
+		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
+		if !ok {
+			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
+			return
+		}
+		strictServing = template.Serving()
+		var validationErr error
+		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model())
+		if validationErr != nil {
+			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
+			return
+		}
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), &route)
 	defer cancel()
@@ -655,7 +777,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
 		return
 	}
-	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file)
+	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file, fileFirst)
 	if failure != nil {
 		x.dispatched = true
 		s.stateFail(x, w, upstreamError(failure), x.family)
@@ -673,11 +795,23 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
 		return
 	}
+	if x.strict() {
+		if _, _, err := strictResult(body, upstreamID); err != nil {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."), x.family)
+			return
+		}
+	}
 	metadata, state, expires := fileMetadata(body, p.model)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	res, err := s.Resources.Put(commitCtx, &resources.Resource{
-		Kind:               resources.KindFile,
+	kind := resources.KindFile
+	if x.strict() {
+		kind = resources.KindStrictFile
+		metadata = durableMetadata(p.model)
+		expires = s.durableExpiry(expires)
+	}
+	resource := &resources.Resource{
+		Kind:               kind,
 		APIKeyID:           authority.ID,
 		RouteSlug:          route.Slug,
 		ProviderID:         p.provider.ID,
@@ -689,12 +823,31 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		State:              state,
 		Metadata:           metadata,
 		ExpiresAt:          expires,
-	})
+	}
+	var res *resources.Resource
+	if x.strict() {
+		version := resources.DurableContractVersion
+		resource.ContractVersion = &version
+		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: strictSource, Result: body, Binding: p.model, Serving: strictServing,
+			Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: strictEndpoint, ItemCount: strictItems}})
+		if marshalErr != nil {
+			s.stateFail(x, w, durableError(marshalErr), x.family)
+			return
+		}
+		res, err = s.Resources.PutDurableContract(commitCtx, resource, payload)
+	} else {
+		res, err = s.Resources.Put(commitCtx, resource)
+	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."), x.family)
 		return
 	}
-	out, err := rewriteID(body, "id", res.ID)
+	var out []byte
+	if x.strict() {
+		out, err = durableProjection(body, res.ID, nil)
+	} else {
+		out, err = rewriteID(body, "id", res.ID)
+	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
 		return
@@ -702,7 +855,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part) (*http.Response, *attemptFailure) {
+func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part, fileFirst bool) (*http.Response, *attemptFailure) {
 	pipeR, pipeW := io.Pipe()
 	form := multipart.NewWriter(pipeW)
 	sendDone := make(chan error, 1)
@@ -710,6 +863,36 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		failure := func(err error) error {
 			pipeW.CloseWithError(err)
 			return err
+		}
+		writeFile := func() error {
+			opened, err := s.transport().Spool.Open(file.Handle)
+			if err != nil {
+				return err
+			}
+			defer opened.File.Close()
+			name := opened.Filename
+			if name == "" {
+				name = "upload"
+			}
+			header := textproto.MIMEHeader{}
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, stateQuote(name)))
+			contentType := opened.Artifact.ContentType
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			header.Set("Content-Type", contentType)
+			part, err := form.CreatePart(header)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(part, opened.File)
+			return err
+		}
+		if fileFirst {
+			if err := writeFile(); err != nil {
+				sendDone <- failure(err)
+				return
+			}
 		}
 		if err := form.WriteField("purpose", purpose); err != nil {
 			sendDone <- failure(err)
@@ -721,33 +904,11 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 				return
 			}
 		}
-		opened, err := s.transport().Spool.Open(file.Handle)
-		if err != nil {
-			sendDone <- failure(err)
-			return
-		}
-		name := opened.Filename
-		if name == "" {
-			name = "upload"
-		}
-		header := textproto.MIMEHeader{}
-		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, stateQuote(name)))
-		contentType := opened.Artifact.ContentType
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-		header.Set("Content-Type", contentType)
-		part, err := form.CreatePart(header)
-		if err != nil {
-			opened.File.Close()
-			sendDone <- failure(err)
-			return
-		}
-		_, copyErr := io.Copy(part, opened.File)
-		opened.File.Close()
-		if copyErr != nil {
-			sendDone <- failure(copyErr)
-			return
+		if !fileFirst {
+			if err := writeFile(); err != nil {
+				sendDone <- failure(err)
+				return
+			}
 		}
 		if err := form.Close(); err != nil {
 			sendDone <- failure(err)
@@ -846,14 +1007,25 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	rows, err := s.Resources.List(r.Context(), resources.KindFile, authority.ID, limit, after)
+	kinds := []string{resources.KindFile}
+	if authority.Policy.AllowProviderState {
+		kinds = append(kinds, resources.KindStrictFile)
+	}
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file list could not be read."), x.family)
 		return
 	}
 	items := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
-		obj, err := fileObject(row)
+		if row.Kind == resources.KindStrictFile {
+			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch") != nil {
+				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."), x.family)
+				return
+			}
+		}
+		obj, err := s.fileObject(r.Context(), row)
 		if err != nil {
 			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list could not be projected."), x.family)
 			return
@@ -886,11 +1058,33 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
 		metadata, state, expires := fileMetadata(body, resourceModel(res))
-		if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
-			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
+		var out []byte
+		if res.Kind == resources.KindStrictFile {
+			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
+			}
+			_, contract, err := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
+			if err != nil {
+				return durableError(err)
+			}
+			contract.Result = body
+			payload, err := json.Marshal(contract)
+			if err != nil {
+				return durableError(err)
+			}
+			commitCtx, stopCommit := resourceCommitContext(ctx)
+			defer stopCommit()
+			if _, _, err = s.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, state, payload); err != nil {
+				return durableError(err)
+			}
+			out, err = durableProjection(body, res.ID, nil)
+		} else {
+			if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
+			}
+			res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
+			out, err = rewriteID(body, "id", res.ID)
 		}
-		res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
-		out, err := rewriteID(body, "id", res.ID)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
 		}
@@ -985,6 +1179,9 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprint(artifact.ContentLength))
+		if res.Kind == resources.KindStrictFile {
+			w.Header().Set("X-OLP-Content-SHA256", artifact.Digest)
+		}
 		w.WriteHeader(http.StatusOK)
 		x.delivered(s.now())
 		written, copyErr := io.Copy(w, opened.File)
@@ -1004,13 +1201,22 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, op func(contex
 		return
 	}
 	defer s.release(r.Context())
-	res, err := s.Resources.Get(r.Context(), resources.KindFile, authority.ID, r.PathValue("id"))
+	kind := durableKind(resources.KindFile, r.PathValue("id"))
+	if kind == resources.KindStrictFile && !authority.Policy.AllowProviderState {
+		s.stateFail(x, w, providerStateForbidden(), x.family)
+		return
+	}
+	res, contract, err := s.readDurable(r.Context(), kind, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
 		return
 	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
+		return
+	}
+	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch"); e != nil {
+		s.stateFail(x, w, e, x.family)
 		return
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch")
@@ -1052,6 +1258,11 @@ func (s *Server) writeStateJSON(w http.ResponseWriter, x *execution, body []byte
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 	x.delivered(s.now())
+	if len(x.facts) > 0 {
+		if evidence := x.facts[len(x.facts)-1].Interaction; evidence != nil {
+			evidence.ClientState = usage.ClientTerminal
+		}
+	}
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
@@ -1105,12 +1316,13 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	fileValue, ok := source.Root().Lookup("input_file_id")
 	localFile, valid := fileValue.Text()
-	if !ok || !valid || !strings.HasPrefix(localFile, "file_") {
+	if !ok || !valid || !strings.HasPrefix(localFile, "file_") && !strings.HasPrefix(localFile, "strict_file_") {
 		param := "input_file_id"
 		s.stateFail(x, w, invalidRequest("missing_required_parameter", "input_file_id must name a file uploaded through this key.", &param), x.family)
 		return
 	}
-	file, err := s.Resources.Get(r.Context(), resources.KindFile, authority.ID, localFile)
+	fileKind := durableKind(resources.KindFile, localFile)
+	file, fileContract, err := s.readDurable(r.Context(), fileKind, authority.ID, localFile)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
 		return
@@ -1125,6 +1337,22 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = route
+	if x.strict() {
+		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.Resources.Encrypted() {
+			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)
+			return
+		}
+		if e := s.authorizeDurable(r.Context(), x, authority, file, fileContract, "batch"); e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		requestEndpoint, present := source.Root().Lookup("endpoint")
+		path, valid := requestEndpoint.Text()
+		if !present || !valid || fileContract.Asset == nil || fileContract.Asset.Endpoint != path || fileContract.Asset.ItemCount < 1 {
+			s.stateFail(x, w, invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", strPtr("endpoint")), x.family)
+			return
+		}
+	}
 	if e := policySurfaceGate(route); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1143,20 +1371,37 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	p.hold = gate.hold
 	upstreamFile, _ := json.Marshal(file.UpstreamID)
-	changes := []oif.Change{{Pointer: "/input_file_id", Value: string(upstreamFile), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"}}
-	if p.provider.Kind == "azure_openai" {
-		deployment := p.provider.Connector().Model(p.model)
-		if deployment != "" {
-			upstreamModel, _ := json.Marshal(deployment)
-			changes = append(changes, oif.Change{Pointer: "/model", Value: string(upstreamModel), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
+	var upstream []byte
+	var strictServing oif.ServingIdentity
+	if x.strict() {
+		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
+		if !ok {
+			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
+			return
 		}
+		bound, bindErr := template.BindBatch(source, route.Slug, localFile, file.UpstreamID)
+		if bindErr != nil {
+			s.stateFail(x, w, invalidRequest("target_capability", "The batch source cannot satisfy this native target contract.", nil), x.family)
+			return
+		}
+		upstream = bound.Effective.Document().Bytes()
+		strictServing = bound.Receipt.Serving
+	} else {
+		changes := []oif.Change{{Pointer: "/input_file_id", Value: string(upstreamFile), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"}}
+		if p.provider.Kind == "azure_openai" {
+			deployment := p.provider.Connector().Model(p.model)
+			if deployment != "" {
+				upstreamModel, _ := json.Marshal(deployment)
+				changes = append(changes, oif.Change{Pointer: "/model", Value: string(upstreamModel), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
+			}
+		}
+		effective, applyErr := oif.Apply(source, changes)
+		if applyErr != nil {
+			s.stateFail(x, w, invalidRequest("invalid_json", "The batch request could not be bound to its provider resource.", nil), x.family)
+			return
+		}
+		upstream = effective.Bytes()
 	}
-	effective, err := oif.Apply(source, changes)
-	if err != nil {
-		s.stateFail(x, w, invalidRequest("invalid_json", "The batch request could not be bound to its provider resource.", nil), x.family)
-		return
-	}
-	upstream := effective.Bytes()
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, "batches", nil)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
@@ -1180,11 +1425,23 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
 		return
 	}
+	if x.strict() {
+		validated, _, err := strictBatchResult(result, upstreamID)
+		if err != nil || !strictBatchInputMatches(validated, upstream) {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
+			return
+		}
+	}
 	metadata, state := batchMetadata(result, p.model)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	res, err := s.Resources.Put(commitCtx, &resources.Resource{
-		Kind:               resources.KindBatch,
+	kind := resources.KindBatch
+	if x.strict() {
+		kind = resources.KindStrictBatch
+		metadata = durableMetadata(p.model)
+	}
+	resource := &resources.Resource{
+		Kind:               kind,
 		APIKeyID:           authority.ID,
 		RouteSlug:          route.Slug,
 		ProviderID:         p.provider.ID,
@@ -1195,7 +1452,21 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		UpstreamID:         upstreamID,
 		State:              state,
 		Metadata:           metadata,
-	})
+	}
+	var res *resources.Resource
+	if x.strict() {
+		version := resources.DurableContractVersion
+		resource.ContractVersion = &version
+		resource.ExpiresAt = s.durableExpiry(nil)
+		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: source.Bytes(), Effective: upstream, Result: result, Binding: p.model, Serving: strictServing})
+		if marshalErr != nil {
+			s.stateFail(x, w, durableError(marshalErr), x.family)
+			return
+		}
+		res, err = s.Resources.PutDurableContract(commitCtx, resource, payload)
+	} else {
+		res, err = s.Resources.Put(commitCtx, resource)
+	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be stored."), x.family)
 		return
@@ -1214,13 +1485,22 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, op func(conte
 		return
 	}
 	defer s.release(r.Context())
-	res, err := s.Resources.Get(r.Context(), resources.KindBatch, authority.ID, r.PathValue("id"))
+	kind := durableKind(resources.KindBatch, r.PathValue("id"))
+	if kind == resources.KindStrictBatch && !authority.Policy.AllowProviderState {
+		s.stateFail(x, w, providerStateForbidden(), x.family)
+		return
+	}
+	res, contract, err := s.readDurable(r.Context(), kind, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No batch with this identifier exists for this key."), x.family)
 		return
 	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."), x.family)
+		return
+	}
+	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch"); e != nil {
+		s.stateFail(x, w, e, x.family)
 		return
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch")
@@ -1258,13 +1538,24 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	rows, err := s.Resources.List(r.Context(), resources.KindBatch, authority.ID, limit, after)
+	kinds := []string{resources.KindBatch}
+	if authority.Policy.AllowProviderState {
+		kinds = append(kinds, resources.KindStrictBatch)
+	}
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch list could not be read."), x.family)
 		return
 	}
 	items := make([]json.RawMessage, 0, len(rows))
 	for _, row := range rows {
+		if row.Kind == resources.KindStrictBatch {
+			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch") != nil {
+				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."), x.family)
+				return
+			}
+		}
 		obj, err := s.batchObject(r.Context(), row)
 		if err != nil {
 			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."), x.family)
@@ -1312,10 +1603,32 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 		commitCtx, stopCommit = resourceCommitContext(ctx)
 	}
 	defer stopCommit()
-	if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
-		return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
+	if res.Kind == resources.KindStrictBatch {
+		validated, _, err := strictBatchResult(result, res.UpstreamID)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result.")
+		}
+		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)
+		if err != nil {
+			return durableError(err)
+		}
+		if !strictBatchInputMatches(validated, contract.Effective) {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider changed the batch input file identity.")
+		}
+		contract.Result = result
+		payload, err := json.Marshal(contract)
+		if err != nil {
+			return durableError(err)
+		}
+		if _, _, err = s.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
+			return durableError(err)
+		}
+	} else {
+		if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
+			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
+		}
+		res.State, res.Metadata = state, metadata
 	}
-	res.State, res.Metadata = state, metadata
 	out, err := s.batchObject(ctx, res)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")

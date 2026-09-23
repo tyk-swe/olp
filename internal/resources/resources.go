@@ -22,6 +22,8 @@ const (
 	KindContinuation   = "continuation"
 	KindStrictResponse = "strict_response"
 	KindInteraction    = "interaction"
+	KindStrictFile     = "strict_file"
+	KindStrictBatch    = "strict_batch"
 )
 
 const StateDeleted = "deleted"
@@ -73,7 +75,7 @@ func parseLocal(local string) (uuid.UUID, error) {
 		return uuid.Nil, ErrNotFound
 	}
 	switch local[:i] {
-	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction:
+	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction, KindStrictFile, KindStrictBatch:
 	default:
 		return uuid.Nil, ErrNotFound
 	}
@@ -109,7 +111,7 @@ func scan(row pgx.Row) (*Resource, error) {
 }
 
 func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
-	if r.Kind == KindContinuation || r.Kind == KindStrictResponse {
+	if r.Kind == KindContinuation || r.Kind == KindStrictResponse || r.Kind == KindStrictFile || r.Kind == KindStrictBatch {
 		return nil, ErrContract
 	}
 	if len(r.Metadata) == 0 {
@@ -162,19 +164,31 @@ func (s *Store) GetByUpstream(ctx context.Context, kind, apiKeyID, providerID, u
 }
 
 func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
+	return s.ListKinds(ctx, []string{kind}, apiKeyID, limit, afterID)
+}
+
+// ListKinds joins legacy and strict resource identities without changing
+// either storage contract. The cursor belongs to this owner and one of the
+// requested kinds; an unrelated local ID cannot move the page boundary.
+func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
 	var after uuid.UUID
 	if afterID != "" {
 		parsed, err := parseLocal(afterID)
-		if err != nil {
+		valid := false
+		for _, kind := range kinds {
+			valid = valid || LocalID(kind, parsed) == afterID
+		}
+		if err != nil || !valid {
 			return nil, ErrNotFound
 		}
 		after = parsed
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
-		WHERE kind=$1 AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
-		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp_go.provider_resources WHERE id=$4))
+		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
+		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp_go.provider_resources
+		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now())))
 		ORDER BY created_at DESC, id DESC LIMIT $5`,
-		kind, apiKeyID, StateDeleted, nilUUID(after), limit)
+		kinds, apiKeyID, StateDeleted, nilUUID(after), limit)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource list: %w", err)
 	}
@@ -202,7 +216,7 @@ func (s *Store) Update(ctx context.Context, localID, state string, metadata json
 		SET state=COALESCE($2,state), metadata=metadata||COALESCE($3,'{}'::jsonb),
 			expires_at=COALESCE($4,expires_at), updated_at=now()
 		WHERE id=$1 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())
- AND kind<>'continuation' AND (kind<>'strict_response' OR ($3::jsonb IS NULL AND $4::timestamptz IS NULL))`,
+ AND kind NOT IN ('continuation','strict_file','strict_batch') AND (kind<>'strict_response' OR ($3::jsonb IS NULL AND $4::timestamptz IS NULL))`,
 		id, nilIfEmpty(state), nilIfEmpty(string(metadata)), expiresAt, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource update: %w", err)

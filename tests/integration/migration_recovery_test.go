@@ -107,6 +107,7 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	    DROP INDEX olp_go.provider_resources_submission_identity;
 	    DROP INDEX olp_go.provider_resources_parent;
 	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_strict_durable_check;
 	    ALTER TABLE olp_go.provider_resources
 	        DROP CONSTRAINT provider_resources_contract_version_check,
 	        DROP CONSTRAINT provider_resources_continuation_contract_check,

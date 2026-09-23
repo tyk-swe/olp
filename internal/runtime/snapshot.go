@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
@@ -148,6 +149,7 @@ type Snapshot struct {
 	interactions       map[string]map[string]*interaction.Template
 	operations         map[string]map[string]*operationplan.Template
 	media              map[string]map[string]*mediacontract.Template
+	durable            map[string]map[string]*durablecontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -188,6 +190,7 @@ func (s *Snapshot) Validate() error {
 	s.interactions = make(map[string]map[string]*interaction.Template)
 	s.operations = make(map[string]map[string]*operationplan.Template)
 	s.media = make(map[string]map[string]*mediacontract.Template)
+	s.durable = make(map[string]map[string]*durablecontract.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
@@ -250,6 +253,11 @@ func (s *Snapshot) Validate() error {
 			return fmt.Errorf("route %q media: %w", slug, err)
 		}
 		s.media[slug] = media
+		durable, err := s.compileDurable(r)
+		if err != nil {
+			return fmt.Errorf("route %q durable: %w", slug, err)
+		}
+		s.durable[slug] = durable
 		r.compiledContentPolicy = policy
 		s.Routes[slug] = r
 	}

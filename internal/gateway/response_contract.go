@@ -93,7 +93,13 @@ func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *Atte
 	if err != nil {
 		return nil, err
 	}
-	metadata, _ = json.Marshal(map[string]string{"upstream_model": fact.UpstreamModel})
+	// Keep only the non-secret serving index and the content-free deferred
+	// accounting template. Native source remains encrypted in the contract.
+	var billing map[string]json.RawMessage
+	if json.Unmarshal(metadata, &billing) != nil {
+		return nil, resources.ErrContract
+	}
+	metadata, _ = json.Marshal(billing)
 	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
 	if x.pin != nil {
 		r.ParentID = &x.pin.UUID

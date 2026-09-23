@@ -279,13 +279,19 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 
 func checkState(document oif.Document, wire openai.Family, context Context, obligations *Obligations) error {
 	root := document.Root()
-	if background, _ := root.Lookup("background"); background.Raw() == "true" {
-		return incompatible("state_carrier", "/background", "durable_lifecycle", "This strict runner does not admit background delivery before durable lifecycle qualification.")
+	background, _ := root.Lookup("background")
+	queued := background.Raw() == "true"
+	if queued && (wire != openai.FamilyResponses || obligations.Delivery != "unary" || member(root, "store").Raw() == "false") {
+		return incompatible("state_carrier", "/background", "durable_lifecycle", "Only retained unary Responses have a qualified background lifecycle.")
 	}
 	retained := member(root, "store").Raw() == "true"
 	if wire == openai.FamilyResponses {
 		store, present := root.Lookup("store")
 		retained = !present || store.Kind() == oif.Null || store.Raw() != "false"
+	}
+	if queued {
+		retained = true
+		obligations.Submission = "queued"
 	}
 	referenced := false
 	unsupportedReference := false
