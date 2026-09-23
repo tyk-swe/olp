@@ -11,7 +11,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { summarize } from './fidelity-benchmark.mjs';
 
 export const SCHEMA = 'openllmproxy.dev/fidelity-source-paired-v2';
-export const SEED = 'oif-source-paired-v2-2026-09-23-sealed-7f093a602b';
+export const SEED = 'oif-source-paired-v2-r6-2026-09-23-sealed-4c09e69bd51a';
 export const BLOCKS = 32;
 export const SAMPLES = 64;
 export const UPPER_INDEX = 21; // d_(22), zero-based.
@@ -45,13 +45,26 @@ const oldFiles = {
   harness: 'internal/gateway/fidelity_benchmark_test.go',
   runner: 'scripts/fidelity-benchmark.mjs',
   pairedHarness: 'internal/gateway/fidelity_paired_benchmark_test.go',
-  pairedRunner: 'scripts/fidelity-paired-v2.mjs'
+  pairedRunner: 'scripts/fidelity-paired-v2.mjs',
+  r5Manifest: 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json'
 };
-const B_ONLY_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json';
+const B_ONLY_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json';
 const B_ONLY_JOURNAL_PATH = `${B_ONLY_EVIDENCE_PATH}.journal.jsonl`;
-const PAIRED_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json';
+const PAIRED_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json';
 const PAIRED_JOURNAL_PATH = `${PAIRED_EVIDENCE_PATH}.journal.jsonl`;
 const affectedProductionPrefixes = ['internal/gateway/', 'internal/resources/', 'internal/interaction/'];
+const R5_INVALID_COMMIT = 'c104953720f7817d2367eb68f99cc2e812bdf91d';
+const R5_INVALID_ARTIFACT_SHA256 = '68f7bb88ce70bcc4b179179749577faf085838c0fd2696c7e3b2f9ba3b239b06';
+const R5_INVALID_JOURNAL_SHA256 = '5127ea75ec3688cbadf433eae8d021ce0d473b269f571fe03face683f7dd8295';
+const hostStabilityRule = {
+  preflight_seconds: 60, preflight_interval_seconds: 5, preflight_samples: 13,
+  preflight_max_load_1m_exclusive: 2, preflight_max_cpu_some_avg10_percent_exclusive: 5,
+  preflight_max_external_busy_cores_exclusive: 1,
+  capture_external_cores_single_block_invalid_at: 2,
+  capture_external_cores_two_consecutive_blocks_invalid_at: 0.75,
+  clock_ticks_per_second: 100,
+  decision: 'before reservation require every preflight sample/window below limits; after each completed block invalidate the whole attempt on one >=2 external-core interval or two consecutive >=0.75 intervals; never filter or replace blocks'
+};
 
 export function sourceOrder(group, variant, baselineOnly = false, outer = 'relay') {
   invariant(variant === 'ABBA' || variant === 'BAAB', 'unknown order');
@@ -100,6 +113,12 @@ export function validateStrictRouteContracts(contracts) {
   return contracts;
 }
 
+function committedEvidence(root, revision, path) {
+  const result = spawnSync('git', ['show', `${revision}:${path}`], { cwd: root, maxBuffer: 128 << 20 });
+  invariant(result.status === 0, `historical committed evidence unavailable: ${revision}:${path}`);
+  return result.stdout;
+}
+
 export function makeManifest(root) {
   const full = (key) => resolve(root, oldFiles[key]);
   const baseline = json(full('baseline'));
@@ -135,10 +154,24 @@ export function makeManifest(root) {
     addedLatency[group] = Object.fromEntries(latencyMetrics.map((metric) => [metric, comparisons[pathName(group, 'gateway')][metric]]));
   }
   invariant(Object.values(addedLatency).flatMap(Object.keys).length === 30, 'added latency inventory changed');
+  const r5Manifest = json(full('r5Manifest'));
+  invariant(digest(full('r5Manifest')) === 'ffc6fa688a6394fe3f350d483587dfc0c13e23874d6d8f99d9b7355569966fca', 'r5 frozen manifest changed');
+  invariant(isDeepStrictEqual(comparisons, r5Manifest.comparisons) && isDeepStrictEqual(addedLatency, r5Manifest.added_latency) &&
+    isDeepStrictEqual(Object.fromEntries(expectedNames.map((name) => [name, budgets.workloads[name].exact])), r5Manifest.exact), 'r6 changed an old workload, metric, margin or exact outcome');
+  const r5Artifact = committedEvidence(root, R5_INVALID_COMMIT, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json');
+  const r5Journal = committedEvidence(root, R5_INVALID_COMMIT, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl');
+  invariant(hash(r5Artifact) === R5_INVALID_ARTIFACT_SHA256 && hash(r5Journal) === R5_INVALID_JOURNAL_SHA256, 'r5 invalid evidence hashes changed');
+  const r5Observed = JSON.parse(r5Artifact.toString());
+  invariant(r5Observed.status === 'invalid' && r5Observed.blocks.length === 151 && r5Observed.C === null, 'r5 invalid B-only outcome changed');
   const schedule = sourceSchedule();
   return {
-    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'separate-evidence-branch-r5',
-    supersedes_manifest_sha256: '87c5584162e0c2b2fa9d6d82ea52203aa297ff6208f2b340238857b9fabc2a49',
+    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'host-stability-retry-r6', attempt_id: 'source-paired-v2-r6',
+    supersedes_manifest_sha256: 'ffc6fa688a6394fe3f350d483587dfc0c13e23874d6d8f99d9b7355569966fca',
+    previous_invalid_attempt: { artifact_commit: R5_INVALID_COMMIT, artifact_sha256: R5_INVALID_ARTIFACT_SHA256,
+      journal_sha256: R5_INVALID_JOURNAL_SHA256, completed_blocks: 151, C_observations: 0,
+      reason: 'material unrelated Rust/PacketCraftr CPU saturation observed before any C measurement' },
+    sequential_rule: 'Exactly one r6 B retry is permitted solely because r5 was invalidated by material external interference before any C observation. The r5 result remains invalid. If r6 fails or is invalid, there is no r6 retry and no C; another study requires a separately preregistered attempt and explicit sequential-testing correction. No numeric limits, margins or confidence rule are adjusted.',
+    host_stability: hostStabilityRule,
     B_only_evidence_path: B_ONLY_EVIDENCE_PATH, B_only_journal_path: B_ONLY_JOURNAL_PATH,
     paired_evidence_path: PAIRED_EVIDENCE_PATH, paired_journal_path: PAIRED_JOURNAL_PATH,
     chronology: 'paired B stays at measured method commit M with fixed untracked reservations; a separate branch creates exact B JSON and journal together in normal commit E directly after M, merges E unchanged into C, and a later affected production Go commit precedes locked C',
@@ -180,6 +213,101 @@ function hardware() {
 function diagnostics() {
   const optional = (path) => existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
   return { loadavg: optional('/proc/loadavg'), cpu_pressure: optional('/proc/pressure/cpu'), memory_pressure: optional('/proc/pressure/memory') };
+}
+function readHostSnapshot(pids = []) {
+  const cpuLine = readFileSync('/proc/stat', 'utf8').split('\n')[0];
+  const fields = cpuLine.trim().split(/\s+/);
+  invariant(fields[0] === 'cpu' && fields.length >= 9, 'unavailable /proc/stat CPU counters');
+  const counters = fields.slice(1, 9).map(Number);
+  invariant(counters.every((value) => Number.isSafeInteger(value) && value >= 0), 'invalid /proc/stat CPU counters');
+  const busyTicks = counters[0] + counters[1] + counters[2] + counters[5] + counters[6] + counters[7];
+  const pressure = readFileSync('/proc/pressure/cpu', 'utf8').trim();
+  const some = pressure.split('\n').find((line) => line.startsWith('some '));
+  const pressureMatch = some?.match(/(?:^|\s)avg10=([0-9.]+)/);
+  invariant(pressureMatch && finite(Number(pressureMatch[1])), 'unavailable CPU pressure avg10');
+  const loadRaw = readFileSync('/proc/loadavg', 'utf8').trim();
+  const load1m = Number(loadRaw.split(/\s+/)[0]);
+  invariant(finite(load1m) && load1m >= 0, 'unavailable one-minute host load');
+  const processTicks = {};
+  for (const pid of pids) {
+    invariant(Number.isSafeInteger(pid) && pid > 0, 'missing measured process PID');
+    const raw = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const close = raw.lastIndexOf(')');
+    invariant(close > 0, `unavailable measured process CPU counters: ${pid}`);
+    const values = raw.slice(close + 1).trim().split(/\s+/);
+    const ticks = Number(values[11]) + Number(values[12]); // utime/stime, fields 14/15.
+    invariant(Number.isSafeInteger(ticks) && ticks >= 0, `invalid measured process CPU counters: ${pid}`);
+    processTicks[String(pid)] = ticks;
+  }
+  const runnerCPU = process.cpuUsage();
+  return { monotonic_ns: process.hrtime.bigint().toString(), cpu_line: cpuLine, host_busy_ticks: busyTicks,
+    process_ticks: processTicks, runner_user_us: runnerCPU.user, runner_system_us: runnerCPU.system,
+    loadavg: loadRaw, load_1m: load1m, cpu_pressure: pressure, cpu_some_avg10_percent: Number(pressureMatch[1]) };
+}
+
+export function hostInterval(before, after, clockTicksPerSecond) {
+  invariant(Number.isSafeInteger(clockTicksPerSecond) && clockTicksPerSecond > 0, 'invalid host clock tick denominator');
+  const elapsedSeconds = Number(BigInt(after.monotonic_ns) - BigInt(before.monotonic_ns)) / 1e9;
+  const hostBusyDelta = after.host_busy_ticks - before.host_busy_ticks;
+  const beforePids = Object.keys(before.process_ticks).toSorted();
+  invariant(isDeepStrictEqual(beforePids, Object.keys(after.process_ticks).toSorted()), 'measured process identity changed during host interval');
+  const measuredTicksDelta = beforePids.reduce((sum, pid) => sum + after.process_ticks[pid] - before.process_ticks[pid], 0);
+  const runnerMicrosecondsDelta = after.runner_user_us + after.runner_system_us - before.runner_user_us - before.runner_system_us;
+  invariant(finite(elapsedSeconds) && elapsedSeconds > 0 && Number.isSafeInteger(hostBusyDelta) && hostBusyDelta >= 0 &&
+    Number.isSafeInteger(measuredTicksDelta) && measuredTicksDelta >= 0 && Number.isSafeInteger(runnerMicrosecondsDelta) && runnerMicrosecondsDelta >= 0,
+  'missing or regressed host CPU counters');
+  const hostBusyCores = hostBusyDelta / clockTicksPerSecond / elapsedSeconds;
+  const measuredBusyCores = measuredTicksDelta / clockTicksPerSecond / elapsedSeconds + runnerMicrosecondsDelta / 1e6 / elapsedSeconds;
+  const externalBusyCores = Math.max(0, hostBusyCores - measuredBusyCores);
+  invariant(finite(externalBusyCores), 'invalid external CPU estimate');
+  return { before, after, elapsed_seconds: elapsedSeconds, clock_ticks_per_second: clockTicksPerSecond,
+    host_busy_ticks_delta: hostBusyDelta, measured_process_ticks_delta: measuredTicksDelta,
+    runner_cpu_microseconds_delta: runnerMicrosecondsDelta, host_busy_cores: hostBusyCores,
+    measured_busy_cores: measuredBusyCores, external_busy_cores: externalBusyCores };
+}
+
+export function evaluateHostPreflight(samples, intervals, rule = hostStabilityRule) {
+  invariant(samples.length === rule.preflight_samples && intervals.length === rule.preflight_samples - 1, 'incomplete fixed host preflight');
+  const failures = [];
+  for (let index = 0; index < samples.length; index++) {
+    const sample = samples[index];
+    if (!(sample.load_1m < rule.preflight_max_load_1m_exclusive)) failures.push(`sample ${index}: load ${sample.load_1m}`);
+    if (!(sample.cpu_some_avg10_percent < rule.preflight_max_cpu_some_avg10_percent_exclusive)) failures.push(`sample ${index}: CPU pressure ${sample.cpu_some_avg10_percent}`);
+  }
+  for (let index = 0; index < intervals.length; index++) {
+    if (!(intervals[index].external_busy_cores < rule.preflight_max_external_busy_cores_exclusive)) failures.push(`window ${index}: external cores ${intervals[index].external_busy_cores}`);
+  }
+  return { passed: failures.length === 0, failures };
+}
+
+export function evaluateCaptureHostInterval(interval, previousElevated, rule = hostStabilityRule) {
+  const external = interval.external_busy_cores;
+  invariant(finite(external) && external >= 0, 'missing per-block external CPU estimate');
+  const elevated = external >= rule.capture_external_cores_two_consecutive_blocks_invalid_at;
+  const invalid = external >= rule.capture_external_cores_single_block_invalid_at || (previousElevated && elevated);
+  return { external_busy_cores: external, elevated, invalid,
+    reason: invalid ? external >= rule.capture_external_cores_single_block_invalid_at
+      ? `one block reached ${external} external busy cores` : `two consecutive blocks reached at least ${rule.capture_external_cores_two_consecutive_blocks_invalid_at} external busy cores` : null };
+}
+
+async function runHostPreflight(clockTicksPerSecond, rule) {
+  const samples = [readHostSnapshot()];
+  const intervals = [];
+  for (let index = 1; index < rule.preflight_samples; index++) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, rule.preflight_interval_seconds * 1000));
+    if (index === rule.preflight_samples - 1) {
+      const elapsedSeconds = Number(process.hrtime.bigint() - BigInt(samples[0].monotonic_ns)) / 1e9;
+      if (elapsedSeconds < rule.preflight_seconds) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, Math.ceil((rule.preflight_seconds - elapsedSeconds) * 1000)));
+      }
+    }
+    samples.push(readHostSnapshot());
+    intervals.push(hostInterval(samples[index - 1], samples[index], clockTicksPerSecond));
+  }
+  invariant(Number(BigInt(samples.at(-1).monotonic_ns) - BigInt(samples[0].monotonic_ns)) / 1e9 >= rule.preflight_seconds,
+    'host preflight duration was shorter than the frozen full minute');
+  const result = evaluateHostPreflight(samples, intervals, rule);
+  return { samples, intervals, ...result };
 }
 function command(program, args, cwd) {
   const result = spawnSync(program, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 20 });
@@ -323,7 +451,7 @@ function sourceIdentity(root, manifest, B, allowedUntracked = []) {
   invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
-    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
+    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
 }
@@ -434,6 +562,18 @@ function validateCapture(capture, manifest, baselineOnly) {
   invariant(hardwareMatches(capture.hardware, manifest.old_hardware) && capture.toolchain === manifest.old_toolchain && capture.go_build_environment === manifest.old_go_build_environment, 'hardware or toolchain changed');
   invariant(isDeepStrictEqual(capture.runtime_environment, manifest.old_runtime_environment), 'Go runtime environment changed');
   invariant(isDeepStrictEqual(capture.conditions, manifest.conditions), 'source measurement conditions changed');
+  invariant(isDeepStrictEqual(capture.host_stability_rule, manifest.host_stability) &&
+    capture.clock_ticks_per_second === manifest.host_stability.clock_ticks_per_second, 'host-stability method or denominator changed');
+  const preflight = capture.host_preflight;
+  invariant(preflight?.samples?.length === manifest.host_stability.preflight_samples &&
+    preflight.intervals?.length === manifest.host_stability.preflight_samples - 1, 'host preflight missing or incomplete');
+  for (let index = 0; index < preflight.intervals.length; index++) {
+    invariant(isDeepStrictEqual(preflight.intervals[index], hostInterval(preflight.samples[index], preflight.samples[index + 1], capture.clock_ticks_per_second)), `host preflight window ${index} counters changed`);
+  }
+  const preflightDuration = Number(BigInt(preflight.samples.at(-1).monotonic_ns) - BigInt(preflight.samples[0].monotonic_ns)) / 1e9;
+  invariant(preflightDuration >= manifest.host_stability.preflight_seconds, 'host preflight did not sustain its full duration');
+  const preflightDecision = evaluateHostPreflight(preflight.samples, preflight.intervals, manifest.host_stability);
+  invariant(preflightDecision.passed && isDeepStrictEqual(preflightDecision, { passed: preflight.passed, failures: preflight.failures }), 'host preflight limit failed');
   invariant(typeof capture.B?.revision === 'string' && typeof capture.B?.binary_sha256 === 'string', 'B binary identity missing');
   if (!baselineOnly) {
     invariant(capture.C && capture.C.revision !== capture.B.revision, 'C revision missing');
@@ -444,10 +584,15 @@ function validateCapture(capture, manifest, baselineOnly) {
   for (const diagnostics of [capture.diagnostics_before, capture.diagnostics_after]) invariant(typeof diagnostics?.loadavg === 'string' && typeof diagnostics?.cpu_pressure === 'string', 'capture host diagnostics missing');
   const schedule = sourceSchedule(manifest.seed);
   invariant(capture.blocks.length === schedule.length && hash(JSON.stringify(schedule)) === manifest.schedule_sha256, 'block schedule or count changed');
+  let previousElevated = false;
   for (let i = 0; i < schedule.length; i++) {
     const actual = capture.blocks[i], expected = schedule[i];
     invariant(actual.group === expected.group && actual.index === expected.index && actual.variant === expected.variant && actual.outer === expected.outer, `block ${i}: schedule changed`);
     for (const diagnostics of [actual.diagnostics_before, actual.diagnostics_after]) invariant(typeof diagnostics?.loadavg === 'string' && typeof diagnostics?.cpu_pressure === 'string', `block ${i}: host diagnostics missing`);
+    invariant(isDeepStrictEqual(actual.host_cpu_interval, hostInterval(actual.host_cpu_interval.before, actual.host_cpu_interval.after, capture.clock_ticks_per_second)), `block ${i}: host CPU counters changed`);
+    const hostDecision = evaluateCaptureHostInterval(actual.host_cpu_interval, previousElevated, manifest.host_stability);
+    invariant(isDeepStrictEqual(actual.host_stability_decision, hostDecision) && !hostDecision.invalid, `block ${i}: external CPU invalidated the whole attempt`);
+    previousElevated = hostDecision.elevated;
     const arms = sourceOrder(expected.group, expected.variant, baselineOnly, expected.outer);
     invariant(actual.subruns.length === arms.length && actual.subruns.every((subrun, j) => subrun.arm === arms[j]), `block ${i}: arm order/count changed`);
     for (const subrun of actual.subruns) validateSubrun(subrun.reply, pathName(expected.group, subrun.arm.split('/')[1]), manifest);
@@ -619,12 +764,18 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   const B = buildBinary(Bbinary, Broot, manifest, true, BReserved);
   const C = mode === 'paired' ? buildBinary(Cbinary, Croot, manifest, false) : null;
   invariant(mode === 'B-only' || C.revision !== B.revision, 'paired study requires a distinct locked C revision');
+  const clockTicksPerSecond = Number(command('getconf', ['CLK_TCK'], Broot));
+  invariant(clockTicksPerSecond === manifest.host_stability.clock_ticks_per_second, 'host CPU clock-tick denominator differs from frozen rule');
+  const hostPreflight = await runHostPreflight(clockTicksPerSecond, manifest.host_stability);
+  invariant(hostPreflight.passed, `host preflight failed before attempt reservation: ${hostPreflight.failures.join('; ')}`);
   const artifact = { schema: SCHEMA, mode, status: 'in_progress', started_at: new Date().toISOString(),
     manifest_sha256: hash(JSON.stringify(manifest)), schedule_sha256: manifest.schedule_sha256,
     B_only_sha256: frozenBaseline ? digest(baselinePath) : null,
     B, C, provenance, C_route_contract: routeContract, C_provider_contract: providerContract,
     hardware: currentHardware, toolchain, go_build_environment: goBuildEnvironment,
     runtime_environment: { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' },
+    clock_ticks_per_second: clockTicksPerSecond, host_stability_rule: manifest.host_stability,
+    host_preflight: hostPreflight,
     conditions: manifest.conditions, diagnostics_before: diagnostics(), blocks: [] };
   writeFileSync(reservation.journal, JSON.stringify({ header: { ...artifact, blocks: undefined } }) + '\n', { flag: 'wx' });
   const Bprocess = new GoArm(Bbinary, 'B', { OLP_FIDELITY_BENCH_ROUTE_CONTRACT: '', OLP_FIDELITY_BENCH_PROVIDER_CONTRACT: '' });
@@ -632,8 +783,11 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   try {
     await Bprocess.ready;
     if (Cprocess) await Cprocess.ready;
+    const studyPids = [Bprocess.process.pid, ...(Cprocess ? [Cprocess.process.pid] : [])];
+    let previousElevated = false;
     for (const block of sourceSchedule(manifest.seed)) {
       const entry = { ...block, diagnostics_before: diagnostics(), subruns: [] };
+      const hostBefore = readHostSnapshot(studyPids);
       for (const arm of sourceOrder(block.group, block.variant, !Cprocess, block.outer)) {
         const [version, path] = arm.split('/');
         const name = pathName(block.group, path);
@@ -643,8 +797,12 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
         entry.subruns.push({ arm, reply });
       }
       entry.diagnostics_after = diagnostics();
+      entry.host_cpu_interval = hostInterval(hostBefore, readHostSnapshot(studyPids), clockTicksPerSecond);
+      entry.host_stability_decision = evaluateCaptureHostInterval(entry.host_cpu_interval, previousElevated, manifest.host_stability);
+      previousElevated = entry.host_stability_decision.elevated;
       artifact.blocks.push(entry);
       appendFileSync(reservation.journal, JSON.stringify({ block: entry }) + '\n');
+      if (entry.host_stability_decision.invalid) throw new Error(`host stability invalidated whole attempt after block ${artifact.blocks.length}: ${entry.host_stability_decision.reason}`);
     }
     artifact.status = 'complete';
     artifact.completed_at = new Date().toISOString();
