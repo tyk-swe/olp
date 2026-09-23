@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -537,8 +538,27 @@ func TestReportsGroupByDimensionAndBucket(t *testing.T) {
 }
 
 func TestUsageReportsOverHTTP(t *testing.T) {
-	f := repSetup(t)
-	repSeedReports(f)
+	// Keep both windows safely in the past at any hour while exercising each
+	// side of the UTC day boundary.
+	day := time.Now().UTC().Truncate(24 * time.Hour).Add(-48 * time.Hour)
+	for _, c := range []struct {
+		name string
+		base time.Time
+	}{
+		{"within UTC day", day.Add(12 * time.Hour)},
+		{"across UTC midnight", day.Add(22 * time.Hour)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := repSetup(t)
+			f.Base = c.base
+			repSeedReports(f)
+			repCheckUsageReportsOverHTTP(t, f)
+		})
+	}
+}
+
+func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
+	t.Helper()
 	window := "start=" + f.Base.Format(time.RFC3339) +
 		"&end=" + f.Base.Add(3*time.Hour).Format(time.RFC3339)
 
@@ -572,8 +592,38 @@ func TestUsageReportsOverHTTP(t *testing.T) {
 
 	body = f.h.want(f.Owner, http.MethodGet,
 		"/api/v3/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
-	if len(body["items"].([]any)) != 1 {
-		t.Fatalf("daily series = %v", body["items"])
+	wantByBucket := map[string]float64{}
+	for _, point := range []struct {
+		at    time.Time
+		count float64
+	}{
+		{f.Base, 2},
+		{f.Base.Add(time.Hour), 1},
+		{f.Base.Add(2*time.Hour + 15*time.Minute), 2},
+	} {
+		bucket := point.at.UTC().Truncate(24 * time.Hour).Format(time.RFC3339)
+		wantByBucket[bucket] += point.count
+	}
+	wantBuckets := make([]string, 0, len(wantByBucket))
+	for bucket := range wantByBucket {
+		wantBuckets = append(wantBuckets, bucket)
+	}
+	sort.Strings(wantBuckets)
+	series := body["items"].([]any)
+	if len(series) != len(wantBuckets) {
+		t.Fatalf("daily series = %v, want %d UTC buckets", series, len(wantBuckets))
+	}
+	var total float64
+	for i, raw := range series {
+		point := raw.(map[string]any)
+		if point["bucket"] != wantBuckets[i] || point["request_count"] != wantByBucket[wantBuckets[i]] {
+			t.Fatalf("daily bucket %d = %v, want %s with %v requests", i, point,
+				wantBuckets[i], wantByBucket[wantBuckets[i]])
+		}
+		total += point["request_count"].(float64)
+	}
+	if total != 5 {
+		t.Fatalf("daily series total = %v, want 5", total)
 	}
 
 	for _, c := range []struct{ query, code string }{
