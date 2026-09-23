@@ -1,7 +1,7 @@
 # Compatibility and evidence matrix, version 1
 
 The [machine-readable matrix](compatibility-matrix-v1.json) assesses source
-`44c88077888cc1274dd3d3687a7dca48f084ac91` on 2026-09-23. It maps
+`37ad4b0f0ae9350611ace6d5ffd27c451bfe7721` on 2026-09-23. It maps
 **all 47 original inventory rows exactly once**, using the frozen whole-file
 and individual-row SHA-256 values, and records 44 later operation/profile/mode/
 client combinations separately. The frozen

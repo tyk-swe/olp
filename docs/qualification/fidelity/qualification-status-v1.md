@@ -1,7 +1,7 @@
 # Qualification status receipt, version 1
 
 This status belongs to the [compatibility matrix](compatibility-matrix-v1.json)
-assessed at `44c88077888cc1274dd3d3687a7dca48f084ac91`. It keeps three
+assessed at `37ad4b0f0ae9350611ace6d5ffd27c451bfe7721`. It keeps three
 different units separate: matrix rows, scripted request outcomes, and timed
 benchmark workloads. The test receipts are [row-evidence-v1.md](row-evidence-v1.md)
 and the per-row source/run hashes in the JSON artifact. No paid provider calls
