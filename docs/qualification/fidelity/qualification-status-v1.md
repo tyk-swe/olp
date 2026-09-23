@@ -5,7 +5,9 @@ assessed at `6f1aa0eb2d145b24e9171f001ca22cba6155d477`. It keeps three
 different units separate: matrix rows, scripted request outcomes, and timed
 benchmark workloads. The test receipts are [row-evidence-v1.md](row-evidence-v1.md)
 and the per-row source/run hashes in the JSON artifact. No paid provider calls
-or empirical model-quality trials were performed.
+or empirical model-quality trials were performed. Later benchmark revisions
+below update only scoped performance evidence; they do not promote a row in
+the `6f1aa0eb` matrix or make its historical assessment current-head evidence.
 
 | Compatibility-row outcome | Frozen 47 | Additive 45 | Total 92 |
 | --- | ---: | ---: | ---: |
@@ -59,26 +61,31 @@ The original [v1 source-layer comparison](../../evidence/fidelity-performance/oi
 still records a failed slow native-relay c1 inter-event-gap p99 control:
 3,943 µs against its unchanged 3,544 µs limit. The encrypted
 [barrier-v1 comparison](../../evidence/fidelity-performance/barrier-v1/README.md)
-retains two earlier failed candidate captures. A quiet a23 revision candidate
-also failed five frozen small-history c1 limits (wall/CPU and workflow
-p50/p95/p99); its write-once capture is retained outside the repository at
-`/tmp/olp-spec-context/candidate-v2-a23-20260923.json`. Current compiled-plan
-and database optimizations need a new final-source timed capture against the
-**same** frozen criteria. A passing one-iteration semantic smoke is not a
-timed comparison.
+retains earlier failed candidate captures. The later clean
+[`517455c3` candidate](../../evidence/fidelity-performance/replacement-517-v1/README.md)
+completed all 288 translated two-turn workflows and 576 exact provider
+dispatches with zero rejects, but **failed five unchanged small-history c1
+limits**: wall and CPU per workflow plus workflow p50/p95/p99. Its load rose
+from 1.07 to 2.48 during capture; the miss is retained without claiming a
+source-causal regression. Subsequent source changes need a new final-source
+comparison to those same frozen criteria. A one-iteration semantic smoke or
+a complete workload count is not a timed pass.
 
 The separate native [lifecycle-stress-v1 reference](../../evidence/fidelity-performance/lifecycle-stress-v1/README.md)
 has a frozen 4 MiB input/1 MiB slow content/64-duplex-event workload and
-predeclared numeric budgets. Its strict replacement comparison has not passed;
-the first correctly configured strict semantic attempt failed at route
-activation because the frozen fixture used an unversioned media profile. The
-fixture and budget cannot be silently rewritten to make a strict workload
-positive. Versioned `lifecycle-stress-v2` source now uses explicit registered
-profiles and passed a non-timed strict semantic smoke; its native reference,
-frozen budgets and strict candidate comparisons have not yet been captured.
-The original native lifecycle and encrypted barrier references are
-also separate from this matrix. Rejected, incomplete and ambiguous workflows
-must remain visible outside successful timing samples.
+predeclared numeric budgets. Its strict attempt stopped at route activation
+because that frozen fixture used an unversioned media profile; the frozen
+`lifecycle-v1` strict attempt separately stopped at its legacy durable-ID
+oracle. Neither old strict fixture is relabeled as a pass or rewritten. The
+separately versioned
+[`lifecycle-stress-v2` registered-profile comparison](../../evidence/fidelity-performance/replacement-383-v2/README.md)
+froze a native reference and budgets first, then **passed every stated strict
+and legacy workload and numeric limit** at product source `38358293`. That is
+scoped scripted media/duplex evidence; it does not replace either old v1
+strict attempt, the original slow-relay control, or the failed encrypted
+continuation barrier. Rejected, incomplete and ambiguous workflows remain
+visible outside successful timing samples. Later product revisions require
+their own appropriate frozen comparison before an exact-head performance pass.
 
 All 92 rows have `empirical_quality: unknown`. The
 [preregistered study](quality-plan.md) requires approved same-serving-identity
@@ -87,7 +94,7 @@ claim. Local scripted providers establish deterministic wire and effect
 behavior, not live quality, latency, billing or provider stability. Missing
 or inconclusive trials remain unknown rather than passing by default.
 
-## Gate disposition at this assessed revision
+## Gate disposition for the assessed matrix and later scoped benchmarks
 
 G1 conservation and G2 complete-interaction have selected public positives,
 preserve-or-reject negatives, official next-turn clients and recovery checks.
@@ -96,7 +103,8 @@ Gemini duplex positives, while audio translation and strict Responses
 streaming background remain unavailable in the fixed inventory. G4
 configuration/security and G5 control
 plane have targeted public and browser evidence in their own receipts. G6
-performance remains open at the failed/pending frozen comparisons above;
+performance remains open at the failed original-v1 and encrypted-barrier
+comparisons, despite the scoped registered-profile stress-v2 passes above;
 empirical model quality remains unknown by design without approved trials. G7
 requires the final integrated checks, additive inventory reconciliation,
 migration/rollback, and mandatory two-axis review. A gate is not marked passed
