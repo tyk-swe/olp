@@ -556,8 +556,13 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	if owner.Kind == resources.KindStrictBatch {
 		kind = resources.KindStrictFile
 	}
+	compatible := func(existing *resources.Resource) bool {
+		return existing.RouteSlug == owner.RouteSlug && existing.ProviderRevisionID == owner.ProviderRevisionID && existing.SlotID == owner.SlotID &&
+			(existing.CredentialID == nil) == (owner.CredentialID == nil) &&
+			(existing.CredentialID == nil || *existing.CredentialID == *owner.CredentialID)
+	}
 	if existing, err := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); err == nil {
-		if existing.RouteSlug != owner.RouteSlug || existing.ProviderRevisionID != owner.ProviderRevisionID || existing.SlotID != owner.SlotID || existing.CredentialID == nil && owner.CredentialID != nil || existing.CredentialID != nil && owner.CredentialID == nil || existing.CredentialID != nil && owner.CredentialID != nil && *existing.CredentialID != *owner.CredentialID {
+		if !compatible(existing) {
 			return nil, resources.ErrContract
 		}
 		return existing, nil
@@ -588,9 +593,25 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		resource.ExpiresAt = owner.ExpiresAt
 		source, _ := json.Marshal(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
 		payload, _ := json.Marshal(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
-		return s.Resources.PutDurableContract(ctx, resource, payload)
+		created, err := s.Resources.PutDurableContract(ctx, resource, payload)
+		if err == nil {
+			return created, nil
+		}
+		// Another authorized poll may have installed the same output-file
+		// mapping concurrently. A collision owned by someone else still fails.
+		if existing, readErr := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); readErr == nil && compatible(existing) {
+			return existing, nil
+		}
+		return nil, err
 	}
-	return s.Resources.Put(ctx, resource)
+	created, err := s.Resources.Put(ctx, resource)
+	if err == nil {
+		return created, nil
+	}
+	if existing, readErr := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); readErr == nil && compatible(existing) {
+		return existing, nil
+	}
+	return nil, err
 }
 
 func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Time) {
@@ -759,7 +780,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		strictServing = template.Serving()
 		var validationErr error
-		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model())
+		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
 		if validationErr != nil {
 			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
 			return
@@ -924,6 +945,13 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
+		if fact.Interaction != nil && f.dispatched {
+			if f.status > 0 {
+				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+			} else {
+				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			}
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
 		x.facts = append(x.facts, fact)
@@ -958,6 +986,10 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		}
 		return nil, finish(class, &attemptFailure{dispatched: true})
 	}
+	// A provider may reply before consuming the entire multipart body. Close
+	// the read side so the writer cannot wait forever for a peer that has
+	// already accepted or rejected partial work.
+	_ = pipeR.CloseWithError(io.ErrClosedPipe)
 	if sendErr := <-sendDone; sendErr != nil {
 		resp.Body.Close()
 		return nil, finish(classConnect, &attemptFailure{dispatched: true})
@@ -968,6 +1000,9 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		fact.Class = "success"
 		fact.Committed = true
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
 		x.facts = append(x.facts, fact)
@@ -1574,6 +1609,19 @@ func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 	s.batchCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+		if res.Kind == resources.KindStrictBatch {
+			switch res.State {
+			case "completed", "failed", "expired", "cancelled":
+				return serverError(http.StatusConflict, "resource_transition", "This batch has already reached a terminal state.")
+			case "cancelling":
+				out, err := s.batchObject(ctx, res)
+				if err != nil {
+					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted cancellation could not be projected.")
+				}
+				s.writeStateJSON(w, x, out)
+				return nil
+			}
+		}
 		return s.batchRefresh(ctx, x, res, p, http.MethodPost, "batches/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w)
 	})
 }

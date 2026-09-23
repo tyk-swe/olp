@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type durableDocument struct {
@@ -39,7 +40,7 @@ type durableAsset struct {
 // The file is already staged by the bounded media owner. Inspection never
 // rewrites its bytes; it only refuses unqualified mixed endpoints/models and
 // ambiguous per-item identities before an effectful provider upload.
-func (s *Server) validateBatchInput(part *media.Part, model string) (string, int, error) {
+func (s *Server) validateBatchInput(part *media.Part, model string, provider *runtime.Provider, route *runtime.Route) (string, int, error) {
 	opened, err := s.transport().Spool.Open(part.Handle)
 	if err != nil {
 		return "", 0, err
@@ -77,6 +78,18 @@ func (s *Server) validateBatchInput(part *media.Part, model string) (string, int
 		}
 		path, ok := get(doc.Root(), "url")
 		if !ok || path != "/v1/chat/completions" && path != "/v1/responses" && path != "/v1/embeddings" || endpoint != "" && endpoint != path {
+			return "", 0, resources.ErrContract
+		}
+		operation := "generation"
+		if path == "/v1/embeddings" {
+			operation = "embeddings"
+		}
+		profile, err := provider.Connector().Profile()
+		if err != nil || !slices.Contains(route.Operations, operation) || !provider.Supports(model, operation, "openai", "unary") ||
+			!provider.Connector().Supports(operation, "openai", "unary") ||
+			path == "/v1/chat/completions" && profile.Dialect != "openai-chat" ||
+			path == "/v1/responses" && profile.Dialect != "openai-responses" ||
+			path == "/v1/embeddings" && profile.OperationDialect("embeddings") != "openai-embeddings" {
 			return "", 0, resources.ErrContract
 		}
 		endpoint = path

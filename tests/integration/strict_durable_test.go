@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
@@ -36,7 +38,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 
 	h := newAccessHarness(t)
 	owner, provider, slug, plain := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
 		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
 	key := stateKey(t, h, owner, slug, true)
@@ -109,8 +111,8 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if got := fixture.lastBatchRaw.Load().(string); got != wantBound {
 		t.Fatalf("source/overlay changed native JSON:\n got %s\nwant %s", got, wantBound)
 	}
-	var ownerID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text FROM olp_go.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID); err != nil {
+	var ownerID, batchUUID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp_go.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &batchUUID); err != nil {
 		t.Fatal(err)
 	}
 	_, encrypted, err := h.Gateway.Resources.ReadDurableContract(t.Context(), resources.KindStrictBatch, ownerID, batchID)
@@ -132,10 +134,45 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"status":"cancelling"`)) {
 		t.Fatalf("cancel: %d %s", status, raw)
 	}
-	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil)
-	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"native_integer":9007199254740993`)) || !bytes.Contains(raw, []byte(`"native_zero":-0`)) || !bytes.Contains(raw, []byte(`"failed":1`)) || bytes.Contains(raw, []byte("file-up-out")) {
-		t.Fatalf("partial result projection: %d %s", status, raw)
+	// Eight first polls race to discover the two native output-file IDs. The
+	// unique mapping must converge on one owner-local identity per file.
+	type reply struct {
+		status int
+		body   []byte
+		err    error
 	}
+	replies := make(chan reply, 8)
+	for range 8 {
+		go func() {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.HTTP.URL+"/v1/batches/"+batchID, nil)
+			if err != nil {
+				replies <- reply{err: err}
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+key)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				replies <- reply{err: err}
+				return
+			}
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			replies <- reply{status: resp.StatusCode, body: body, err: err}
+		}()
+	}
+	var first []byte
+	for range 8 {
+		got := <-replies
+		if got.err != nil || got.status != http.StatusOK || !bytes.Contains(got.body, []byte(`"native_integer":9007199254740993`)) || !bytes.Contains(got.body, []byte(`"native_zero":-0`)) || !bytes.Contains(got.body, []byte(`"failed":1`)) || bytes.Contains(got.body, []byte("file-up-out")) {
+			t.Fatalf("concurrent partial result projection: status=%d err=%v body=%s", got.status, got.err, got.body)
+		}
+		if first == nil {
+			first = got.body
+		} else if !bytes.Equal(first, got.body) {
+			t.Fatalf("concurrent mapping changed local file identity:\n%s\n%s", first, got.body)
+		}
+	}
+	raw = first
 	outputID, ok := jsonStringField(raw, "output_file_id")
 	if !ok || !strings.HasPrefix(outputID, "strict_file_") {
 		t.Fatalf("output file identity: %s", raw)
@@ -162,6 +199,11 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status, _, _ := h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, other, nil, nil); status != http.StatusNotFound {
 		t.Fatalf("other key read strict batch: %d", status)
 	}
+	before = fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches/"+batchID+"/cancel", key, nil, nil)
+	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"resource_transition"`)) || fixture.dials.Load() != before {
+		t.Fatalf("terminal strict batch was cancelled again: %d %s", status, raw)
+	}
 	providerPath := "/api/v3/providers/" + provider["id"].(string)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, http.StatusOK)
 	credentialID := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
@@ -181,6 +223,10 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	}
 	if _, err := h.Gateway.Resources.CleanupExpired(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
+	}
+	var retained int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE id=$1::uuid`, batchUUID).Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("expired strict batch ciphertext remains: count=%d err=%v", retained, err)
 	}
 }
 
@@ -258,7 +304,7 @@ func TestStrictBatchPinnedOpenAISDKs(t *testing.T) {
 			fixture.contentByID.Store("file-up-err", `{"custom_id":"second","error":{"code":"fixture"}}`+"\n")
 			h := newAccessHarness(t)
 			owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-				[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+				[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
 				map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 				map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
 			key := stateKey(t, h, owner, slug, true)
@@ -284,7 +330,7 @@ func TestAcceptedStrictBatchMappingSurvivesClientDisconnect(t *testing.T) {
 	fixture.batchCreateRaw.Store(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-up-1"}`)
 	h := newAccessHarness(t)
 	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
 		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
 	key := stateKey(t, h, owner, slug, true)
@@ -382,6 +428,177 @@ WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &localID
 	}
 	if fixture.batchCreates.Load() != before+1 {
 		t.Fatalf("client disconnect caused %d batch submissions", fixture.batchCreates.Load()-before)
+	}
+}
+
+func TestStrictBatchRejectsUncertifiedPerItemOperationBeforeUpload(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	before := fixture.dials.Load()
+	input := `{"custom_id":"one","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n"
+	status, _ := h.uploadTestFile(slug, key, input)
+	if status != http.StatusBadRequest || fixture.dials.Load() != before {
+		t.Fatalf("uncertified embeddings item reached batch provider: %d calls=%d", status, fixture.dials.Load()-before)
+	}
+}
+
+func TestStrictFileEarlyProviderAcceptanceNeverLooksComplete(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	var source strings.Builder
+	for i := range 10000 {
+		source.WriteString(`{"custom_id":"item-`)
+		source.WriteString(strconv.Itoa(i))
+		source.WriteString(`","method":"POST","url":"/v1/embeddings","body":{"model":"`)
+		source.WriteString(vendorModel)
+		source.WriteString(`","input":"`)
+		source.WriteString(strings.Repeat("x", 350))
+		source.WriteString(`"}}` + "\n")
+	}
+	fixture.earlyFileReply.Store(true)
+	before := fixture.dials.Load()
+	status, result := h.uploadTestFile(slug, key, source.String())
+	if status < 400 || fixture.dials.Load() != before+1 {
+		t.Fatalf("early provider reply exposed a completed file: status=%d result=%v calls=%d", status, result, fixture.dials.Load()-before)
+	}
+	var mapped int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE kind='strict_file'`).Scan(&mapped); err != nil || mapped != 0 {
+		t.Fatalf("partial upload published file mapping: count=%d err=%v", mapped, err)
+	}
+	fact := sink.last().Attempts[0]
+	if fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamUnknown || fact.Interaction.ClientState != usage.ClientUnobserved || !fact.BillingUncertain {
+		t.Fatalf("partial accepted upload was not recorded as ambiguous: %+v", fact)
+	}
+}
+
+func TestAcceptedStrictBatchCancellationSurvivesClientDisconnect(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	fixture.batchCreateRaw.Store(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-up-1"}`)
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	input := `{"custom_id":"one","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n"
+	status, uploaded := h.uploadTestFile(slug, key, input)
+	if status != http.StatusOK {
+		t.Fatalf("upload: %d %v", status, uploaded)
+	}
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/batches", key,
+		strings.NewReader(`{"input_file_id":"`+uploaded["id"].(string)+`","endpoint":"/v1/embeddings","completion_window":"24h"}`),
+		map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK {
+		t.Fatalf("batch create: %d %s", status, raw)
+	}
+	batchID, _ := jsonStringField(raw, "id")
+	before := fixture.dials.Load()
+	const lockKey int64 = 21416017
+	locker, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	t.Cleanup(func() {
+		if locked {
+			_, _ = locker.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", lockKey)
+		}
+		locker.Release()
+	})
+	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_lock($1)", lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp_go.wait_strict_batch_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.kind='strict_batch' AND NEW.state='cancelling' THEN PERFORM pg_advisory_xact_lock(21416017); END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER wait_strict_batch_cancel BEFORE UPDATE ON olp_go.provider_resources
+FOR EACH ROW EXECUTE FUNCTION olp_go.wait_strict_batch_cancel()`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/batches/"+batchID+"/cancel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	finished := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		finished <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(
+SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+AND wait_event_type='Lock' AND wait_event='advisory')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("accepted cancellation never reached state commit; provider calls=%d", fixture.dials.Load()-before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_unlock($1)", lockKey); err != nil {
+		t.Fatal(err)
+	}
+	locked = false
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled client did not release its HTTP request")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		var state string
+		err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&state)
+		if err == nil && state == "cancelling" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("provider accepted cancellation but mapping stayed %q: %v", state, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fixture.dials.Load() != before+1 || fixture.batchCreates.Load() != 1 {
+		t.Fatalf("cancellation replayed work: provider calls=%d batch submissions=%d", fixture.dials.Load()-before, fixture.batchCreates.Load())
+	}
+	// The mock's next GET is intentionally stale (`validating`). The durable
+	// resource must keep the accepted cancellation until a terminal result.
+	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil)
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"status":"cancelling"`)) {
+		t.Fatalf("stale provider poll regressed accepted cancellation: %d %s", status, raw)
+	}
+	before = fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches/"+batchID+"/cancel", key, nil, nil)
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"status":"cancelling"`)) || fixture.dials.Load() != before {
+		t.Fatalf("accepted cancellation retry called provider again: %d %s", status, raw)
 	}
 }
 

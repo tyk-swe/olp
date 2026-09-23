@@ -37,6 +37,9 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
+	if r.Kind == KindStrictBatch && batchStateRank(r.State) == 0 {
+		return nil, ErrContract
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -111,11 +114,27 @@ func terminalBatch(state string) bool {
 	return false
 }
 
+func batchStateRank(state string) int {
+	switch state {
+	case "validating":
+		return 1
+	case "in_progress":
+		return 2
+	case "finalizing":
+		return 3
+	case "cancelling":
+		return 4
+	case "completed", "failed", "expired", "cancelled":
+		return 5
+	}
+	return 0
+}
+
 // UpdateDurableContract commits the latest native result with the status in
 // one transaction. Once a batch reaches a terminal result, a delayed poll or
 // cancellation response cannot replace it with an earlier state.
 func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID, state string, payload []byte) (*Resource, []byte, error) {
-	if !s.Encrypted() || !durableKind(kind) || state == "" || len(payload) == 0 || len(payload) > MaxContinuationBytes {
+	if !s.Encrypted() || !durableKind(kind) || state == "" || kind == KindStrictBatch && batchStateRank(state) == 0 || len(payload) == 0 || len(payload) > MaxContinuationBytes {
 		return nil, nil, ErrContract
 	}
 	id, err := parseLocal(localID)
@@ -141,7 +160,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
 		return nil, nil, ErrContract
 	}
-	if kind == KindStrictBatch && terminalBatch(r.State) {
+	if kind == KindStrictBatch && (terminalBatch(r.State) || batchStateRank(state) < batchStateRank(r.State)) {
 		current, err := s.keys.Read(ctx, tx, s.installation, id.String(), continuationPurpose)
 		if err != nil || len(current) == 0 || len(current) > MaxContinuationBytes {
 			return nil, nil, ErrContract

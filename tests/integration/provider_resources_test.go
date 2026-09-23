@@ -70,6 +70,7 @@ type openaiFixture struct {
 	lastReq        atomic.Value
 	lastBatchRaw   atomic.Value
 	batchCreates   atomic.Int64
+	earlyFileReply atomic.Bool
 	batchCreateRaw atomic.Value
 	batchFetchRaw  atomic.Value
 	fileCreateRaw  atomic.Value
@@ -112,6 +113,14 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("POST /openai/files", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		if f.earlyFileReply.Load() {
+			_ = http.NewResponseController(w).EnableFullDuplex()
+			_, _ = r.Body.Read(make([]byte, 1))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"file-up-early","object":"file","status":"processed"}`)
+			_ = http.NewResponseController(w).Flush()
+			return
+		}
 		_ = r.ParseMultipartForm(1 << 20)
 		if raw := f.fileCreateRaw.Load(); raw != nil {
 			_, _ = io.WriteString(w, raw.(string))

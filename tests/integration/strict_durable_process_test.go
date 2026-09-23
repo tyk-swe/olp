@@ -25,7 +25,7 @@ func TestStrictBatchSurvivesGatewayRestartWithPartialFiles(t *testing.T) {
 	fixture.contentByID.Store("file-up-err", "failure-2\n")
 	h := newAccessHarness(t)
 	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}, []string{"batch", "embeddings"},
 		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
 	key := stateKey(t, h, owner, slug, true)
