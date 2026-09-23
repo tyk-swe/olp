@@ -1,16 +1,20 @@
 # Scoped compatibility execution receipt, version 1
 
-The assessed product revision is
-`66a3ccb3fc737010a345d309ee280a541d4176f5`. The prior matrix fixtures
-and later realtime/continuation changes are present in this exact committed
-source; the frozen v1 inventory and benchmark budgets were not changed. The
-selected command below ran public published-route gateway instances,
+This selected public/SDK execution ran at product revision
+`66a3ccb3fc737010a345d309ee280a541d4176f5`. The compatibility matrix now
+assesses the later locked product `bc325da50c575803c771531dc4e3aab1ac203a53`;
+all 38 pinned test-source hashes are unchanged at that revision, and the
+original run commit remains its ancestor. That source identity and ancestry
+do not substitute for an exact-head rerun. The frozen v1 inventory and
+benchmark budgets were not changed. The selected command below ran public
+published-route gateway instances,
 independently scripted local providers and isolated PostgreSQL databases.
 Required PostgreSQL and Valkey service variables were checked before execution,
 as described in [tests/README.md](../../../tests/README.md). No paid provider
-was called. The matrix pins this receipt in a later docs-only commit so its
-Git revision can authenticate these bytes; that anchor does not change the
-product or test source run at `66a3ccb3`.
+was called. At the locked product commit, the matrix pins the original
+receipt bytes and 66a test-source hashes through Git. This later clarification
+does not rewrite that execution evidence. Final exact-head
+integration/browser/CI and review checks remain separate.
 
 ```sh
 GOMAXPROCS=4 go test -mod=readonly -race -tags=integration,pythonsdk \
@@ -69,6 +73,8 @@ late continuation terminal/signature/event corruptions are runtime violation
 controls, not successful workload samples. Reader loss during an accepted
 Gemini background stream does not prove provider work stopped; the separate
 resume test proves the same encrypted owned resource and one provider POST.
-No script fixture proves live model quality, provider-side exactly-once work,
-or a passing frozen performance comparison. Those outcomes are reported in
+No script fixture proves live model quality or provider-side exactly-once work.
+The later locked product has scoped passing v2 lifecycle, stress and barrier
+comparisons, but source paired r6 is invalid and frozen v1 failures remain.
+Those outcomes are reported in
 [qualification-status-v1.md](qualification-status-v1.md).

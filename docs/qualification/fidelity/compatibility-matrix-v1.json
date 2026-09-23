@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "assessed_revision": "2426aec0c6f6c39c1fcb48fdc8924b58f198862c",
+  "assessed_revision": "bc325da50c575803c771531dc4e3aab1ac203a53",
   "frozen_inventory": {
     "path": "tests/fixtures/fidelity/v1/inventory.json",
     "sha256": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd",
