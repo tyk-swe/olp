@@ -35,7 +35,7 @@ function capture(baselineOnly) {
     return cache.get(name);
   };
   const blocks = sourceSchedule().map((block) => ({ ...block, diagnostics_before: diagnostics, diagnostics_after: diagnostics,
-    subruns: sourceOrder(block.group, block.variant, baselineOnly).map((arm) => ({ arm, reply: get(`${block.group}/${arm.split('/')[1]}`) })) }));
+    subruns: sourceOrder(block.group, block.variant, baselineOnly, block.outer).map((arm) => ({ arm, reply: get(`${block.group}/${arm.split('/')[1]}`) })) }));
   return { schema: 'openllmproxy.dev/fidelity-source-paired-v2', mode: baselineOnly ? 'B-only' : 'paired', status: 'complete',
     manifest_sha256: digest(JSON.stringify(manifest)), B_only_sha256: null, blocks,
     hardware: manifest.old_hardware, toolchain: manifest.old_toolchain, go_build_environment: manifest.old_go_build_environment,
@@ -64,14 +64,29 @@ test('fixed randomized schedule balances two orders per path and keeps four-arm 
     const blocks = schedule.filter((block) => block.group === group);
     assert.equal(blocks.filter((block) => block.variant === 'ABBA').length, 16);
     assert.equal(blocks.filter((block) => block.variant === 'BAAB').length, 16);
+    if (!group.startsWith('rejected_extension/')) {
+      for (const variant of ['ABBA', 'BAAB']) {
+        assert.equal(blocks.filter((block) => block.variant === variant && block.outer === 'relay').length, 8);
+        assert.equal(blocks.filter((block) => block.variant === variant && block.outer === 'gateway').length, 8);
+      }
+    }
     for (const block of blocks) {
-      const arms = sourceOrder(group, block.variant);
+      const arms = sourceOrder(group, block.variant, false, block.outer);
       assert.deepEqual(arms, [...arms].reverse());
       for (const path of group.startsWith('rejected_extension/') ? ['gateway'] : ['relay', 'gateway']) {
         assert.equal(arms.filter((arm) => arm === `B/${path}`).length, 2);
         assert.equal(arms.filter((arm) => arm === `C/${path}`).length, 2);
+        const treatmentOrder = arms.filter((arm) => arm.endsWith(`/${path}`)).map((arm) => arm[0]).join('');
+        const expected = path === 'relay' || group.startsWith('rejected_extension/')
+          ? block.variant === 'ABBA' ? 'BCCB' : 'CBBC'
+          : block.variant === 'ABBA' ? 'CBBC' : 'BCCB';
+        assert.equal(treatmentOrder, expected, `${group} ${path} ${block.variant}`);
       }
-      assert.deepEqual(sourceOrder(group, block.variant, true), arms.filter((arm) => arm.startsWith('B/')));
+      assert.deepEqual(sourceOrder(group, block.variant, true, block.outer), arms.filter((arm) => arm.startsWith('B/')));
+      if (!group.startsWith('rejected_extension/')) {
+        const opposite = sourceOrder(group, block.variant === 'ABBA' ? 'BAAB' : 'ABBA', false, block.outer);
+        assert.deepEqual(opposite, arms.map((arm) => `${arm[0] === 'B' ? 'C' : 'B'}${arm.slice(1)}`));
+      }
     }
   }
 });
@@ -82,6 +97,8 @@ test('complete synthetic B-only and paired captures pass every predeclared metri
   const B = analyzeBaseline(baseline, manifest);
   assert.equal(B.passed, true);
   assert.deepEqual(B.count, { blocks: 384, B_subruns: 1408, B_requests: 90112 });
+  assert.equal(B.absolute_within_block_variability['native_unary/c1/relay']['ns/op'].values.length, 32);
+  assert.equal(B.absolute_within_block_variability['native_unary/c1/relay']['ns/op'].upper, 0);
   const C = analyzePaired(paired, baseline, manifest);
   assert.equal(C.status, 'passed');
   assert.equal(Object.values(C.results).flatMap(Object.keys).length, 224);

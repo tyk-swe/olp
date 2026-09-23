@@ -18,12 +18,14 @@ outcome. The original 22 workload/path/concurrency combinations remain fixed.
 
 The manifest pins a SHA-256 schedule with 32 blocks per workload/concurrency
 group. Sixteen blocks use B-C-C-B on the relay and C-B-B-C on the gateway;
-sixteen reverse those orders. The eight subruns in a successful block form a
-four-arm palindrome. Rejection has only B/C gateway arms. B-only measurement
+sixteen reverse those orders. Within each treatment order, eight put relay
+outermost and eight put gateway outermost. The eight subruns in a successful
+block form a four-arm palindrome. Rejection has only B/C gateway arms. B-only measurement
 uses the identical schedule with C slots omitted. Every subrun checks one warm
 request and a one-request Go benchmark calibration, then records **exactly 64**
 fresh requests; neither warmup contributes to its metrics. B and C are
-separate prebuilt long-lived Go processes. The runner records the raw 64
+separate long-lived Go processes freshly built by the runner from exact clean
+checkouts before timed blocks. It refuses existing binary paths. The runner records the raw 64
 per-request timings, checked effects and content counts, runtime/GC data and
 host pressure, GC and scheduler observations for every subrun and block. It writes an append-only journal;
 invalid or interrupted output stays visible. Do not remove/retry a block based
@@ -57,14 +59,12 @@ not change this rule.
 node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest.json
 node --test scripts/fidelity-paired-v2.test.mjs
 go test -mod=readonly ./internal/gateway -run 'TestFidelityBenchmarkOracleDetectsCorruption|TestFidelityPairedLookupPreservesFrozenInventory' -count=1
-go test -c -mod=readonly -o /tmp/oif-source-B.test ./internal/gateway
 node scripts/fidelity-paired-v2.mjs record-B /tmp/oif-source-B-only.json docs/evidence/fidelity-performance/source-paired-v2/manifest.json /tmp/oif-source-B.test "$PWD"
 
 # Commit the complete, passing B-only artifact and its SHA-256 before C.
-# Build C in the clean locked C checkout before starting the timed capture.
-go test -c -mod=readonly -o /tmp/oif-source-C.test ./internal/gateway
+# The runner builds fresh B/C binaries into unused paths before timed blocks.
 export OLP_FIDELITY_BENCH_ROUTE_CONTRACT='{"native":{"fidelity":{"mode":"strict"}},"translated":{"fidelity":{"mode":"strict"}},"rejected":{"fidelity":{"mode":"strict"}}}'
-node scripts/fidelity-paired-v2.mjs record-paired /tmp/oif-source-paired.json docs/evidence/fidelity-performance/source-paired-v2/manifest.json /tmp/oif-source-B-only.json /tmp/oif-source-B.test /path/to/clean/B /tmp/oif-source-C.test "$PWD"
+node scripts/fidelity-paired-v2.mjs record-paired /tmp/oif-source-paired.json docs/evidence/fidelity-performance/source-paired-v2/manifest.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/clean/B /tmp/oif-source-C.test "$PWD"
 ```
 
 The route-contract JSON shown is illustrative; use the exact independently

@@ -47,18 +47,28 @@ const oldFiles = {
   pairedRunner: 'scripts/fidelity-paired-v2.mjs'
 };
 
-export function sourceOrder(group, variant, baselineOnly = false) {
+export function sourceOrder(group, variant, baselineOnly = false, outer = 'relay') {
   invariant(variant === 'ABBA' || variant === 'BAAB', 'unknown order');
+  invariant(outer === 'relay' || outer === 'gateway', 'unknown outer path');
   if (group.startsWith('rejected_extension/')) {
     return baselineOnly ? ['B/gateway', 'B/gateway'] : variant === 'ABBA'
       ? ['B/gateway', 'C/gateway', 'C/gateway', 'B/gateway']
       : ['C/gateway', 'B/gateway', 'B/gateway', 'C/gateway'];
   }
-  // A four-arm palindrome. Each path separately receives 16 B-C-C-B and
-  // 16 C-B-B-C blocks, while both arms occupy symmetric positions.
-  const full = variant === 'ABBA'
-    ? ['B/relay', 'C/relay', 'C/gateway', 'B/gateway', 'B/gateway', 'C/gateway', 'C/relay', 'B/relay']
-    : ['C/gateway', 'B/gateway', 'B/relay', 'C/relay', 'C/relay', 'B/relay', 'B/gateway', 'C/gateway'];
+  // Treatment order is defined per relay path. Swapping B and C at every
+  // position yields the opposite order. Path placement is independently
+  // balanced so relay and gateway each occupy outer and inner positions.
+  const orders = {
+    relay: {
+      ABBA: ['B/relay', 'C/relay', 'C/gateway', 'B/gateway', 'B/gateway', 'C/gateway', 'C/relay', 'B/relay'],
+      BAAB: ['C/relay', 'B/relay', 'B/gateway', 'C/gateway', 'C/gateway', 'B/gateway', 'B/relay', 'C/relay']
+    },
+    gateway: {
+      ABBA: ['C/gateway', 'B/gateway', 'B/relay', 'C/relay', 'C/relay', 'B/relay', 'B/gateway', 'C/gateway'],
+      BAAB: ['B/gateway', 'C/gateway', 'C/relay', 'B/relay', 'B/relay', 'C/relay', 'C/gateway', 'B/gateway']
+    }
+  };
+  const full = orders[outer][variant];
   return baselineOnly ? full.filter((arm) => arm.startsWith('B/')) : full;
 }
 
@@ -67,7 +77,13 @@ export function sourceSchedule(seed = SEED) {
     const indices = Array.from({ length: BLOCKS }, (_, index) => index)
       .sort((a, b) => rank(seed, `variant:${group}:${a}`).localeCompare(rank(seed, `variant:${group}:${b}`)));
     const variant = new Map(indices.map((index, ordinal) => [index, ordinal < 16 ? 'ABBA' : 'BAAB']));
-    return Array.from({ length: BLOCKS }, (_, index) => ({ group, index, variant: variant.get(index) }));
+    const outer = new Map();
+    for (const treatment of ['ABBA', 'BAAB']) {
+      const placed = indices.filter((index) => variant.get(index) === treatment)
+        .sort((a, b) => rank(seed, `outer:${group}:${a}`).localeCompare(rank(seed, `outer:${group}:${b}`)));
+      placed.forEach((index, ordinal) => outer.set(index, group.startsWith('rejected_extension/') ? 'gateway' : ordinal < 8 ? 'relay' : 'gateway'));
+    }
+    return Array.from({ length: BLOCKS }, (_, index) => ({ group, index, variant: variant.get(index), outer: outer.get(index) }));
   });
   blocks.sort((a, b) => rank(seed, `block:${a.group}:${a.index}`).localeCompare(rank(seed, `block:${b.group}:${b.index}`)));
   return blocks;
@@ -116,6 +132,7 @@ export function makeManifest(root) {
     paired_harness_sha256: digest(full('pairedHarness')), paired_runner_sha256: digest(full('pairedRunner')),
     seed: SEED, blocks_per_group: BLOCKS, samples_per_subrun: SAMPLES,
     order: { ABBA: 'B-C-C-B per relay path; C-B-B-C per gateway path', BAAB: 'C-B-B-C per relay path; B-C-C-B per gateway path',
+      outer: 'within each treatment order, eight relay-outer and eight gateway-outer four-arm palindromes',
       rejected: 'B-C-C-B or C-B-B-C gateway', baseline: 'same schedule with C subruns omitted' },
     schedule_sha256: hash(JSON.stringify(schedule)),
     bound: { lower_order_statistic: 11, upper_order_statistic: 22, upper_coverage: 0.97494877,
@@ -159,14 +176,30 @@ function sourceIdentity(root, manifest, B) {
   invariant(status === '', `${B ? 'B' : 'C'} source tree is dirty: ${status}`);
   invariant(digest(resolve(root, oldFiles.harness)) === manifest.old_harness_sha256, 'frozen v1 harness differs');
   invariant(digest(resolve(root, oldFiles.runner)) === manifest.old_runner_sha256, 'frozen v1 runner differs');
+  invariant(digest(resolve(root, oldFiles.baseline)) === manifest.old_baseline_sha256, 'frozen v1 baseline differs');
+  invariant(digest(resolve(root, oldFiles.budgets)) === manifest.old_budgets_sha256, 'frozen v1 budgets differ');
   invariant(digest(resolve(root, oldFiles.pairedHarness)) === manifest.paired_harness_sha256, 'v2 harness differs');
   invariant(digest(resolve(root, oldFiles.pairedRunner)) === manifest.paired_runner_sha256, 'v2 runner differs');
+  invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
-    invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, 'B does not descend from historical product');
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
     invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
+}
+
+function buildBinary(binaryPath, root, manifest, B) {
+  const absolute = resolve(binaryPath);
+  const withinRoot = relative(root, absolute);
+  invariant(isAbsolute(withinRoot) || withinRoot.startsWith('..'), 'benchmark binary output must be outside the source checkout');
+  invariant(!existsSync(absolute), `refusing to reuse or overwrite benchmark binary: ${absolute}`);
+  const before = sourceIdentity(root, manifest, B);
+  const args = ['test', '-c', '-mod=readonly', '-o', absolute, './internal/gateway'];
+  const result = spawnSync('go', args, { cwd: root, encoding: 'utf8', maxBuffer: 4 << 20 });
+  invariant(result.status === 0 && existsSync(absolute), `fresh ${B ? 'B' : 'C'} test binary build failed: ${result.stderr}`);
+  const after = sourceIdentity(root, manifest, B);
+  invariant(isDeepStrictEqual(before, after), 'source checkout changed during binary build');
+  return { ...before, binary_sha256: digest(absolute), build_command: ['go', ...args], built_at: new Date().toISOString() };
 }
 
 class GoArm {
@@ -271,9 +304,9 @@ function validateCapture(capture, manifest, baselineOnly) {
   invariant(capture.blocks.length === schedule.length && hash(JSON.stringify(schedule)) === manifest.schedule_sha256, 'block schedule or count changed');
   for (let i = 0; i < schedule.length; i++) {
     const actual = capture.blocks[i], expected = schedule[i];
-    invariant(actual.group === expected.group && actual.index === expected.index && actual.variant === expected.variant, `block ${i}: schedule changed`);
+    invariant(actual.group === expected.group && actual.index === expected.index && actual.variant === expected.variant && actual.outer === expected.outer, `block ${i}: schedule changed`);
     for (const diagnostics of [actual.diagnostics_before, actual.diagnostics_after]) invariant(typeof diagnostics?.loadavg === 'string' && typeof diagnostics?.cpu_pressure === 'string', `block ${i}: host diagnostics missing`);
-    const arms = sourceOrder(expected.group, expected.variant, baselineOnly);
+    const arms = sourceOrder(expected.group, expected.variant, baselineOnly, expected.outer);
     invariant(actual.subruns.length === arms.length && actual.subruns.every((subrun, j) => subrun.arm === arms[j]), `block ${i}: arm order/count changed`);
     for (const subrun of actual.subruns) validateSubrun(subrun.reply, pathName(expected.group, subrun.arm.split('/')[1]), manifest);
   }
@@ -286,19 +319,31 @@ function perName(capture, name, arm) {
 export function analyzeBaseline(capture, manifest) {
   validateCapture(capture, manifest, true);
   const envelope = {};
+  const absoluteVariability = {};
   const failures = [];
   for (const [name, metrics] of Object.entries(manifest.comparisons)) {
     const runs = perName(capture, name, 'B');
     invariant(runs.length === 64, `${name}: B-only sample floor changed`);
     envelope[name] = {};
+    absoluteVariability[name] = {};
+    const group = name.slice(0, name.lastIndexOf('/'));
+    const path = name.slice(name.lastIndexOf('/') + 1);
     for (const [metric, old] of Object.entries(metrics)) {
       const observed = median(runs.map((run) => run.metrics[metric]));
       const passed = observed <= old.old_limit;
       envelope[name][metric] = { B_median: observed, old_limit: old.old_limit, passed };
       if (!passed) failures.push(`${name} ${metric}: B-only median ${observed} > frozen ${old.old_limit}`);
+      const values = capture.blocks.filter((block) => block.group === group).map((block) => {
+        const pair = block.subruns.filter((run) => run.arm === `B/${path}`);
+        invariant(pair.length === 2, `${name}: missing B-only block pair`);
+        return Math.abs(pair[0].reply.metrics[metric] - pair[1].reply.metrics[metric]);
+      });
+      const sorted = [...values].sort((a, b) => a - b);
+      absoluteVariability[name][metric] = { values, median: median(values), upper: sorted[UPPER_INDEX], old_margin: old.margin, diagnostic_only: true };
     }
   }
-  return { passed: failures.length === 0, failures, envelope, count: { blocks: capture.blocks.length, B_subruns: capture.blocks.reduce((n, block) => n + block.subruns.length, 0), B_requests: 22 * 64 * 64 } };
+  return { passed: failures.length === 0, failures, envelope, absolute_within_block_variability: absoluteVariability,
+    count: { blocks: capture.blocks.length, B_subruns: capture.blocks.reduce((n, block) => n + block.subruns.length, 0), B_requests: 22 * 64 * 64 } };
 }
 
 function pairedValues(blocks, path, metric) {
@@ -401,9 +446,9 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     command('git', ['ls-files', '--error-unmatch', '--', trackedPath], Croot);
     invariant(command('git', ['status', '--porcelain', '--', trackedPath], Croot) === '', 'B-only artifact must be committed before C capture');
   }
-  const B = { ...sourceIdentity(Broot, manifest, true), binary_sha256: digest(Bbinary) };
-  const C = mode === 'paired' ? { ...sourceIdentity(Croot, manifest, false), binary_sha256: digest(Cbinary) } : null;
-  invariant(mode === 'B-only' || (C && C.revision !== B.revision), 'paired study requires a distinct locked C revision');
+  sourceIdentity(Broot, manifest, true);
+  if (mode === 'paired') sourceIdentity(Croot, manifest, false);
+  if (mode === 'paired') invariant(resolve(Bbinary) !== resolve(Cbinary), 'B and C require distinct binary output paths');
   const routeContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT || 'null') : null;
   const providerContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT || 'null') : null;
   if (mode === 'paired') invariant(routeContract && ['native', 'translated', 'rejected'].every((name) => Object.keys(routeContract[name] || {}).length > 0), 'C requires explicit native, translated and rejected route contracts');
@@ -412,6 +457,9 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   const toolchain = command('go', ['version'], Broot);
   const goBuildEnvironment = command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS'], Broot);
   invariant(toolchain === manifest.old_toolchain && goBuildEnvironment === manifest.old_go_build_environment, 'toolchain/build environment differs from v1');
+  const B = buildBinary(Bbinary, Broot, manifest, true);
+  const C = mode === 'paired' ? buildBinary(Cbinary, Croot, manifest, false) : null;
+  invariant(mode === 'B-only' || C.revision !== B.revision, 'paired study requires a distinct locked C revision');
   const artifact = { schema: SCHEMA, mode, status: 'in_progress', started_at: new Date().toISOString(),
     manifest_sha256: hash(JSON.stringify(manifest)), schedule_sha256: manifest.schedule_sha256,
     B_only_sha256: frozenBaseline ? digest(baselinePath) : null,
@@ -427,7 +475,7 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
     if (Cprocess) await Cprocess.ready;
     for (const block of sourceSchedule(manifest.seed)) {
       const entry = { ...block, diagnostics_before: diagnostics(), subruns: [] };
-      for (const arm of sourceOrder(block.group, block.variant, !Cprocess)) {
+      for (const arm of sourceOrder(block.group, block.variant, !Cprocess, block.outer)) {
         const [version, path] = arm.split('/');
         const name = pathName(block.group, path);
         const id = `${block.group}:${block.index}:${entry.subruns.length}`;
