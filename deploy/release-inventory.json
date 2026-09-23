@@ -6485,6 +6485,7 @@
     "tests/integration/extension_public_test.go",
     "tests/integration/fidelity_baseline_test.go",
     "tests/integration/fidelity_lifecycle_performance_test.go",
+    "tests/integration/fidelity_lifecycle_v2_test.go",
     "tests/integration/gateway_health_test.go",
     "tests/integration/gateway_limits_test.go",
     "tests/integration/gateway_test.go",
