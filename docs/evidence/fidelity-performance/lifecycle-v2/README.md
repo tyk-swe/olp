@@ -28,10 +28,15 @@ retrieval, and an authenticated other-key 404 without provider work. The 12
 gateway durable repetitions require 288 mapping checks, 288 retrievals and 12
 zero-dispatch negatives, with zero ambiguous outcomes. Native upstream IDs
 must match the fixture's own emission records; mere local-ID syntax is never
-enough. Retrieval and wrong-owner checks occur after each repetition's timed
-and resource-sampled interval. Publication still measures native emission to
-client-visible ID *before* the SQL check; streaming request latency and run
-wall time include that check.
+enough. The independently retained provider document must also have the exact
+upstream ID, native provider model, text, usage and terminal fields. Retrieval
+and wrong-owner checks occur after each repetition's timed and resource-sampled
+interval. Historical B's GET response exposes the native provider model;
+strict C's GET response projects the declared client route model. Each full
+document is checked against its own explicit contract, and that projection is
+reported as a client identity mapping rather than native byte equality.
+Publication still measures native emission to client-visible ID *before* the
+SQL check; streaming request latency and run wall time include that check.
 
 The numeric rule uses **every unchanged limit** in frozen
 [`lifecycle-v1/replacement-budgets.json`](../lifecycle-v1/replacement-budgets.json),

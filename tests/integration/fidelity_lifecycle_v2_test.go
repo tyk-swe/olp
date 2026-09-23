@@ -155,6 +155,14 @@ type lifecycleV2Sample struct {
 	identity lifecycleV2Identity
 }
 
+func lifecycleV2CheckNativeResponse(raw []byte, upstream string, stream bool) error {
+	text := lifecycleText
+	if stream {
+		text = strings.Repeat(lifecycleText, lifecycleEvents)
+	}
+	return lifecycleCheckResult(raw, upstream, vendorModel, text)
+}
+
 // The public key ID comes from the same management response as its secret.
 // The second valid owner key exercises an authenticated zero-dispatch denial.
 func lifecycleV2Provision(t *testing.T, h *accessHarness, endpoint string) (slug, secret, keyID, otherSecret string) {
@@ -240,6 +248,14 @@ func lifecycleV2MappedID(ctx context.Context, h *accessHarness, f *lifecycleV2Fi
 	}
 	if strict && (contract == nil || *contract != version || !encrypted) || !strict && (contract != nil || encrypted) {
 		return "", time.Time{}, fmt.Errorf("durable contract kind or ciphertext changed")
+	}
+	native, ok := f.responses.Load(upstream)
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("mapped upstream response was never retained by fixture")
+	}
+	nativeRaw, err := json.Marshal(native)
+	if err != nil || lifecycleV2CheckNativeResponse(nativeRaw, upstream, stream) != nil {
+		return "", time.Time{}, fmt.Errorf("mapped upstream response does not match exact native provider document")
 	}
 	v, ok := f.sends.LoadAndDelete(upstream)
 	if !ok {
@@ -510,6 +526,10 @@ func TestFidelityLifecycleV2Performance(t *testing.T) {
 					if path == "gateway" && strings.HasPrefix(workload, "durable") {
 						getsBefore := f.gets.Load()
 						text := lifecycleText
+						retrievedModel := vendorModel // historical B GET exposes native model
+						if strict {
+							retrievedModel = model // strict C projects its route identity
+						}
 						if workload == "durable_stream_64" {
 							text = strings.Repeat(lifecycleText, lifecycleEvents)
 						}
@@ -518,7 +538,7 @@ func TestFidelityLifecycleV2Performance(t *testing.T) {
 								t.Fatal("missing independent local/native identity check")
 							}
 							run.Mappings++
-							if err := lifecycleV2Get(t.Context(), client, endpoint, key, s.identity.id, model, text); err != nil {
+							if err := lifecycleV2Get(t.Context(), client, endpoint, key, s.identity.id, retrievedModel, text); err != nil {
 								t.Fatal(err)
 							}
 							run.Retrievals++
@@ -574,10 +594,14 @@ func TestFidelityLifecycleV2Semantic(t *testing.T) {
 				continue
 			}
 			text := lifecycleText
+			retrievedModel := vendorModel
+			if strict {
+				retrievedModel = model
+			}
 			if workload == "durable_stream_64" {
 				text = strings.Repeat(lifecycleText, lifecycleEvents)
 			}
-			if err := lifecycleV2Get(t.Context(), client, endpoint, key, sample.identity.id, model, text); err != nil {
+			if err := lifecycleV2Get(t.Context(), client, endpoint, key, sample.identity.id, retrievedModel, text); err != nil {
 				t.Fatal(err)
 			}
 			before = f.dispatches.Load()
@@ -635,4 +659,24 @@ func TestLifecycleV2PayloadOracleDetectsCorruption(t *testing.T) {
 			t.Fatal("event order oracle changed")
 		}
 	}
+	native := lifecycleResponse("resp_fidelity_000000001", vendorModel, lifecycleText)
+	for _, field := range []string{"model", "id", "output"} {
+		changed := structuredLifecycleCopy(native)
+		if field == "model" {
+			changed[field] = "wrong-upstream-model"
+		} else {
+			delete(changed, field)
+		}
+		bad, _ := json.Marshal(changed)
+		if lifecycleV2CheckNativeResponse(bad, "resp_fidelity_000000001", false) == nil {
+			t.Fatalf("native %s corruption accepted", field)
+		}
+	}
+}
+
+func structuredLifecycleCopy(value map[string]any) map[string]any {
+	raw, _ := json.Marshal(value)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	return out
 }
