@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	olpruntime "github.com/tyk-swe/olp/internal/runtime"
 )
 
 type pairedBarrierCommand struct {
@@ -69,6 +71,18 @@ type pairedBarrierRun struct {
 }
 
 func pairedBarrierUS(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1000 }
+
+// A multi-minute paired experiment must use the same five-second authority
+// refresh lifecycle as a production gateway. A one-shot h.refresh() becomes
+// stale after 60 seconds even when storage and the fixture are healthy.
+func startPairedBarrierAuthority(t *testing.T, h *accessHarness, key string) {
+	t.Helper()
+	h.Runtime.Start(t.Context())
+	t.Cleanup(h.Runtime.Stop)
+	if _, err := h.Runtime.Authenticate(key); err != nil {
+		t.Fatalf("initial paired key authority: %v", err)
+	}
+}
 
 type pairedSchedulerHistogram struct {
 	buckets []float64
@@ -240,7 +254,7 @@ func TestPairedBarrierReferenceV2(t *testing.T) {
 	owner := h.owner()
 	slug, key := publishStrictProvider(t, h, owner, fixture, nil, nil, "strict")
 	key = stateKey(t, h, owner, slug, true)
-	h.refresh()
+	startPairedBarrierAuthority(t, h, key)
 	binding := newBarrierBinding(t, h, fixture.providerID, slug, key)
 	relay := newBarrierRelay(t, provider)
 	provider.measured.Store(true)
@@ -276,5 +290,31 @@ func TestPairedBarrierReferenceV2(t *testing.T) {
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPairedBarrierAuthorityFreshnessV2Attempt2(t *testing.T) {
+	h := newAccessHarness(t)
+	d := barrierCorpus(t, 0)
+	provider := newBarrierProvider(t, []barrierDocuments{d})
+	fixture := &strictProviderFixture{Server: provider.Server, profile: "anthropic-messages"}
+	owner := h.owner()
+	slug, _ := publishStrictProvider(t, h, owner, fixture, nil, nil, "strict")
+	key := stateKey(t, h, owner, slug, true)
+	startPairedBarrierAuthority(t, h, key)
+	initial := h.Runtime.Authority().ReadAt
+	provider.measured.Store(true)
+	time.Sleep(olpruntime.AuthorityStaleAfter + time.Second)
+	current := h.Runtime.Authority()
+	if current.Stale || !current.ReadAt.After(initial) {
+		t.Fatal("long-lived paired gateway lost production authority polling")
+	}
+	if _, err := h.Runtime.Authenticate(key); err != nil {
+		t.Fatalf("paired key authority stale after 60 seconds: %v", err)
+	}
+	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 16}, Timeout: 30 * time.Second}
+	t.Cleanup(client.CloseIdleConnections)
+	if _, err := barrierWorkflow(t.Context(), barrierBinding{}, provider, client, d, h.HTTP.URL+"/anthropic", key, slug, "gateway"); err != nil {
+		t.Fatalf("public native workflow failed after authority refresh: %v", err)
 	}
 }

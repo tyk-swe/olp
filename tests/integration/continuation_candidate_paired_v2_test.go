@@ -141,7 +141,7 @@ func TestPairedBarrierCandidateV2(t *testing.T) {
 	owner := h.owner()
 	slug, _ := publishStrictProvider(t, h, owner, fixture, options, nil, "strict")
 	key := stateKey(t, h, owner, slug, true)
-	h.refresh()
+	startPairedBarrierAuthority(t, h, key)
 	provider.measured.Store(true)
 	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 16}, Timeout: 30 * time.Second}
 	t.Cleanup(client.CloseIdleConnections)
