@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { names } from './fidelity-lifecycle-benchmark.mjs';
-import { parseRuns, validateV2Runs, freeze, compare } from './fidelity-lifecycle-v2-benchmark.mjs';
+import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare } from './fidelity-lifecycle-v2-benchmark.mjs';
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const originalBudget = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'));
+const originalBaseline = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/baseline.json'));
 
 function runs() {
   return names.flatMap((name) => [0, 1, 2].map((repetition) => {
@@ -22,16 +24,18 @@ function runs() {
 function baseline() {
   return { schema: 'openllmproxy.dev/fidelity-lifecycle-performance/v2', contract: null, source_revision: 'reference',
     working_tree: '', reference_product_diff: ['scripts/fidelity-lifecycle-v2-benchmark.mjs', 'tests/integration/fidelity_lifecycle_v2_test.go'],
-    harness_sha256: 'harness', runner_sha256: 'runner', frozen_harness_sha256: 'v1harness',
+    harness_sha256: sha256('tests/integration/fidelity_lifecycle_v2_test.go'),
+    runner_sha256: sha256('scripts/fidelity-lifecycle-v2-benchmark.mjs'),
+    frozen_harness_sha256: originalBudget.harness_sha256,
     historical_baseline_sha256: sha256('docs/evidence/fidelity-performance/lifecycle-v1/baseline.json'),
     historical_budget_sha256: sha256('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'),
     command: ['go', 'test'], runtime_environment: { GOMAXPROCS: '4' }, toolchain: 'go version',
     go_build_environment: 'amd64', hardware: { cpu: 'host' }, storage: { postgresql_server_version: '180006' },
+    setup_sha256: sha256('tests/integration/access_test.go'),
     conditions: { ordering: 'fixed' }, repetitions: 3, samples_per_repetition: 24, concurrency: [1, 4], runs: runs() };
 }
 function historical() {
-  return { schema: 'openllmproxy.dev/fidelity-lifecycle-budget/v1', baseline_revision: '373c58467a3a17da97d2b48b16473ffd715afeac', harness_sha256: 'v1harness',
-    maxima: Object.fromEntries(names.map((name) => [name, Object.fromEntries(Object.keys(runs().find((r) => r.name === name).metrics).filter((m) => m !== 'elapsed_ns').map((m) => [m, 1000]))])) };
+  return structuredClone(originalBudget);
 }
 function candidate(a) {
   return { ...structuredClone(a), contract: { mode: 'strict' }, source_revision: 'candidate', reference_product_diff: null };
@@ -41,6 +45,9 @@ test('the complete v2 native inventory and strict candidate compare to pre-chang
   assert.equal(Object.keys(validateV2Runs(b.runs)).length, 16);
   assert.deepEqual(parseRuns(b.runs.map((r) => `x: LIFECYCLE_V2_MEASUREMENT ${JSON.stringify(r)}`).join('\n')), b.runs);
   const budget = freeze(b, historical());
+  assert.equal(Object.keys(budget.added_latency_maxima).length, 8);
+  assert.equal(Object.values(budget.added_latency_maxima).flatMap(Object.values).length, 24);
+  assert.deepEqual(budget.added_latency_maxima, historicalAddedLimits(originalBaseline));
   assert.deepEqual(compare(candidate(b), budget), []);
   assert.equal(b.runs.reduce((n, r) => n + r.succeeded, 0), 1152);
   assert.equal(b.runs.reduce((n, r) => n + r.retrieval_checks, 0), 288);
@@ -63,13 +70,27 @@ test('changed identity, conditions, source or budget cannot pass', () => {
     (a) => a.contract = null, (a) => a.harness_sha256 = 'changed',
     (a) => a.frozen_harness_sha256 = 'changed', (a) => a.hardware.cpu = 'other',
     (a) => a.storage.postgresql_server_version = '190001', (a) => a.working_tree = 'dirty',
-    (a) => a.source_revision = 'reference', (a) => a.historical_budget_sha256 = 'changed'
+    (a) => a.source_revision = 'reference', (a) => a.historical_budget_sha256 = 'changed',
+    (a) => a.setup_sha256 = 'changed'
   ]) {
     const a = candidate(baseline()); mutate(a); assert.throws(() => compare(a, budget));
   }
-  const a = candidate(baseline()); a.runs.forEach((r) => { if (r.name === 'durable_unary/c1/gateway') r.metrics['publication-p99-us'] = 1001; });
+  const a = candidate(baseline()); a.runs.forEach((r) => { if (r.name === 'durable_unary/c1/gateway') r.metrics['publication-p99-us'] = budget.maxima[r.name]['publication-p99-us'] + 1; });
   assert.equal(compare(a, budget).length, 1);
   budget.maxima[names[0]]['B/op'] = NaN;
+  assert.throws(() => compare(candidate(baseline()), budget));
+  const setupBudget = freeze(baseline(), historical());
+  setupBudget.expected_candidate_setup_sha256 = 'changed';
+  assert.throws(() => compare(candidate(baseline()), setupBudget));
+});
+test('every added-latency limit is candidate-independent and mutation guarded', () => {
+  const budget = freeze(baseline(), historical());
+  const label = 'durable_unary/c1';
+  const metric = 'latency-p99-us';
+  const a = candidate(baseline());
+  for (const run of a.runs) if (run.name === `${label}/gateway`) run.metrics[metric] = budget.added_latency_maxima[label][metric] + 101;
+  assert.ok(compare(a, budget).some((failure) => failure.includes(`${label}: added ${metric}`)));
+  delete budget.added_latency_maxima[label][metric];
   assert.throws(() => compare(candidate(baseline()), budget));
 });
 test('B-only freeze rejects changed historical product or source-envelope failures', () => {
@@ -77,7 +98,10 @@ test('B-only freeze rejects changed historical product or source-envelope failur
     (a) => a.reference_product_diff.push('internal/gateway/responses.go'),
     (a) => a.contract = { mode: 'strict' },
     (a) => a.working_tree = 'modified',
-    (a) => a.runs.forEach((r) => { if (r.name === 'durable_unary/c1/gateway') r.metrics['ns/op'] = 1001; }),
+    (a) => a.harness_sha256 = 'changed',
+    (a) => a.runner_sha256 = 'changed',
+    (a) => a.setup_sha256 = 'changed',
+    (a) => a.runs.forEach((r) => { if (r.name === 'durable_unary/c1/gateway') r.metrics['ns/op'] = originalBudget.maxima[r.name]['ns/op'] + 1; }),
   ]) {
     const a = baseline(); mutate(a); assert.throws(() => freeze(a, historical()));
   }
