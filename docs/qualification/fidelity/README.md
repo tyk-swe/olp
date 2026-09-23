@@ -28,9 +28,11 @@ protects the full existing surface from accidental removal.
 
 The additive [compatibility and evidence matrix](compatibility-matrix-v1.md)
 maps those 47 frozen rows without changing them, and records newer unary and
-Gemini lifecycle combinations separately. Its statuses are scoped to a pinned
-source revision and distinguish integrated execution from isolated branch
-results and incomplete evidence.
+Gemini, media, durable and duplex combinations separately. Its statuses are
+scoped to a pinned source revision and distinguish integrated execution from
+incomplete evidence. The [qualification status receipt](qualification-status-v1.md)
+keeps row counts, ambiguous outcomes, failed/pending timed comparisons and
+unknown empirical quality separate.
 
 The [counterexamples](../../../tests/fixtures/fidelity/v1/counterexamples.json)
 contain seven independently authored native invocations: the five recorded

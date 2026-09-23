@@ -218,6 +218,56 @@ func TestStrictMediaPublicNativeSourcesAndAssets(t *testing.T) {
 			}
 		}
 	})
+	t.Run("image variation original asset and result", func(t *testing.T) {
+		result := `{"created":1,"data":[{"url":"https://asset.example/variation"}],"native_number":9007199254740993}`
+		fixture := newOperationFixture(t, "/v1/images/variations", result)
+		slug, key := publishStrictMediaFixture(t, h, owner, fixture, "image_variation", "unary")
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		writer.WriteField("model", slug)
+		part, err := writer.CreateFormFile("image", "original.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := []byte{0x89, 0x50, 0x4e, 0x47, 0, 0xff}
+		part.Write(original)
+		writer.WriteField("n", "2")
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/images/variations", key, bytes.NewReader(body.Bytes()), map[string]string{"Content-Type": writer.FormDataContentType()})
+		if status != http.StatusOK || string(raw) != result {
+			t.Fatalf("native variation status=%d body=%s", status, raw)
+		}
+		calls := fixture.snapshot()
+		if len(calls) != 1 {
+			t.Fatalf("variation dispatch count=%d", len(calls))
+		}
+		_, params, err := mime.ParseMediaType(calls[0].headers.Get("Content-Type"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader := multipart.NewReader(bytes.NewReader(calls[0].body), params["boundary"])
+		for i, want := range []struct {
+			name string
+			body []byte
+		}{{"model", []byte(vendorModel)}, {"image", original}, {"n", []byte("2")}} {
+			part, err := reader.NextPart()
+			if err != nil {
+				t.Fatalf("variation part %d: %v", i, err)
+			}
+			actual, err := io.ReadAll(part)
+			if err != nil || part.FormName() != want.name || !bytes.Equal(actual, want.body) {
+				t.Fatalf("variation part %d %q=%x, want %q=%x: %v", i, part.FormName(), actual, want.name, want.body, err)
+			}
+			if i == 1 && part.FileName() != "original.png" {
+				t.Fatalf("variation filename changed: %q", part.FileName())
+			}
+		}
+		if _, err := reader.NextPart(); err != io.EOF {
+			t.Fatalf("variation appended multipart part: %v", err)
+		}
+	})
 	t.Run("transcription timestamps and file bytes", func(t *testing.T) {
 		result := `{"text":"hello","duration":1.0000001,"segments":[{"start":-0,"end":1.0000001,"text":"hello","native_counter":9007199254740993}]}`
 		fixture := newOperationFixture(t, "/v1/audio/transcriptions", result)
