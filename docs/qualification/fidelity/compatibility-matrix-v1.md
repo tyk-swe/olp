@@ -39,7 +39,10 @@ The row's `evidence_state` is independent of its contract status:
 | `isolated-executed` | A pinned implementer branch reports a passing scripted check; its feature is **not integrated** into this snapshot. |
 | `not-executed` | Source inspection or an explicit gap assessment is the evidence; no row-level passing test is claimed. |
 
-The source and receipt SHA-256 values in test evidence are part of the claim.
+The source and receipt SHA-256 values in test evidence are verified against
+the assessed Git revision, so later source edits cannot silently change this
+historical claim. The assessed commit must be available locally; a shallow
+checkout without it fails closed. These hashes are part of the claim.
 The [validator](../../../scripts/compatibility-matrix.mjs) rejects a missing,
 duplicate, altered, or newly appended frozen row; a changed frozen inventory
 digest; duplicate additive tuples; missing/renamed test symbols or files;

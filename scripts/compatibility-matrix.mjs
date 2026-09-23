@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 export const FROZEN_V1_SHA256 = 'c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd';
@@ -14,16 +15,22 @@ const isDigest = (value) => /^[a-f0-9]{64}$/.test(value ?? '');
 const isRepoPath = (value) => typeof value === 'string' && value !== '' &&
   !value.startsWith('/') && !value.split('/').includes('..') && !value.includes('\\');
 
-function artifact(path, readArtifact) {
+export function readCompatibilityArtifact(path, revision) {
+  if (revision) return execFileSync('git', ['show', `${revision}:${path}`],
+    { stdio: ['ignore', 'pipe', 'ignore'] });
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
+function artifact(path, readArtifact, revision) {
   if (!isRepoPath(path)) fail('Invalid evidence path: ' + path);
   try {
-    return readArtifact(path);
+    return readArtifact(path, revision);
   } catch {
     return null;
   }
 }
 
-function verifyEvidence(id, item, readArtifact) {
+function verifyEvidence(id, item, readArtifact, assessedRevision) {
   if (!item || !['test', 'assessment', 'isolated-receipt'].includes(item.kind))
     fail('Invalid evidence kind: ' + id);
   if (!['integrated', 'isolated'].includes(item.integration) ||
@@ -35,7 +42,9 @@ function verifyEvidence(id, item, readArtifact) {
     fail('Isolated evidence needs a pinned revision: ' + id);
   for (const field of item.kind === 'test' ? ['source', 'receipt'] : ['source']) {
     const [path, symbol] = (item[field] ?? '').split('#');
-    const bytes = artifact(path, readArtifact);
+    // Test hashes describe the assessed source snapshot. Later commits may
+    // legitimately edit the same file without rewriting this historical row.
+    const bytes = artifact(path, readArtifact, item.kind === 'test' ? assessedRevision : undefined);
     if (bytes == null) fail('Missing evidence ' + field + ': ' + id + ' (' + path + ')');
     if (item.kind === 'test' && field === 'source') {
       if (!isDigest(item.source_sha256) || sha256(bytes) !== item.source_sha256)
@@ -98,8 +107,7 @@ function verifyRow(row, evidence, frozen) {
   }
 }
 
-export function validateCompatibilityMatrix(inventoryBytes, matrix, readArtifact = (path) =>
-  existsSync(path) ? readFileSync(path) : null) {
+export function validateCompatibilityMatrix(inventoryBytes, matrix, readArtifact = readCompatibilityArtifact) {
   if (sha256(inventoryBytes) !== FROZEN_V1_SHA256)
     fail('Frozen v1 inventory changed; create a new version');
   const inventory = JSON.parse(inventoryBytes);
@@ -119,7 +127,8 @@ export function validateCompatibilityMatrix(inventoryBytes, matrix, readArtifact
   if (!matrix.evidence || typeof matrix.evidence !== 'object' ||
     !Array.isArray(matrix.rows) || !Array.isArray(matrix.additions))
     fail('Matrix lacks evidence or row lists');
-  for (const [id, item] of Object.entries(matrix.evidence)) verifyEvidence(id, item, readArtifact);
+  for (const [id, item] of Object.entries(matrix.evidence))
+    verifyEvidence(id, item, readArtifact, matrix.assessed_revision);
   const seen = new Set();
   for (const row of matrix.rows) {
     if (seen.has(row.id)) fail('Duplicate matrix row: ' + row.id);

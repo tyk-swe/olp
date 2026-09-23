@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { validateCompatibilityMatrix } from './compatibility-matrix.mjs';
+import { readCompatibilityArtifact, validateCompatibilityMatrix } from './compatibility-matrix.mjs';
 
 const inventory = readFileSync('tests/fixtures/fidelity/v1/inventory.json');
 const matrix = JSON.parse(readFileSync('docs/qualification/fidelity/compatibility-matrix-v1.json', 'utf8'));
@@ -76,9 +76,12 @@ test('missing, renamed or altered execution evidence fails validation', () => {
   alteredReceipt.evidence['native-count-classification'].receipt_sha256 = '0'.repeat(64);
   assert.throws(() => validate(alteredReceipt), /Stale execution receipt/);
   const missingArtifact = copy();
-  const readArtifact = (path) => path === 'docs/qualification/fidelity/compatibility-matrix-v1.md'
-    ? null : readFileSync(path);
+  const readArtifact = (path, revision) => path === 'docs/qualification/fidelity/compatibility-matrix-v1.md'
+    ? null : readCompatibilityArtifact(path, revision);
   assert.throws(() => validate(missingArtifact, readArtifact), /Missing evidence source/);
+  const absentRevision = copy();
+  absentRevision.assessed_revision = '0'.repeat(40);
+  assert.throws(() => validate(absentRevision), /Missing evidence source/);
 });
 
 test('positive and incompatibility statuses require integrated executed proof', () => {
