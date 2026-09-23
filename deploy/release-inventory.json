@@ -6412,6 +6412,7 @@
     "internal/providers/quotas_test.go",
     "internal/providers/server_test.go",
     "internal/providers/validation_test.go",
+    "internal/realtimecontract/contract_test.go",
     "internal/resources/continuation_test.go",
     "internal/routes/inspect_redaction_test.go",
     "internal/routes/media_test.go",
@@ -6491,6 +6492,7 @@
     "tests/integration/key_replay_expiry_test.go",
     "tests/integration/keys_budget_test.go",
     "tests/integration/lifecycle_stress_performance_test.go",
+    "tests/integration/lifecycle_stress_v2_performance_test.go",
     "tests/integration/limits_regression_test.go",
     "tests/integration/limits_test.go",
     "tests/integration/m4_isolation_test.go",
@@ -6547,6 +6549,7 @@
     "tests/integration/strict_media_test.go",
     "tests/integration/strict_operations_test.go",
     "tests/integration/strict_plan_inspector_test.go",
+    "tests/integration/strict_realtime_test.go",
     "tests/integration/strict_route_migration_test.go",
     "tests/integration/strict_video_sdk_test.go",
     "tests/integration/strict_video_test.go"
