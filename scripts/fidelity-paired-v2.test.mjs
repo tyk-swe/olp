@@ -5,12 +5,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateOutputReservation, validateStrictRouteContracts, validateSubrun, validateUntrackedBReservation, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
+import { analyzeBaseline, analyzePaired, evaluateCaptureHostInterval, evaluateHostPreflight, hostInterval, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateOutputReservation, validateStrictRouteContracts, validateSubrun, validateUntrackedBReservation, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
 
 const manifest = makeManifest(process.cwd());
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const diagnostics = { loadavg: '0.1 0.1 0.1 1/100 100', cpu_pressure: 'some avg10=0.00 total=0', memory_pressure: 'some avg10=0.00 total=0' };
 const metadata = { revision: 'B-measurement-only', binary_sha256: 'same-B-binary' };
+const hostSnapshot = (seconds, busyTicks, processTicks = {}) => ({
+  monotonic_ns: String(seconds * 1e9), cpu_line: 'cpu synthetic', host_busy_ticks: busyTicks,
+  process_ticks: processTicks, runner_user_us: 0, runner_system_us: 0,
+  loadavg: '0.1 0.1 0.1 1/100 100', load_1m: 0.1,
+  cpu_pressure: 'some avg10=0.00 avg60=0.00 total=0', cpu_some_avg10_percent: 0
+});
+const preflightSamples = Array.from({ length: 13 }, (_, index) => hostSnapshot(index * 5, index * 20));
+const preflightIntervals = Array.from({ length: 12 }, (_, index) => hostInterval(preflightSamples[index], preflightSamples[index + 1], 100));
+const stableBlockInterval = hostInterval(hostSnapshot(0, 0, { 123: 0 }), hostSnapshot(1, 100, { 123: 80 }), 100);
 
 function syntheticJournal(capture) {
   const header = { schema: capture.schema, mode: capture.mode, status: 'in_progress',
@@ -73,11 +82,14 @@ function capture(baselineOnly) {
     return cache.get(name);
   };
   const blocks = sourceSchedule().map((block) => ({ ...block, diagnostics_before: diagnostics, diagnostics_after: diagnostics,
+    host_cpu_interval: stableBlockInterval, host_stability_decision: evaluateCaptureHostInterval(stableBlockInterval, false),
     subruns: sourceOrder(block.group, block.variant, baselineOnly, block.outer).map((arm) => ({ arm, reply: get(`${block.group}/${arm.split('/')[1]}`) })) }));
   return { schema: 'openllmproxy.dev/fidelity-source-paired-v2', mode: baselineOnly ? 'B-only' : 'paired', status: 'complete',
     manifest_sha256: digest(JSON.stringify(manifest)), B_only_sha256: null, blocks,
     hardware: manifest.old_hardware, toolchain: manifest.old_toolchain, go_build_environment: manifest.old_go_build_environment,
     runtime_environment: manifest.old_runtime_environment, conditions: manifest.conditions, diagnostics_before: diagnostics, diagnostics_after: diagnostics,
+    clock_ticks_per_second: 100, host_stability_rule: manifest.host_stability,
+    host_preflight: { samples: preflightSamples, intervals: preflightIntervals, passed: true, failures: [] },
     B: metadata, C: baselineOnly ? null : { revision: 'locked-C', binary_sha256: 'C-binary' },
     C_route_contract: baselineOnly ? null : structuredClone(manifest.C_route_contract) };
 }
@@ -87,15 +99,36 @@ test('manifest derives exactly 224 path and 30 added-latency margins from immuta
   assert.equal(Object.values(manifest.comparisons).flatMap(Object.keys).length, 224);
   assert.equal(Object.values(manifest.added_latency).flatMap(Object.keys).length, 30);
   assert.equal(manifest.B_product_revision, '8e52f775df815c3a1a25d75064c3ffd540fb07f5');
-  assert.equal(manifest.manifest_revision, 'separate-evidence-branch-r5');
-  assert.equal(manifest.B_only_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json');
-  assert.equal(manifest.B_only_journal_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl');
-  assert.equal(manifest.paired_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json');
+  assert.equal(manifest.manifest_revision, 'host-stability-retry-r6');
+  assert.equal(manifest.B_only_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json');
+  assert.equal(manifest.B_only_journal_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json.journal.jsonl');
+  assert.equal(manifest.paired_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json');
+  assert.equal(manifest.previous_invalid_attempt.artifact_sha256, '68f7bb88ce70bcc4b179179749577faf085838c0fd2696c7e3b2f9ba3b239b06');
+  assert.equal(manifest.previous_invalid_attempt.journal_sha256, '5127ea75ec3688cbadf433eae8d021ce0d473b269f571fe03face683f7dd8295');
   assert.deepEqual(manifest.C_route_contract, { native: { fidelity: { mode: 'strict' } }, translated: { fidelity: { mode: 'strict' } }, rejected: { fidelity: { mode: 'strict' } } });
   for (const metrics of Object.values(manifest.comparisons)) for (const value of Object.values(metrics)) {
     assert.equal(value.margin, value.old_limit - value.old_B_median);
     assert.ok(value.margin > 0);
   }
+});
+
+test('r6 host preflight and per-block external CPU rules fail without trimming', () => {
+  assert.deepEqual(evaluateHostPreflight(preflightSamples, preflightIntervals), { passed: true, failures: [] });
+  const loaded = structuredClone(preflightSamples);
+  loaded[6].load_1m = 2;
+  assert.equal(evaluateHostPreflight(loaded, preflightIntervals).passed, false);
+  const pressured = structuredClone(preflightSamples);
+  pressured[5].cpu_some_avg10_percent = 5;
+  assert.equal(evaluateHostPreflight(pressured, preflightIntervals).passed, false);
+  const noisy = structuredClone(preflightIntervals);
+  noisy[0].external_busy_cores = 1;
+  assert.equal(evaluateHostPreflight(preflightSamples, noisy).passed, false);
+  assert.equal(evaluateCaptureHostInterval({ external_busy_cores: 2 }, false).invalid, true);
+  assert.equal(evaluateCaptureHostInterval({ external_busy_cores: 0.75 }, false).invalid, false);
+  assert.equal(evaluateCaptureHostInterval({ external_busy_cores: 0.75 }, true).invalid, true);
+  assert.equal(evaluateCaptureHostInterval({ external_busy_cores: 0.74 }, true).invalid, false);
+  assert.throws(() => hostInterval(hostSnapshot(0, 0, { 1: 0 }), hostSnapshot(1, 100), 100), /process identity changed/);
+  assert.throws(() => hostInterval(hostSnapshot(0, 100), hostSnapshot(1, 99), 100), /regressed host CPU counters/);
 });
 
 test('exact B-only blob precedes a real production change and stays verifiable after a docs descendant', (t) => {

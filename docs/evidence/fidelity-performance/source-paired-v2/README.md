@@ -14,7 +14,11 @@ copies of the v1 baseline and budgets to that checkout. `manifest.json`,
 design revisions. The first accepted a non-strict C route; r2 omitted
 post-baseline product chronology; r3 did not bind the write-once journal or
 fix the output paths; r4 left B checkout reuse ambiguous after committing
-evidence. **`manifest-r5.json` is active.** It requires the
+evidence. The r5 B-only attempt was invalidated before any C observation by
+sustained unrelated PacketCraftr/Rust CPU load; its [partial JSON, journal and
+receipt](attempt-r5-invalid.md) remain immutable at commit
+c104953720f7817d2367eb68f99cc2e812bdf91d. **`manifest-r6.json` is the
+active single retry.** It requires the
 exact explicit `{"fidelity":{"mode":"strict"}}` overlay for every native,
 translated and rejected route category, plus Git proof that the exact B-only
 artifact was committed before an affected production Go change. It must be
@@ -41,7 +45,28 @@ host pressure, GC and scheduler observations for every subrun and block. The
 fixed JSON and append-only journal paths are both under this directory. The
 journal is reserved before the first timed subrun; a failed run writes invalid
 status to the same JSON path, and an interrupted run retains its journal. Both
-paths prevent another r5 attempt. Do not remove/retry a block based on load or timing.
+paths prevent another r6 attempt. Do not remove/retry a block based on load or timing.
+
+R6 changes the seed and fixed output paths, while retaining the exact 22
+workloads, 224 path margins, 30 added-latency margins, 32-block order-statistic
+rule and semantic oracle. This is the one prospective retry allowed solely
+because r5 was invalidated by external host interference before C. If r6 is
+invalid or fails, no further r6 attempt or C capture is allowed; another study
+requires a new prospective method and explicit sequential-testing correction.
+The runner pins the hashes of the invalid r5 JSON and journal in r6's manifest.
+
+After fresh binary builds but **before reserving a journal**, the runner checks
+host stability for 60 seconds: 13 samples five seconds apart must each have
+one-minute load below 2 and CPU pressure some avg10 below 5%, and each window
+must have less than one unrelated busy CPU core. The same rule applies to B and
+C. During collection it records raw /proc/stat busy ticks, measured B/C
+process ticks, runner CPU microseconds, monotonic elapsed time, load and CPU
+pressure around every complete block. Unrelated cores are whole-host busy
+minus measured B/C and runner CPU, divided by the pinned clock-tick rate and
+elapsed seconds. One block with at least 2 unrelated cores, or two consecutive
+blocks with at least 0.75, invalidates the **entire** attempt after recording
+the completed block. Missing counters fail closed. No block is dropped or
+replaced, and no CPU affinity or numeric acceptance limit changes.
 
 For each of 224 path metrics, the frozen margin is `M = old v1 budget limit −
 median of the three historical B repetitions`. Thirty gateway-minus-relay
@@ -77,7 +102,7 @@ changing a production `.go` file in `internal/gateway/`, `internal/resources/`
 or `internal/interaction/`; `_test.go` files do not count. The evidence commit
 must be a strict ancestor of that product commit, which must be an ancestor of
 the locked C revision. The runner checks the exact Git blobs and SHA-256 values
-of `baseline.json` and `baseline.json.journal.jsonl` through all of C's
+of `baseline-r6.json` and `baseline-r6.json.journal.jsonl` through all of C's
 ancestry. Exactly one normal commit must create both; a no-ff merge may only
 carry unchanged blobs. Later edits, deletions or recreations fail. It records
 both evidence paths/hashes, commit IDs and changed paths, and rechecks them
@@ -98,11 +123,11 @@ B checkout would change B's revision and fail this gate.
 
 ```sh
 # In the clean B measurement checkout, after pre-baseline review and before C measurement:
-node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json
+node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json
 node --test scripts/fidelity-paired-v2.test.mjs
 go test -mod=readonly ./internal/gateway -run 'TestFidelityBenchmarkOracleDetectsCorruption|TestFidelityPairedLookupPreservesFrozenInventory' -count=1
 OLP_SOURCE_PAIRED_LONG_LIVED_TEST=1 go test -mod=readonly -run '^TestFidelityPairedFixturePastManagerStaleWindow$' -benchtime=1x -count=1 -timeout=3m ./internal/gateway
-node scripts/fidelity-paired-v2.mjs record-B "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json /tmp/oif-source-B.test "$PWD"
+node scripts/fidelity-paired-v2.mjs record-B "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json /tmp/oif-source-r6-B.test "$PWD"
 
 # From a separate clean evidence worktree branched at measured B commit M,
 # copy both reserved B files and commit them together as E. Merge E into C.
@@ -110,8 +135,8 @@ node scripts/fidelity-paired-v2.mjs record-B "$PWD/docs/evidence/fidelity-perfor
 # Make a later affected production Go commit, then lock C.
 # The runner builds fresh B/C binaries into unused paths before timed blocks.
 export OLP_FIDELITY_BENCH_ROUTE_CONTRACT='{"native":{"fidelity":{"mode":"strict"}},"translated":{"fidelity":{"mode":"strict"}},"rejected":{"fidelity":{"mode":"strict"}}}'
-node scripts/fidelity-paired-v2.mjs record-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/measured/B-at-M /tmp/oif-source-C.test "$PWD"
-node scripts/fidelity-paired-v2.mjs compare-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json "$PWD" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json"
+node scripts/fidelity-paired-v2.mjs record-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json" /tmp/oif-source-r6-B-confirm.test /path/to/measured/B-at-M /tmp/oif-source-r6-C.test "$PWD"
+node scripts/fidelity-paired-v2.mjs compare-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json "$PWD" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json"
 ```
 
 The route-contract JSON shown is the exact required C shape from the current
