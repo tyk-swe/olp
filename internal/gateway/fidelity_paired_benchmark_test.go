@@ -9,6 +9,7 @@ import (
 	goruntime "runtime"
 	runtimemetrics "runtime/metrics"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,7 +47,55 @@ type fidelityPairedReply struct {
 	Runtime    map[string]uint64         `json:"runtime,omitempty"`
 	Scheduler  fidelityPairedScheduler   `json:"scheduler"`
 	Error      string                    `json:"error,omitempty"`
+	Failure    *fidelityPairedFailure    `json:"failure,omitempty"`
 	Ready      bool                      `json:"ready,omitempty"`
+}
+
+// testing.Benchmark discards b.Error output. Keep the first observed failure
+// and the final counters in the protocol reply before stopping a one-shot run.
+type fidelityPairedFailure struct {
+	Stage               string `json:"stage"`
+	Detail              string `json:"detail,omitempty"`
+	HTTPStatus          int    `json:"http_status,omitempty"`
+	Dispatched          int64  `json:"dispatched"`
+	Completed           int64  `json:"completed"`
+	ExpectedEffects     int64  `json:"expected_effects"`
+	BenchmarkIterations int    `json:"benchmark_iterations"`
+	ReplyIterations     int    `json:"reply_iterations"`
+	ReplySamples        int    `json:"reply_samples"`
+}
+
+func fidelityPairedSafeError(err error) (string, int) {
+	if err == nil {
+		return "", 0
+	}
+	detail := strings.ReplaceAll(err.Error(), "benchmark-client-key", "<REDACTED>")
+	detail = strings.ReplaceAll(detail, "benchmark-provider-key", "<REDACTED>")
+	if len(detail) > 4096 {
+		detail = detail[:4096]
+	}
+	status := 0
+	if after, ok := strings.CutPrefix(detail, "status="); ok {
+		code, _, _ := strings.Cut(after, " ")
+		status, _ = strconv.Atoi(code)
+	}
+	return detail, status
+}
+
+// An HTTP client can finish reading the response before the upstream handler's
+// deferred completion counter runs. Observe the exact effect count only after
+// the timed interval, with a fixed deadline so a missing effect still fails.
+func fidelityPairedAwaitEffects(dispatched, completed *atomic.Int64, want int64) (bool, time.Duration, int64, int64) {
+	start := time.Now()
+	if dispatched.Load() != want {
+		return false, 0, dispatched.Load(), completed.Load()
+	}
+	deadline := start.Add(250 * time.Millisecond)
+	for completed.Load() < want && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Microsecond)
+	}
+	gotDispatched, gotCompleted := dispatched.Load(), completed.Load()
+	return gotDispatched == want && gotCompleted == want, time.Since(start), gotDispatched, gotCompleted
 }
 
 type fidelityPairedScheduler struct {
@@ -131,10 +180,19 @@ func TestFidelityPairedServer(t *testing.T) {
 func fidelityPairedMeasure(w fidelityWorkload, concurrency int, relay bool) fidelityPairedReply {
 	var reply fidelityPairedReply
 	var failed atomic.Bool
+	var firstFailure atomic.Pointer[fidelityPairedFailure]
+	var finalCountsSet atomic.Bool
+	var finalDispatched, finalCompleted, finalExpected atomic.Int64
+	record := func(stage string, err error, dispatched, completed, expected int64) {
+		detail, status := fidelityPairedSafeError(err)
+		firstFailure.CompareAndSwap(nil, &fidelityPairedFailure{Stage: stage, Detail: detail,
+			HTTPStatus: status, Dispatched: dispatched, Completed: completed, ExpectedEffects: expected})
+	}
 	result := testing.Benchmark(func(b *testing.B) {
 		f := newFidelityFixture(b, w, relay)
 		if _, err := f.request(w, relay); err != nil {
 			failed.Store(true)
+			record("warmup", err, f.dispatches.Load(), f.completed.Load(), 1)
 			b.Fatal(err)
 		}
 		f.dispatches.Store(0)
@@ -180,6 +238,7 @@ func fidelityPairedMeasure(w fidelityWorkload, concurrency int, relay bool) fide
 					samples[i], err = f.request(w, relay)
 					if err != nil {
 						failed.Store(true)
+						record("measured_request", err, f.dispatches.Load(), f.completed.Load(), int64(b.N))
 						b.Error(err)
 						return
 					}
@@ -187,20 +246,30 @@ func fidelityPairedMeasure(w fidelityWorkload, concurrency int, relay bool) fide
 			})
 		}
 		workers.Wait()
+		if os.Getenv("OLP_SOURCE_PAIRED_R7_FORCE_EFFECT_MISMATCH") == "1" && b.N == 64 {
+			f.completed.Add(-1) // Selected diagnostic RED control; the runner always clears this variable.
+		}
 		cpu := fidelityCPU() - cpuStart
 		b.StopTimer()
+		wantDispatches := int64(b.N)
+		if w.rejected {
+			wantDispatches = 0
+		}
+		effectsMatch, effectWait, gotDispatched, gotCompleted := fidelityPairedAwaitEffects(&f.dispatches, &f.completed, wantDispatches)
+		finalDispatched.Store(gotDispatched)
+		finalCompleted.Store(gotCompleted)
+		finalExpected.Store(wantDispatches)
+		finalCountsSet.Store(true)
 		close(stop)
 		<-stopped
 		goruntime.ReadMemStats(&after)
 		_, schedulerAfter := fidelityPairedSchedulerSnapshot()
 		peak.Store(max(peak.Load(), after.HeapAlloc))
-		wantDispatches := int64(b.N)
-		if w.rejected {
-			wantDispatches = 0
-		}
-		if f.dispatches.Load() != wantDispatches || f.completed.Load() != wantDispatches {
+		if !effectsMatch {
 			failed.Store(true)
-			b.Errorf("provider effects: dispatched=%d completed=%d want=%d", f.dispatches.Load(), f.completed.Load(), wantDispatches)
+			record("provider_effects", fmt.Errorf("provider effects: dispatched=%d completed=%d want=%d", gotDispatched, gotCompleted, wantDispatches),
+				gotDispatched, gotCompleted, wantDispatches)
+			b.Errorf("provider effects: dispatched=%d completed=%d want=%d", gotDispatched, gotCompleted, wantDispatches)
 		}
 		if b.N != 64 || failed.Load() {
 			return // testing.Benchmark first executes a discarded one-request calibration.
@@ -243,6 +312,7 @@ func fidelityPairedMeasure(w fidelityWorkload, concurrency int, relay bool) fide
 			"total_alloc_bytes_delta": after.TotalAlloc - before.TotalAlloc,
 			"heap_alloc_after_bytes":  after.HeapAlloc,
 			"goroutines_after":        uint64(goruntime.NumGoroutine()),
+			"provider_effect_wait_ns": uint64(effectWait.Nanoseconds()),
 		}
 		reply.Scheduler.LatencyBucketSeconds = schedulerBuckets
 		reply.Scheduler.LatencyCountsDelta = make([]uint64, len(schedulerAfter))
@@ -252,12 +322,61 @@ func fidelityPairedMeasure(w fidelityWorkload, concurrency int, relay bool) fide
 	})
 	if failed.Load() || reply.Iterations != 64 || len(reply.Samples) != 64 || result.N != 64 {
 		reply.Error = "oracle, effect count or fixed sample count failed"
+		reply.Failure = firstFailure.Load()
+		if reply.Failure == nil {
+			reply.Failure = &fidelityPairedFailure{Stage: "benchmark_setup_or_sample_count"}
+		}
+		reply.Failure.BenchmarkIterations = result.N
+		reply.Failure.ReplyIterations = reply.Iterations
+		reply.Failure.ReplySamples = len(reply.Samples)
+		if finalCountsSet.Load() {
+			reply.Failure.Dispatched = finalDispatched.Load()
+			reply.Failure.Completed = finalCompleted.Load()
+			reply.Failure.ExpectedEffects = finalExpected.Load()
+		}
 		return reply
 	}
 	reply.Metrics["ns/op"] = float64(result.NsPerOp())
 	reply.Metrics["B/op"] = float64(result.AllocedBytesPerOp())
 	reply.Metrics["allocs/op"] = float64(result.AllocsPerOp())
 	return reply
+}
+
+func TestFidelityPairedFailureIsStructured(t *testing.T) {
+	if os.Getenv("OLP_SOURCE_PAIRED_R7_DIAGNOSTIC_TEST") != "1" {
+		t.Skip("select the r7 forced-failure diagnostic explicitly with -benchtime=64x")
+	}
+	t.Setenv("OLP_SOURCE_PAIRED_R7_FORCE_EFFECT_MISMATCH", "1")
+	reply := fidelityPairedMeasure(fidelityWorkloads()[0], 1, true)
+	if reply.Error == "" || reply.Failure == nil || reply.Failure.Stage != "provider_effects" ||
+		reply.Failure.Dispatched != 64 || reply.Failure.Completed != 63 || reply.Failure.ExpectedEffects != 64 ||
+		reply.Failure.BenchmarkIterations != 64 || reply.Failure.ReplyIterations != 0 || reply.Failure.ReplySamples != 0 {
+		t.Fatalf("forced provider-effect failure was not structured: %+v", reply.Failure)
+	}
+}
+
+func TestFidelityPairedAwaitEffectsWaitsOnlyOutsideTimedWork(t *testing.T) {
+	var dispatched, completed atomic.Int64
+	dispatched.Store(64)
+	completed.Store(63)
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		completed.Add(1)
+	}()
+	matched, waited, _, _ := fidelityPairedAwaitEffects(&dispatched, &completed, 64)
+	if !matched || waited < time.Millisecond {
+		t.Fatalf("deferred provider completion did not settle: matched=%t waited=%s", matched, waited)
+	}
+	completed.Store(63)
+	matched, waited, _, _ = fidelityPairedAwaitEffects(&dispatched, &completed, 64)
+	if matched || waited < 250*time.Millisecond {
+		t.Fatalf("missing provider completion escaped fixed deadline: matched=%t waited=%s", matched, waited)
+	}
+	dispatched.Store(65)
+	matched, _, _, _ = fidelityPairedAwaitEffects(&dispatched, &completed, 64)
+	if matched {
+		t.Fatal("extra provider dispatch was accepted")
+	}
 }
 
 func TestFidelityPairedLookupPreservesFrozenInventory(t *testing.T) {
