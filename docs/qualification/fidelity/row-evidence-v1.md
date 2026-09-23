@@ -7,17 +7,27 @@ source revisions, not a live-provider or intelligence-quality result. The
 
 On `efae6135abc5904617f821b4e8b836a4255a6241`, a selected
 `go test -mod=readonly -race -tags=integration -count=1 -v
-./tests/integration` run passed 23 named row-evidence tests in 105.732 s. The
+./tests/integration` run passed 22 named row-evidence tests in 105.732 s. The
 selection covered strict published cloud profiles, registered native and
 qualified unary operations, official OpenAI vector storage, native media source
 rejection, Anthropic document bytes, strict image/audio sources/results/events,
 strict batch partial success/error files and official OpenAI JavaScript/Python
 clients, strict video original assets and official OpenAI JavaScript/Python
 clients, Gemini Interactions/Live public and official JavaScript/Python TLS
-clients, and both official OpenAI negotiated-continuation clients. The selected
+clients, and the official OpenAI JavaScript negotiated-continuation client. The selected
 test names and result are retained in the local execution log
 `/tmp/olp-spec-context/final-matrix-row-evidence-race.log`; the source files
 and commands are part of the repository.
+
+The Python negotiated-continuation test has an additional `pythonsdk` build
+tag and was **not** in that 22-test run. A separate selected
+`go test -mod=readonly -race -tags=integration,pythonsdk -run
+'^TestNegotiatedContinuationOfficialPythonSDK$' -count=1 -v
+./tests/integration` passed at `95f4deb2` (5.696 s package time), with the
+official pinned Python client serializing both tool turns. The run is retained
+at `/tmp/olp-spec-context/final-matrix-continuation-python-race.log`.
+`scripts/integration.sh` now includes the `pythonsdk` tag in the required
+service/race suite; a future full `make integration` must execute this test.
 
 On `789da4210772a9382a6e253888c1a6eed68404cd`, the new public strict
 image-variation subtest passed under `-race` in the certified compatible
