@@ -410,7 +410,17 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			return fact
 		}
-		if x.unary != nil {
+		if x.family == openai.FamilyBatch || x.family == openai.FamilyFile {
+			if _, ok := x.snapshot().DurableTemplate(x.route.Slug, a.TargetID); ok {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			}
+			return fact
+		}
+		if x.media != nil {
+			if _, ok := x.snapshot().MediaTemplate(x.route.Slug, a.TargetID, x.media.Op); ok {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			}
+		} else if x.unary != nil {
 			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}

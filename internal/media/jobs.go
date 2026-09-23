@@ -110,6 +110,8 @@ const (
 // JobRecord is one durable media job.
 type JobRecord struct {
 	ID                     string
+	StrictContract         bool
+	NativeSourceID         *string
 	UpstreamJobID          *string
 	APIKeyID               string
 	ProviderID             string
@@ -145,6 +147,7 @@ type JobRecord struct {
 // create is attempted. No prompt or file metadata is accepted by this API.
 type Reservation struct {
 	ID                  string
+	StrictContract      bool
 	RuntimeGenerationID string
 	ProviderRevisionID  string
 	APIKeyID            string
@@ -215,7 +218,7 @@ const jobSelect = `SELECT j.id::text, j.upstream_job_id, j.api_key_id::text, j.p
 		j.credential_version_id::text, j.slot_id::text, j.reconciliation_claim_id::text,
 		j.reconciliation_attempts, j.next_reconciliation_at,
 		j.last_reconciliation_at, j.etag::text,
-		j.created_at, j.updated_at
+		j.created_at, j.updated_at, j.strict_contract, j.native_source_id::text
 	FROM olp_go.media_jobs j
 	JOIN olp_go.providers p ON p.id = j.provider_id`
 
@@ -229,7 +232,8 @@ func scanJob(row pgx.Row) (JobRecord, error) {
 		&j.RuntimeGenerationID, &j.ProviderRevisionID,
 		&j.CredentialVersionID, &j.SlotID, &j.ReconciliationClaimID,
 		&j.ReconciliationAttempts, &j.NextReconciliationAt,
-		&j.LastReconciliationAt, &j.ETag, &j.CreatedAt, &j.UpdatedAt)
+		&j.LastReconciliationAt, &j.ETag, &j.CreatedAt, &j.UpdatedAt,
+		&j.StrictContract, &j.NativeSourceID)
 	return j, err
 }
 
@@ -546,14 +550,17 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 		INSERT INTO olp_go.media_jobs (
 			id, upstream_job_id, api_key_id, provider_id, provider_model,
 			route_slug, operation, surface, state, lifecycle_state,
-			runtime_generation_id, provider_revision_id, credential_version_id, etag, slot_id
+			runtime_generation_id, provider_revision_id, credential_version_id, etag, slot_id,
+			strict_contract
 		)
 		SELECT $1::uuid, NULL, $2::uuid, $3::uuid, $4, $5, $6, $7, 'queued', 'creating',
-		       compatible.runtime_generation_id, compatible.provider_revision_id, $9::uuid, $10::uuid, $11::uuid
+		       compatible.runtime_generation_id, compatible.provider_revision_id, $9::uuid, $10::uuid, $11::uuid,
+		       $12::boolean
 		FROM compatible`,
 		input.ID, input.APIKeyID, input.ProviderID, input.UpstreamModel,
 		input.RouteSlug, input.Operation, input.Surface,
-		input.RuntimeGenerationID, input.CredentialVersionID, uuid.Must(uuid.NewV7()), input.SlotID)
+		input.RuntimeGenerationID, input.CredentialVersionID, uuid.Must(uuid.NewV7()), input.SlotID,
+		input.StrictContract)
 	if err != nil {
 		return JobRecord{}, dbError(err)
 	}
@@ -570,12 +577,22 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 // AttachUpstream binds the accepted upstream identity and first state to a
 // creating job. A retry after an ambiguous connection loss still reports
 // success when the stored identity already matches.
-func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, update JobUpdate) (JobRecord, error) {
+func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, update JobUpdate, nativeSourceID ...string) (JobRecord, error) {
 	if upstreamJobID == "" || upstreamJobID != trimSpace(upstreamJobID) {
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "upstream job ID cannot be empty"}
 	}
 	if err := validateUpdate(update); err != nil {
 		return JobRecord{}, err
+	}
+	if len(nativeSourceID) > 1 {
+		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "only one native source identity is permitted"}
+	}
+	var source *string
+	if len(nativeSourceID) == 1 {
+		if _, err := uuid.Parse(nativeSourceID[0]); err != nil {
+			return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "native source identity is invalid"}
+		}
+		source = &nativeSourceID[0]
 	}
 	row, err := scanJob(q.QueryRow(ctx, `WITH attached AS (
 			UPDATE olp_go.media_jobs SET
@@ -588,7 +605,8 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 				error_class = $7,
 				last_polled_at = $8,
 				reconciliation_error = NULL,
-				etag = $9
+				etag = $9,
+				native_source_id = $10::uuid
 			WHERE id = $1 AND lifecycle_state = 'creating'
 			RETURNING *
 		)
@@ -601,11 +619,12 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 			j.runtime_generation_id::text, j.provider_revision_id::text,
 			j.credential_version_id::text, j.slot_id::text, j.reconciliation_claim_id::text,
 			j.reconciliation_attempts, j.next_reconciliation_at,
-			j.last_reconciliation_at, j.etag::text, j.created_at, j.updated_at
+			j.last_reconciliation_at, j.etag::text, j.created_at, j.updated_at,
+			j.strict_contract, j.native_source_id::text
 		FROM attached j JOIN olp_go.providers p ON p.id = j.provider_id`,
 		id, upstreamJobID, string(update.State), update.ProgressPercent,
 		update.ContentAvailable, update.ExpiresAt, update.ErrorClass,
-		update.LastPolledAt, uuid.Must(uuid.NewV7())))
+		update.LastPolledAt, uuid.Must(uuid.NewV7()), source))
 	if err == nil {
 		return row, nil
 	}
@@ -895,7 +914,8 @@ func refreshJob(ctx context.Context, pool *pgxpool.Pool, id string, claimID *str
 func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
 	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
-			reconciliation_error = NULL, content_available = false, etag = $2
+			reconciliation_error = NULL, content_available = false,
+			native_source_id = NULL, etag = $2
 		WHERE id = $1
 		  AND lifecycle_state IN ('creating','create_ambiguous','create_cleanup_pending','delete_pending')`,
 		id, uuid.Must(uuid.NewV7()))
@@ -912,7 +932,8 @@ func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
 func finalizeDeletionClaimed(ctx context.Context, q Querier, id, claimID string) error {
 	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
-			reconciliation_error = NULL, content_available = false, etag = $3
+			reconciliation_error = NULL, content_available = false,
+			native_source_id = NULL, etag = $3
 		WHERE id = $1
 		  AND reconciliation_claim_id = $2
 		  AND lifecycle_state IN ('creating','create_ambiguous','create_cleanup_pending','delete_pending')`,

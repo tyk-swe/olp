@@ -63,15 +63,22 @@ func (c *captureSink) all() []gateway.Envelope {
 
 type openaiFixture struct {
 	*httptest.Server
-	files    map[string]map[string]any
-	batches  map[string]map[string]any
-	resps    map[string]map[string]any
-	mu       sync.Mutex
-	lastReq  atomic.Value
-	lastPath atomic.Value
-	content  atomic.Value
-	respID   atomic.Value
-	dials    atomic.Int64
+	files          map[string]map[string]any
+	batches        map[string]map[string]any
+	resps          map[string]map[string]any
+	mu             sync.Mutex
+	lastReq        atomic.Value
+	lastBatchRaw   atomic.Value
+	batchCreates   atomic.Int64
+	batchCreateRaw atomic.Value
+	batchFetchRaw  atomic.Value
+	fileCreateRaw  atomic.Value
+	fileFetchRaw   atomic.Value
+	contentByID    sync.Map
+	lastPath       atomic.Value
+	content        atomic.Value
+	respID         atomic.Value
+	dials          atomic.Int64
 }
 
 func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
@@ -106,6 +113,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	mux.HandleFunc("POST /openai/files", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
 		_ = r.ParseMultipartForm(1 << 20)
+		if raw := f.fileCreateRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
+			return
+		}
 		writeJSON(w, f.files["file-up-1"])
 	})
 	mux.HandleFunc("GET /openai/files/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +124,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		file, ok := f.files[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such file"}}`, http.StatusNotFound)
+			return
+		}
+		if raw := f.fileFetchRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
 		writeJSON(w, file)
@@ -124,6 +139,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
+		if custom, ok := f.contentByID.Load(r.PathValue("id")); ok {
+			_, _ = io.WriteString(w, custom.(string))
+			return
+		}
 		io.WriteString(w, f.content.Load().(string))
 	})
 	mux.HandleFunc("DELETE /openai/files/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -139,10 +158,25 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("POST /openai/batches", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
-		body := decodeBody(t, r)
+		f.batchCreates.Add(1)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid batch fixture body", http.StatusBadRequest)
+			return
+		}
+		body := map[string]any{}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			http.Error(w, "invalid batch fixture JSON", http.StatusBadRequest)
+			return
+		}
 		f.mu.Lock()
 		f.lastReq.Store(body)
+		f.lastBatchRaw.Store(string(raw))
 		f.mu.Unlock()
+		if result := f.batchCreateRaw.Load(); result != nil {
+			_, _ = io.WriteString(w, result.(string))
+			return
+		}
 		batch := map[string]any{}
 		for k, v := range f.batches["batch-up-1"] {
 			batch[k] = v
@@ -155,6 +189,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		batch, ok := f.batches[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such batch"}}`, http.StatusNotFound)
+			return
+		}
+		if raw := f.batchFetchRaw.Load(); raw != nil {
+			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
 		writeJSON(w, batch)
@@ -192,6 +230,34 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			return
 		}
 		writeJSON(w, out)
+	})
+	// Azure's reviewed legacy Responses profile uses the resource-level path;
+	// the deployment path above remains the older compatibility fixture.
+	mux.HandleFunc("POST /openai/responses", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		body := decodeBody(t, r)
+		f.lastReq.Store(body)
+		out := map[string]any{}
+		for k, v := range f.resps["resp-up-1"] {
+			out[k] = v
+		}
+		out["id"] = f.respID.Load().(string)
+		if stream, _ := body["stream"].(bool); stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": out})
+			fmt.Fprintf(w, "event: response.created\ndata: %s\n\n", created)
+			return
+		}
+		writeJSON(w, out)
+	})
+	mux.HandleFunc("GET /openai/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		res, ok := f.resps[r.PathValue("id")]
+		if !ok {
+			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, res)
 	})
 	mux.HandleFunc("GET /openai/deployments/{dep}/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
@@ -299,10 +365,16 @@ func provisionOpenAI(t *testing.T, h *accessHarness, endpoint string, capabiliti
 	return provisionOpenAIWith(t, h, endpoint, capabilities, operations, nil)
 }
 
-func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabilities []any, operations []string, draftFields map[string]any) (*browser, map[string]any, string, string) {
+func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabilities []any, operations []string, draftFields map[string]any, providerFields ...map[string]any) (*browser, map[string]any, string, string) {
 	t.Helper()
 	owner := h.owner()
-	create := map[string]any{"name": "Provider state fixture", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}, "model": vendorModel, "credential": vendorSecret}
+	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}
+	if len(providerFields) > 0 {
+		for name, value := range providerFields[0] {
+			configuration[name] = value
+		}
+	}
+	create := map[string]any{"name": "Provider state fixture", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}
 	detail := h.want(owner, "POST", "/api/v3/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	path := "/api/v3/providers/" + detail["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
@@ -373,24 +445,39 @@ func TestBatchLifecycle(t *testing.T) {
 	if fixture.dials.Load() != before {
 		t.Fatal("a metadata-only list must not contact the provider")
 	}
+	var originalFileMetadata []byte
+	if err := h.Pool.QueryRow(t.Context(), `SELECT metadata FROM olp_go.provider_resources WHERE kind='file' AND route_slug=$1`, slug).Scan(&originalFileMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata='[]'::jsonb WHERE kind='file' AND route_slug=$1`, slug); err != nil {
+		t.Fatal(err)
+	}
+	status, raw, _ := h.gatewayRaw("GET", "/v1/files", secret, nil, nil)
+	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != before {
+		t.Fatalf("corrupt file was silently omitted from local list: status=%d body=%s", status, raw)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata=$2::jsonb WHERE kind='file' AND route_slug=$1`, slug, string(originalFileMetadata)); err != nil {
+		t.Fatal(err)
+	}
 
 	status, fetched, _ := h.gateway("GET", "/v1/files/"+fileID, secret, nil)
 	if status != 200 || fetched["id"] != fileID {
 		t.Fatalf("get file: %d %v", status, fetched)
 	}
-	status, raw, _ := h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
+	status, raw, _ = h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
 	if status != 200 || string(raw) != fileContent {
 		t.Fatalf("file content: %d %q", status, raw)
 	}
 
 	fixture.content.Store(strings.Repeat("z", (1<<20)+64))
 	status, raw, _ = h.gatewayRaw("GET", "/v1/files/"+fileID+"/content", secret, nil, nil)
-	if status != 200 || len(raw) != 1<<20 {
-		t.Fatalf("content overflow: %d %d bytes", status, len(raw))
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"upstream_response_too_large"`)) || len(raw) >= 1<<20 {
+		t.Fatalf("provider file overflow looked like a successful truncated download: %d %d bytes %s", status, len(raw), raw)
 	}
-	overflow := sink.last().Attempts[len(sink.last().Attempts)-1]
-	if overflow.UsageComplete || !overflow.BillingUncertain {
-		t.Fatalf("overflow attempt not marked incomplete/uncertain: %+v", overflow)
+	overflowEnvelope := sink.last()
+	overflow := overflowEnvelope.Attempts[len(overflowEnvelope.Attempts)-1]
+	if overflowEnvelope.Outcome != "failure" || overflowEnvelope.Committed || overflow.Class != "protocol" || overflow.UsageComplete || !overflow.BillingUncertain {
+		t.Fatalf("overflow acceptance/observation was not separated: %+v %+v", overflowEnvelope, overflow)
 	}
 	fixture.content.Store(fileContent)
 	status, fetched, _ = h.gateway("GET", "/v1/files/"+fileID, otherSecret, nil)
@@ -398,7 +485,22 @@ func TestBatchLifecycle(t *testing.T) {
 		t.Fatalf("other key file: %d %v", status, fetched)
 	}
 
-	status, batch, _ := h.gateway("POST", "/v1/batches", secret, map[string]any{"input_file_id": fileID, "endpoint": "/v1/chat/completions", "completion_window": "24h"})
+	beforeBatch := fixture.dials.Load()
+	for _, rejected := range []string{
+		`{"input_file_id":"` + fileID + `","input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions"}`,
+		`{"input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions","id":"caller-selected"}`,
+	} {
+		status, raw, _ = h.gatewayRaw("POST", "/v1/batches", secret, strings.NewReader(rejected), map[string]string{"Content-Type": "application/json"})
+		if status != http.StatusBadRequest || fixture.dials.Load() != beforeBatch {
+			t.Fatalf("ambiguous or caller-owned batch identity dispatched: status=%d body=%s", status, raw)
+		}
+	}
+	batchSource := `{"completion_window":"24h","native":{"rank":9007199254740993,"tiny":-0},"input_file_id":"` + fileID + `","endpoint":"/v1/chat/completions"}`
+	status, raw, _ = h.gatewayRaw("POST", "/v1/batches", secret, strings.NewReader(batchSource), map[string]string{"Content-Type": "application/json"})
+	var batch map[string]any
+	if err := json.Unmarshal(raw, &batch); err != nil {
+		t.Fatalf("batch response: %s: %v", raw, err)
+	}
 	if status != 200 {
 		t.Fatalf("create batch: %d %v", status, batch)
 	}
@@ -409,6 +511,10 @@ func TestBatchLifecycle(t *testing.T) {
 	sent, _ := fixture.lastReq.Load().(map[string]any)
 	if sent["input_file_id"] != "file-up-1" {
 		t.Fatalf("upstream did not receive the rewritten file identifier: %v", sent)
+	}
+	wantBatchRaw := `{"completion_window":"24h","native":{"rank":9007199254740993,"tiny":-0},"input_file_id":"file-up-1","endpoint":"/v1/chat/completions","model":"` + vendorModel + `"}`
+	if got := fixture.lastBatchRaw.Load().(string); got != wantBatchRaw {
+		t.Fatalf("batch source, numeric syntax or overlay order changed:\n got %s\nwant %s", got, wantBatchRaw)
 	}
 
 	fixture.mu.Lock()
@@ -426,6 +532,11 @@ func TestBatchLifecycle(t *testing.T) {
 	status, raw, _ = h.gatewayRaw("GET", "/v1/batches/"+batchID, secret, nil, nil)
 	if status < 500 || bytes.Contains(raw, []byte("file-up-out")) {
 		t.Fatalf("mapping collision leaked upstream identifier: %d %s", status, raw)
+	}
+	beforeList := fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw("GET", "/v1/batches", secret, nil, nil)
+	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != beforeList {
+		t.Fatalf("unprojectable batch was silently omitted from local list: status=%d body=%s", status, raw)
 	}
 	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp_go.provider_resources WHERE kind='file' AND upstream_id='file-up-out'`); err != nil {
 		t.Fatal(err)
@@ -652,6 +763,8 @@ func newRealtimeFixture(t *testing.T) *realtimeFixture {
 func TestRealtimeIngress(t *testing.T) {
 	fixture := newRealtimeFixture(t)
 	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
 	owner, _, slug, secret := provisionOpenAI(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "realtime", "surface": "openai", "mode": "realtime"}},
 		[]string{"realtime"})
@@ -697,6 +810,7 @@ func TestRealtimeIngress(t *testing.T) {
 		t.Fatalf("relay did not echo: %v %q", err, data)
 	}
 
+	beforeTerminal := sink.count()
 	if err := client.Write(ctx, websocket.MessageText, []byte("BIG")); err != nil {
 		t.Fatalf("size probe write: %v", err)
 	}
@@ -705,6 +819,13 @@ func TestRealtimeIngress(t *testing.T) {
 	}
 	client.Close(websocket.StatusNormalClosure, "")
 	admissionReleased("oversized frame")
+	if sink.count() != beforeTerminal+1 {
+		t.Fatalf("oversized frame terminal count=%d, want one new terminal", sink.count()-beforeTerminal)
+	}
+	oversized := sink.last()
+	if oversized.Outcome != "failure" || oversized.ErrorClass != "realtime_incomplete" || !oversized.Committed || len(oversized.Attempts) != 1 || oversized.Attempts[0].Class != "protocol" {
+		t.Fatalf("oversized frame was recorded as success: %+v", oversized)
+	}
 
 	client, _, err = websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + secret}}})
 	if err != nil {
@@ -732,6 +853,10 @@ func TestRealtimeIngress(t *testing.T) {
 		t.Fatalf("revocation close status %v, want policy violation", code)
 	}
 	admissionReleased("revoked key")
+	revoked := sink.last()
+	if revoked.Outcome != "failure" || revoked.ErrorClass != "key_revoked" || !revoked.Committed || len(revoked.Attempts) != 1 || revoked.Attempts[0].Class != "credential" {
+		t.Fatalf("revoked realtime session lost its failure category: %+v", revoked)
+	}
 }
 
 type bedrockFixture struct {

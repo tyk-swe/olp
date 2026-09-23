@@ -155,13 +155,15 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	}
 	// Model an unpublished intermediate writer that once put strictness under
 	// an older legacy slug, then apply the new forward migration to that data.
-	// The fixture also reverses later 0028 so migration history remains a
-	// sequential prefix; production migrations themselves stay forward-only.
-	_, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
-	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_kind_check;
-	    ALTER TABLE olp_go.provider_resources ADD CONSTRAINT provider_resources_kind_check
-	        CHECK (kind IN ('file', 'batch', 'response', 'continuation', 'strict_response'));
-	    DELETE FROM olp_go.migrations WHERE version='0028_gemini_interaction_resources.sql';
+	// Reverse later additions in this synthetic fixture so migration history
+	// remains a sequential prefix. Production migrations stay forward-only.
+	_, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.media_jobs DROP CONSTRAINT media_jobs_strict_source;
+	    ALTER TABLE olp_go.media_jobs DROP COLUMN native_source_id, DROP COLUMN strict_contract;
+	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_media_job_source_bound;
+	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_purpose_check;
+	    ALTER TABLE olp_go.secrets ADD CONSTRAINT secrets_purpose_check
+	        CHECK (purpose IN ('oidc_client', 'oidc_flow', 'mutation_replay',
+	                          'provider_credential', 'notification_secret', 'provider_continuation'));
 	    DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
 	    DROP FUNCTION olp_go.check_runtime_route_contracts();
 	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
@@ -169,7 +171,12 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	    DROP TRIGGER preserve_route_contract_identity ON olp_go.routes;
 	    DROP FUNCTION olp_go.preserve_route_contract_identity();
 	    ALTER TABLE olp_go.routes DROP COLUMN strict_contract;
-	    DELETE FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql'`)
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_strict_durable_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_kind_check;
+	    ALTER TABLE olp_go.provider_resources ADD CONSTRAINT provider_resources_kind_check
+	        CHECK (kind IN ('file','batch','response','continuation','strict_response'));
+	    DELETE FROM olp_go.migrations WHERE version>='0027_strict_route_identity.sql'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +190,10 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	if err = h.Pool.QueryRow(t.Context(), `SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns
 	    WHERE table_schema='olp_go' AND table_name='routes' AND column_name='strict_contract'),
 	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql'),
-	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0028_gemini_interaction_resources.sql')`).Scan(&schemaRolledBack, &historyMissing, &laterHistoryMissing); err != nil || !schemaRolledBack || !historyMissing || !laterHistoryMissing {
+	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version IN (
+	        '0028_gemini_interaction_resources.sql',
+	        '0029_strict_durable_resources.sql',
+	        '0030_strict_video_sources.sql'))`).Scan(&schemaRolledBack, &historyMissing, &laterHistoryMissing); err != nil || !schemaRolledBack || !historyMissing || !laterHistoryMissing {
 		t.Fatal("failed strict identity migration left partial schema/history", err)
 	}
 	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp_go.route_revisions SET fidelity=NULL WHERE id=$1`, secondRevision); err != nil {

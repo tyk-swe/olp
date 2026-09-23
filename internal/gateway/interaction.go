@@ -28,7 +28,20 @@ func (x *execution) servingAllowed(provider *runtime.Provider, model string, slo
 		return true
 	}
 	var serving oif.ServingIdentity
-	if x.unary != nil {
+	if x.media != nil {
+		var found bool
+		for _, target := range x.route.Targets {
+			if target.ProviderID == provider.ID && target.ProviderModel == model {
+				if template, ok := x.request.release.Snapshot.MediaTemplate(x.route.Slug, target.ID, x.media.Op); ok {
+					serving, found = template.Serving(), true
+				}
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	} else if x.unary != nil {
 		plan, err := x.unaryPlan(provider, model)
 		if err != nil {
 			return false

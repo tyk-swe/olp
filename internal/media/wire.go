@@ -78,6 +78,7 @@ type UpstreamCall struct {
 	Stream    bool
 	Kind      ResponseKind
 	Native    string
+	Strict    bool // local decoding contract; never an upstream wire member
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
 	// Inject carries W3C trace-context headers the caller allows upstream.
 	// Only request-path calls set it; reconciliation traffic does not
@@ -130,8 +131,10 @@ type Request struct {
 
 	// SourceFields retains JSON member presence and raw values before typed decoding.
 	// Multipart requests use their explicit typed fields and staged parts instead.
-	SourceFields   map[string]json.RawMessage
-	sourceDocument oif.Document
+	SourceFields     map[string]json.RawMessage
+	sourceDocument   oif.Document
+	SourceParts      []Field // original accepted multipart member order
+	SourceNormalized bool    // caller multipart text or metadata was normalized
 
 	// Video job operations.
 	JobID           string
@@ -529,8 +532,10 @@ func DecodeImageEdit(form *Form) (*Request, *Error) {
 		v := int64(*n)
 		count64 = &v
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpImageEdit, Route: model, Stream: stream != nil && *stream,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Prompt: prompt, Count: count64, Size: size, Quality: quality,
 		Format: responseFormat, User: user, Background: background,
 		InputFidelity: inputFidelity, OutputCompression: int64Ptr(outputCompression),
@@ -582,8 +587,10 @@ func DecodeImageVariation(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpImageVariation, Route: model,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Count: int64Ptr(n), Size: size, Format: responseFormat, User: user,
 		Image: image, Extra: extraAny,
 	}, nil
@@ -683,8 +690,10 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpTranscription, Route: model, Stream: stream != nil && *stream,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		File: file, Format: responseFormat, Language: language, TextPrompt: prompt,
 		Temperature: temperature, Include: include, TimestampGranularities: granularities,
 		ChunkingStrategy: chunkingJSON, KnownSpeakerNames: names,
@@ -765,8 +774,10 @@ func DecodeVideoCreate(form *Form) (*Request, *Error) {
 	for name, value := range extra {
 		extraAny[name] = value
 	}
+	sourceParts, sourceNormalized := form.SourceFields()
 	return &Request{
 		Op: OpVideoCreate, Route: model, Prompt: prompt,
+		SourceParts: sourceParts, SourceNormalized: sourceNormalized,
 		Seconds: seconds, Size: size, InputRef: inputRef, Extra: extraAny,
 	}, nil
 }
@@ -780,8 +791,8 @@ type ListQuery struct {
 
 // ValidateVideoListQuery checks the OpenAI video list query parameters.
 func ValidateVideoListQuery(query url.Values) (*ListQuery, *Error) {
-	for name := range query {
-		if name != "after" && name != "limit" && name != "order" {
+	for name, values := range query {
+		if name != "after" && name != "limit" && name != "order" || len(values) != 1 {
 			return nil, invalidMedia("Video list contains unsupported query parameters.")
 		}
 	}
@@ -813,6 +824,11 @@ func ValidateVideoListQuery(query url.Values) (*ListQuery, *Error) {
 
 // ValidateVideoContentQuery checks the content variant parameter.
 func ValidateVideoContentQuery(query url.Values) (string, *Error) {
+	for name, values := range query {
+		if name != "variant" || len(values) != 1 {
+			return "", invalidMedia("Video content contains unsupported query parameters.")
+		}
+	}
 	variant := query.Get("variant")
 	switch variant {
 	case "", "video", "thumbnail", "spritesheet":
@@ -1455,6 +1471,52 @@ func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *
 		return nil, protocolError("The provider video metadata could not be encoded.")
 	}
 	return body, nil
+}
+
+// EncodeStrictVideoObject keeps every native metadata member and numeric token
+// intact while replacing only the provider resource ID and model binding with
+// the caller's owned local job identity and route. The original source stays
+// available in the encrypted job secret for recovery.
+func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route string) ([]byte, *Error) {
+	if !source.Valid() || source.Root().Kind() != oif.Object {
+		return nil, protocolError("The native video metadata is unavailable.")
+	}
+	id, ok := source.Root().Lookup("id")
+	actual, valid := id.Text()
+	if !ok || !valid || actual != upstreamID {
+		return nil, protocolError("The native video identity changed.")
+	}
+	localJSON, _ := json.Marshal(localID)
+	changes := []oif.Change{{Pointer: "/id", Value: string(localJSON), Origin: oif.ResourceBinding, Reason: "owned local video job identity"}}
+	if route != "" {
+		routeJSON, _ := json.Marshal(route)
+		changes = append(changes, oif.Change{Pointer: "/model", Value: string(routeJSON), Origin: oif.IdentityBinding, Reason: "published route identity"})
+	}
+	client, err := oif.Apply(source, changes)
+	if err != nil {
+		return nil, protocolError("The native video metadata could not be projected.")
+	}
+	return client.Bytes(), nil
+}
+
+// ValidStrictVideoJobSource guards autonomous polls, which have no gateway
+// response writer or route template. They may advance a strict job only from
+// an unambiguous provider object with the same pinned identity and model.
+func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bool {
+	if !source.Valid() || source.Root().Kind() != oif.Object {
+		return false
+	}
+	id, idOK := source.Root().Lookup("id")
+	modelValue, modelOK := source.Root().Lookup("model")
+	object, objectOK := source.Root().Lookup("object")
+	status, statusOK := source.Root().Lookup("status")
+	gotID, idText := id.Text()
+	gotModel, modelText := modelValue.Text()
+	gotObject, objectText := object.Text()
+	gotStatus, statusText := status.Text()
+	return idOK && idText && gotID == upstreamID && modelOK && modelText && gotModel == model &&
+		objectOK && objectText && gotObject == "video" && statusOK && statusText &&
+		slices.Contains([]string{"queued", "in_progress", "completed", "failed"}, gotStatus)
 }
 
 // DecodeVideoListResponse parses a provider list document.

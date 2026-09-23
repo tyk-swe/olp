@@ -10,6 +10,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/mediacontract"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -87,6 +89,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 
 	reserved, jobErr := media.ReserveJob(ctx, s.Media.Jobs.Pool, media.Reservation{
 		ID:                  localJobID,
+		StrictContract:      x.strict(),
 		RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
 		ProviderRevisionID:  attempt.ProviderRevisionID,
 		APIKeyID:            authority.ID,
@@ -239,7 +242,17 @@ func (s *Server) attachCreated(ctx context.Context, x *execution, reserved media
 		ErrorClass:       result.Video.ErrorCode,
 		LastPolledAt:     s.now(),
 	}
-	record, err := s.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update)
+	var nativeSource [][]byte
+	if reserved.StrictContract {
+		if !result.Source.Valid() {
+			if _, err := media.MarkCreateAmbiguous(ctx, s.Media.Jobs.Pool, reserved.ID, "upstream_create_response_missing_native_source"); err != nil {
+				s.Media.Jobs.RecordGap()
+			}
+			return protocol("The native video metadata is unavailable.")
+		}
+		nativeSource = append(nativeSource, result.Source.Bytes())
+	}
+	record, err := s.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update, nativeSource...)
 	if err != nil {
 		return s.handleFailedAttachment(ctx, x, reserved, upstreamID, result, err, out)
 	}
@@ -347,6 +360,27 @@ func (s *Server) jobTarget(ctx context.Context, record *media.JobRecord) (*media
 	return target, timeout, nil
 }
 
+func strictVideoResourceContext(x *execution, record *media.JobRecord, allowVariant bool) *Error {
+	if !record.StrictContract {
+		return nil
+	}
+	if e := strictMediaHeaders(x); e != nil {
+		return e
+	}
+	if x.semanticQueryInvalid || !allowVariant && len(x.semanticQuery) != 0 {
+		return invalidRequest("target_capability", "This strict video resource does not qualify caller query settings.", nil)
+	}
+	return nil
+}
+
+func videoJobRoute(record *media.JobRecord) *runtime.Route {
+	route := &runtime.Route{Slug: record.RouteSlug}
+	if record.StrictContract {
+		route.Fidelity = &runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	}
+	return route
+}
+
 // admitVideoRequest applies key budgets once, before job reads or mutations.
 func (s *Server) admitVideoRequest(parent context.Context, x *execution, authority access.Authority) (context.Context, func(), *Error) {
 	ttl := maxStreamDuration + media.ReconciliationLeaseSlack
@@ -388,6 +422,22 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	// Connection and credential authority stay pinned; quota changes in the
 	// current release still apply to subsequent requests for the retained job.
 	provider, slot := target.Provider, target.Slot
+	var strictTemplate *mediacontract.Template
+	if record.StrictContract {
+		var err error
+		strictTemplate, err = mediacontract.Compile(mediacontract.Config{
+			Provider: target.Config, ProviderID: record.ProviderID,
+			RevisionID: record.ProviderRevisionID, Model: record.UpstreamModel,
+			Operation: request.Op,
+		})
+		if err != nil {
+			fact.Class = classProtocol
+			fact.Duration = s.now().Sub(fact.StartedAt)
+			fact.recordEvidence(false)
+			return nil, &attemptFailure{class: classProtocol}, fact
+		}
+		call.Strict = true
+	}
 	if current, ok := x.request.release.Snapshot.Providers[provider.ID]; ok {
 		provider.Limits = current.Limits
 		for _, currentSlot := range current.Slots {
@@ -448,6 +498,48 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		s.health.record(record.ProviderID, fact)
 		atr.Finish(fact.Class, fact.Status)
 		return nil, f, fact
+	}
+	if strictTemplate != nil {
+		var contractErr error
+		switch request.Op {
+		case media.OpVideoGet, media.OpVideoDelete:
+			if !result.Source.Valid() || record.UpstreamJobID == nil {
+				contractErr = errors.New("native video source is unavailable")
+			} else {
+				_, contractErr = strictTemplate.JSONResult(strictTemplate.Descriptor("unary"), result.Source)
+				if contractErr == nil {
+					id, _ := result.Source.Root().Lookup("id")
+					actual, _ := id.Text()
+					if actual != *record.UpstreamJobID {
+						contractErr = errors.New("native video identity changed")
+					}
+				}
+			}
+		case media.OpVideoContent:
+			if result.Artifact == nil {
+				contractErr = errors.New("native video content is unavailable")
+			} else {
+				var blob oif.BlobReference
+				blob, contractErr = result.Artifact.BlobReference()
+				if contractErr == nil {
+					var envelope oif.BlobResult
+					envelope, contractErr = oif.NewBlobResult(strictTemplate.Descriptor("unary"), blob, oif.Complete)
+					if contractErr == nil {
+						result.BlobSource = &envelope
+					}
+				}
+			}
+		}
+		if contractErr != nil {
+			if result.Artifact != nil {
+				_ = s.Media.Jobs.Transport.Spool.Remove(result.Artifact.Handle)
+			}
+			fact.Class = classProtocol
+			fact.Duration = s.now().Sub(fact.StartedAt)
+			fact.recordEvidence(true)
+			atr.Finish(fact.Class, result.Status)
+			return nil, &attemptFailure{class: classProtocol, status: result.Status, dispatched: true}, fact
+		}
 	}
 	fact.Class = "success"
 	fact.Status = result.Status
@@ -611,11 +703,15 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
+	if e = strictVideoResourceContext(x, record, false); e != nil {
+		s.mediaFail(x, w, e)
+		return
+	}
 	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	x.route = &runtime.Route{Slug: record.RouteSlug}
+	x.route = videoJobRoute(record)
 	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
@@ -651,8 +747,14 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	result.Video.ID = updated.ID
 	result.Video.Route = updated.RouteSlug
-	body, failure := media.EncodeVideoObject(result.Video, updated.ID, updated.RouteSlug)
-	if failure != nil {
+	var body []byte
+	var renderFailure *media.Error
+	if record.StrictContract {
+		body, renderFailure = media.EncodeStrictVideoObject(result.Source, *record.UpstreamJobID, updated.ID, updated.RouteSlug)
+	} else {
+		body, renderFailure = media.EncodeVideoObject(result.Video, updated.ID, updated.RouteSlug)
+	}
+	if renderFailure != nil {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 		return
 	}
@@ -682,6 +784,10 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
+	if e = strictVideoResourceContext(x, record, true); e != nil {
+		s.mediaFail(x, w, e)
+		return
+	}
 	variant, failure := media.ValidateVideoContentQuery(r.URL.Query())
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
@@ -691,7 +797,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	x.route = &runtime.Route{Slug: record.RouteSlug}
+	x.route = videoJobRoute(record)
 	call, failure := media.Encode(&media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
@@ -735,8 +841,16 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
+	if e = strictVideoResourceContext(x, loaded, false); e != nil {
+		s.mediaFail(x, w, e)
+		return
+	}
 	record := *loaded
 	if record.Lifecycle == media.LifecycleDeleted {
+		if record.StrictContract {
+			s.mediaFail(x, w, notFoundError("video_not_found", "The video job does not exist."))
+			return
+		}
 		body, _ := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: record.ID, Deleted: true}, record.ID)
 		out := &mediaOutcome{committed: true, status: http.StatusOK}
 		x.dispatched = true // Serving an existing tombstone consumes one key request.
@@ -748,7 +862,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	x.route = &runtime.Route{Slug: record.RouteSlug}
+	x.route = videoJobRoute(&record)
 	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
@@ -787,16 +901,26 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
 		return
 	}
-	local := ""
-	var object *string
-	var extra map[string]any
-	if result != nil && result.Deleted != nil {
-		object = result.Deleted.Object
-		extra = result.Deleted.Extra
+	if record.StrictContract && result == nil {
+		// An upstream 404 proves the resource is gone, but did not provide a
+		// native deletion receipt. Surface that 404 after finalizing the local
+		// tombstone rather than inventing a successful native document.
+		s.mediaFailOutcome(x, w, transportFailure)
+		return
 	}
-	_ = object
-	body, failure := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
-	if failure != nil {
+	var body []byte
+	var renderFailure *media.Error
+	if record.StrictContract {
+		body, renderFailure = media.EncodeStrictVideoObject(result.Source, *record.UpstreamJobID, record.ID, "")
+	} else {
+		local := ""
+		var extra map[string]any
+		if result != nil && result.Deleted != nil {
+			extra = result.Deleted.Extra
+		}
+		body, renderFailure = media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
+	}
+	if renderFailure != nil {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 		return
 	}

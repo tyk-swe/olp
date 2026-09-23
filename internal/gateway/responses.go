@@ -47,9 +47,9 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 			// cannot silently inject store:false to avoid the caller's state policy.
 			store = true
 		}
-		if background {
-			param := "background"
-			return invalidRequest("state_carrier", "Background generation requires a qualified durable interaction runner.", &param)
+		if background && !store {
+			param := "store"
+			return invalidRequest("state_carrier", "Background generation requires retained provider state.", &param)
 		}
 		if !authority.Policy.AllowProviderState && (store || previous != "") {
 			param := "store"
@@ -203,12 +203,23 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 		}
 	}
 	if x.strict() {
+		deferred := s.pendingResponseUsage(x, &fact, metadata)
 		encoded, _ := json.Marshal(metadata)
-		res, err := s.putStrictResponse(ctx, x, &fact, upstreamID, state, encoded, expires)
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		defer stopCommit()
+		res, err := s.putStrictResponse(commitCtx, x, &fact, upstreamID, state, encoded, expires)
 		if err != nil {
 			return nil, serverError(http.StatusInternalServerError, "continuation_unavailable", "The strict response contract could not be committed.")
 		}
-		out, err := rewriteID(body, "id", res.ID)
+		if deferred {
+			last := &x.facts[len(x.facts)-1]
+			last.ResponseUsageDeferred = true
+			last.recordEvidence(false)
+			if e := s.reconcileResponse(commitCtx, res.ID, body); e != nil {
+				return nil, e
+			}
+		}
+		out, err := strictIdentityProjection(body, upstreamID, res.ID)
 		if err != nil {
 			return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 		}
@@ -351,9 +362,16 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 		return e
 	}
 	if status, ok := upstreamString(result, "status"); ok {
-		_ = s.Resources.Update(ctx, res.ID, status, nil, nil)
+		if err := s.Resources.Update(ctx, res.ID, status, nil, nil); err != nil {
+			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The response status could not be committed.")
+		}
 	}
-	out, err := rewriteID(result, "id", res.ID)
+	var out []byte
+	if res.Kind == resources.KindStrictResponse {
+		out, err = strictIdentityProjection(result, res.UpstreamID, res.ID)
+	} else {
+		out, err = rewriteID(result, "id", res.ID)
+	}
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}

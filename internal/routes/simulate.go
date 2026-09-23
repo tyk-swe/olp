@@ -154,7 +154,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -166,6 +166,9 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
+	}
+	if mediaRequest != nil {
+		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
 	}
 	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept, Effective: effective}
 	if key.reason != "" {
@@ -181,7 +184,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	}
 	targets := []map[string]any{}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil, inspections) {
+	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections) {
 		var name string
 		for _, t := range d.Targets {
 			if t.ID == decision.TargetID {
@@ -300,7 +303,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -316,6 +319,9 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, options.TokenDemand)
 	}
+	if mediaRequest != nil {
+		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, options.TokenDemand)
+	}
 	options.Accept = accept
 	options.Effective = effective
 	if key.reason != "" {
@@ -328,7 +334,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	return access.OK(inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil, inspections)), nil
+	return access.OK(inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections)), nil
 }
 
 // Register mounts the route surface.
