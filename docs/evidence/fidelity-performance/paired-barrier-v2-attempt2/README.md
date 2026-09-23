@@ -1,6 +1,6 @@
 # Paired encrypted-barrier experiment, attempt 2
 
-Status: **method and criteria only; no attempt-2 B or C timing has been
+Status: **the write-once B-only reference passed; no C timing has been
 collected.** This separately named attempt follows the retained
 [attempt-1 failure](../paired-barrier-v2/README.md#attempt-1-result-failed-before-a-b-only-baseline).
 Attempt 1 ended after 76 of 768 historical B subruns, with no C observation.
@@ -107,3 +107,25 @@ scratch databases, idle Valkey, Go 1.27.1 and the original Haswell-class host
 conditions. Process resource figures include the local client/provider/oracle,
 exclude PostgreSQL and are not isolated gateway RSS. This is local scripted
 performance, not WAN/TLS or empirical live-model quality evidence.
+
+## Captured B-only result
+
+The clean method `9350d40e` with measurement-only historical B overlay
+`55d9d591` produced the single write-once [baseline.json](baseline.json) and
+[reservation journal](baseline.json.journal.jsonl) on 2026-09-23. The 13-sample
+quiet preflight passed over at least 60 seconds (load1 0.46–0.81; CPU pressure
+`some avg10` 0–0.55%). All 128 blocks and 768 B subruns completed: 18,432
+two-turn workflows, 36,864 exact provider dispatches, 350,208 native events,
+36,864 enabled fixture tool actions, 6,144 encrypted-reference ready reads,
+and zero rejections. All 240 original B envelope metrics and all 240 absolute
+same-source stability controls passed their unchanged frozen limits. The
+offline comparator revalidated the complete journal, artifact, method/source
+hashes and numeric result. No material unrelated-work event was reported.
+
+The artifact SHA-256 is
+`5cec1e3c2dbfc62c8511d5c236867ecbd7aaedbd7b2772ddeec44c36f9b999a9`;
+the journal SHA-256 is
+`96d4876b6c1ebb2dc7d8530ec7e4c783b6f8e3c837337ac72485a880db576b55`.
+These B-only observations establish host/reference comparability, not a C
+added-cost pass. The first failed attempt remains visible and no C process or
+C timing was included in this capture.
