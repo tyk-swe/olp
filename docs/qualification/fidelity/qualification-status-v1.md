@@ -58,8 +58,14 @@ or the existence of a fixture as their execution.
 ## Performance and quality limits
 
 The original [v1 source-layer comparison](../../evidence/fidelity-performance/oif-source-v1/README.md)
-still records a failed slow native-relay c1 inter-event-gap p99 control:
-3,943 µs against its unchanged 3,544 µs limit. The encrypted
+recorded a failed slow native-relay c1 inter-event-gap p99 control:
+3,943 µs against its unchanged 3,544 µs limit. A later clean
+[`bc1e28ff` services-off capture](../../evidence/fidelity-performance/replacement-source-bc1-v1/README.md)
+retained all 22 workloads and 66 repetitions with exact outcomes and sample
+floors, but **still failed that same relay control**: 3,567 µs >3,544 µs. All
+gateway metrics passed. The host's one-minute load rose from 0.63 to 3.29;
+the capture does not prove whether scheduling caused the 23 µs miss. The
+frozen source-v1 comparison therefore remains open. The encrypted
 [barrier-v1 comparison](../../evidence/fidelity-performance/barrier-v1/README.md)
 retains earlier failed candidate captures. The later clean
 [`517455c3` candidate](../../evidence/fidelity-performance/replacement-517-v1/README.md)
