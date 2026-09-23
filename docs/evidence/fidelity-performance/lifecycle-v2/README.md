@@ -41,10 +41,16 @@ SQL check; streaming request latency and run wall time include that check.
 The numeric rule uses **every unchanged limit** in frozen
 [`lifecycle-v1/replacement-budgets.json`](../lifecycle-v1/replacement-budgets.json),
 which was calculated from the maximum of three original native B repetitions
-with predeclared margin. The B-only v2 median for every workload/metric must
-first meet the original limit, otherwise host/fixture comparability fails and
-the study is inconclusive. The strict C median for every metric must then be
-at or below the same limit, with complete exact-count/byte/identity controls.
+with predeclared margin. V2 additionally freezes 24 gateway-minus-relay
+latency limits for the four workloads at c1/c4 and p50/p95/p99. For each one,
+the limit is `ceil(max(0, maximum of the three original same-repetition
+gateway-minus-relay differences) × 1.5 + 1000 µs)`. This uses the original
+v1 latency tolerance and only pre-#216 source observations; the v1 budget did
+not contain an added-latency field. The B-only v2 medians for every original
+metric and their gateway-minus-relay differences must first meet those
+limits, otherwise host/fixture comparability fails and the study is
+inconclusive. Strict C must then meet the same 16 path inventories and eight
+added-latency inventories, with complete exact-count/byte/identity controls.
 This is an absolute regression gate over descriptive 24-sample repetition
 quantiles, not a production p99 SLO or a live-model quality claim. CPU and
 allocations include client, provider, relay/gateway and checking in one Go
@@ -74,7 +80,12 @@ node scripts/fidelity-lifecycle-v2-benchmark.mjs compare /tmp/lifecycle-v2-stric
 The runner rejects missing/dirty B budgets, changed v2/v1 harnesses,
 hardware/runtime/storage/fixture changes, incomplete workload/dispatch/event
 inventory, missing mappings/retrievals/negative controls, ambiguous outcomes,
-and changed or invalid numeric limits. It records raw Go output, source and
-fixture hashes, conditions, load, full per-repetition metrics and counts.
+and changed or invalid numeric limits. B and C use different committed
+`access_test.go` setup helpers: C extracts the old constructor and installs
+the encrypted resource store required for strict Responses. The B helper hash
+is measured and verified at freeze; C must match the predeclared reviewed
+candidate helper hash. Any further helper edit invalidates comparison. The
+runner records raw Go output, source and fixture hashes, conditions, load,
+full per-repetition metrics and counts.
 No paid model invocation is part of this qualification. Until a complete
 B-only baseline and final strict C comparison pass, G6 remains open.

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { names, validateRuns } from './fidelity-lifecycle-benchmark.mjs';
+import { names, workloads, validateRuns } from './fidelity-lifecycle-benchmark.mjs';
 
 const schema = 'openllmproxy.dev/fidelity-lifecycle-performance/v2';
 const budgetSchema = 'openllmproxy.dev/fidelity-lifecycle-budget/v2';
@@ -16,6 +16,11 @@ const historicalBudget = 'docs/evidence/fidelity-performance/lifecycle-v1/replac
 const harness = 'tests/integration/fidelity_lifecycle_v2_test.go';
 const frozenHarness = 'tests/integration/fidelity_lifecycle_performance_test.go';
 const runner = 'scripts/fidelity-lifecycle-v2-benchmark.mjs';
+// The reviewed source delta replaces the legacy unencrypted resource store
+// with NewEncrypted and extracts the same harness constructor for migration
+// tests. An unreviewed setup-helper revision invalidates this qualification.
+const candidateSetupSHA256 = '0f7230293d2e325dafcaf9dc56d4c02dc29b12c61ce105ce281dbc126954cb93';
+const addedNames = workloads.flatMap((workload) => [1, 4].map((c) => `${workload}/c${c}`));
 const args = ['test', '-mod=readonly', '-tags=integration', '-run', '^TestFidelityLifecycleV2Performance$', '-count=1', '-v', '-timeout=10m', './tests/integration'];
 const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_LIFECYCLE_V2_MEASURE: '1' };
 const conditions = {
@@ -53,9 +58,31 @@ export function validateV2Runs(runs) {
 }
 function measurement(a) {
   return { command: a.command, runtime_environment: a.runtime_environment, toolchain: a.toolchain,
-    go_build_environment: a.go_build_environment, hardware: a.hardware, storage: a.storage,
+    go_build_environment: a.go_build_environment, hardware: a.hardware, storage: a.storage, setup_sha256: a.setup_sha256,
     conditions: a.conditions, repetitions: a.repetitions, samples_per_repetition: a.samples_per_repetition,
     concurrency: a.concurrency };
+}
+function addedLatency(summary, label, metric) {
+  return summary[`${label}/gateway`][metric].median - summary[`${label}/relay`][metric].median;
+}
+export function historicalAddedLimits(reference) {
+  if (reference.schema !== 'openllmproxy.dev/fidelity-lifecycle-performance/v1' || reference.contract !== null ||
+      reference.source_revision !== '373c58467a3a17da97d2b48b16473ffd715afeac' || reference.working_tree !== '') {
+    throw new Error('Original native lifecycle reference changed');
+  }
+  validateRuns(reference.runs);
+  return Object.fromEntries(addedNames.map((label) => [label, Object.fromEntries([50, 95, 99].map((p) => {
+    const metric = `latency-p${p}-us`;
+    const differences = [0, 1, 2].map((repetition) => {
+      const gateway = reference.runs.find((r) => r.name === `${label}/gateway` && r.repetition === repetition);
+      const relay = reference.runs.find((r) => r.name === `${label}/relay` && r.repetition === repetition);
+      return gateway.metrics[metric] - relay.metrics[metric];
+    });
+    // Same pre-change v1 latency tolerance, applied to the original B
+    // gateway-minus-relay descriptive difference. A negative maximum gets
+    // only the fixed 1 ms tolerance, never a negative budget.
+    return [metric, Math.ceil(Math.max(0, ...differences) * 1.5 + 1000)];
+  }))]));
 }
 function referenceProductDiff() {
   return command('git', ['diff', '--name-only', historicalProduct, 'HEAD']).split('\n').filter(Boolean).sort();
@@ -67,7 +94,11 @@ function record(path, strict, budgetPath) {
     const tracked = command('git', ['ls-files', '--error-unmatch', budgetPath]);
     if (!tracked || command('git', ['status', '--short', '--', budgetPath]) !== '') throw new Error('B-only v2 budget must be committed and clean');
     const budget = JSON.parse(readFileSync(budgetPath, 'utf8'));
-    if (budget.schema !== budgetSchema || budget.baseline.contract !== null || !budget.baseline.source_revision || budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner)) throw new Error('Unfrozen or mismatched B-only v2 budget');
+    const original = JSON.parse(readFileSync(historicalBudget, 'utf8'));
+    const added = historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8')));
+    if (budget.schema !== budgetSchema || budget.baseline.contract !== null || !budget.baseline.source_revision || budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner) ||
+        budget.expected_candidate_setup_sha256 !== candidateSetupSHA256 || hash('tests/integration/access_test.go') !== budget.expected_candidate_setup_sha256 ||
+        !isDeepStrictEqual(budget.maxima, original.maxima) || !isDeepStrictEqual(budget.added_latency_maxima, added)) throw new Error('Unfrozen or mismatched B-only v2 budget/setup');
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY !== '{"mode":"strict"}') throw new Error('Explicit strict route fidelity required');
   } else if (budgetPath || process.env.OLP_LIFECYCLE_ROUTE_FIDELITY) {
     throw new Error('Historical B reference must use the legacy route and no candidate budget');
@@ -107,12 +138,15 @@ export function freeze(baseline, historical) {
     throw new Error('Clean historical pre-#216 native reference required');
   }
   if (baseline.historical_baseline_sha256 !== hash(historicalBaseline) || baseline.historical_budget_sha256 !== hash(historicalBudget) ||
-      baseline.frozen_harness_sha256 !== historical.harness_sha256) throw new Error('Original pre-change lifecycle anchors changed');
+      baseline.frozen_harness_sha256 !== historical.harness_sha256 || baseline.setup_sha256 !== hash('tests/integration/access_test.go') ||
+      baseline.harness_sha256 !== hash(harness) || baseline.runner_sha256 !== hash(runner)) throw new Error('Original or current B measurement anchors changed');
+  if (!isDeepStrictEqual(historical.maxima, JSON.parse(readFileSync(historicalBudget, 'utf8')).maxima)) throw new Error('Original native limits changed');
   const allowed = [harness, runner, 'scripts/fidelity-lifecycle-v2-benchmark.test.mjs', 'docs/evidence/fidelity-performance/lifecycle-v2/README.md'];
   if (!baseline.reference_product_diff.every((path) => allowed.includes(path)) || !baseline.reference_product_diff.includes(harness) || !baseline.reference_product_diff.includes(runner)) {
     throw new Error('Historical B product source differs from pre-#216 revision');
   }
   const summary = validateV2Runs(baseline.runs);
+  const added = historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8')));
   if (!isDeepStrictEqual(Object.keys(historical.maxima).sort(), [...names].sort())) throw new Error('Frozen v1 workload inventory changed');
   const failures = [];
   for (const name of names) {
@@ -122,17 +156,27 @@ export function freeze(baseline, historical) {
       if (!Number.isFinite(limit) || limit < 0 || !summary[name][metric] || summary[name][metric].median > limit) failures.push(`${name}: B ${metric} exceeds original frozen native limit`);
     }
   }
+  for (const label of addedNames) for (const [metric, limit] of Object.entries(added[label])) {
+    const value = addedLatency(summary, label, metric);
+    if (value > limit) failures.push(`${label}: B added ${metric} exceeds pre-change limit`);
+  }
   if (failures.length) throw new Error(`Historical B envelope failed: ${failures.join('; ')}`);
-  return { schema: budgetSchema, declared_at: new Date().toISOString(), method: 'B-only reference predeclared before strict C: use every unchanged original lifecycle-v1 native limit, derived from three pre-#216 repetitions; require v2 B median inside each original limit and strict C median <= same limit. Fixed 24 successes and dispatches per repetition, exact bytes/events/cancellation, 24 owner/native mapping and retrieval checks plus one authenticated zero-dispatch denial per gateway durable repetition. Never reset to fit C.',
+  return { schema: budgetSchema, declared_at: new Date().toISOString(), method: 'B-only reference predeclared before strict C: use every unchanged original lifecycle-v1 native limit plus 24 added-latency limits derived only from the three original pre-#216 gateway-minus-relay repetition differences as ceil(max(0,max difference)*1.5+1000us). Require v2 B and strict C medians within all limits. Fixed 24 successes and dispatches per repetition, exact bytes/events/cancellation, 24 owner/native mapping and retrieval checks plus one authenticated zero-dispatch denial per gateway durable repetition. Never reset to fit C.',
     baseline: { source_revision: baseline.source_revision, contract: null, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256 },
     historical_baseline_sha256: baseline.historical_baseline_sha256, historical_budget_sha256: baseline.historical_budget_sha256,
     frozen_harness_sha256: baseline.frozen_harness_sha256, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256,
-    measurement: structuredClone(measurement(baseline)), maxima: structuredClone(historical.maxima) };
+    expected_candidate_setup_sha256: candidateSetupSHA256,
+    measurement: structuredClone(measurement(baseline)), maxima: structuredClone(historical.maxima), added_latency_maxima: added };
 }
 export function compare(candidate, budget) {
   if (candidate.schema !== schema || budget.schema !== budgetSchema || !isDeepStrictEqual(candidate.contract, { mode: 'strict' }) || candidate.working_tree !== '') throw new Error('Clean strict lifecycle-v2 candidate required');
   if (candidate.source_revision === budget.baseline.source_revision || candidate.harness_sha256 !== budget.harness_sha256 || candidate.runner_sha256 !== budget.runner_sha256 || candidate.frozen_harness_sha256 !== budget.frozen_harness_sha256 || candidate.historical_baseline_sha256 !== budget.historical_baseline_sha256 || candidate.historical_budget_sha256 !== budget.historical_budget_sha256) throw new Error('Fixture, historical anchor or measured source changed');
-  if (!isDeepStrictEqual(measurement(candidate), budget.measurement)) throw new Error('Measurement conditions changed');
+  if (candidate.setup_sha256 !== budget.expected_candidate_setup_sha256) throw new Error('Unreviewed candidate setup helper changed');
+  const candidateMeasurement = measurement(candidate);
+  candidateMeasurement.setup_sha256 = budget.measurement.setup_sha256;
+  if (!isDeepStrictEqual(candidateMeasurement, budget.measurement)) throw new Error('Measurement conditions changed');
+  const original = JSON.parse(readFileSync(historicalBudget, 'utf8'));
+  if (!isDeepStrictEqual(budget.maxima, original.maxima) || !isDeepStrictEqual(budget.added_latency_maxima, historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8'))))) throw new Error('Pre-change numeric limits changed');
   if (!isDeepStrictEqual(Object.keys(budget.maxima).sort(), [...names].sort())) throw new Error('Frozen workload inventory changed');
   const summary = validateV2Runs(candidate.runs);
   const failures = [];
@@ -144,6 +188,10 @@ export function compare(candidate, budget) {
       if (!Number.isFinite(limit) || limit < 0) throw new Error('Invalid frozen limit');
       if (summary[name][metric].median > limit) failures.push(`${name}: ${metric} ${summary[name][metric].median} > ${limit}`);
     }
+  }
+  for (const label of addedNames) for (const [metric, limit] of Object.entries(budget.added_latency_maxima[label])) {
+    const value = addedLatency(summary, label, metric);
+    if (value > limit) failures.push(`${label}: added ${metric} ${value} > ${limit}`);
   }
   return failures;
 }
