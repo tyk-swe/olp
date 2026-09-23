@@ -67,9 +67,16 @@ completed all 288 translated two-turn workflows and 576 exact provider
 dispatches with zero rejects, but **failed five unchanged small-history c1
 limits**: wall and CPU per workflow plus workflow p50/p95/p99. Its load rose
 from 1.07 to 2.48 during capture; the miss is retained without claiming a
-source-causal regression. Subsequent source changes need a new final-source
-comparison to those same frozen criteria. A one-iteration semantic smoke or
-a complete workload count is not a timed pass.
+source-causal regression. Two later clean
+[continuation barrier captures](../../evidence/fidelity-performance/replacement-continuation-v2/README.md)
+also completed every required workflow with zero rejects against those same
+budgets. The `fa6e42f8` request-summary revision measured lower small/c1 CPU
+and allocations than `517455c3`, but failed three wall/latency limits. The
+isolated `66fb41f9` combination with an authorized one-statement submission
+lookup failed four limits, including large/c8 sampled heap, and remains
+unmerged. Neither capture qualifies G6; source changes after `fa6e42f8`
+require another final-source comparison. A one-iteration semantic smoke or a
+complete workload count is not a timed pass.
 
 The separate native [lifecycle-stress-v1 reference](../../evidence/fidelity-performance/lifecycle-stress-v1/README.md)
 has a frozen 4 MiB input/1 MiB slow content/64-duplex-event workload and
