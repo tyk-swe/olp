@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '../playwright';
+import { signInGatewayOwner as signIn } from './signIn';
 
 const endpoint = 'http://127.0.0.1:4187/v1';
 const model = 'compatible-e2e-model';
@@ -11,30 +11,6 @@ const screenshotStyle =
 const corpus =
   '{"negative_zero":-0,"tiny_exponent":1e-1000,"long_decimal":0.1000000000000000000001,"unsafe_integer":9007199254740993,"null":null,"false":false,"zero":0,"empty":"","empty_array":[],"ordered":[false,0,"",null],"schema":{"properties":{"10":{"type":"string"},"2":{"type":"number"},"__proto__":{"inert":true}},"required":["10","2"]},"unknown":{"blocks":[{"id":"second"},{"id":"first"}]}}';
 const configuration = `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","profile_id":"compatible-chat","profile_revision":"1","options":{"operation_defaults":{"generation":{"dialect":"openai-chat","values":{"seed":9007199254740993},"native_options":{"fixture_provider":${corpus}}}},"bindings":{"${model}":{"defaults":{"generation":{"dialect":"openai-chat","native_options":{"fixture_binding":${corpus}}}}}}}}`;
-
-async function signIn(page: Page) {
-  await page.goto('/');
-  await expect(page).toHaveURL(/\/(setup|login)(\?.*)?$/);
-  if (/\/setup$/.test(page.url())) {
-    await page.getByLabel('Display name').fill('Owner');
-    await page.getByLabel('Work email').fill('owner@example.com');
-    await page
-      .getByLabel('Password', { exact: true })
-      .fill('a long browser test password');
-    await page
-      .getByLabel('Confirm password')
-      .fill('a long browser test password');
-    await page
-      .getByLabel('Setup token')
-      .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
-    await page.getByRole('button', { name: 'Create owner account' }).click();
-  } else {
-    await page.getByLabel('Email').fill('owner@example.com');
-    await page.getByLabel('Password').fill('a long browser test password');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-  }
-  await expect(page).toHaveURL(/\/$/);
-}
 
 // The public API receives the original source, never a parsed numeric object.
 async function management(
