@@ -100,6 +100,59 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 	if err := ValidateSubmission(*r.SubmissionID, time.Now()); err != nil {
 		return nil, false, err
 	}
+	copy := *r
+	copy.UUID = uuid.Must(uuid.NewV7())
+	copy.State = state
+	// A continuation has no provider resource ID; use its own internal identity.
+	copy.UpstreamID = copy.UUID.String()
+	if len(copy.Metadata) == 0 {
+		copy.Metadata = []byte(`{}`)
+	}
+	// The resource, its encrypted dependency, and the owner/parent/key-version
+	// locks share one PostgreSQL statement. Data-modifying CTEs are atomic: a
+	// failed ciphertext write cannot leave an accepted-work journal. The shared
+	// installation lock still fences rotation until this statement commits.
+	ciphertext, err := s.keys.Seal(s.installation, continuationPurpose, copy.UUID.String(), payload)
+	if err != nil {
+		return nil, false, err
+	}
+	out, err := scan(s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
+ SELECT id FROM olp_go.api_keys WHERE id=$3 AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
+), parent AS MATERIALIZED (
+ SELECT id FROM olp_go.provider_resources WHERE id=$15 AND api_key_id=$3
+   AND kind=$2 AND state=$19 AND expires_at>now() FOR SHARE
+), active AS MATERIALIZED (
+ SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE
+), inserted AS (
+ INSERT INTO olp_go.provider_resources
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+ FROM owner CROSS JOIN active
+ WHERE active.active_key_version=$17
+   AND ($15::uuid IS NULL OR EXISTS(SELECT 1 FROM parent))
+ ON CONFLICT(api_key_id,submission_id) WHERE submission_id IS NOT NULL DO NOTHING
+ RETURNING `+columns+`
+), stored AS (
+ INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at)
+ SELECT id,$20,$17,$18,expires_at FROM inserted
+ ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
+   ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
+)
+SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
+		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, continuationPurpose))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.existingClaim(ctx, r)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
+}
+
+// The conflict path uses a fresh snapshot: a concurrent claimant may have
+// committed while the single-statement INSERT waited on the unique index.
+func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, err
@@ -115,36 +168,18 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 			return nil, false, ErrNotFound
 		}
 	}
-	copy := *r
-	copy.UUID = uuid.Must(uuid.NewV7())
-	copy.State = state
-	// A continuation has no provider resource ID; use its own internal identity.
-	copy.UpstreamID = copy.UUID.String()
-	if len(copy.Metadata) == 0 {
-		copy.Metadata = []byte(`{}`)
-	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp_go.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
- ON CONFLICT(api_key_id,submission_id) WHERE submission_id IS NOT NULL DO NOTHING RETURNING `+columns,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID))
+	out, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`, r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
-		out, err = scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`, r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
-		if errors.Is(err, pgx.ErrNoRows) {
-			err = ErrNotFound
+		var active int
+		if keyErr := tx.QueryRow(ctx, `SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE`).Scan(&active); keyErr != nil {
+			return nil, false, keyErr
 		}
-		return out, false, err
+		if active != s.keys.Active {
+			return nil, false, errors.New("reload the active master key before writing secrets")
+		}
+		return nil, false, ErrNotFound
 	}
-	if err != nil {
-		return nil, false, err
-	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), continuationPurpose, payload, out.ExpiresAt); err != nil {
-		return nil, false, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+	return out, false, err
 }
 
 // StartDispatch records the accepted-work boundary before the existing Attempt
@@ -173,25 +208,50 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
 	if err := s.validateContract(r, payload); err != nil {
 		return err
 	}
-	tx, err := s.pool.Begin(ctx)
+	ciphertext, err := s.keys.Seal(s.installation, continuationPurpose, r.UUID.String(), payload)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
-		return err
-	}
-	tag, err := tx.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$4,updated_at=now() WHERE id=$1 AND api_key_id=$2 AND state=$3 AND kind=$5 AND expires_at>now()`, r.UUID, r.APIKeyID, StateDispatching, StateReady, KindContinuation)
+	// The ready UPDATE feeds the ciphertext INSERT through RETURNING. Both must
+	// commit together, while owner and installation rows stay shared-locked.
+	var owner, active, updated, stored bool
+	err = s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
+ SELECT id FROM olp_go.api_keys WHERE id=$1 AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
+), active AS MATERIALIZED (
+ SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE
+), updated AS (
+ UPDATE olp_go.provider_resources AS r SET state=$4,updated_at=now()
+ FROM owner,active
+ WHERE r.id=$2 AND r.api_key_id=$1 AND r.state=$3 AND r.kind=$5
+   AND r.expires_at>now() AND active.active_key_version=$6 RETURNING r.id
+), stored AS (
+ INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at)
+ SELECT id,$7,$6,$8,$9 FROM updated
+ ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
+   ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
+)
+SELECT EXISTS(SELECT 1 FROM owner),
+       EXISTS(SELECT 1 FROM active WHERE active_key_version=$6),
+       EXISTS(SELECT 1 FROM updated),EXISTS(SELECT 1 FROM stored)`,
+		r.APIKeyID, r.UUID, StateDispatching, StateReady, KindContinuation,
+		s.keys.Active, continuationPurpose, ciphertext, r.ExpiresAt).Scan(&owner, &active, &updated, &stored)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() != 1 {
+	if !owner {
+		return ErrNotFound
+	}
+	if !active {
+		return errors.New("reload the active master key before writing secrets")
+	}
+	if !updated {
 		return ErrTransition
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, r.UUID.String(), continuationPurpose, payload, r.ExpiresAt); err != nil {
-		return err
+	if !stored {
+		return ErrContract
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ReadContract returns the encrypted operation-owned document only to its live

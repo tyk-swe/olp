@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -88,6 +89,22 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	got, payload, err = store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, claimed.ID)
 	if err != nil || got.State != resources.StateDispatching || !bytes.Equal(payload, initial) {
 		t.Fatalf("nonatomic failed barrier: %v %v", got, err)
+	}
+	// An actual ciphertext-write failure must also roll back the ready state.
+	// NOT VALID leaves the already committed journal readable while checking
+	// this next write.
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteContinuation(t.Context(), claimed, ready); err == nil {
+		t.Fatal("ciphertext-write failure published ready state")
+	}
+	got, payload, err = store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, claimed.ID)
+	if err != nil || got.State != resources.StateDispatching || !bytes.Equal(payload, initial) {
+		t.Fatalf("ciphertext-write failure changed journal: state=%v err=%v", got, err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
+		t.Fatal(err)
 	}
 	if err := store.CompleteContinuation(t.Context(), claimed, ready); err != nil {
 		t.Fatal(err)
@@ -278,5 +295,104 @@ func TestContinuationClaimForDispatchCommitsOneEncryptedJournal(t *testing.T) {
 	}
 	if _, _, err := store.FindSubmission(t.Context(), authority.ID, badSubmission); !errors.Is(err, resources.ErrNotFound) {
 		t.Fatalf("failed encryption left an accepted-work journal: %v", err)
+	}
+	var initialSecrets int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose='provider_continuation'`).Scan(&initialSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	failingSubmission := resources.SubmissionID(time.Now(), uuid.New())
+	contract.SubmissionID = &failingSubmission
+	if _, _, err := store.ClaimForDispatch(t.Context(), contract, initial); err == nil {
+		t.Fatal("ciphertext-write failure committed a claim")
+	}
+	var claims, secretsAfter int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, failingSubmission).Scan(&claims); err != nil || claims != 0 {
+		t.Fatalf("failed ciphertext write left a journal: count=%d err=%v", claims, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose='provider_continuation'`).Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
+		t.Fatalf("failed ciphertext write left a secret: before=%d after=%d err=%v", initialSecrets, secretsAfter, err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *testing.T) {
+	h := newAccessHarness(t)
+	f := newStrictProviderFixture(t, "anthropic-messages")
+	slug, key := publishStrictProvider(t, h, h.owner(), f, nil, nil, "strict")
+	authority, err := h.Runtime.Authenticate(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := database.Installation(t.Context(), h.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := resources.NewEncrypted(h.Pool, installation, ring)
+	release := h.Runtime.Release()
+	route := release.Snapshot.Routes[slug]
+	provider := release.Snapshot.Providers[f.providerID]
+	version := "chat-anthropic-tools-v1"
+	expires := time.Now().Add(time.Hour)
+	submission := resources.SubmissionID(time.Now(), uuid.New())
+	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
+	var initialSecrets int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose=$1`, "provider_continuation").Scan(&initialSecrets); err != nil {
+		t.Fatal(err)
+	}
+
+	rotation, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rotation.Rollback(context.Background())
+	var active int
+	if err := rotation.QueryRow(t.Context(), `SELECT active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE`).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		created bool
+		err     error
+	}
+	finished := make(chan outcome, 1)
+	started := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		close(started)
+		_, created, err := store.ClaimForDispatch(ctx, contract, []byte(`{"private":"never dispatched"}`))
+		finished <- outcome{created, err}
+	}()
+	<-started
+	select {
+	case result := <-finished:
+		t.Fatalf("claim passed an in-progress key rotation: %+v", result)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err := rotation.Exec(t.Context(), `UPDATE olp_go.installation SET active_key_version=$1 WHERE singleton`, active+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := rotation.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result := <-finished
+	if result.err == nil || result.created {
+		t.Fatalf("stale key claimed accepted work: %+v", result)
+	}
+	var claims int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, submission).Scan(&claims); err != nil || claims != 0 {
+		t.Fatalf("stale key left an accepted-work journal: count=%d err=%v", claims, err)
+	}
+	var secretsAfter int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose=$1`, "provider_continuation").Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
+		t.Fatalf("stale key left ciphertext: before=%d after=%d err=%v", initialSecrets, secretsAfter, err)
 	}
 }
