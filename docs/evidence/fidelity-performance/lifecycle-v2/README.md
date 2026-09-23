@@ -92,7 +92,10 @@ complete committed B capture's exact SHA and B self-comparison, and checks
 that the pre-candidate measurement method, historical B source and strict
 product changes are ancestors of the final source. Integrate the B evidence
 branch with its ancestry; copying its JSONL and budget without the historical
-B source will fail the preflight. B and C use different committed
+B source will fail the preflight. The exact B JSONL and budget blobs must both
+exist in a **strict ancestor commit** of C HEAD; adding them for the first
+time in C's own source commit is rejected. The qualifying ancestor commit is
+recorded in C's capture. B and C use different committed
 `access_test.go` setup helpers: C extracts the old constructor and installs
 the encrypted resource store required for strict Responses. The B helper hash
 is measured and verified at freeze; C must match the predeclared reviewed
