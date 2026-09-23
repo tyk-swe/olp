@@ -16,6 +16,7 @@ const historicalBudget = 'docs/evidence/fidelity-performance/lifecycle-v1/replac
 const harness = 'tests/integration/fidelity_lifecycle_v2_test.go';
 const frozenHarness = 'tests/integration/fidelity_lifecycle_performance_test.go';
 const runner = 'scripts/fidelity-lifecycle-v2-benchmark.mjs';
+const runnerTest = 'scripts/fidelity-lifecycle-v2-benchmark.test.mjs';
 const captureSchema = 'openllmproxy.dev/fidelity-lifecycle-capture/v2';
 export const evidencePaths = Object.freeze({
   baseline: 'docs/evidence/fidelity-performance/lifecycle-v2/baseline.jsonl',
@@ -48,6 +49,11 @@ const command = (name, args) => {
 };
 const optional = (path) => existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+function gitFileHash(revision, path) {
+  const result = spawnSync('git', ['show', `${revision}:${path}`], { maxBuffer: 32 << 20 });
+  if (result.status !== 0) throw new Error(`Missing committed source file ${path} at ${revision}`);
+  return createHash('sha256').update(result.stdout).digest('hex');
+}
 function isAncestor(ancestor) {
   const r = spawnSync('git', ['merge-base', '--is-ancestor', ancestor, 'HEAD'], { encoding: 'utf8' });
   return r.status === 0;
@@ -63,17 +69,27 @@ export function selectEvidenceAncestor(head, baselineBlob, budgetBlob, candidate
   if (!found) throw new Error('No strict ancestor commit contains the exact B capture and budget');
   return found.commit;
 }
-function evidenceAncestor() {
-  const head = command('git', ['rev-parse', 'HEAD']);
-  const baselineBlob = command('git', ['rev-parse', `HEAD:${evidencePaths.baseline}`]);
-  const budgetBlob = command('git', ['rev-parse', `HEAD:${evidencePaths.budget}`]);
-  const commits = command('git', ['rev-list', 'HEAD', '--', evidencePaths.budget]).split('\n').filter(Boolean);
+export function verifyOfflineSource(candidate, { candidateAncestor, baselineBlobsMatch, evidenceCommit, sourceHashes, currentHashes }) {
+  if (!candidateAncestor || !baselineBlobsMatch || evidenceCommit !== candidate.baseline_evidence_commit) {
+    throw new Error('Candidate source is unrelated or B evidence changed after capture');
+  }
+  for (const field of ['harness_sha256', 'runner_sha256', 'runner_test_sha256', 'frozen_harness_sha256', 'setup_sha256']) {
+    if (candidate[field] !== sourceHashes[field]) throw new Error(`Captured candidate ${field} differs from its committed source`);
+  }
+  for (const field of ['harness_sha256', 'runner_sha256', 'runner_test_sha256']) {
+    if (candidate[field] !== currentHashes[field]) throw new Error(`Current comparator ${field} changed after capture`);
+  }
+}
+function evidenceAncestor(source) {
+  const baselineBlob = command('git', ['rev-parse', `${source}:${evidencePaths.baseline}`]);
+  const budgetBlob = command('git', ['rev-parse', `${source}:${evidencePaths.budget}`]);
+  const commits = command('git', ['rev-list', source, '--', evidencePaths.budget]).split('\n').filter(Boolean);
   const candidates = commits.map((commit) => {
     const check = spawnSync('git', ['rev-parse', `${commit}:${evidencePaths.baseline}`, `${commit}:${evidencePaths.budget}`], { encoding: 'utf8' });
     const [b, u] = check.status === 0 ? check.stdout.trim().split('\n') : [];
     return { commit, baselineBlob: b, budgetBlob: u };
   });
-  return selectEvidenceAncestor(head, baselineBlob, budgetBlob, candidates);
+  return selectEvidenceAncestor(source, baselineBlob, budgetBlob, candidates);
 }
 function committedClean(path) {
   if (!existsSync(path) || !command('git', ['ls-files', '--error-unmatch', path]) || command('git', ['status', '--short', '--', path]) !== '') {
@@ -159,7 +175,8 @@ export function verifyBaselineReceipt(capture, budget, captureSHA) {
   }
   if (b.schema !== schema || b.contract !== null || b.working_tree !== '' ||
       b.source_revision !== budget.baseline.source_revision || b.harness_sha256 !== budget.harness_sha256 ||
-      b.runner_sha256 !== budget.runner_sha256 || !isDeepStrictEqual(measurement(b), budget.measurement)) {
+      b.runner_sha256 !== budget.runner_sha256 || b.runner_test_sha256 !== budget.runner_test_sha256 ||
+      !isDeepStrictEqual(measurement(b), budget.measurement)) {
     throw new Error('Committed B-only capture and numeric receipt disagree');
   }
   const summary = validateV2Runs(b.runs);
@@ -189,13 +206,13 @@ function record(strict) {
     verifyBaselineReceipt(b, budget, hash(evidencePaths.baseline));
     const original = JSON.parse(readFileSync(historicalBudget, 'utf8'));
     const added = historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8')));
-    if (budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner) ||
+    if (budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner) || budget.runner_test_sha256 !== hash(runnerTest) ||
         budget.expected_candidate_setup_sha256 !== candidateSetupSHA256 || hash('tests/integration/access_test.go') !== budget.expected_candidate_setup_sha256 ||
         !isDeepStrictEqual(budget.maxima, original.maxima) || !isDeepStrictEqual(budget.added_latency_maxima, added)) throw new Error('Unfrozen or mismatched B-only v2 budget/setup');
     verifyCandidateLineage({ methodAncestor: isAncestor(methodCommit), productAncestor: isAncestor(strictProductCommit),
       baselineAncestor: isAncestor(b.artifact.source_revision),
       productDiff: Boolean(command('git', ['diff', '--name-only', historicalProduct, 'HEAD', '--', 'internal/gateway/response_contract.go'])) });
-    baselineEvidenceCommit = evidenceAncestor();
+    baselineEvidenceCommit = evidenceAncestor(source);
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY !== '{"mode":"strict"}') throw new Error('Explicit strict route fidelity required');
   } else {
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY) throw new Error('Historical B reference must use the legacy route');
@@ -223,7 +240,7 @@ function record(strict) {
       source_revision: source, working_tree: workingTree,
       baseline_evidence_commit: baselineEvidenceCommit,
       reference_product_diff: strict ? null : referenceProductDiff(),
-      harness_sha256: hash(harness), frozen_harness_sha256: hash(frozenHarness), runner_sha256: hash(runner),
+      harness_sha256: hash(harness), frozen_harness_sha256: hash(frozenHarness), runner_sha256: hash(runner), runner_test_sha256: hash(runnerTest),
       historical_baseline_sha256: hash(historicalBaseline), historical_budget_sha256: hash(historicalBudget),
       setup_sha256: hash('tests/integration/access_test.go'), command: ['go', ...args],
       runtime_environment: runtimeEnvironment, toolchain: command('go', ['version']),
@@ -257,7 +274,7 @@ export function freeze(baseline, historical, captureSHA) {
   }
   if (baseline.historical_baseline_sha256 !== hash(historicalBaseline) || baseline.historical_budget_sha256 !== hash(historicalBudget) ||
       baseline.frozen_harness_sha256 !== historical.harness_sha256 || baseline.setup_sha256 !== hash('tests/integration/access_test.go') ||
-      baseline.harness_sha256 !== hash(harness) || baseline.runner_sha256 !== hash(runner)) throw new Error('Original or current B measurement anchors changed');
+      baseline.harness_sha256 !== hash(harness) || baseline.runner_sha256 !== hash(runner) || baseline.runner_test_sha256 !== hash(runnerTest)) throw new Error('Original or current B measurement anchors changed');
   if (!isDeepStrictEqual(historical.maxima, JSON.parse(readFileSync(historicalBudget, 'utf8')).maxima)) throw new Error('Original native limits changed');
   const allowed = [harness, runner, 'scripts/fidelity-lifecycle-v2-benchmark.test.mjs', 'docs/evidence/fidelity-performance/lifecycle-v2/README.md'];
   if (!baseline.reference_product_diff.every((path) => allowed.includes(path)) || !baseline.reference_product_diff.includes(harness) || !baseline.reference_product_diff.includes(runner)) {
@@ -283,14 +300,14 @@ export function freeze(baseline, historical, captureSHA) {
     baseline: { source_revision: baseline.source_revision, contract: null, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256 },
     baseline_capture_sha256: captureSHA,
     historical_baseline_sha256: baseline.historical_baseline_sha256, historical_budget_sha256: baseline.historical_budget_sha256,
-    frozen_harness_sha256: baseline.frozen_harness_sha256, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256,
+    frozen_harness_sha256: baseline.frozen_harness_sha256, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256, runner_test_sha256: baseline.runner_test_sha256,
     expected_candidate_setup_sha256: candidateSetupSHA256,
     measurement: structuredClone(measurement(baseline)), maxima: structuredClone(historical.maxima), added_latency_maxima: added };
 }
 export function compare(candidate, budget) {
   if (candidate.schema !== schema || budget.schema !== budgetSchema || !isDeepStrictEqual(candidate.contract, { mode: 'strict' }) || candidate.working_tree !== '') throw new Error('Clean strict lifecycle-v2 candidate required');
   if (!/^[0-9a-f]{40}$/.test(candidate.baseline_evidence_commit ?? '')) throw new Error('Missing pre-candidate B evidence commit');
-  if (candidate.source_revision === budget.baseline.source_revision || candidate.harness_sha256 !== budget.harness_sha256 || candidate.runner_sha256 !== budget.runner_sha256 || candidate.frozen_harness_sha256 !== budget.frozen_harness_sha256 || candidate.historical_baseline_sha256 !== budget.historical_baseline_sha256 || candidate.historical_budget_sha256 !== budget.historical_budget_sha256) throw new Error('Fixture, historical anchor or measured source changed');
+  if (candidate.source_revision === budget.baseline.source_revision || candidate.harness_sha256 !== budget.harness_sha256 || candidate.runner_sha256 !== budget.runner_sha256 || candidate.runner_test_sha256 !== budget.runner_test_sha256 || candidate.frozen_harness_sha256 !== budget.frozen_harness_sha256 || candidate.historical_baseline_sha256 !== budget.historical_baseline_sha256 || candidate.historical_budget_sha256 !== budget.historical_budget_sha256) throw new Error('Fixture, historical anchor or measured source changed');
   if (candidate.setup_sha256 !== budget.expected_candidate_setup_sha256) throw new Error('Unreviewed candidate setup helper changed');
   const candidateMeasurement = measurement(candidate);
   candidateMeasurement.setup_sha256 = budget.measurement.setup_sha256;
@@ -333,7 +350,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       verifyBaselineReceipt(readCapture(evidencePaths.baseline), budget, hash(evidencePaths.baseline));
       const c = readCapture(evidencePaths.candidate);
       if (c.phase !== 'complete') throw new Error('Failed or partial C capture remains failed');
-      if (c.artifact.source_revision !== command('git', ['rev-parse', 'HEAD']) || c.artifact.baseline_evidence_commit !== evidenceAncestor()) throw new Error('C source or pre-candidate B evidence ancestry changed');
+      const source = c.artifact.source_revision;
+      verifyOfflineSource(c.artifact, {
+        candidateAncestor: isAncestor(source), evidenceCommit: evidenceAncestor(source),
+        baselineBlobsMatch: command('git', ['rev-parse', `HEAD:${evidencePaths.baseline}`]) === command('git', ['rev-parse', `${source}:${evidencePaths.baseline}`]) &&
+          command('git', ['rev-parse', `HEAD:${evidencePaths.budget}`]) === command('git', ['rev-parse', `${source}:${evidencePaths.budget}`]),
+        sourceHashes: {
+          harness_sha256: gitFileHash(source, harness), runner_sha256: gitFileHash(source, runner),
+          runner_test_sha256: gitFileHash(source, runnerTest), frozen_harness_sha256: gitFileHash(source, frozenHarness),
+          setup_sha256: gitFileHash(source, 'tests/integration/access_test.go')
+        },
+        currentHashes: { harness_sha256: hash(harness), runner_sha256: hash(runner), runner_test_sha256: hash(runnerTest) }
+      });
       const failures = compare(c.artifact, budget);
       console.log(JSON.stringify({ passed: failures.length === 0, failures }, null, 2)); if (failures.length) process.exitCode = 1;
     } else throw new Error('Usage: record-baseline | freeze | record-strict | compare (fixed lifecycle-v2 paths only)');
