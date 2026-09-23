@@ -23,6 +23,14 @@ executes a complete public native workflow. The historical B product remains
 only the measurement-only command-loop file. The original v1 reference,
 budgets, attempt-1 runner/criteria and failed data are immutable.
 
+Ordinary `make integration` runs both arm tests through required service
+setup, then exits without reading stdin. A regression test keeps their stdin
+pipe open to prove they cannot hang the default suite. Only the write-once
+runner sets `OLP_PAIRED_BARRIER_COMMAND_MODE=1` to enable the long-lived
+command loop. Explicitly selecting either arm without service configuration
+still fails at setup; the >60-second public-workflow freshness test remains in
+the ordinary integration suite.
+
 [criteria.json](criteria.json) fixes a new sealed seed and 32 interleaved blocks
 per stratum, exactly 16 of each palindromic orientation. Each block has two
 24-workflow subruns for B relay, B gateway, B encrypted reference and, only

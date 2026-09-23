@@ -57,7 +57,7 @@ export const candidateDependencies = [
   'tests/fixtures/fidelity/v1/anthropic-tool-next-request.json',
   'tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse'
 ];
-const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '' };
+const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_PAIRED_BARRIER_COMMAND_MODE: '1' };
 export const conditions = { network: 'IPv4 loopback, two warm HTTP/1.1 inference hops, no inference TLS', reference: 'Historical native strict gateway plus independently authored encrypted submission/journal/atomic-ready barrier', candidate: 'Production negotiated OpenAI Chat-to-Anthropic translated continuation', resources: 'Client, provider, gateway or relay, oracle and instrumentation in arm process; PostgreSQL process excluded', exclusions: ['WAN/TLS', 'isolated gateway RSS', 'live-model quality', 'actual SDK process CPU'] };
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const fileHash = (path) => digest(readFileSync(path));

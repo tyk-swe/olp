@@ -159,6 +159,11 @@ func TestPairedBarrierCandidateV2(t *testing.T) {
 	}
 	setup, _ := json.Marshal(map[string]any{"postgresql_server_version": version, "postgresql_tls": tls, "database_name": databaseName})
 	fmt.Printf("PAIRED_BARRIER_SETUP %s\n", setup)
+	// Ordinary integration checks setup and exits even if stdin remains open.
+	// The paired runner explicitly enables the long-lived command protocol.
+	if os.Getenv("OLP_PAIRED_BARRIER_COMMAND_MODE") != "1" {
+		return
+	}
 	fmt.Println("PAIRED_BARRIER_READY translated")
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -176,4 +181,8 @@ func TestPairedBarrierCandidateV2(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPairedBarrierCandidateDefaultOpenStdinV2Attempt2(t *testing.T) {
+	pairedBarrierDefaultOpenStdin(t, "TestPairedBarrierCandidateV2")
 }

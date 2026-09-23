@@ -11,6 +11,8 @@ import {
 } from './continuation-barrier-paired-v2.mjs';
 
 const criteria = verifyCriteria();
+const historicalMethod = JSON.parse(readFileSync('docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json.failed.json', 'utf8')).method_revision;
+const historicalHash = (path) => createHash('sha256').update(execFileSync('git', ['show', `${historicalMethod}:${path}`])).digest('hex');
 const duration = { workflow_us: 500, first_event_us: 100, wire_tool_us: 200, tool_visible_us: 200, action_ready_us: 300, claim_us: 10, journal_us: 10, ready_us: 10, events: 19, actions: 2 };
 function makeRun(name, block, position) {
   const translated = name.endsWith('/translated');
@@ -177,24 +179,21 @@ test('criteria mutation cannot reset a frozen margin or erase a comparison', () 
 });
 
 test('post-baseline candidate harness or SDK-equivalent oracle edits are refused', () => {
-  const method = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  const harness = hash(candidateHarness), workflow = hash('tests/integration/continuation_candidate_benchmark_test.go');
-  assert.equal(verifyCandidateOracle(method), true);
-  assert.throws(() => verifyCandidateOracle(method, { harness: 'changed', workflow }));
-  assert.throws(() => verifyCandidateOracle(method, { harness, workflow: 'changed' }));
+  const harness = historicalHash(candidateHarness), workflow = historicalHash('tests/integration/continuation_candidate_benchmark_test.go');
+  assert.equal(verifyCandidateOracle(historicalMethod, { harness, workflow }), true);
+  assert.throws(() => verifyCandidateOracle(historicalMethod, { harness: 'changed', workflow }));
+  assert.throws(() => verifyCandidateOracle(historicalMethod, { harness, workflow: 'changed' }));
 });
 
 test('shared setup, route, provider, percentile and corpus helpers are pinned before B timing', () => {
-  const method = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const hashes = Object.fromEntries(candidateDependencies.map((path) => [path, createHash('sha256').update(readFileSync(path)).digest('hex')]));
-  assert.equal(verifyCandidateDependencies(method, hashes), true);
+  const hashes = Object.fromEntries(candidateDependencies.map((path) => [path, historicalHash(path)]));
+  assert.equal(verifyCandidateDependencies(historicalMethod, hashes), true);
   for (const path of ['tests/integration/access_test.go', 'tests/integration/strict_generation_test.go', 'tests/integration/fidelity_lifecycle_performance_test.go', 'tests/integration/provider_parity_test.go', 'tests/integration/provider_resources_test.go', 'tests/integration/continuation_workflow_test.go', 'tests/integration/route_fidelity_test.go', 'tests/fixtures/fidelity/fixtures.go']) {
     const changed = { ...hashes, [path]: 'changed' };
-    assert.throws(() => verifyCandidateDependencies(method, changed), path);
+    assert.throws(() => verifyCandidateDependencies(historicalMethod, changed), path);
   }
   const missing = { ...hashes }; delete missing['tests/integration/access_test.go'];
-  assert.throws(() => verifyCandidateDependencies(method, missing));
+  assert.throws(() => verifyCandidateDependencies(historicalMethod, missing));
 });
 
 test('executable SHA-256, source tree and exact build/run commands are attested and reused output is refused', () => {
