@@ -69,9 +69,13 @@ The record commands require clean, committed method and product checkouts and
 write a new artifact only once. The historical B overlay must be a clean commit
 whose only difference from B is the reference measurement file. The B-only
 artifact must itself be committed and pass the old B envelope and stability
-controls before `record-paired` can start C. The candidate is measured once at
-one locked final source revision. Tests can exercise synthetic C values but
-must not observe C timings before this chronology completes.
+controls before `record-paired` can start C. The paired artifact records the
+exact SHA-256 and creation commit of that write-once B-only file; offline
+comparison re-reads its committed bytes and recalculates its full result. That
+commit must strictly precede a product-code change commit on the path to C.
+The candidate is measured once at one locked final source revision. Tests can
+exercise synthetic C values but must not observe C timings before this
+chronology completes.
 
 ```sh
 node --test scripts/continuation-barrier-paired-v2.test.mjs
@@ -87,9 +91,15 @@ node scripts/continuation-barrier-paired-v2.mjs compare \
 ```
 
 The owner supplies the disposable integration-service environment without
-printing credentials. The runner records source/harness/fixture hashes,
+printing credentials. The runner builds each arm into a fresh unique output
+path and refuses an existing executable. It records the exact executable
+SHA-256 and size before and after timing, build/run commands, source commit and
+tree, Go version and build environment. Offline comparison checks these
+attestations and re-hashes any retained executable at its recorded path.
+The runner also records source/harness/fixture hashes,
 hardware, Go runtime, per-block load and CPU pressure, GC pauses, scheduler
-latency histogram p99 and goroutine counts. Process CPU and memory include the local client, provider,
+latency histogram p99 and goroutine counts. Process CPU and memory include the
+local client, provider,
 gateway/relay, oracle and instrumentation, but exclude PostgreSQL itself.
 They are not an isolated gateway RSS, WAN/TLS test, actual SDK process CPU, or
 live-model quality measurement. The separate public race, recovery, replay,

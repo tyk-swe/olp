@@ -3,9 +3,9 @@
 // read-only inputs; this runner never edits them or changes the product oracle.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, release, totalmem, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { compare as compareFrozenReference } from './continuation-barrier-benchmark.mjs';
@@ -26,6 +26,7 @@ export const candidateHarness = 'tests/integration/continuation_candidate_paired
 export const frozenReference = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
 export const frozenBudget = 'docs/evidence/fidelity-performance/barrier-v1/budgets.json';
 export const criteriaPath = 'docs/evidence/fidelity-performance/paired-barrier-v2/criteria.json';
+export const bOnlyPath = 'docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json';
 export const runnerPath = 'scripts/continuation-barrier-paired-v2.mjs';
 export const corpusPaths = [
   'tests/integration/continuation_barrier_benchmark_test.go',
@@ -66,11 +67,13 @@ const command = (name, args, cwd = process.cwd()) => {
   return result.stdout.trim();
 };
 const git = (args, cwd = process.cwd()) => command('git', args, cwd);
-const gitBlobHash = (revision, path) => {
-  const result = spawnSync('git', ['show', `${revision}:${path}`], { maxBuffer: 16 << 20 });
+const gitTree = (revision) => git(['rev-parse', `${revision}^{tree}`]);
+const gitBlobHashAt = (root, revision, path) => {
+  const result = spawnSync('git', ['show', `${revision}:${path}`], { cwd: root, maxBuffer: 16 << 20 });
   if (result.status !== 0) throw new Error(`Unreachable committed source: ${revision}:${path}`);
   return digest(result.stdout);
 };
+const gitBlobHash = (revision, path) => gitBlobHashAt(process.cwd(), revision, path);
 const optional = (path) => existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
 const check = (ok, message) => { if (!ok) throw new Error(message); };
 
@@ -265,6 +268,29 @@ export function verifyCandidateDependencies(methodRevision, hashes = Object.from
   for (const path of candidateDependencies) check(hashes[path] === gitBlobHash(methodRevision, path), `Candidate measurement dependency changed after method freeze: ${path}`);
   return true;
 }
+const isAncestor = (older, newer, root = process.cwd()) => older !== newer && spawnSync('git', ['merge-base', '--is-ancestor', older, newer], { cwd: root }).status === 0;
+export function committedBaselineLineage(path, candidateRevision, root = process.cwd()) {
+  check(!isAbsolute(path) && existsSync(join(root, path)), 'Missing committed B-only artifact');
+  const history = git(['log', '--format=%H', '--', path], root).split('\n').filter(Boolean);
+  check(history.length === 1 && /^[a-f0-9]{40,64}$/.test(history[0]), 'B-only artifact was edited after its write-once creation');
+  const baselineCommit = history[0];
+  const sha256 = digest(readFileSync(join(root, path)));
+  check(gitBlobHashAt(root, baselineCommit, path) === sha256, 'Working B-only artifact differs from its committed bytes');
+  check(isAncestor(baselineCommit, candidateRevision, root), 'B-only artifact commit is not a strict ancestor of C');
+  const intervening = git(['rev-list', '--reverse', '--ancestry-path', `${baselineCommit}..${candidateRevision}`], root).split('\n').filter(Boolean);
+  const productChangeCommit = intervening.find((revision) => {
+    if (!isAncestor(baselineCommit, revision, root)) return false;
+    const changed = git(['diff-tree', '--root', '-m', '--no-commit-id', '--name-only', '-r', revision], root).split('\n');
+    return changed.some((file) => file.startsWith('internal/') && file.endsWith('.go'));
+  });
+  check(productChangeCommit && isAncestor(baselineCommit, productChangeCommit, root) && (productChangeCommit === candidateRevision || isAncestor(productChangeCommit, candidateRevision, root)), 'No product-change commit strictly follows committed B-only evidence');
+  return { b_only_path: path, b_only_sha256: sha256, b_only_commit: baselineCommit, product_change_commit: productChangeCommit };
+}
+export function verifyPairedBaselineBinding(artifact, root = process.cwd()) {
+  const binding = committedBaselineLineage(artifact.b_only_path, artifact.candidate_revision, root);
+  check(artifact.b_only_sha256 === binding.b_only_sha256 && artifact.b_only_commit === binding.b_only_commit && artifact.product_change_commit === binding.product_change_commit, 'Paired artifact is not bound to committed B-only bytes and later product change');
+  return JSON.parse(readFileSync(join(root, artifact.b_only_path), 'utf8'));
+}
 
 function verifyReferenceCheckout(root) {
   clean(root);
@@ -278,11 +304,48 @@ function verifyReferenceCheckout(root) {
   }
 }
 
-function buildBinary(root, path) {
-  command('go', ['test', '-mod=readonly', '-tags=integration', '-c', '-o', path, './tests/integration'], root);
+const executablePattern = /^[a-f0-9]{64}$/;
+const buildArgs = (path) => ['test', '-mod=readonly', '-tags=integration', '-c', '-o', path, './tests/integration'];
+const runArgs = (role) => ['-test.run', role === 'reference' ? '^TestPairedBarrierReferenceV2$' : '^TestPairedBarrierCandidateV2$', '-test.v', '-test.timeout=2h'];
+export function assertFreshBuildOutput(path) {
+  check(isAbsolute(path) && !existsSync(path), `Refusing reused benchmark executable output: ${path}`);
+  return true;
 }
-function launchArm(root, binary, testName, role) {
-  const child = spawn(binary, ['-test.run', `^${testName}$`, '-test.v', '-test.timeout=2h'], { cwd: root, env: { ...process.env, ...runtimeEnvironment }, stdio: ['pipe', 'pipe', 'pipe'] });
+export function attestBuild(root, path, role, startedAt = new Date().toISOString()) {
+  check(['reference', 'translated'].includes(role) && isAbsolute(path) && existsSync(path), 'Missing built benchmark executable');
+  const stat = statSync(path);
+  check(stat.isFile() && stat.size > 0 && (stat.mode & 0o111) !== 0, 'Benchmark output is not an executable file');
+  const revision = sourceRevision(root);
+  return {
+    role, source_revision: revision, source_tree: gitTree(revision), working_directory: root,
+    build_command: ['go', ...buildArgs(path)], run_command: [path, ...runArgs(role)],
+    executable_path: path, executable_size_bytes: stat.size,
+    executable_sha256: fileHash(path), executable_sha256_after: null,
+    toolchain: toolchain(), go_build_environment: buildEnvironment(), started_at: startedAt, completed_at: new Date().toISOString()
+  };
+}
+function buildBinary(root, path, role) {
+  assertFreshBuildOutput(path);
+  const startedAt = new Date().toISOString();
+  command('go', buildArgs(path), root);
+  return attestBuild(root, path, role, startedAt);
+}
+function attestUnchangedBinary(build) {
+  check(existsSync(build.executable_path), 'Built benchmark executable vanished during measurement');
+  build.executable_sha256_after = fileHash(build.executable_path);
+  check(build.executable_sha256_after === build.executable_sha256 && statSync(build.executable_path).size === build.executable_size_bytes, 'Benchmark executable changed during measurement');
+}
+export function validateBuildEvidence(build, role, revision, expectedToolchain, expectedGoBuildEnvironment) {
+  check(build?.role === role && build.source_revision === revision && isAbsolute(build.working_directory ?? '') && isAbsolute(build.executable_path ?? ''), 'Unknown benchmark build source');
+  check(build.source_tree === gitTree(revision), 'Benchmark build source tree changed');
+  check(isDeepStrictEqual(build.build_command, ['go', ...buildArgs(build.executable_path)]) && isDeepStrictEqual(build.run_command, [build.executable_path, ...runArgs(role)]), 'Benchmark build or execution command changed');
+  check(Number.isSafeInteger(build.executable_size_bytes) && build.executable_size_bytes > 0 && executablePattern.test(build.executable_sha256 ?? '') && build.executable_sha256_after === build.executable_sha256, 'Missing, changed or malformed executable SHA-256');
+  check(build.toolchain === expectedToolchain && build.go_build_environment === expectedGoBuildEnvironment && Number.isFinite(Date.parse(build.started_at)) && Number.isFinite(Date.parse(build.completed_at)) && Date.parse(build.started_at) <= Date.parse(build.completed_at), 'Benchmark build environment or chronology changed');
+  if (existsSync(build.executable_path)) check(fileHash(build.executable_path) === build.executable_sha256 && statSync(build.executable_path).size === build.executable_size_bytes, 'Retained benchmark executable differs from measured SHA-256');
+  return true;
+}
+function launchArm(root, build, role) {
+  const child = spawn(build.executable_path, build.run_command.slice(1), { cwd: root, env: { ...process.env, ...runtimeEnvironment }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buffer = '', stderr = '', setup, ready = false, pending, dead;
   let readyResolve, readyReject;
   const readyPromise = new Promise((resolveReady, rejectReady) => { readyResolve = resolveReady; readyReject = rejectReady; });
@@ -349,32 +412,34 @@ async function capture(mode, output, baselinePath) {
   clean(process.cwd()); tracked(process.cwd(), criteriaPath);
   const bRoot = resolve(process.env.OLP_PAIRED_B_ROOT || '/tmp/olp-worktrees/paired-barrier-reference-v2');
   verifyReferenceCheckout(bRoot);
-  let baseline;
+  let baseline, baselineBinding;
   if (mode === 'paired') {
-    check(baselinePath && existsSync(baselinePath), 'Committed B-only baseline is required before C measurement');
+    check(baselinePath === bOnlyPath && existsSync(baselinePath), 'Committed B-only baseline is required at its frozen path before C measurement');
     tracked(process.cwd(), baselinePath);
     baseline = readJSON(baselinePath);
     check(baseline.mode === 'baseline' && baseline.analysis?.passed && baseline.criteria_sha256 === fileHash(criteriaPath) && baseline.runner_sha256 === fileHash(runnerPath) && baseline.reference_harness_sha256 === fileHash(referenceHarness), 'Frozen B-only baseline or method is unavailable/failed');
     validateArtifact(baseline, 'baseline', criteria);
     check(baseline.method_revision && baseline.method_revision !== sourceRevision(process.cwd()), 'C must follow the committed pre-candidate method');
     verifyCandidateDependencies(baseline.method_revision);
-    const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', baseline.method_revision, 'HEAD']);
-    check(ancestor.status === 0, 'Frozen B-only method is not an ancestor of candidate C');
-    const changedProduct = git(['diff', '--name-only', baseline.method_revision, 'HEAD']).split('\n').some((path) => path.startsWith('internal/') && path.endsWith('.go'));
-    check(changedProduct, 'No post-baseline product implementation change is present');
+    check(isAncestor(baseline.method_revision, sourceRevision(process.cwd())), 'Frozen B-only method is not a strict ancestor of candidate C');
+    baselineBinding = committedBaselineLineage(baselinePath, sourceRevision(process.cwd()));
   }
-  const bBinary = join(tmpdir(), `olp-paired-barrier-b-${process.pid}`);
-  const cBinary = join(tmpdir(), `olp-paired-barrier-c-${process.pid}`);
-  buildBinary(bRoot, bBinary);
-  if (mode === 'paired') buildBinary(process.cwd(), cBinary);
-  const b = launchArm(bRoot, bBinary, 'TestPairedBarrierReferenceV2', 'reference');
-  const c = mode === 'paired' ? launchArm(process.cwd(), cBinary, 'TestPairedBarrierCandidateV2', 'translated') : null;
+  const buildDir = mkdtempSync(join(tmpdir(), 'olp-paired-barrier-v2-'));
+  const bBinary = join(buildDir, 'reference.test');
+  const cBinary = join(buildDir, 'translated.test');
+  const bBuild = buildBinary(bRoot, bBinary, 'reference');
+  const cBuild = mode === 'paired' ? buildBinary(process.cwd(), cBinary, 'translated') : null;
+  const b = launchArm(bRoot, bBuild, 'reference');
+  const c = mode === 'paired' ? launchArm(process.cwd(), cBuild, 'translated') : null;
   const artifact = {
     schema, mode, started_at: new Date().toISOString(), completed_at: null,
     criteria_sha256: fileHash(criteriaPath), runner_sha256: fileHash(runnerPath),
     historical_baseline_sha256: fileHash(frozenReference), historical_budget_sha256: fileHash(frozenBudget),
     reference_product_revision: anchor, reference_overlay_revision: sourceRevision(bRoot), candidate_revision: c ? sourceRevision(process.cwd()) : null,
     method_revision: mode === 'baseline' ? sourceRevision(process.cwd()) : baseline.method_revision,
+    b_only_path: baselineBinding?.b_only_path ?? null, b_only_sha256: baselineBinding?.b_only_sha256 ?? null,
+    b_only_commit: baselineBinding?.b_only_commit ?? null, product_change_commit: baselineBinding?.product_change_commit ?? null,
+    builds: { reference: bBuild, translated: cBuild },
     reference_harness_sha256: fileHash(referenceHarness), candidate_harness_sha256: c ? fileHash(candidateHarness) : null,
     original_oracle_sha256: fileHash('tests/integration/continuation_barrier_benchmark_test.go'),
     fixture_sha256: Object.fromEntries(corpusPaths.filter((path) => existsSync(path)).map((path) => [path, fileHash(path)])),
@@ -407,6 +472,8 @@ async function capture(mode, output, baselinePath) {
   } finally {
     try { await Promise.all([b.close(), ...(c ? [c.close()] : [])]); }
     catch (error) { artifact.error ||= error?.message || String(error); }
+    try { attestUnchangedBinary(bBuild); if (cBuild) attestUnchangedBinary(cBuild); }
+    catch (error) { artifact.error ||= error?.message || String(error); }
     artifact.completed_at = new Date().toISOString(); artifact.system_load.after = load();
     const destination = artifact.error ? `${output}.failed.json` : output;
     writeFileSync(destination, `${JSON.stringify(artifact, null, 2)}\n`, { flag: 'wx' });
@@ -421,6 +488,9 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
   check(artifact.criteria_sha256 === fileHash(criteriaPath) && artifact.runner_sha256 === fileHash(runnerPath) && artifact.historical_baseline_sha256 === fileHash(frozenReference) && artifact.historical_budget_sha256 === fileHash(frozenBudget), 'Frozen paired method changed');
   check(artifact.reference_product_revision === anchor && artifact.original_oracle_sha256 === readJSON(frozenReference).harness_sha256 && artifact.reference_harness_sha256 === fileHash(referenceHarness), 'Reference product/oracle changed');
   check(artifact.method_revision && gitBlobHash(artifact.method_revision, runnerPath) === artifact.runner_sha256 && gitBlobHash(artifact.method_revision, criteriaPath) === artifact.criteria_sha256, 'Pre-candidate method commit changed');
+  validateBuildEvidence(artifact.builds?.reference, 'reference', artifact.reference_overlay_revision, artifact.toolchain, artifact.go_build_environment);
+  check(mode === 'baseline' ? artifact.builds.translated === null : artifact.builds.translated !== null, 'Wrong benchmark executable inventory');
+  if (mode === 'paired') validateBuildEvidence(artifact.builds.translated, 'translated', artifact.candidate_revision, artifact.toolchain, artifact.go_build_environment);
   verifyCandidateDependencies(artifact.method_revision, artifact.candidate_dependency_sha256);
   verifyCandidateDependencies(artifact.method_revision);
   check(isDeepStrictEqual(git(['diff', '--name-only', anchor, artifact.reference_overlay_revision]).split('\n').filter(Boolean), [referenceHarness]), 'B overlay touched product or oracle');
@@ -432,10 +502,14 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
   }
   check(mode === 'baseline' ? artifact.candidate_revision === null && artifact.candidate_harness_sha256 === null && artifact.candidate_workflow_sha256 === null : artifact.candidate_revision && artifact.candidate_harness_sha256 === fileHash(candidateHarness) && gitBlobHash(artifact.candidate_revision, candidateHarness) === artifact.candidate_harness_sha256 && artifact.candidate_workflow_sha256 === gitBlobHash(artifact.candidate_revision, 'tests/integration/continuation_candidate_benchmark_test.go'), 'Candidate source/harness changed');
   if (mode === 'paired') {
-    const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', artifact.method_revision, artifact.candidate_revision]);
-    check(ancestor.status === 0, 'Candidate does not descend from frozen method');
+    check(isAncestor(artifact.method_revision, artifact.candidate_revision), 'Candidate does not strictly follow frozen method');
     verifyCandidateOracle(artifact.method_revision, { harness: artifact.candidate_harness_sha256, workflow: artifact.candidate_workflow_sha256 });
-    check(git(['diff', '--name-only', artifact.method_revision, artifact.candidate_revision]).split('\n').some((path) => path.startsWith('internal/') && path.endsWith('.go')), 'No candidate product implementation change after method');
+    check(artifact.b_only_path === bOnlyPath, 'Unknown B-only artifact path');
+    const bOnly = verifyPairedBaselineBinding(artifact);
+    const bOnlyResult = validateArtifact(bOnly, 'baseline', criteria);
+    check(bOnlyResult.passed && bOnly.method_revision === artifact.method_revision && bOnly.reference_overlay_revision === artifact.reference_overlay_revision, 'Committed B-only artifact is inconclusive or from a different method/reference');
+  } else {
+    check(artifact.b_only_path === null && artifact.b_only_sha256 === null && artifact.b_only_commit === null && artifact.product_change_commit === null, 'B-only artifact contains future candidate evidence');
   }
   check(isDeepStrictEqual(artifact.schedule, schedule(criteria)), 'Schedule changed');
   check(artifact.blocks?.length === strata.length * blocksPerStratum && artifact.blocks.every((block, i) => block.stratum === artifact.schedule[i].stratum && block.block === artifact.schedule[i].block && block.orientation === artifact.schedule[i].orientation && block.before && block.after), 'Missing block diagnostics');

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  analyze, deriveCriteria, schedule, validateInventory, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria,
+  analyze, assertFreshBuildOutput, attestBuild, committedBaselineLineage, deriveCriteria, schedule, validateBuildEvidence, validateInventory, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria, verifyPairedBaselineBinding,
   blocksPerStratum, candidateDependencies, candidateHarness, criteriaPath, primaryMetrics, referencePaths, samples, strata
 } from './continuation-barrier-paired-v2.mjs';
 
@@ -193,4 +195,85 @@ test('shared setup, route, provider, percentile and corpus helpers are pinned be
   }
   const missing = { ...hashes }; delete missing['tests/integration/access_test.go'];
   assert.throws(() => verifyCandidateDependencies(method, missing));
+});
+
+test('executable SHA-256, source tree and exact build/run commands are attested and reused output is refused', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'olp-paired-build-test-'));
+  const binary = join(directory, 'reference.test');
+  try {
+    assert.equal(assertFreshBuildOutput(binary), true);
+    writeFileSync(binary, 'synthetic executable fixture');
+    chmodSync(binary, 0o755);
+    assert.throws(() => assertFreshBuildOutput(binary));
+    const build = attestBuild(process.cwd(), binary, 'reference');
+    assert.throws(() => validateBuildEvidence(build, 'reference', build.source_revision, build.toolchain, build.go_build_environment));
+    build.executable_sha256_after = build.executable_sha256;
+    assert.equal(validateBuildEvidence(build, 'reference', build.source_revision, build.toolchain, build.go_build_environment), true);
+    for (const change of [
+      (a) => a.executable_sha256_after = '0'.repeat(64),
+      (a) => a.executable_sha256 = '0'.repeat(64),
+      (a) => a.executable_size_bytes++,
+      (a) => a.source_tree = '0'.repeat(40),
+      (a) => a.source_revision = '0'.repeat(40),
+      (a) => a.build_command[3] = '-tags=other',
+      (a) => a.run_command[1] = '-test.run=^Other$',
+      (a) => a.toolchain = 'different'
+    ]) {
+      const changed = structuredClone(build); change(changed);
+      assert.throws(() => validateBuildEvidence(changed, 'reference', build.source_revision, build.toolchain, build.go_build_environment));
+    }
+    writeFileSync(binary, 'tampered binary');
+    assert.throws(() => validateBuildEvidence(build, 'reference', build.source_revision, build.toolchain, build.go_build_environment));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+function temporaryLineage() {
+  const root = mkdtempSync(join(tmpdir(), 'olp-paired-lineage-test-'));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '-q'); git('config', 'user.name', 'Benchmark Test'); git('config', 'user.email', 'benchmark@example.invalid');
+  const commit = (message) => { git('add', '.'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
+  writeFileSync(join(root, 'README.md'), 'initial\n'); commit('Initial');
+  return { root, git, commit };
+}
+test('paired evidence binds exact committed B bytes and requires a later product-change commit', () => {
+  const repo = temporaryLineage(), path = 'evidence/baseline.json';
+  try {
+    mkdirSync(join(repo.root, 'evidence'));
+    writeFileSync(join(repo.root, path), '{"schema":"synthetic-b-only"}\n');
+    const bCommit = repo.commit('Capture B only');
+    assert.throws(() => committedBaselineLineage(path, bCommit, repo.root));
+    mkdirSync(join(repo.root, 'internal'));
+    writeFileSync(join(repo.root, 'internal/hotpath.go'), 'package hotpath\n');
+    const productCommit = repo.commit('Improve product hot path');
+    writeFileSync(join(repo.root, 'note.md'), 'C source\n');
+    const candidateCommit = repo.commit('Lock C source');
+    const binding = committedBaselineLineage(path, candidateCommit, repo.root);
+    assert.equal(binding.b_only_commit, bCommit);
+    assert.equal(binding.product_change_commit, productCommit);
+    assert.equal(binding.b_only_sha256, createHash('sha256').update(readFileSync(join(repo.root, path))).digest('hex'));
+    const artifact = { ...binding, candidate_revision: candidateCommit };
+    assert.deepEqual(verifyPairedBaselineBinding(artifact, repo.root), { schema: 'synthetic-b-only' });
+    for (const field of ['b_only_sha256', 'b_only_commit', 'product_change_commit']) {
+      const changed = { ...artifact, [field]: '0'.repeat(64) };
+      assert.throws(() => verifyPairedBaselineBinding(changed, repo.root), field);
+    }
+    writeFileSync(join(repo.root, path), '{"schema":"tampered"}\n');
+    assert.throws(() => verifyPairedBaselineBinding(artifact, repo.root));
+    repo.git('checkout', '--', path);
+    writeFileSync(join(repo.root, path), '{"schema":"edited-after-capture"}\n');
+    const editedCommit = repo.commit('Edit B evidence');
+    assert.throws(() => committedBaselineLineage(path, editedCommit, repo.root));
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+  const premature = temporaryLineage();
+  try {
+    mkdirSync(join(premature.root, 'internal'));
+    writeFileSync(join(premature.root, 'internal/hotpath.go'), 'package hotpath\n');
+    premature.commit('Product changed before B');
+    mkdirSync(join(premature.root, 'evidence'));
+    writeFileSync(join(premature.root, path), '{"schema":"synthetic-b-only"}\n');
+    premature.commit('Capture B only');
+    writeFileSync(join(premature.root, 'note.md'), 'no later product change\n');
+    const candidateCommit = premature.commit('Lock C without product change');
+    assert.throws(() => committedBaselineLineage(path, candidateCommit, premature.root));
+  } finally { rmSync(premature.root, { recursive: true, force: true }); }
 });
