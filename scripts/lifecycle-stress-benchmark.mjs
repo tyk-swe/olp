@@ -108,6 +108,19 @@ export function validateNegatives(negatives) {
 export function parse(output, marker) {
   return output.split('\n').filter((line) => line.includes(marker)).map((line) => JSON.parse(line.slice(line.indexOf(marker) + marker.length)));
 }
+export function writeFailedCapture(path, reason, result, started, loadBefore) {
+  const suffix = new Date().toISOString().replace(/[^0-9TZ]/g, '');
+  const failurePath = `${path}.failed-${suffix}.json`;
+  writeFileSync(failurePath, JSON.stringify({
+    schema: 'openllmproxy.dev/lifecycle-stress-failed-capture/v1',
+    requested_artifact: path, reason, started_at: started, failed_at: new Date().toISOString(),
+    source_revision: git('rev-parse', 'HEAD'), working_tree: git('status', '--short'),
+    system_load: { before: loadBefore, after: optional('/proc/loadavg') },
+    exit_status: result.status, process_error: result.error?.message ?? null,
+    stdout: result.stdout ?? '', stderr: result.stderr ?? ''
+  }, null, 2) + '\n', { flag: 'wx' });
+  return failurePath;
+}
 function identity(artifact) {
   return {
     command: artifact.command, runtime_environment: artifact.runtime_environment,
@@ -193,13 +206,22 @@ function record(path) {
   const result = spawnSync('go', commandArgs, { encoding: 'utf8', maxBuffer: 32 << 20, env: { ...process.env, ...environment, OLP_LIFECYCLE_ROUTE_FIDELITY: JSON.stringify(contract ?? { mode: 'legacy' }) } });
   process.stdout.write(result.stdout ?? '');
   process.stderr.write(result.stderr ?? '');
-  if (result.status !== 0) throw new Error('Lifecycle stress run failed; no passing artifact written');
-  const runs = parse(result.stdout, 'LIFECYCLE_STRESS_MEASUREMENT ');
-  const negatives = parse(result.stdout, 'LIFECYCLE_STRESS_NEGATIVE ');
-  const setup = parse(result.stdout, 'LIFECYCLE_STRESS_SETUP ');
-  const summary = validateRuns(runs);
-  validateNegatives(negatives);
-  if (setup.length !== 1) throw new Error('Exactly one required storage setup record expected');
+  if (result.status !== 0) {
+    const failurePath = writeFailedCapture(path, 'integration process failed', result, started, loadBefore);
+    throw new Error(`Lifecycle stress run failed; retained ${failurePath}; no passing artifact written`);
+  }
+  let runs, negatives, setup, summary;
+  try {
+    runs = parse(result.stdout, 'LIFECYCLE_STRESS_MEASUREMENT ');
+    negatives = parse(result.stdout, 'LIFECYCLE_STRESS_NEGATIVE ');
+    setup = parse(result.stdout, 'LIFECYCLE_STRESS_SETUP ');
+    summary = validateRuns(runs);
+    validateNegatives(negatives);
+    if (setup.length !== 1) throw new Error('Exactly one required storage setup record expected');
+  } catch (error) {
+    const failurePath = writeFailedCapture(path, error.message, result, started, loadBefore);
+    throw new Error(`Incomplete lifecycle stress evidence; retained ${failurePath}; ${error.message}`);
+  }
   const artifact = {
     schema, contract, started_at: started, completed_at: new Date().toISOString(),
     source_revision: git('rev-parse', 'HEAD'), working_tree: git('status', '--short'),

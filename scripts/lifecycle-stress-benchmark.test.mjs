@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compare, freeze, names, parse, validateNegatives, validateRuns } from './lifecycle-stress-benchmark.mjs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { compare, freeze, names, parse, validateNegatives, validateRuns, writeFailedCapture } from './lifecycle-stress-benchmark.mjs';
 
 function evidence() {
   const runs = names.flatMap((name) => [0, 1, 2].map((repetition) => {
@@ -119,4 +122,18 @@ test('invalid or weakened budget inventory is rejected and strict requires actua
   artifact.contract = { mode: 'strict' };
   assert.deepEqual(compare(artifact, budget, 'strict'), []);
   assert.throws(() => freeze(artifact));
+});
+
+test('incomplete timed output is retained separately without creating a passing artifact', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lifecycle-stress-failed-'));
+  try {
+    const requested = join(directory, 'baseline.json');
+    const failed = writeFailedCapture(requested, 'missing repetition', { status: 1, stdout: 'partial marker', stderr: 'fixture failed' }, '2026-09-23T00:00:00Z', '0.1 0.2 0.3');
+    assert.equal(existsSync(requested), false);
+    const retained = JSON.parse(readFileSync(failed, 'utf8'));
+    assert.equal(retained.reason, 'missing repetition');
+    assert.equal(retained.stdout, 'partial marker');
+    assert.equal(retained.stderr, 'fixture failed');
+    assert.equal(retained.exit_status, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
