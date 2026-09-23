@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "assessed_revision": "e0534816efd4f6f2f45c3a462a78dc1d297a4e91",
+  "assessed_revision": "44c88077888cc1274dd3d3687a7dca48f084ac91",
   "frozen_inventory": {
     "path": "tests/fixtures/fidelity/v1/inventory.json",
     "sha256": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd",
@@ -11,12 +11,12 @@
     "strict-profile-control": {
       "kind": "test",
       "source": "tests/integration/provider_profiles_cloud_test.go#TestStrictPublishedProviderProfilesPreserveCloudInvocation",
-      "source_sha256": "0389af03132b504a2f41f824bf88c4a6a24a4cad8c1a8b1436075d59f3cdf931",
+      "source_sha256": "2a631ca4c275ff7fdbd60982d3696da08c2966bb3a33400998c3947d5462d228",
       "receipt": "docs/qualification/fidelity/strict-planning.md",
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "79168e7083ede1290ac92451cab4283dce213c72",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "anthropic-js-tool-workflow": {
@@ -66,78 +66,78 @@
     "native-vector-storage": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictNativeVectorStoragePublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "native-sparse-multivector": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictNativeSparseAndMultivectorPublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "native-hosted-embeddings": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictNativeHostedEmbeddingShapesPublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "native-rerank": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictNativeRerankScoresAndIdentityPublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "native-count-classification": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictClassificationAndNativeCountPublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "pinned-vector-sdk": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictOperationsPinnedSDKStorage",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "qualified-unary": {
       "kind": "test",
       "source": "tests/integration/strict_operations_test.go#TestStrictQualifiedUnaryOperationsPublic",
-      "source_sha256": "ce204c8f78c9bc3e9f34b15bc40545aa04b5a88285ca7d07031393538bc04093",
+      "source_sha256": "7a16a62b057952b5d822b4125ab0da99d32237114cbdf612d67fdf1a7afbd5e8",
       "receipt": "docs/qualification/fidelity/unary-operations.md",
       "receipt_sha256": "cef2020146c6f6b80abd416bf934678acd3ba40ec1adc1a4008d22c0894407ba",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "native-media-source": {
@@ -148,7 +148,7 @@
       "receipt_sha256": "60f82c4303c695f50fca2207359c9d47dd25b8287f7191e081866f75206260e1",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "f63c74dadc40a5ff5e9510562fac410f1fa9a0a0",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "positive"
     },
     "matrix-assessment": {
@@ -163,30 +163,258 @@
       "integration": "integrated",
       "execution": "not-executed"
     },
-    "gemini-isolated-receipt": {
-      "kind": "isolated-receipt",
-      "source": "docs/qualification/fidelity/compatibility-matrix-v1.md",
-      "integration": "isolated",
-      "execution": "passed",
-      "revision": "6d361ba8a8595d50eda70c44dfd6312f7dd0325f"
-    },
-    "continuation-isolated-receipt": {
-      "kind": "isolated-receipt",
-      "source": "docs/qualification/fidelity/compatibility-matrix-v1.md",
-      "integration": "isolated",
-      "execution": "passed",
-      "revision": "d9c3d729fdb90d70f2b3c8018638a23b8f6f02b8"
-    },
     "strict-reasoning-refusal": {
       "kind": "test",
       "source": "tests/integration/strict_generation_test.go#TestStrictPublicQualifiedTextAndPreciseRefusals",
-      "source_sha256": "6947dc73d17397a7cd19f9135fcbc2feaa8ee223674a1bd5a063f69e04458875",
+      "source_sha256": "a40e70baca4fe63f6f454312d16ea2ed5b1000cfb41f794180b01e9f6c3fd0c5",
       "receipt": "docs/qualification/fidelity/strict-planning.md",
       "receipt_sha256": "4c64904c94a27fa09889832142eb43067dce8c232a6650d577ecee6fa1d58f54",
       "integration": "integrated",
       "execution": "passed",
-      "run_revision": "79168e7083ede1290ac92451cab4283dce213c72",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
       "outcome": "zero-dispatch-refusal"
+    },
+    "anthropic-document-public": {
+      "kind": "test",
+      "source": "tests/integration/strict_generation_test.go#TestStrictPublicAnthropicDocumentAssetIdentity",
+      "source_sha256": "a40e70baca4fe63f6f454312d16ea2ed5b1000cfb41f794180b01e9f6c3fd0c5",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-media-public": {
+      "kind": "test",
+      "source": "tests/integration/strict_media_test.go#TestStrictMediaPublicNativeSourcesAndAssets",
+      "source_sha256": "845aa8b9293d1a50fcf8073a8064c64ebc7553efd821d90ece4cbb2ce87aecb9",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d58921db6591516f40d698c99d22228ff434615a",
+      "outcome": "positive"
+    },
+    "strict-video-public": {
+      "kind": "test",
+      "source": "tests/integration/strict_video_test.go#TestStrictVideoPublicOriginalAssetsAndDurableIdentity",
+      "source_sha256": "33a74a06bf791620d89b9e1268ea9dcac682935dcf254d3c28ed56a2c80af7cd",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-video-sdk-harness": {
+      "kind": "test",
+      "source": "tests/integration/strict_video_sdk_test.go#TestStrictVideoPinnedOpenAISDKs",
+      "source_sha256": "e8160a413b9fe60694fcde09c85dde609c569b5feb36554fa113057044d65845",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-video-sdk-js": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/strict-video.mjs",
+      "source_sha256": "455554e0abadd27b0d405b504d29fa4ffa2a460e1068ce47ba8dfa8a7bfdfe17",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-video-sdk-python": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/strict_video.py",
+      "source_sha256": "3ced9e6a64f37014db0af85ef0de92f032cb81e8eb678a056f59914f26ca1d60",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-batch-public": {
+      "kind": "test",
+      "source": "tests/integration/strict_durable_test.go#TestStrictBatchSourcePartialFilesAndLifecycle",
+      "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-batch-sdk-harness": {
+      "kind": "test",
+      "source": "tests/integration/strict_durable_test.go#TestStrictBatchPinnedOpenAISDKs",
+      "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-batch-sdk-js": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/durable-batch.mjs",
+      "source_sha256": "73ef95ca5110a742e6b1f70d009bcb98bb1ebdbcb329c274c8e5b2a5c30e9bb3",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-batch-sdk-python": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/durable_batch.py",
+      "source_sha256": "a38033a81dc2daddf8d67b0c026275f18fac8a55c3b697367c4bddb8cc692982",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "strict-background-unary": {
+      "kind": "test",
+      "source": "tests/integration/strict_durable_test.go#TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork",
+      "source_sha256": "a54a35b872767c067ab94c446a48dcda48683daae86fd112f107c88912973a1e",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-interactions-public": {
+      "kind": "test",
+      "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle",
+      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-live-public": {
+      "kind": "test",
+      "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLivePublicNativeAudioAndSetupAffinity",
+      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-sdk-harness": {
+      "kind": "test",
+      "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecyclePinnedOfficialSDKsThroughTrustedTLS",
+      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-sdk-js": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/gemini-lifecycle.mjs",
+      "source_sha256": "7c2c3a73eca0104a7e6bd97196ea4f9a0e72737acfb0665193ca4b18e9c07036",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-sdk-python": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/gemini_lifecycle.py",
+      "source_sha256": "4ccf081953cb32a6f546cfe3afdbbeacb4b9708dd55837ce22c81c5947c474c5",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "gemini-live-resumption-refusal": {
+      "kind": "test",
+      "source": "tests/integration/gemini_lifecycle_test.go#TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWork",
+      "source_sha256": "0ef2a3b9d5455422bc85088a7eeeb4a95709de6694910dbce3d4d17beca44143",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "zero-dispatch-refusal"
+    },
+    "gemini-background-stream": {
+      "kind": "test",
+      "source": "tests/integration/gemini_background_stream_test.go#TestGeminiBackgroundStreamResumesSameOwnedWorkAfterReaderLoss",
+      "source_sha256": "8d7351129cdc9cdfd36e7a58314715c807272e0e3a5d219d9f5b2ff7baf3cc84",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "d58921db6591516f40d698c99d22228ff434615a",
+      "outcome": "positive"
+    },
+    "negotiated-sdk-js-public": {
+      "kind": "test",
+      "source": "tests/integration/continuation_sdk_test.go#TestNegotiatedContinuationOfficialJavaScriptSDK",
+      "source_sha256": "7f975a374ebebc92e09fe96798838daf9cfa8684dc0dc5bca213b8d58e9b847e",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "negotiated-sdk-js-script": {
+      "kind": "test",
+      "source": "tests/sdk-smoke/negotiated-continuation.mjs",
+      "source_sha256": "e50ece24bc7bb27f920bacfb1c2eaab63e44f7ba32d016fa163b056159dd4d7c",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "negotiated-sdk-python-public": {
+      "kind": "test",
+      "source": "tests/integration/continuation_python_sdk_test.go#TestNegotiatedContinuationOfficialPythonSDK",
+      "source_sha256": "94ff7725af0420480c90af1dbaf5b7e99ef09eb5beca54fe6e631976b44654d4",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
+    },
+    "negotiated-sdk-python-script": {
+      "kind": "test",
+      "source": "tests/sdk-smoke-python/negotiated_continuation.py",
+      "source_sha256": "aa855862a378499492d5cbeb562dce3356872743f061340ae447ece6a5dd3dfb",
+      "receipt": "docs/qualification/fidelity/row-evidence-v1.md",
+      "receipt_sha256": "3c7c3e78e951451712f05ea6b7c31ba98ab3a9bf3ca51e20e87c37abd595a0e0",
+      "integration": "integrated",
+      "execution": "passed",
+      "run_revision": "efae6135abc5904617f821b4e8b836a4255a6241",
+      "outcome": "positive"
     }
   },
   "rows": [
@@ -446,12 +674,12 @@
       "id": "openai-js-openai-responses",
       "frozen_row_sha256": "3d14f443a6209eed24366613d6eec34b8b93b173e7a87c4948ef3934c8810abc",
       "status": "unknown",
-      "evidence_state": "isolated-executed",
+      "evidence_state": "integrated-partial",
       "evidence": [
-        "continuation-isolated-receipt",
+        "sdk-js-smoke",
         "matrix-assessment"
       ],
-      "constraints": "Complete negotiated Responses continuation passed only in isolated #214 at d9c3d729, not in assessed e0534816.",
+      "constraints": "Pinned SDK smoke exercises basic direct Responses transport; the complete native-state, parallel-tool and next-turn conjunction of this direct OpenAI Responses row remains unqualified. Negotiated Chat-to-Anthropic continuation is a separate dialect/profile tuple.",
       "empirical_quality": "unknown"
     },
     {
@@ -546,7 +774,7 @@
         "catalog-assessment",
         "matrix-assessment"
       ],
-      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered on assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
+      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered at the assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
       "empirical_quality": "unknown"
     },
     {
@@ -558,7 +786,7 @@
         "catalog-assessment",
         "matrix-assessment"
       ],
-      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered on assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
+      "constraints": "Exact Cohere strict operation dialect in frozen row is not registered at the assessed revision; compatible/TEI/Voyage alternatives do not qualify it.",
       "empirical_quality": "unknown"
     },
     {
@@ -608,58 +836,61 @@
     {
       "id": "openai-image_generation-unary",
       "frozen_row_sha256": "0b34a10d22a0b542a122fa284d4e1ca26e4c1b2c1327fbf351a075395f93e1b4",
-      "status": "unavailable",
+      "status": "unknown",
       "evidence_state": "integrated-partial",
       "evidence": [
-        "native-media-source",
+        "strict-media-public",
         "matrix-assessment"
       ],
-      "constraints": "Immutable JSON source and public rejection passed, but strict media result/event/asset/lifecycle contract is absent on assessed e0534816.",
+      "constraints": "The public certified compatible or Azure fixture exercised exact JSON source, native result and stream event contract; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-image_edit-multipart",
       "frozen_row_sha256": "b157a6585e5f8b0141ba2754e37039f5e49fc2713334117ff7e74207ed1379aa",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-media-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised ordered mask and original image parts; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-image_variation-multipart",
       "frozen_row_sha256": "a922208c8d66cb22cde54a8829a38c4245b13f38d3fb23ec6bcb0c24820027a5",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-media-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised original image and multipart ordering; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-speech-binary",
       "frozen_row_sha256": "a4664fee141c8f9fd7e8a42a5bde269684475b523f59261819c6e3a72407a773",
-      "status": "unavailable",
+      "status": "unknown",
       "evidence_state": "integrated-partial",
       "evidence": [
-        "native-media-source",
+        "strict-media-public",
         "matrix-assessment"
       ],
-      "constraints": "Immutable JSON source and public rejection passed, but strict media result/event/asset/lifecycle contract is absent on assessed e0534816.",
+      "constraints": "The public certified compatible or Azure fixture exercised native JSON controls and binary codec bytes; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-transcription-multipart",
       "frozen_row_sha256": "29411b4837c1fc9a6d18f7ebe8516a4da92b9c08ec56a9bd9c372d14b4162b7c",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-media-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised audio source and timestamp result; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
@@ -670,29 +901,30 @@
       "evidence": [
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "No strict or legacy /v1/audio/translations endpoint is exposed at the assessed revision; transcription evidence cannot qualify a translation request or original-language contract.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-video-durable",
       "frozen_row_sha256": "c460b7ed922be68cd6000269a6b66c9f057ed9eb813bdf2e727bd278cc8b4446",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-video-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised create/get/content/delete, original image reference and encrypted job source; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "anthropic-documents-unary",
       "frozen_row_sha256": "2cc8cac49cdb2eeea066399ed7be80121f5876a3a7254b75d103c1a9c3a66e2a",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "matrix-assessment"
+        "anthropic-document-public"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "Public strict Anthropic Messages v1 fixture preserves the exact inline PDF base64 bytes, text/document order, title and citation flag without OCR or extraction; scripted local provider only.",
       "empirical_quality": "unknown"
     },
     {
@@ -703,40 +935,43 @@
       "evidence": [
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The frozen direct OpenAI profile/client VAD, interruption and tool-timing combination has no complete strict public proof at this revision; Gemini Live and Azure realtime scopes are separate.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-batch-durable",
       "frozen_row_sha256": "181119f7f020b60c9f40385676a80b3a77f345ba5588b0509a9dc6ed4f8a1222",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-batch-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised partial output/error files, cancellation and expiry; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-files-durable",
       "frozen_row_sha256": "9879f192ab6f2fb5250295e9ac07e78ca43b085912b97a66d014ca5874f0310e",
-      "status": "unavailable",
-      "evidence_state": "not-executed",
+      "status": "unknown",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-batch-public",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "The public certified compatible or Azure fixture exercised upload/retrieve/content and owner-scoped file identity; the frozen direct OpenAI profile/client combination has not been executed end to end.",
       "empirical_quality": "unknown"
     },
     {
       "id": "openai-generation-durable-streaming",
       "frozen_row_sha256": "59793521dc095e4adb799ccf0383945774d0415ca04ff8f22340de035f749351",
       "status": "unavailable",
-      "evidence_state": "not-executed",
+      "evidence_state": "integrated-partial",
       "evidence": [
+        "strict-background-unary",
         "matrix-assessment"
       ],
-      "constraints": "Complete strict operation/lifecycle contract for this frozen combination is not available on assessed e0534816; legacy controls or source foundations do not qualify it.",
+      "constraints": "Strict Azure Responses background is admitted for unary polling; strict background streaming is refused before dispatch, so this frozen direct OpenAI streaming contract is not available.",
       "empirical_quality": "unknown"
     }
   ],
@@ -1061,12 +1296,12 @@
         "two-turn",
         "encrypted-state"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-interactions-public"
       ],
-      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "constraints": "Direct Gemini Interactions v1beta two-turn public fixture retains an encrypted provider ID and current owner/credential authority.",
       "empirical_quality": "unknown"
     },
     {
@@ -1080,12 +1315,12 @@
         "sse",
         "cursor"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-interactions-public"
       ],
-      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "constraints": "Direct public Interactions SSE preserves native step order and event cursor on an owned resource.",
       "empirical_quality": "unknown"
     },
     {
@@ -1099,12 +1334,13 @@
         "two-turn",
         "cursor"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-sdk-harness",
+        "gemini-sdk-js"
       ],
-      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "constraints": "Pinned @google/genai 2.16.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim.",
       "empirical_quality": "unknown"
     },
     {
@@ -1118,12 +1354,13 @@
         "two-turn",
         "cursor"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-sdk-harness",
+        "gemini-sdk-python"
       ],
-      "constraints": "#229 passed scripted public/SDK tests only at isolated 6d361ba8; no Interactions runner is integrated at assessed e0534816.",
+      "constraints": "Pinned google-genai 2.22.0 over trusted local TLS: two turns, native steps, streaming and cursor retrieval; no live-model quality claim.",
       "empirical_quality": "unknown"
     },
     {
@@ -1140,12 +1377,12 @@
         "vad",
         "interruptions"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-live-public"
       ],
-      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "constraints": "Direct public Gemini Live v1beta WebSocket fixture preserves ordered audio/video, VAD activity, tool timing, interruption and turn boundary.",
       "empirical_quality": "unknown"
     },
     {
@@ -1157,17 +1394,17 @@
       "client": "google-genai-js@2.16.0",
       "features": [
         "audio",
-        "video",
-        "tool-timing",
-        "vad",
-        "interruptions"
+        "activity-start",
+        "interruptions",
+        "turn-completion"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-sdk-harness",
+        "gemini-sdk-js"
       ],
-      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "constraints": "Pinned @google/genai 2.16.0 over trusted local TLS exercises audio, activity start, interruption and turn completion; video/tool timing are public raw-WebSocket evidence only.",
       "empirical_quality": "unknown"
     },
     {
@@ -1179,17 +1416,17 @@
       "client": "google-genai-python@2.22.0",
       "features": [
         "audio",
-        "video",
-        "tool-timing",
-        "vad",
-        "interruptions"
+        "activity-start",
+        "interruptions",
+        "turn-completion"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "native",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-sdk-harness",
+        "gemini-sdk-python"
       ],
-      "constraints": "#229 passed scripted public/SDK Live tests only at isolated 6d361ba8; no Live runner is integrated at assessed e0534816.",
+      "constraints": "Pinned google-genai 2.22.0 over trusted local TLS exercises audio, activity start, interruption and turn completion; video/tool timing are public raw-WebSocket evidence only.",
       "empirical_quality": "unknown"
     },
     {
@@ -1202,19 +1439,19 @@
       "features": [
         "session-resumption-handle"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "incompatible",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "gemini-isolated-receipt"
+        "gemini-live-resumption-refusal"
       ],
-      "constraints": "Isolated #229 explicitly refuses nonempty native session-resumption handles before provider dispatch; current assessed revision has no Live runner.",
+      "constraints": "A valid public Live WebSocket carrying a nonempty unowned sessionResumption.handle closes before provider dispatch; no session-owned resumption mapping is implemented. Empty setup settings remain admitted.",
       "empirical_quality": "unknown"
     },
     {
       "id": "negotiated-openai-to-anthropic-openai-js-7-4-0",
       "operation": "generation",
       "profile": "anthropic-messages",
-      "dialect": "openai-responses",
+      "dialect": "openai-chat",
       "mode": "streaming",
       "client": "openai-js@7.4.0",
       "features": [
@@ -1222,19 +1459,20 @@
         "tools",
         "encrypted-continuation"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "qualified",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "continuation-isolated-receipt"
+        "negotiated-sdk-js-public",
+        "negotiated-sdk-js-script"
       ],
-      "constraints": "#214 passed negotiated public SDK continuation only in isolated d9c3d729; not integrated at assessed e0534816.",
+      "constraints": "Pinned official OpenAI JavaScript Chat client completes two streamed reasoning/tool turns through the negotiated Anthropic Messages target with encrypted continuation, exact second provider request and pre-dispatch unsupported-carrier refusal.",
       "empirical_quality": "unknown"
     },
     {
       "id": "negotiated-openai-to-anthropic-openai-python-3-8-0",
       "operation": "generation",
       "profile": "anthropic-messages",
-      "dialect": "openai-responses",
+      "dialect": "openai-chat",
       "mode": "streaming",
       "client": "openai-python@3.8.0",
       "features": [
@@ -1242,12 +1480,13 @@
         "tools",
         "encrypted-continuation"
       ],
-      "status": "unavailable",
-      "evidence_state": "isolated-executed",
+      "status": "qualified",
+      "evidence_state": "integrated-executed",
       "evidence": [
-        "continuation-isolated-receipt"
+        "negotiated-sdk-python-public",
+        "negotiated-sdk-python-script"
       ],
-      "constraints": "#214 passed negotiated public SDK continuation only in isolated d9c3d729; not integrated at assessed e0534816.",
+      "constraints": "Pinned official OpenAI Python Chat client completes two streamed reasoning/tool turns through the negotiated Anthropic Messages target with encrypted continuation, exact second provider request and pre-dispatch unsupported-carrier refusal.",
       "empirical_quality": "unknown"
     },
     {
@@ -1267,6 +1506,369 @@
         "strict-reasoning-refusal"
       ],
       "constraints": "Only the OpenAI Chat reasoning_effort high field against Anthropic Messages is classified incompatible here; the public strict test checks reasoning_budget and zero additional provider dispatch. Plain text is a separate qualified subset.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-image-generation-unary-raw-http",
+      "operation": "image_generation",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/image_generation",
+      "mode": "unary",
+      "client": "raw-http",
+      "features": [
+        "source-json",
+        "native-result",
+        "model-default"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-image-generation-streaming-raw-http",
+      "operation": "image_generation",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/image_generation",
+      "mode": "streaming",
+      "client": "raw-http",
+      "features": [
+        "sse-event-order",
+        "native-number",
+        "terminal"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-image-edit-multipart-raw-http",
+      "operation": "image_edit",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/image_edit",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "ordered-images",
+        "mask",
+        "original-bytes"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-image-variation-multipart-raw-http",
+      "operation": "image_variation",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/image_variation",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "original-image",
+        "filename",
+        "ordered-parts"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-speech-binary-raw-http",
+      "operation": "speech",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/speech",
+      "mode": "binary",
+      "client": "raw-http",
+      "features": [
+        "native-controls",
+        "binary-codec-bytes"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-transcription-multipart-raw-http",
+      "operation": "transcription",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/transcription",
+      "mode": "multipart",
+      "client": "raw-http",
+      "features": [
+        "original-audio",
+        "native-timestamps"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-media-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture through public strict route; native source/result scoped to this operation only.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-video-durable-raw-http",
+      "operation": "video_create",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/video_create",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "create",
+        "retrieve",
+        "content",
+        "delete",
+        "expiry",
+        "encrypted-source"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-video-public"
+      ],
+      "constraints": "Certified compatible-chat revision 1 local fixture; one accepted create, exact original image reference and native metadata, owner-scoped encrypted job source, video/thumbnail bytes, delete and expiry.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-video-durable-openai-js-7-4-0",
+      "operation": "video_create",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/video_create",
+      "mode": "durable",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "create",
+        "retrieve",
+        "video-content",
+        "thumbnail-content",
+        "delete",
+        "reference-bytes"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-video-sdk-harness",
+        "strict-video-sdk-js"
+      ],
+      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads and exact uploaded reference/model. Provider-wide list and direct OpenAI hosting are not qualified.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "compatible-video-durable-openai-python-3-8-0",
+      "operation": "video_create",
+      "profile": "compatible-chat",
+      "dialect": "direct-compatible/video_create",
+      "mode": "durable",
+      "client": "openai-python@3.8.0",
+      "features": [
+        "create",
+        "retrieve",
+        "video-content",
+        "thumbnail-content",
+        "delete",
+        "reference-bytes"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-video-sdk-harness",
+        "strict-video-sdk-python"
+      ],
+      "constraints": "Official pinned OpenAI client through the certified compatible-chat local fixture; one provider create/get/delete, two content reads and exact uploaded reference/model. Provider-wide list and direct OpenAI hosting are not qualified.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-batch-durable-raw-http",
+      "operation": "batch",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-batch",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "item-identity",
+        "partial-output-error",
+        "cancel",
+        "expiry"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-public"
+      ],
+      "constraints": "Versioned Azure legacy-chat local fixture; certified embeddings items, immutable source/result, separate exact output/error JSONL, cancellation, owner/credential authority and expiry.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-batch-durable-openai-js-7-4-0",
+      "operation": "batch",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-batch",
+      "mode": "durable",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "file-upload",
+        "batch-create",
+        "cancel",
+        "retrieve",
+        "partial-output-error"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-sdk-harness",
+        "strict-batch-sdk-js"
+      ],
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation and exact distinct output/error file content.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-batch-durable-openai-python-3-8-0",
+      "operation": "batch",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-batch",
+      "mode": "durable",
+      "client": "openai-python@3.8.0",
+      "features": [
+        "file-upload",
+        "batch-create",
+        "cancel",
+        "retrieve",
+        "partial-output-error"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-sdk-harness",
+        "strict-batch-sdk-python"
+      ],
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; exactly one provider batch creation and exact distinct output/error file content.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-files-durable-raw-http",
+      "operation": "files",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-files",
+      "mode": "durable",
+      "client": "raw-http",
+      "features": [
+        "upload",
+        "retrieve",
+        "content",
+        "owner-scoped-identity"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-public"
+      ],
+      "constraints": "Versioned Azure legacy-chat local fixture; encrypted strict_file resource, exact input/output/error file bytes and owner authority. Delete is outside this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-files-durable-openai-js-7-4-0",
+      "operation": "files",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-files",
+      "mode": "durable",
+      "client": "openai-js@7.4.0",
+      "features": [
+        "upload",
+        "output-content",
+        "error-content",
+        "owner-scoped-identity"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-sdk-harness",
+        "strict-batch-sdk-js"
+      ],
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content. Delete is outside this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-files-durable-openai-python-3-8-0",
+      "operation": "files",
+      "profile": "azure-legacy-chat",
+      "dialect": "openai-files",
+      "mode": "durable",
+      "client": "openai-python@3.8.0",
+      "features": [
+        "upload",
+        "output-content",
+        "error-content",
+        "owner-scoped-identity"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-batch-sdk-harness",
+        "strict-batch-sdk-python"
+      ],
+      "constraints": "Official pinned OpenAI client through the versioned Azure local fixture; upload and exact separate partial output/error file content. Delete is outside this row.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "azure-openai-responses-background-unary-raw-http",
+      "operation": "generation",
+      "profile": "azure-legacy-responses",
+      "dialect": "openai-responses",
+      "mode": "durable-unary",
+      "client": "raw-http",
+      "features": [
+        "accepted-background",
+        "poll",
+        "one-terminal-usage"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "strict-background-unary"
+      ],
+      "constraints": "Versioned Azure legacy-responses local fixture; strict unary background creates one encrypted accepted response and reconciles terminal usage once. Streaming background is refused.",
+      "empirical_quality": "unknown"
+    },
+    {
+      "id": "gemini-interactions-background-stream-raw-http",
+      "operation": "generation",
+      "profile": "gemini-interactions",
+      "dialect": "gemini-interactions",
+      "mode": "durable-streaming",
+      "client": "raw-http",
+      "features": [
+        "accepted-post",
+        "sse-get",
+        "reader-loss",
+        "cursor-resume",
+        "same-resource"
+      ],
+      "status": "native",
+      "evidence_state": "integrated-executed",
+      "evidence": [
+        "gemini-background-stream"
+      ],
+      "constraints": "Direct Gemini Interactions local fixture; accepted background POST, fresh gateway SSE GET, early reader close and another fresh gateway cursor retrieval use one encrypted owned resource and one provider POST. Process crash is not claimed.",
       "empirical_quality": "unknown"
     }
   ]

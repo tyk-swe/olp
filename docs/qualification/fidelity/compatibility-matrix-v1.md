@@ -1,122 +1,120 @@
 # Compatibility and evidence matrix, version 1
 
 The [machine-readable matrix](compatibility-matrix-v1.json) assesses source
-`e0534816efd4f6f2f45c3a462a78dc1d297a4e91` on 2026-09-22. It maps **every
-one of the 47 unchanged frozen inventory rows exactly once** and keeps 27 later
-operation/profile/client combinations in a separate additive list. It does not
-rewrite `tests/fixtures/fidelity/v1/inventory.json`, whose `unqualified` value
-remains the original denominator rather than a release result. The historical
-`tests/fixtures/reference-inventory.json` and `tests/release-behaviors.json`
-retain their independent purposes.
+`44c88077888cc1274dd3d3687a7dca48f084ac91` on 2026-09-23. It maps
+**all 47 original inventory rows exactly once**, using the frozen whole-file
+and individual-row SHA-256 values, and records 44 later operation/profile/mode/
+client combinations separately. The frozen
+`tests/fixtures/fidelity/v1/inventory.json` remains unchanged, including its
+historical `unqualified` labels; those are a fixed denominator, not a release
+result. The 18-fixture `tests/fixtures/reference-inventory.json` and
+`tests/release-behaviors.json` retain their independent purposes.
 
-The assessed source has six frozen `native`, zero frozen `qualified`, fourteen
-frozen `unavailable`, and twenty-seven frozen `unknown` rows. The 27 additive
-rows have thirteen `native`, two `qualified`, one `incompatible`, ten
-`unavailable`, and one `unknown` status. These are **scoped deterministic
-contract statuses**, not a
-provider-wide badge or a model-quality comparison. The original 47 never leave
-the denominator because an alternate TEI or Voyage profile was added.
+| Assessed rows | Native | Qualified translation | Incompatible before dispatch | Unavailable | Unknown |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Frozen 47 | 7 | 0 | 0 | 5 | 35 |
+| Additive 44 | 37 | 4 | 2 | 0 | 1 |
+| All 91 | 44 | 4 | 2 | 5 | 36 |
+
+These are **scoped deterministic contract statuses**. The 48 positive rows
+are the admitted/completed combinations actually exercised at their named
+fixture, profile revision and client boundary. Two rows record executed
+pre-dispatch incompatibility with zero provider work. Forty-one remain
+unqualified: five unavailable and 36 unknown. Neither a successful fixture
+nor a connectivity probe establishes provider-model intelligence parity, and
+no alternate profile removes a difficult frozen row from the denominator.
+All 91 empirical-quality fields remain `unknown` under the
+[preregistered quality plan](quality-plan.md); no approved paid live trials
+were run.
 
 `native` means the listed direct native behavior was exercised within the
-row's stated fixture/profile/client constraints. It does not imply a translated
-client carrier, live serving stability or intelligence parity. `qualified`
-means a named cross-dialect mapping's supported subset was exercised through
-the public strict path; other fields remain incompatible or unknown. An
-`incompatible` row requires an executed pre-dispatch refusal with zero provider
-work for the exact declared class. `unavailable` means the complete row
-contract is not exposed at the assessed revision, even if a legacy operation,
-source foundation, or isolated branch implements some of it. `unknown` means
-the evidence cannot justify one of the other statuses for the full declared
-feature combination. No row silently changes status when another revision is
+row's explicit constraints. It does not imply a translated client carrier,
+live serving stability or provider-wide compatibility. `qualified` means the
+named cross-dialect mapping's supported subset completed through the public
+strict route. `incompatible` requires an executed pre-dispatch refusal with
+zero provider work for that exact class. `unavailable` means the complete row
+contract is not exposed; `unknown` means existing evidence does not justify a
+stronger classification for the full feature combination. The separately
+stored `evidence_state` distinguishes integrated execution from partial or
+unexecuted assessment; a status never automatically changes when source is
 merged.
 
-The row's `evidence_state` is independent of its contract status:
+The [validator](../../../scripts/compatibility-matrix.mjs) checks all frozen
+IDs and byte hashes, additive tuple uniqueness, named test symbols, SHA-pinned
+source and execution receipts, execution state, and zero-dispatch evidence for
+incompatibilities. Its [mutation tests](../../../scripts/compatibility-matrix.test.mjs)
+exercise missing/renamed evidence, frozen-row changes and unsupported status
+promotion. A passing validator verifies ledger consistency, not the runtime
+behavior itself. The [row execution receipt](row-evidence-v1.md) gives the
+exact combined-tree public and official SDK runs. Its run revisions and
+source/receipt hashes are repeated in machine-readable evidence entries so a
+later edit cannot silently inherit these claims.
 
-| State | Meaning at assessed revision |
-| --- | --- |
-| `integrated-executed` | Named test source and passing execution receipt are integrated; the receipt pins the revision where it ran. |
-| `integrated-partial` | An integrated test exercised a narrower behavior, but the complete row was not qualified. |
-| `isolated-executed` | A pinned implementer branch reports a passing scripted check; its feature is **not integrated** into this snapshot. |
-| `not-executed` | Source inspection or an explicit gap assessment is the evidence; no row-level passing test is claimed. |
+The seven frozen native rows are official Anthropic JavaScript/Python two-tool
+next turns, OpenAI moderation, native OpenAI/Anthropic/Gemini counts, and the
+public strict Anthropic inline-PDF document block. The document fixture keeps
+the original base64 bytes, text/document ordering, title and citation setting
+without OCR. The two official Anthropic tool clients run the historical
+direct-native route; they do not prove translated recovery. The 20 raw
+generation/profile rows remain `unknown` because the public cloud fixture
+checks profile dispatch and transport while the frozen conjunction also names
+ordered content, tools, reasoning and native extensions. The direct OpenAI and
+Voyage embedding frozen rows remain `unknown`: individual shape/storage and
+pinned SDK examples passed, but the entire feature conjunction in those exact
+rows has not been demonstrated. Cohere-specific embeddings/rerank remain
+`unavailable`; TEI or Voyage alternatives do not qualify a Cohere dialect.
 
-The source and receipt SHA-256 values in test evidence are verified against
-the assessed Git revision, so later source edits cannot silently change this
-historical claim. The assessed commit must be available locally; a shallow
-checkout without it fails closed. These hashes are part of the claim.
-The [validator](../../../scripts/compatibility-matrix.mjs) rejects a missing,
-duplicate, altered, or newly appended frozen row; a changed frozen inventory
-digest; duplicate additive tuples; missing/renamed test symbols or files;
-changed test source or receipt bytes; and native/qualified/incompatible claims
-without matching executed evidence. `node --test
-scripts/compatibility-matrix.test.mjs` exercises these failures. A passing
-validator confirms ledger consistency, **not** runtime behavior by itself.
+Strict image generation, edit, variation, speech, transcription and video
+positives use a **certified compatible-chat** local fixture. The video public
+test preserves original multipart image-reference bytes, native numeric
+metadata, encrypted owner-scoped job source, result/content/delete identity
+and expiry. The pinned OpenAI JavaScript 7.4.0 and Python 3.8.0 clients each
+create, retrieve, download exact video and thumbnail bytes, and delete through
+that public strict route. They make one provider create each. The frozen media
+and video rows instead name the direct OpenAI profile, so they remain
+`unknown` with integrated **partial** evidence; these compatible-hosting
+positives appear in additive rows. Strict audio translation has no exposed
+endpoint and remains `unavailable`. Original OpenAI realtime and streaming
+background combinations remain `unavailable` at this assessment; Gemini Live
+and Azure unary background are distinct contracts.
 
-The six frozen native rows are the pinned JavaScript/Python Anthropic two-tool
-next-turn fixture and OpenAI moderation plus OpenAI, Anthropic and Gemini
-native count fixtures. The Anthropic fixture preserves thinking/signature,
-parallel call IDs, block order and the SDK-generated second request, but it
-uses the historical direct native route and does not prove translated or crash
-recovery. The count/moderation fixtures use the management-provisioned strict
-route, a scripted provider, exact result and one shared Attempt. Frozen OpenAI
-and Voyage embedding rows remain unknown: individual float/base64/packed and
-SDK examples passed, but the full storage, dimensions, task and ordered-input
-feature conjunction has not been demonstrated through that exact public row.
-The frozen Cohere-specific embedding and rerank dialects remain unavailable;
-Voyage/TEI/compatible alternatives do not qualify a Cohere row. Media, durable,
-document and duplex rows are unavailable as *complete strict contracts* at
-this revision; their legacy controls and media source/asset work remain useful
-partial evidence.
+The Azure OpenAI additive rows cover strict file upload/retrieval/content,
+batch item identity, exact separate partial output/error JSONL, cancellation,
+expiry, and official pinned OpenAI JavaScript/Python upload-to-result journeys.
+The file rows deliberately omit deletion; the direct OpenAI frozen file/batch
+rows remain `unknown`. A separate Azure Responses row admits **unary**
+background accepted work and one terminal usage record. Strict streaming
+background remains refused, so that frozen streaming row stays unavailable.
 
-The two additive qualified rows are only OpenAI **float** embeddings to Voyage
-float and compatible rerank to Voyage rerank, as proven by the public fixture in
-[unary-operations.md](unary-operations.md). The separately listed TEI,
-Gemini/Vertex/Bedrock unary native paths are scoped to their scripted fixtures.
-Voyage rerank has a successful mapped target request, but no complete native
-client round-trip in this snapshot, so its additive native-client row remains
-`unknown`. A separate OpenAI Chat reasoning-effort request against Anthropic
-Messages is `incompatible`: the public strict test observes a precise
-`reasoning_budget` refusal and zero additional provider dispatch. That narrow
-negative does not classify the qualified plain-text subset as incompatible.
+The direct Gemini Interactions additive rows cover public two-turn encrypted
+state, SSE native steps and cursor retrieval; official pinned JavaScript and
+Python clients passed the streaming next-turn path over trusted local TLS. The
+separate background row reopens the **same** encrypted accepted resource on
+fresh gateway instances, closes an SSE reader early and resumes its native
+cursor without another provider POST. This is reader-loss recovery, not a
+process-crash or provider-stop claim. Direct Gemini Live raw WebSocket covers
+native audio/video, activity/VAD, tool ordering, interruption and turn
+completion. The pinned SDK rows are narrower: audio, activity start,
+interruption and turn completion. An unowned nonempty Live resumption handle
+is the second explicit `incompatible` row; the public WebSocket test observed
+zero provider dispatch. Ordinary first Live sessions and empty resumption
+settings are separate native positives.
 
-The #214 isolated continuation handoff at `d9c3d729` reports real official
-SDK negotiated two-turn tests, encrypted
-ready/replay and fault coverage; that source is absent from assessed
-`e0534816`, so the frozen OpenAI Responses SDK row and two additive translated
-client rows remain `unknown` or `unavailable`. The #229 isolated Gemini
-Interactions/Live handoff at `6d361ba8` reports public and pinned SDK HTTP/SSE
-and WebSocket tests, including native audio/video, tools, cursor and ownership.
-Its eight additive rows remain `unavailable` in this snapshot because those
-profiles were not yet merged. The isolated branch explicitly refuses a Live
-session-resumption handle; even after the branch merges, that handle must not
-inherit an ordinary Live-session success claim. These handoffs establish
-isolated execution only; the matrix's portable record is this paragraph and
-the pinned branch revisions, not an integrated test or a production provider
-observation.
+The two negotiated OpenAI Chat-to-Anthropic rows are `qualified` only
+for their pinned official JavaScript/Python clients and the exact streamed
+reasoning/two-tool/encrypted-continuation contract. Each sends the exact
+second native request, while unsupported carrier/controls fail before
+dispatch. The other two qualified rows are OpenAI float embeddings to Voyage
+float and compatible rerank to Voyage rerank. A plain-text OpenAI Chat to
+Anthropic subset does not admit an OpenAI `reasoning_effort` budget: its
+separate `incompatible` row passed the public zero-dispatch refusal. Native
+Voyage rerank remains `unknown` without a complete direct-native client
+round trip.
 
-## Final #218 refresh procedure
-
-After #214, #229 and #216 are integrated, assess the **merged PR revision**
-again. Keep the 47 frozen row IDs and hashes unchanged. For each row, compare
-its full feature set with executed public service, fault, official SDK and
-packaged/Vite browser results. Update `assessed_revision`, constraints,
-status, `evidence_state`, test-source hash, receipt hash and exact run revision
-only when the combined-tree result warrants it. Add new versioned rows for any
-new operation/profile/mode/client combinations; never remove difficult or
-rejected frozen rows. Convert isolated receipts to integrated evidence only
-after the source and final tests exist on the merged PR and actually run.
-Publish the admitted/completed/refused/incomplete/ambiguous/unknown counts and
-the frozen original, barrier, lifecycle and media performance comparisons
-separately. A failing frozen budget stays failed until a same-condition rerun
-passes without changing the denominator or threshold. The current original
-slow-relay p99 inter-event-gap miss and the two failed barrier candidate
-captures remain visible in their versioned artifacts. Final G1/G7 also need
-the paired no-inference migration shadow, mixed-version restore, generated
-contracts, full service/SDK/browser/CI runs and mandatory review; this ledger
-alone does not close those gates.
-
-Every row's `empirical_quality` is `unknown`. The preregistered
-[quality study](quality-plan.md) has zero approved live trials. Scripted local
-providers prove selected protocol behavior, not equal intelligence or live
-latency. A future paid study requires its separately approved serving-identity
-and cost/privacy scope and must add new versioned evidence without changing
-this snapshot's results.
+The [gate status receipt](qualification-status-v1.md) separates ledger counts
+from actual runtime violations, accepted-unknown outcomes, incomplete work,
+performance and quality evidence. In particular, the original frozen
+slow-stream relay budget, encrypted continuation barrier, and native
+lifecycle/media stress comparisons are independent of this matrix. No
+historical failed capture or frozen budget was rewritten to make these rows
+positive.

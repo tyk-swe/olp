@@ -66,6 +66,18 @@ function verifyEvidence(id, item, readArtifact, assessedRevision) {
   if (item.kind === 'test' && (item.integration !== 'integrated' || item.execution !== 'passed' ||
     !/^[a-f0-9]{40}$/.test(item.run_revision ?? '')))
     fail('Test evidence must identify an executed integrated check: ' + id);
+  if (item.kind === 'test') {
+    const sourcePath = item.source.split('#')[0];
+    const atRun = artifact(sourcePath, readArtifact, item.run_revision);
+    if (atRun == null || sha256(atRun) !== item.source_sha256)
+      fail('Run revision does not match test source: ' + id);
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', item.run_revision, assessedRevision],
+        { stdio: 'ignore' });
+    } catch {
+      fail('Run revision is not in assessed history: ' + id);
+    }
+  }
   if (item.kind !== 'test' && (item.source_sha256 || item.receipt_sha256))
     fail('Only tests pin test/receipt hashes: ' + id);
 }

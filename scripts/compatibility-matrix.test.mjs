@@ -11,9 +11,9 @@ const validate = (value, readArtifact) => validateCompatibilityMatrix(inventory,
 test('all 47 frozen rows and additive operation/client rows have scoped evidence', () => {
   const result = validate(matrix);
   assert.equal(result.frozen, 47);
-  assert.equal(result.additive, 27);
+  assert.equal(result.additive, 44);
   assert.deepEqual(result.statuses, {
-    native: 19, qualified: 2, incompatible: 1, unavailable: 24, unknown: 28
+    native: 44, qualified: 4, incompatible: 2, unavailable: 5, unknown: 36
   });
   assert.ok(matrix.rows.every((row) => row.empirical_quality === 'unknown'));
   assert.ok(matrix.additions.every((row) => row.empirical_quality === 'unknown'));
@@ -75,6 +75,10 @@ test('missing, renamed or altered execution evidence fails validation', () => {
   const alteredReceipt = copy();
   alteredReceipt.evidence['native-count-classification'].receipt_sha256 = '0'.repeat(64);
   assert.throws(() => validate(alteredReceipt), /Stale execution receipt/);
+  const staleRun = copy();
+  staleRun.evidence['strict-profile-control'].run_revision =
+    '79168e7083ede1290ac92451cab4283dce213c72';
+  assert.throws(() => validate(staleRun), /Run revision does not match test source/);
   const missingArtifact = copy();
   const readArtifact = (path, revision) => path === 'docs/qualification/fidelity/compatibility-matrix-v1.md'
     ? null : readCompatibilityArtifact(path, revision);
@@ -88,12 +92,15 @@ test('positive and incompatibility statuses require integrated executed proof', 
   const promoted = copy();
   promoted.rows[21].status = 'qualified';
   assert.throws(() => validate(promoted), /Unsupported positive qualification/);
-  const isolated = copy();
-  const row = isolated.additions.find((item) => item.id.startsWith('gemini-interactions-'));
+  const partial = copy();
+  const row = partial.additions.find((item) => item.id === 'voyage-rerank-native');
   row.status = 'native';
-  assert.throws(() => validate(isolated), /Unsupported positive qualification/);
+  assert.throws(() => validate(partial), /Unsupported positive qualification/);
   const incompatible = copy();
   incompatible.rows[0].status = 'incompatible';
   incompatible.rows[0].evidence_state = 'integrated-executed';
   assert.throws(() => validate(incompatible), /Incompatibility needs executed zero-dispatch evidence/);
+  const inventedRefusal = copy();
+  inventedRefusal.evidence['gemini-live-resumption-refusal'].outcome = 'positive';
+  assert.throws(() => validate(inventedRefusal), /Incompatibility needs executed zero-dispatch evidence/);
 });
