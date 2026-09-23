@@ -155,7 +155,14 @@ func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
 	}
 	// Model an unpublished intermediate writer that once put strictness under
 	// an older legacy slug, then apply the new forward migration to that data.
-	_, err := h.Pool.Exec(t.Context(), `DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
+	_, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.media_jobs DROP CONSTRAINT media_jobs_strict_source;
+	    ALTER TABLE olp_go.media_jobs DROP COLUMN native_source_id, DROP COLUMN strict_contract;
+	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_media_job_source_bound;
+	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_purpose_check;
+	    ALTER TABLE olp_go.secrets ADD CONSTRAINT secrets_purpose_check
+	        CHECK (purpose IN ('oidc_client', 'oidc_flow', 'mutation_replay',
+	                          'provider_credential', 'notification_secret', 'provider_continuation'));
+	    DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
 	    DROP FUNCTION olp_go.check_runtime_route_contracts();
 	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
 	    DROP FUNCTION olp_go.check_route_revision_contract();

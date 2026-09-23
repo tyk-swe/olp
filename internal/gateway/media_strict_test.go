@@ -273,7 +273,8 @@ func TestStrictMediaActivationRejectsUnqualifiedLifecycleAndPolicy(t *testing.T)
 		op     string
 		policy *contentpolicy.Policy
 	}{
-		{media.OpVideoCreate, nil},
+		{media.OpVideoList, nil},
+		{media.OpVideoCreate, &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "input", Phase: contentpolicy.PhaseInput, Pattern: "x", Action: contentpolicy.ActionBlock}}}},
 		{media.OpImageEdit, &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "input", Phase: contentpolicy.PhaseInput, Pattern: "x", Action: contentpolicy.ActionBlock}}}},
 		{media.OpSpeech, &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "output", Phase: contentpolicy.PhaseOutput, Pattern: "x", Action: contentpolicy.ActionBlock}}}},
 	} {

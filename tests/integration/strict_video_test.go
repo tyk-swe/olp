@@ -85,7 +85,7 @@ func newStrictVideoUpstream(t *testing.T) *strictVideoUpstream {
 				w.Header().Set("Content-Type", "image/jpeg")
 				w.Write([]byte{0xff, 0xd8, 0, 1, 0xff, 0xd9})
 			} else {
-				w.Header().Set("Content-Type", "video/mp4")
+				w.Header().Set("Content-Type", `video/mp4; codecs="avc1.42E01E"`)
 				w.Write([]byte{0, 0, 0, 8, 'm', 'o', 'o', 'v'})
 			}
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/videos/upstream-video-1":
@@ -266,7 +266,7 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 	for _, content := range []struct {
 		path, mediaType string
 		body            []byte
-	}{{"", "video/mp4", []byte{0, 0, 0, 8, 'm', 'o', 'o', 'v'}}, {"?variant=thumbnail", "image/jpeg", []byte{0xff, 0xd8, 0, 1, 0xff, 0xd9}}} {
+	}{{"", `video/mp4; codecs="avc1.42E01E"`, []byte{0, 0, 0, 8, 'm', 'o', 'o', 'v'}}, {"?variant=thumbnail", "image/jpeg", []byte{0xff, 0xd8, 0, 1, 0xff, 0xd9}}} {
 		status, raw, header := h.gatewayRaw("GET", "/v1/videos/"+localID+"/content"+content.path, key, nil, nil)
 		if status != 200 || header.Get("Content-Type") != content.mediaType || !bytes.Equal(raw, content.body) {
 			t.Fatalf("native content=%d %s %x", status, header.Get("Content-Type"), raw)

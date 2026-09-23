@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptrace"
@@ -333,6 +334,14 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	case ResponseBinary:
 		contentType := binaryContentType(resp, "audio/")
+		if call.Strict {
+			original := resp.Header.Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(original)
+			if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "audio/") {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "native audio codec metadata is invalid"}
+			}
+			contentType = original
+		}
 		artifact, failure := t.stageResponse(ctx, resp, contentType, request)
 		if failure != nil {
 			return nil, stageFailure(failure)
@@ -342,7 +351,15 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	case ResponseVideoContent:
 		base := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
-		if !strings.HasPrefix(base, "video/") && !strings.HasPrefix(base, "image/") {
+		if call.Strict {
+			original := resp.Header.Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(original)
+			if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "video/") && !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "native video codec metadata is invalid"}
+			}
+			base = original
+		}
+		if !strings.HasPrefix(strings.ToLower(base), "video/") && !strings.HasPrefix(strings.ToLower(base), "image/") {
 			base = "application/octet-stream"
 		}
 		artifact, failure := t.stageResponse(ctx, resp, base, request)
