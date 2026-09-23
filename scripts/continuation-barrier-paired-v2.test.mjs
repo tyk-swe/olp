@@ -4,9 +4,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import {
-  analyze, assertFreshBuildOutput, attestBuild, committedBaselineLineage, deriveCriteria, schedule, validateBuildEvidence, validateInventory, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria, verifyPairedBaselineBinding,
+  analyze, assertFreshAttemptOutput, assertFreshBuildOutput, attestBuild, committedBaselineLineage, deriveCriteria, isContinuationProductSource, reserveCaptureJournal, schedule, validateBuildEvidence, validateInventory, validateJournalArtifact, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria, verifyPairedBaselineBinding,
   blocksPerStratum, candidateDependencies, candidateHarness, criteriaPath, primaryMetrics, referencePaths, samples, strata
 } from './continuation-barrier-paired-v2.mjs';
 
@@ -240,10 +240,11 @@ test('paired evidence binds exact committed B bytes and requires a later product
   try {
     mkdirSync(join(repo.root, 'evidence'));
     writeFileSync(join(repo.root, path), '{"schema":"synthetic-b-only"}\n');
+    writeFileSync(join(repo.root, `${path}.journal.jsonl`), '{"event":"reserved"}\n');
     const bCommit = repo.commit('Capture B only');
     assert.throws(() => committedBaselineLineage(path, bCommit, repo.root));
-    mkdirSync(join(repo.root, 'internal'));
-    writeFileSync(join(repo.root, 'internal/hotpath.go'), 'package hotpath\n');
+    mkdirSync(join(repo.root, 'internal/resources'), { recursive: true });
+    writeFileSync(join(repo.root, 'internal/resources/continuation.go'), 'package resources\n');
     const productCommit = repo.commit('Improve product hot path');
     writeFileSync(join(repo.root, 'note.md'), 'C source\n');
     const candidateCommit = repo.commit('Lock C source');
@@ -253,27 +254,81 @@ test('paired evidence binds exact committed B bytes and requires a later product
     assert.equal(binding.b_only_sha256, createHash('sha256').update(readFileSync(join(repo.root, path))).digest('hex'));
     const artifact = { ...binding, candidate_revision: candidateCommit };
     assert.deepEqual(verifyPairedBaselineBinding(artifact, repo.root), { schema: 'synthetic-b-only' });
-    for (const field of ['b_only_sha256', 'b_only_commit', 'product_change_commit']) {
+    for (const field of ['b_only_sha256', 'b_only_journal_sha256', 'b_only_commit', 'product_change_commit']) {
       const changed = { ...artifact, [field]: '0'.repeat(64) };
       assert.throws(() => verifyPairedBaselineBinding(changed, repo.root), field);
     }
     writeFileSync(join(repo.root, path), '{"schema":"tampered"}\n');
     assert.throws(() => verifyPairedBaselineBinding(artifact, repo.root));
     repo.git('checkout', '--', path);
+    writeFileSync(join(repo.root, `${path}.journal.jsonl`), '{"event":"tampered"}\n');
+    assert.throws(() => verifyPairedBaselineBinding(artifact, repo.root));
+    repo.git('checkout', '--', `${path}.journal.jsonl`);
     writeFileSync(join(repo.root, path), '{"schema":"edited-after-capture"}\n');
     const editedCommit = repo.commit('Edit B evidence');
     assert.throws(() => committedBaselineLineage(path, editedCommit, repo.root));
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
   const premature = temporaryLineage();
   try {
-    mkdirSync(join(premature.root, 'internal'));
-    writeFileSync(join(premature.root, 'internal/hotpath.go'), 'package hotpath\n');
+    mkdirSync(join(premature.root, 'internal/resources'), { recursive: true });
+    writeFileSync(join(premature.root, 'internal/resources/continuation.go'), 'package resources\n');
     premature.commit('Product changed before B');
     mkdirSync(join(premature.root, 'evidence'));
     writeFileSync(join(premature.root, path), '{"schema":"synthetic-b-only"}\n');
+    writeFileSync(join(premature.root, `${path}.journal.jsonl`), '{"event":"reserved"}\n');
     premature.commit('Capture B only');
     writeFileSync(join(premature.root, 'note.md'), 'no later product change\n');
     const candidateCommit = premature.commit('Lock C without product change');
     assert.throws(() => committedBaselineLineage(path, candidateCommit, premature.root));
   } finally { rmSync(premature.root, { recursive: true, force: true }); }
+});
+
+test('test-only or unrelated internal commits do not satisfy the post-B product-change gate', () => {
+  assert.equal(isContinuationProductSource('internal/resources/continuation.go'), true);
+  for (const path of ['internal/resources/continuation_test.go', 'internal/gateway/stream_test.go', 'internal/other/feature.go', 'docs/change.go']) assert.equal(isContinuationProductSource(path), false);
+  const repo = temporaryLineage(), path = 'evidence/baseline.json';
+  try {
+    mkdirSync(join(repo.root, 'evidence'));
+    writeFileSync(join(repo.root, path), '{}\n');
+    writeFileSync(join(repo.root, `${path}.journal.jsonl`), '{"event":"reserved"}\n');
+    repo.commit('Capture B only');
+    mkdirSync(join(repo.root, 'internal/resources'), { recursive: true });
+    writeFileSync(join(repo.root, 'internal/resources/continuation_test.go'), 'package resources\n');
+    repo.commit('Add only a test');
+    writeFileSync(join(repo.root, 'note.md'), 'C\n');
+    const candidate = repo.commit('Lock C without implementation change');
+    assert.throws(() => committedBaselineLineage(path, candidate, repo.root));
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('exclusive pre-run reservation survives interruption and complete journal binds every subrun and artifact byte', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'olp-paired-journal-test-'));
+  const interrupted = join(directory, 'interrupted.json');
+  try {
+    const abandoned = reserveCaptureJournal(interrupted, { mode: 'baseline' });
+    abandoned.append({ event: 'run', run: { name: 'partial' } });
+    abandoned.close();
+    assert.throws(() => assertFreshAttemptOutput(interrupted));
+    assert.throws(() => reserveCaptureJournal(interrupted, { mode: 'baseline' }));
+    const completePath = join(directory, 'complete.json');
+    const sha = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+    const reservation = { mode: 'baseline', runner_sha256: 'runner', criteria_sha256: 'criteria', reference_revision: 'reference', candidate_revision: null, reference_executable_sha256: 'executable', candidate_executable_sha256: null };
+    const journal = reserveCaptureJournal(completePath, reservation);
+    const run = { name: 'small/c1/reference', block: 0 }, block = { stratum: 'small/c1', block: 0 };
+    const artifact = {
+      mode: 'baseline', journal_id: journal.id, journal_path: journal.path, journal_reservation_sha256: journal.reservation_sha256,
+      runner_sha256: 'runner', criteria_sha256: 'criteria', reference_overlay_revision: 'reference', candidate_revision: null,
+      builds: { reference: { executable_sha256: 'executable' }, translated: null },
+      runs: [run], blocks: [block], analysis: { passed: true }
+    };
+    journal.append({ event: 'run', run }); journal.append({ event: 'block_complete', block });
+    writeFileSync(completePath, `${JSON.stringify(artifact)}\n`, { flag: 'wx' });
+    journal.append({ event: 'complete', artifact_path: relative(process.cwd(), completePath), artifact_sha256: sha(completePath), runs: 1, blocks: 1, passed: true });
+    journal.close();
+    assert.equal(validateJournalArtifact(artifact, completePath), true);
+    assert.throws(() => validateJournalArtifact({ ...artifact, journal_id: 'changed' }, completePath));
+    assert.throws(() => validateJournalArtifact({ ...artifact, runs: [] }, completePath));
+    writeFileSync(completePath, '{}\n');
+    assert.throws(() => validateJournalArtifact(artifact, completePath));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

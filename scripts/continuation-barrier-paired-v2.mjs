@@ -2,10 +2,10 @@
 // Prospective, additive paired experiment. Frozen v1 evidence and its runner are
 // read-only inputs; this runner never edits them or changes the product oracle.
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { closeSync, existsSync, fsyncSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { arch, cpus, platform, release, totalmem, tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { compare as compareFrozenReference } from './continuation-barrier-benchmark.mjs';
@@ -269,26 +269,32 @@ export function verifyCandidateDependencies(methodRevision, hashes = Object.from
   return true;
 }
 const isAncestor = (older, newer, root = process.cwd()) => older !== newer && spawnSync('git', ['merge-base', '--is-ancestor', older, newer], { cwd: root }).status === 0;
+export const isContinuationProductSource = (path) => /^internal\/(gateway|resources|interaction)\/.+\.go$/.test(path) && !path.endsWith('_test.go');
 export function committedBaselineLineage(path, candidateRevision, root = process.cwd()) {
-  check(!isAbsolute(path) && existsSync(join(root, path)), 'Missing committed B-only artifact');
+  const journalPath = journalPathFor(path);
+  check(!isAbsolute(path) && existsSync(join(root, path)) && existsSync(join(root, journalPath)), 'Missing committed B-only artifact or reserved journal');
   const history = git(['log', '--format=%H', '--', path], root).split('\n').filter(Boolean);
   check(history.length === 1 && /^[a-f0-9]{40,64}$/.test(history[0]), 'B-only artifact was edited after its write-once creation');
   const baselineCommit = history[0];
+  const journalHistory = git(['log', '--format=%H', '--', journalPath], root).split('\n').filter(Boolean);
+  check(journalHistory.length === 1 && journalHistory[0] === baselineCommit, 'B-only reservation journal was not committed with its write-once artifact');
   const sha256 = digest(readFileSync(join(root, path)));
+  const journalSha256 = digest(readFileSync(join(root, journalPath)));
   check(gitBlobHashAt(root, baselineCommit, path) === sha256, 'Working B-only artifact differs from its committed bytes');
+  check(gitBlobHashAt(root, baselineCommit, journalPath) === journalSha256, 'Working B-only journal differs from its committed bytes');
   check(isAncestor(baselineCommit, candidateRevision, root), 'B-only artifact commit is not a strict ancestor of C');
   const intervening = git(['rev-list', '--reverse', '--ancestry-path', `${baselineCommit}..${candidateRevision}`], root).split('\n').filter(Boolean);
   const productChangeCommit = intervening.find((revision) => {
     if (!isAncestor(baselineCommit, revision, root)) return false;
     const changed = git(['diff-tree', '--root', '-m', '--no-commit-id', '--name-only', '-r', revision], root).split('\n');
-    return changed.some((file) => file.startsWith('internal/') && file.endsWith('.go'));
+    return changed.some(isContinuationProductSource);
   });
   check(productChangeCommit && isAncestor(baselineCommit, productChangeCommit, root) && (productChangeCommit === candidateRevision || isAncestor(productChangeCommit, candidateRevision, root)), 'No product-change commit strictly follows committed B-only evidence');
-  return { b_only_path: path, b_only_sha256: sha256, b_only_commit: baselineCommit, product_change_commit: productChangeCommit };
+  return { b_only_path: path, b_only_sha256: sha256, b_only_journal_sha256: journalSha256, b_only_commit: baselineCommit, product_change_commit: productChangeCommit };
 }
 export function verifyPairedBaselineBinding(artifact, root = process.cwd()) {
   const binding = committedBaselineLineage(artifact.b_only_path, artifact.candidate_revision, root);
-  check(artifact.b_only_sha256 === binding.b_only_sha256 && artifact.b_only_commit === binding.b_only_commit && artifact.product_change_commit === binding.product_change_commit, 'Paired artifact is not bound to committed B-only bytes and later product change');
+  check(artifact.b_only_sha256 === binding.b_only_sha256 && artifact.b_only_journal_sha256 === binding.b_only_journal_sha256 && artifact.b_only_commit === binding.b_only_commit && artifact.product_change_commit === binding.product_change_commit, 'Paired artifact is not bound to committed B-only bytes, reservation journal and later product change');
   return JSON.parse(readFileSync(join(root, artifact.b_only_path), 'utf8'));
 }
 
@@ -342,6 +348,60 @@ export function validateBuildEvidence(build, role, revision, expectedToolchain, 
   check(Number.isSafeInteger(build.executable_size_bytes) && build.executable_size_bytes > 0 && executablePattern.test(build.executable_sha256 ?? '') && build.executable_sha256_after === build.executable_sha256, 'Missing, changed or malformed executable SHA-256');
   check(build.toolchain === expectedToolchain && build.go_build_environment === expectedGoBuildEnvironment && Number.isFinite(Date.parse(build.started_at)) && Number.isFinite(Date.parse(build.completed_at)) && Date.parse(build.started_at) <= Date.parse(build.completed_at), 'Benchmark build environment or chronology changed');
   if (existsSync(build.executable_path)) check(fileHash(build.executable_path) === build.executable_sha256 && statSync(build.executable_path).size === build.executable_size_bytes, 'Retained benchmark executable differs from measured SHA-256');
+  return true;
+}
+const journalPathFor = (output) => `${output}.journal.jsonl`;
+const repositoryRelative = (path) => relative(process.cwd(), resolve(path));
+export function assertFreshAttemptOutput(output) {
+  check(!existsSync(output) && !existsSync(`${output}.failed.json`) && !existsSync(journalPathFor(output)), 'Refusing an overwritten or interrupted write-once paired attempt');
+  return true;
+}
+function writeJournalEntry(fd, entry) {
+  const bytes = Buffer.from(`${JSON.stringify(entry)}\n`);
+  for (let offset = 0; offset < bytes.length;) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+  fsyncSync(fd);
+  return digest(bytes);
+}
+export function reserveCaptureJournal(output, reservation) {
+  assertFreshAttemptOutput(output);
+  const path = journalPathFor(output);
+  const fd = openSync(path, 'wx', 0o600);
+  const id = randomUUID();
+  const first = { ...reservation, event: 'reserved', journal_id: id, artifact_path: repositoryRelative(output) };
+  try {
+    const reservationSha256 = writeJournalEntry(fd, first);
+    return { id, path: repositoryRelative(path), reservation_sha256: reservationSha256,
+      append(entry) { writeJournalEntry(fd, { journal_id: id, ...entry }); },
+      close() { closeSync(fd); } };
+  } catch (error) { closeSync(fd); throw error; }
+}
+export function validateJournalArtifact(artifact, artifactPath) {
+  const path = journalPathFor(artifactPath);
+  check(artifact.journal_path === repositoryRelative(path) && existsSync(path) && existsSync(artifactPath), 'Missing reserved paired attempt journal or artifact');
+  const raw = readFileSync(path, 'utf8');
+  check(raw.endsWith('\n'), 'Truncated paired attempt journal');
+  const lines = raw.trimEnd().split('\n');
+  const entries = lines.map((line) => JSON.parse(line));
+  const first = entries[0], last = entries.at(-1);
+  check(first?.event === 'reserved' && first.journal_id === artifact.journal_id && first.artifact_path === repositoryRelative(artifactPath) && digest(`${lines[0]}\n`) === artifact.journal_reservation_sha256, 'Journal reservation does not bind artifact');
+  check(first.mode === artifact.mode && first.runner_sha256 === artifact.runner_sha256 && first.criteria_sha256 === artifact.criteria_sha256 && first.reference_revision === artifact.reference_overlay_revision && first.candidate_revision === artifact.candidate_revision && first.reference_executable_sha256 === artifact.builds?.reference?.executable_sha256 && first.candidate_executable_sha256 === (artifact.builds?.translated?.executable_sha256 ?? null), 'Journal reserved a different method, source or executable');
+  const recordedRuns = entries.filter((entry) => entry.event === 'run').map((entry) => entry.run);
+  const recordedBlocks = entries.filter((entry) => entry.event === 'block_complete').map((entry) => entry.block);
+  check(isDeepStrictEqual(recordedRuns, artifact.runs) && isDeepStrictEqual(recordedBlocks, artifact.blocks), 'Journal lost or changed measured subruns/blocks');
+  let cursor = 1, countedRuns = 0;
+  for (const block of artifact.blocks) {
+    const blockRuns = artifact.runs.filter((run) => run.block === block.block && run.name.startsWith(`${block.stratum}/`));
+    for (const run of blockRuns) {
+      check(entries[cursor]?.event === 'run' && entries[cursor].journal_id === artifact.journal_id && isDeepStrictEqual(entries[cursor].run, run), 'Journal run is missing or out of block order');
+      cursor++; countedRuns++;
+    }
+    check(entries[cursor]?.event === 'block_complete' && entries[cursor].journal_id === artifact.journal_id && isDeepStrictEqual(entries[cursor].block, block), 'Journal block completion is missing or reordered');
+    cursor++;
+  }
+  check(countedRuns === artifact.runs.length && cursor === entries.length - 1, 'Journal has incomplete or extra subrun entries');
+  check(entries.filter((entry) => entry.event === 'reserved').length === 1 && entries.filter((entry) => ['complete', 'failed'].includes(entry.event)).length === 1 && last.event === 'complete' && last.journal_id === artifact.journal_id, 'Interrupted or duplicated paired attempt terminal');
+  check(last.artifact_path === repositoryRelative(artifactPath) && last.artifact_sha256 === fileHash(artifactPath) && last.runs === artifact.runs.length && last.blocks === artifact.blocks.length && last.passed === artifact.analysis?.passed, 'Journal terminal does not bind complete artifact');
+  check(entries.length === 2 + recordedRuns.length + recordedBlocks.length, 'Unexpected paired journal entries');
   return true;
 }
 function launchArm(root, build, role) {
@@ -407,7 +467,7 @@ function assertConditions(bSetup, cSetup) {
 async function capture(mode, output, baselinePath) {
   const prescribedOutput = resolve(`docs/evidence/fidelity-performance/paired-barrier-v2/${mode === 'baseline' ? 'baseline.json' : 'candidate.json'}`);
   check(resolve(output) === prescribedOutput, 'Use the preregistered write-once artifact path');
-  check(!existsSync(output) && !existsSync(`${output}.failed.json`), 'Refusing a second or overwritten paired attempt');
+  assertFreshAttemptOutput(output);
   const criteria = verifyCriteria();
   clean(process.cwd()); tracked(process.cwd(), criteriaPath);
   const bRoot = resolve(process.env.OLP_PAIRED_B_ROOT || '/tmp/olp-worktrees/paired-barrier-reference-v2');
@@ -429,28 +489,40 @@ async function capture(mode, output, baselinePath) {
   const cBinary = join(buildDir, 'translated.test');
   const bBuild = buildBinary(bRoot, bBinary, 'reference');
   const cBuild = mode === 'paired' ? buildBinary(process.cwd(), cBinary, 'translated') : null;
-  const b = launchArm(bRoot, bBuild, 'reference');
-  const c = mode === 'paired' ? launchArm(process.cwd(), cBuild, 'translated') : null;
   const artifact = {
     schema, mode, started_at: new Date().toISOString(), completed_at: null,
     criteria_sha256: fileHash(criteriaPath), runner_sha256: fileHash(runnerPath),
     historical_baseline_sha256: fileHash(frozenReference), historical_budget_sha256: fileHash(frozenBudget),
-    reference_product_revision: anchor, reference_overlay_revision: sourceRevision(bRoot), candidate_revision: c ? sourceRevision(process.cwd()) : null,
+    reference_product_revision: anchor, reference_overlay_revision: sourceRevision(bRoot), candidate_revision: mode === 'paired' ? sourceRevision(process.cwd()) : null,
     method_revision: mode === 'baseline' ? sourceRevision(process.cwd()) : baseline.method_revision,
     b_only_path: baselineBinding?.b_only_path ?? null, b_only_sha256: baselineBinding?.b_only_sha256 ?? null,
+    b_only_journal_sha256: baselineBinding?.b_only_journal_sha256 ?? null,
     b_only_commit: baselineBinding?.b_only_commit ?? null, product_change_commit: baselineBinding?.product_change_commit ?? null,
     builds: { reference: bBuild, translated: cBuild },
-    reference_harness_sha256: fileHash(referenceHarness), candidate_harness_sha256: c ? fileHash(candidateHarness) : null,
+    reference_harness_sha256: fileHash(referenceHarness), candidate_harness_sha256: mode === 'paired' ? fileHash(candidateHarness) : null,
     original_oracle_sha256: fileHash('tests/integration/continuation_barrier_benchmark_test.go'),
     fixture_sha256: Object.fromEntries(corpusPaths.filter((path) => existsSync(path)).map((path) => [path, fileHash(path)])),
     candidate_dependency_sha256: Object.fromEntries(candidateDependencies.map((path) => [path, fileHash(path)])),
-    candidate_workflow_sha256: c ? fileHash('tests/integration/continuation_candidate_benchmark_test.go') : null,
+    candidate_workflow_sha256: mode === 'paired' ? fileHash('tests/integration/continuation_candidate_benchmark_test.go') : null,
     toolchain: toolchain(), go_build_environment: buildEnvironment(), runtime_environment: runtimeEnvironment,
     hardware: hardware(), system_load: { before: load(), after: null }, storage: null, schedule: schedule(criteria),
     blocks: [], runs: [], analysis: null, error: null,
+    journal_id: null, journal_path: null, journal_reservation_sha256: null,
     conditions
   };
+  const journal = reserveCaptureJournal(output, {
+    schema, mode, runner_sha256: artifact.runner_sha256, criteria_sha256: artifact.criteria_sha256,
+    reference_revision: artifact.reference_overlay_revision, candidate_revision: artifact.candidate_revision,
+    reference_executable_sha256: bBuild.executable_sha256, candidate_executable_sha256: cBuild?.executable_sha256 ?? null,
+    reserved_at: new Date().toISOString()
+  });
+  artifact.journal_id = journal.id;
+  artifact.journal_path = journal.path;
+  artifact.journal_reservation_sha256 = journal.reservation_sha256;
+  let b, c;
   try {
+    b = launchArm(bRoot, bBuild, 'reference');
+    c = mode === 'paired' ? launchArm(process.cwd(), cBuild, 'translated') : null;
     const [bSetup, cSetup] = await Promise.all([b.ready(), c ? c.ready() : Promise.resolve(null)]);
     assertConditions(bSetup, cSetup);
     artifact.storage = { reference: bSetup, candidate: cSetup };
@@ -463,28 +535,34 @@ async function capture(mode, output, baselinePath) {
         const run = await processArm.run({ name: `${block.stratum}/${arm}`, block: block.block, position });
         validateRun(run, criteria);
         artifact.runs.push(run);
+        journal.append({ event: 'run', run });
       }
       diagnostic.after = load(); artifact.blocks.push(diagnostic);
+      journal.append({ event: 'block_complete', block: diagnostic });
     }
     artifact.analysis = analyze(artifact.runs, mode, criteria);
   } catch (error) {
     artifact.error = error?.message || String(error);
   } finally {
-    try { await Promise.all([b.close(), ...(c ? [c.close()] : [])]); }
+    try { await Promise.all([...(b ? [b.close()] : []), ...(c ? [c.close()] : [])]); }
     catch (error) { artifact.error ||= error?.message || String(error); }
     try { attestUnchangedBinary(bBuild); if (cBuild) attestUnchangedBinary(cBuild); }
     catch (error) { artifact.error ||= error?.message || String(error); }
     artifact.completed_at = new Date().toISOString(); artifact.system_load.after = load();
     const destination = artifact.error ? `${output}.failed.json` : output;
-    writeFileSync(destination, `${JSON.stringify(artifact, null, 2)}\n`, { flag: 'wx' });
-    if (artifact.error) { b.kill(); c?.kill(); throw new Error(`${artifact.error}; retained ${destination}`); }
+    try {
+      writeFileSync(destination, `${JSON.stringify(artifact, null, 2)}\n`, { flag: 'wx' });
+      journal.append({ event: artifact.error ? 'failed' : 'complete', artifact_path: repositoryRelative(destination), artifact_sha256: fileHash(destination), runs: artifact.runs.length, blocks: artifact.blocks.length, passed: artifact.analysis?.passed ?? false, completed_at: artifact.completed_at });
+    } finally { journal.close(); }
+    if (artifact.error) { b?.kill(); c?.kill(); throw new Error(`${artifact.error}; retained ${destination} and ${journal.path}`); }
     console.log(`${mode}: ${artifact.runs.length} complete subruns, ${artifact.analysis.passed ? 'PASS' : 'INCONCLUSIVE'}; ${destination}`);
     if (!artifact.analysis.passed) process.exitCode = 1;
   }
 }
 
-export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
+export function validateArtifact(artifact, mode, criteria = verifyCriteria(), artifactPath = mode === 'baseline' ? bOnlyPath : 'docs/evidence/fidelity-performance/paired-barrier-v2/candidate.json') {
   check(artifact.schema === schema && artifact.mode === mode && artifact.error === null, 'Incomplete paired artifact');
+  validateJournalArtifact(artifact, artifactPath);
   check(artifact.criteria_sha256 === fileHash(criteriaPath) && artifact.runner_sha256 === fileHash(runnerPath) && artifact.historical_baseline_sha256 === fileHash(frozenReference) && artifact.historical_budget_sha256 === fileHash(frozenBudget), 'Frozen paired method changed');
   check(artifact.reference_product_revision === anchor && artifact.original_oracle_sha256 === readJSON(frozenReference).harness_sha256 && artifact.reference_harness_sha256 === fileHash(referenceHarness), 'Reference product/oracle changed');
   check(artifact.method_revision && gitBlobHash(artifact.method_revision, runnerPath) === artifact.runner_sha256 && gitBlobHash(artifact.method_revision, criteriaPath) === artifact.criteria_sha256, 'Pre-candidate method commit changed');
@@ -506,10 +584,10 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria()) {
     verifyCandidateOracle(artifact.method_revision, { harness: artifact.candidate_harness_sha256, workflow: artifact.candidate_workflow_sha256 });
     check(artifact.b_only_path === bOnlyPath, 'Unknown B-only artifact path');
     const bOnly = verifyPairedBaselineBinding(artifact);
-    const bOnlyResult = validateArtifact(bOnly, 'baseline', criteria);
+    const bOnlyResult = validateArtifact(bOnly, 'baseline', criteria, artifact.b_only_path);
     check(bOnlyResult.passed && bOnly.method_revision === artifact.method_revision && bOnly.reference_overlay_revision === artifact.reference_overlay_revision, 'Committed B-only artifact is inconclusive or from a different method/reference');
   } else {
-    check(artifact.b_only_path === null && artifact.b_only_sha256 === null && artifact.b_only_commit === null && artifact.product_change_commit === null, 'B-only artifact contains future candidate evidence');
+    check(artifact.b_only_path === null && artifact.b_only_sha256 === null && artifact.b_only_journal_sha256 === null && artifact.b_only_commit === null && artifact.product_change_commit === null, 'B-only artifact contains future candidate evidence');
   }
   check(isDeepStrictEqual(artifact.schedule, schedule(criteria)), 'Schedule changed');
   check(artifact.blocks?.length === strata.length * blocksPerStratum && artifact.blocks.every((block, i) => block.stratum === artifact.schedule[i].stratum && block.block === artifact.schedule[i].block && block.orientation === artifact.schedule[i].orientation && block.before && block.after), 'Missing block diagnostics');
@@ -527,7 +605,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     else if (action === 'record-baseline' && path && !extra) await capture('baseline', path);
     else if (action === 'record-paired' && path && extra) await capture('paired', path, extra);
     else if (action === 'compare' && path && !extra) {
-      const result = validateArtifact(readJSON(path), readJSON(path).mode);
+      const result = validateArtifact(readJSON(path), readJSON(path).mode, verifyCriteria(), path);
       console.log(JSON.stringify({ passed: result.passed, failures: result.failures, totals: result.totals }, null, 2));
       if (!result.passed) process.exitCode = 1;
     } else throw new Error('Usage: derive-criteria <new-file> | record-baseline <new-file> | record-paired <new-file> <committed-baseline> | compare <artifact>');

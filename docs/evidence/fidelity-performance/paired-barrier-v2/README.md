@@ -66,13 +66,21 @@ events, 12,288 C fixture actions, 6,144 C authenticated ready-state reads,
 There is zero allowance for missing, rejected, ambiguous or duplicate work.
 
 The record commands require clean, committed method and product checkouts and
-write a new artifact only once. The historical B overlay must be a clean commit
+write a new artifact only once. Before either arm starts, the runner creates
+an exclusive `*.journal.jsonl` reservation at the fixed output path. It
+durably appends each completed subrun and block, then a complete/failed
+terminal bound to the artifact bytes. A crash leaves the partial journal and
+blocks an invisible retry. Offline comparison checks the complete journal
+against every saved subrun and the exact artifact hash. The historical B
+overlay must be a clean commit
 whose only difference from B is the reference measurement file. The B-only
 artifact must itself be committed and pass the old B envelope and stability
 controls before `record-paired` can start C. The paired artifact records the
-exact SHA-256 and creation commit of that write-once B-only file; offline
-comparison re-reads its committed bytes and recalculates its full result. That
-commit must strictly precede a product-code change commit on the path to C.
+exact SHA-256 and shared creation commit of that write-once B-only file and
+journal; offline comparison re-reads their committed bytes and recalculates
+the full result. That commit must strictly precede a non-test Go implementation
+change in `internal/gateway/`, `internal/resources/` or `internal/interaction/`
+on the path to C. The reviewer still checks that it is the affected hot path.
 The candidate is measured once at one locked final source revision. Tests can
 exercise synthetic C values but must not observe C timings before this
 chronology completes.
