@@ -6549,6 +6549,7 @@
     "tests/integration/strict_media_test.go",
     "tests/integration/strict_operations_test.go",
     "tests/integration/strict_plan_inspector_test.go",
+    "tests/integration/strict_realtime_terminal_test.go",
     "tests/integration/strict_realtime_test.go",
     "tests/integration/strict_route_migration_test.go",
     "tests/integration/strict_video_sdk_test.go",
