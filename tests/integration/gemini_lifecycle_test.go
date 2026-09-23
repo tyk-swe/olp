@@ -498,6 +498,20 @@ func TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWor
 	if len(provider.captured()) != before {
 		t.Fatal("malformed Live setup dispatched to provider")
 	}
+	client, upgrade, err = websocket.Dial(ctx, address+"?key="+url.QueryEscape(liveKey), nil)
+	if err != nil {
+		t.Fatalf("Live resumption refusal upgrade: %v %v", upgrade, err)
+	}
+	if err := client.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"setup":{"model":"models/%s","sessionResumption":{"handle":"unowned-native-handle"}}}`, liveRoute))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := client.Read(ctx); err == nil {
+		t.Fatal("unowned Live resumption handle received a successful setup response")
+	}
+	client.Close(websocket.StatusNormalClosure, "")
+	if len(provider.captured()) != before {
+		t.Fatal("unowned Live resumption handle dispatched to provider")
+	}
 	var credentialID string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default`, providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
