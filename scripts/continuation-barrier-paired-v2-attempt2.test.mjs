@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import {
-  analyze, assertFreshAttemptOutput, assertFreshBuildOutput, attestBuild, boundedGoDiagnosticTail, committedBaselineLineage, deriveCriteria, isContinuationProductSource, reserveCaptureJournal, schedule, validateBuildEvidence, validateInventory, validateJournalArtifact, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria, verifyPairedBaselineBinding,
-  attemptId, blocksPerStratum, candidateDependencies, candidateHarness, criteriaPath, goDiagnosticTailBytes, primaryMetrics, referencePaths, samples, strata
+  analyze, assertFreshAttemptOutput, assertFreshBuildOutput, attestBuild, boundedGoDiagnosticTail, committedBaselineLineage, deriveCriteria, isContinuationProductSource, materialInterferenceEvent, newBoundedGoDiagnosticLines, parseHostSnapshot, redactGoDiagnostic, reserveCaptureJournal, schedule, validateBlockHostDiagnostics, validateBuildEvidence, validateHostSnapshot, validateInventory, validateJournalArtifact, validateMaterialInterferenceNotice, validateQuietPreflight, validateRun, verifyCandidateDependencies, verifyCandidateOracle, verifyCriteria, verifyPairedBaselineBinding,
+  attemptId, blocksPerStratum, candidateDependencies, candidateHarness, criteriaPath, goDiagnosticTailBytes, hostGuard, materialityReasons, primaryMetrics, referencePaths, samples, strata
 } from './continuation-barrier-paired-v2-attempt2.mjs';
 
 const criteria = verifyCriteria();
@@ -34,6 +34,15 @@ function fixture(mode = 'paired') {
   return schedule(criteria).flatMap(({ stratum, block, arms }) => arms.flatMap((arm, position) => mode === 'baseline' && arm === 'translated' ? [] : [makeRun(`${stratum}/${arm}`, block, position)]));
 }
 function mutate(run, change) { const copy = structuredClone(run); change(copy); return copy; }
+function syntheticHost(index, load1 = 1, pressure = 2, arms = { reference: null, translated: null }, tickOffset = index) {
+  return parseHostSnapshot(
+    `${load1} 0.50 0.40 1/100 42`,
+    `some avg10=${pressure.toFixed(2)} avg60=1.00 avg300=1.00 total=100\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0`,
+    `cpu  ${100 + tickOffset} 0 ${50 + tickOffset} ${1000 + tickOffset} 0 2 3 0 0 0\ncpu0 1 0 1 1 0 0 0 0 0 0`,
+    new Date(Date.UTC(2026, 8, 23, 0, 0, index * 5)).toISOString(),
+    (1000n + BigInt(index) * 5000000000n).toString(), 1000 + index * 100, arms, 100
+  );
+}
 
 test('criteria are exactly derived from untouched three-run B history and frozen limits', () => {
   assert.deepEqual(criteria, deriveCriteria());
@@ -47,6 +56,47 @@ test('criteria are exactly derived from untouched three-run B history and frozen
     assert.ok(margin > 0);
   }
   assert.ok(candidateHarness.endsWith('_paired_v2_test.go'));
+});
+
+test('quiet preflight and per-block host receipts fail closed without mislabeling owned PostgreSQL CPU', () => {
+  const quiet = Array.from({ length: 13 }, (_, index) => syntheticHost(index));
+  assert.equal(validateQuietPreflight(quiet), true);
+  assert.equal(hostGuard.preflight_samples, 13);
+  assert.equal(hostGuard.preflight_interval_ms, 5000);
+  assert.match(hostGuard.block_rule, /PostgreSQL is an owned measured service/);
+  assert.throws(() => validateQuietPreflight(quiet.slice(0, 12)));
+  const loaded = structuredClone(quiet); loaded[4] = syntheticHost(4, 2);
+  assert.throws(() => validateQuietPreflight(loaded));
+  const pressured = structuredClone(quiet); pressured[4] = syntheticHost(4, 1, 5);
+  assert.throws(() => validateQuietPreflight(pressured));
+  const shortened = structuredClone(quiet); shortened[4].monotonic_ns = quiet[3].monotonic_ns;
+  assert.throws(() => validateQuietPreflight(shortened));
+  const missing = structuredClone(quiet); missing[4].cpu_pressure_raw = '';
+  assert.throws(() => validateQuietPreflight(missing));
+  assert.throws(() => parseHostSnapshot('', '', '', new Date().toISOString(), '1', 0, { reference: null, translated: null }, 100));
+  const before = syntheticHost(0, 1, 2, { reference: 100, translated: null }, 0);
+  const after = syntheticHost(1, 1.2, 3, { reference: 110, translated: null }, 10);
+  assert.equal(validateHostSnapshot(before, 'baseline'), true);
+  assert.equal(validateBlockHostDiagnostics(before, after, 'baseline'), true);
+  assert.throws(() => validateBlockHostDiagnostics(before, { ...after, arm_cpu_ticks: { reference: 99, translated: null } }, 'baseline'));
+  const cBefore = syntheticHost(0, 1, 2, { reference: 100, translated: 200 }, 0);
+  const cAfter = syntheticHost(1, 1.2, 3, { reference: 110, translated: 210 }, 10);
+  assert.equal(validateBlockHostDiagnostics(cBefore, cAfter, 'paired'), true);
+  assert.throws(() => validateBlockHostDiagnostics(cBefore, { ...cAfter, arm_cpu_ticks: { reference: 110, translated: null } }, 'paired'));
+});
+
+test('prospective material interference has a fixed reason and recorded process/host evidence', () => {
+  const notice = { reason: 'unrelated-build', pid: 12345, process: 'rustc', observed_at: new Date().toISOString() };
+  assert.equal(validateMaterialInterferenceNotice(notice), true);
+  const event = materialInterferenceEvent(notice, syntheticHost(0));
+  assert.equal(event.event, 'material_interference');
+  assert.equal(event.rationale, materialityReasons['unrelated-build']);
+  assert.equal(event.process.pid, 12345);
+  assert.ok(event.host.cpu_pressure_raw.includes('some avg10='));
+  assert.throws(() => validateMaterialInterferenceNotice({ ...notice, reason: 'favorable-retry' }));
+  assert.throws(() => validateMaterialInterferenceNotice({ ...notice, pid: 0 }));
+  assert.throws(() => validateMaterialInterferenceNotice({ ...notice, process: 'rustc --token=secret' }));
+  assert.throws(() => materialInterferenceEvent(notice, { ...syntheticHost(0), proc_stat_cpu_raw: '' }));
 });
 
 test('sealed schedule has 32 balanced blocks per stratum and adjacent B-reference/C in both orientations', () => {
@@ -179,10 +229,43 @@ test('criteria mutation cannot reset a frozen margin or erase a comparison', () 
 });
 
 test('failed Go stdout tail retains the terminal cause within a fixed bound and redacts credentials', () => {
-  const tail = boundedGoDiagnosticTail('x'.repeat(goDiagnosticTailBytes), '\n    continuation_barrier_paired_v2_test.go:270: native workflow status 503 olp_private-key vendor-secret-1 postgres://private:secret@localhost/db\n');
+  const diagnostic = [
+    '    continuation_barrier_paired_v2_test.go:270: native workflow status 503',
+    'Authorization: Bearer bearerSecret123',
+    'X-API-Key: apiKeySecret123',
+    'x-goog-api-key: googSecret123',
+    'Cookie: session=cookieSecret123; csrf=csrfSecret123',
+    'Set-Cookie: refresh=setCookieSecret123; HttpOnly',
+    'Authorization=Basic basicSecret123',
+    'Authorization="quotedSecret123" X-API-Key=[bracketSecret123]',
+    'map[Authorization:[Bearer mapSecret123] Cookie:[session=mapCookieSecret123]]',
+    'https://provider.test/v1?key=querySecret123&mode=stream',
+    'postgres://dbuser:dbSecret123@localhost:5432/db',
+    'postgresql://dbuser:dbSecret456@localhost/db',
+    '{"Authorization":"Bearer jsonSecret123","X-API-Key":"jsonKeySecret123","Cookie":"session=jsonCookieSecret123"}',
+    '{\"Cookie\":\"session=escapedCookieSecret123\"}',
+    '    continuation_barrier_paired_v2_test.go:271: body {"code":"authority_unavailable","message":"Key authority is unavailable"}'
+  ].join('\n');
+  const tail = boundedGoDiagnosticTail('x'.repeat(goDiagnosticTailBytes), '\n' + diagnostic + '\n');
   assert.ok(Buffer.byteLength(tail) <= goDiagnosticTailBytes);
   assert.match(tail, /native workflow status 503/);
-  for (const value of ['olp_private-key', 'vendor-secret-1', 'postgres://private:secret']) assert.ok(!tail.includes(value));
+  assert.match(tail, /authority_unavailable/);
+  assert.match(tail, /Key authority is unavailable/);
+  for (const value of ['bearerSecret123', 'apiKeySecret123', 'googSecret123', 'cookieSecret123', 'csrfSecret123', 'setCookieSecret123', 'basicSecret123', 'quotedSecret123', 'bracketSecret123', 'mapSecret123', 'mapCookieSecret123', 'querySecret123', 'dbSecret123', 'dbSecret456', 'jsonSecret123', 'jsonKeySecret123', 'jsonCookieSecret123', 'escapedCookieSecret123']) assert.ok(!tail.includes(value), value);
+  assert.ok(!redactGoDiagnostic('Bearer anotherSecret123 Basic stillAnotherSecret123 olp_private-key vendor-secret-1').includes('anotherSecret123'));
+  const split = newBoundedGoDiagnosticLines();
+  split.push('Authoriz'); split.push('ation: Bearer splitSecret'); split.push('123\nCookie: session=splitCookie');
+  split.push('Secret123\nX-API-Key: splitApi'); split.push('Secret123');
+  split.finish();
+  const snapshot = split.snapshot();
+  assert.ok(Buffer.byteLength(snapshot.tail) <= goDiagnosticTailBytes);
+  for (const value of ['splitSecret123', 'splitCookieSecret123', 'splitApiSecret123']) assert.ok(!snapshot.tail.includes(value), value);
+  const overlong = newBoundedGoDiagnosticLines();
+  overlong.push('Cookie: ' + 's'.repeat(goDiagnosticTailBytes + 1));
+  overlong.push('\n');
+  overlong.finish();
+  assert.equal(overlong.snapshot().truncated, true);
+  assert.match(overlong.snapshot().tail, /redacted-overlong-diagnostic-line/);
 });
 
 test('post-baseline candidate harness or SDK-equivalent oracle edits are refused', () => {
@@ -346,11 +429,16 @@ test('exclusive pre-run reservation survives interruption and complete journal b
     assert.throws(() => reserveCaptureJournal(interrupted, { mode: 'baseline' }));
     const completePath = join(directory, 'complete.json');
     const sha = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-    const reservation = { mode: 'baseline', attempt_id: attemptId, runner_sha256: 'runner', criteria_sha256: 'criteria', reference_revision: 'reference', candidate_revision: null, reference_executable_sha256: 'executable', candidate_executable_sha256: null };
+    const preflight = Array.from({ length: 13 }, (_, index) => syntheticHost(index));
+    const receiptHash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const reservation = { mode: 'baseline', attempt_id: attemptId, runner_sha256: 'runner', criteria_sha256: 'criteria', reference_revision: 'reference', candidate_revision: null, reference_executable_sha256: 'executable', candidate_executable_sha256: null,
+      host_preflight_sha256: receiptHash(preflight), host_guard_sha256: receiptHash(hostGuard), runner_pid: 1234, runner_start_ticks: 5678 };
     const journal = reserveCaptureJournal(completePath, reservation);
     const run = { name: 'small/c1/reference', block: 0 }, block = { stratum: 'small/c1', block: 0 };
     const artifact = {
       mode: 'baseline', attempt_id: attemptId, journal_id: journal.id, journal_path: journal.path, journal_reservation_sha256: journal.reservation_sha256,
+      runner_start_ticks: 5678,
+      host_preflight: preflight, host_guard: hostGuard,
       runner_sha256: 'runner', criteria_sha256: 'criteria', reference_overlay_revision: 'reference', candidate_revision: null,
       builds: { reference: { executable_sha256: 'executable' }, translated: null },
       runs: [run], blocks: [block], analysis: { passed: true }
@@ -362,6 +450,7 @@ test('exclusive pre-run reservation survives interruption and complete journal b
     assert.equal(validateJournalArtifact(artifact, completePath), true);
     assert.throws(() => validateJournalArtifact({ ...artifact, journal_id: 'changed' }, completePath));
     assert.throws(() => validateJournalArtifact({ ...artifact, runs: [] }, completePath));
+    assert.throws(() => validateJournalArtifact({ ...artifact, host_preflight: preflight.slice(0, 12) }, completePath));
     writeFileSync(completePath, '{}\n');
     assert.throws(() => validateJournalArtifact(artifact, completePath));
   } finally { rmSync(directory, { recursive: true, force: true }); }

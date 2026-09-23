@@ -108,6 +108,7 @@ export function deriveCriteria(baseline = readJSON(frozenReference), budgets = r
     schema: 'openllmproxy.dev/continuation-barrier-paired-criteria/v2-attempt2',
     attempt_id: attemptId,
     prior_failed_sha256: fileHash(priorFailedPath), prior_journal_sha256: fileHash(priorJournalPath),
+    host_guard: hostGuard, materiality_reasons: materialityReasons,
     sequential_rule: 'One and only one replacement attempt is allowed for the diagnosed >60s measurement-harness authority expiry. Attempt 1 ended before any C observation, so no C hypothesis was tested and its one-sided alpha was not spent. Retain the original d_(22) 97.494877% bound, all L-H margins, B controls, sample floor and exact semantics. A2 B or C failure/inconclusive result ends this preregistered sequence; no further timed retry may be selected for a pass.',
     historical_revision: anchor, historical_baseline_sha256: fileHash(frozenReference), historical_budget_sha256: fileHash(frozenBudget),
     seed, blocks_per_stratum: blocksPerStratum, samples_per_subrun: samples, reference_paths: referencePaths, strata,
@@ -259,7 +260,111 @@ export function analyze(runs, mode, criteria = verifyCriteria()) {
 }
 
 const hardware = () => ({ os: platform(), architecture: arch(), kernel: release(), cpu: cpus()[0]?.model, logical_cpus: cpus().length, total_memory_bytes: totalmem(), cpu_quota: optional('/sys/fs/cgroup/cpu.max'), memory_limit: optional('/sys/fs/cgroup/memory.max') });
-const load = () => ({ loadavg: optional('/proc/loadavg'), cpu_pressure: optional('/proc/pressure/cpu') });
+export const hostGuard = {
+  preflight_samples: 13, preflight_interval_ms: 5000,
+  load1_exclusive_max: 2, cpu_some_avg10_percent_exclusive_max: 5,
+  block_rule: 'Record raw whole-host, runner, B/C process, load and CPU pressure counters. PostgreSQL is an owned measured service in another process, so do not label host-minus-B/C CPU as unrelated automatically.',
+  interference_rule: 'During collection only, an operator must immediately flag observed unrelated build, test or compute work. The runner fsyncs time/process/reason/load/pressure to the journal and invalidates the entire attempt before numeric analysis. No block is filtered and no retry is allowed.',
+  unavailable_counters: 'Fail closed before or during capture.'
+};
+export const materialityReasons = {
+  'unrelated-build': 'An unrelated build competes for host CPU, memory bandwidth or storage during the measured workflow.',
+  'unrelated-test': 'An unrelated test suite competes for host CPU, memory bandwidth or storage during the measured workflow.',
+  'unrelated-compute': 'An unrelated compute task materially competes with the measured workflow.'
+};
+let cachedHostHz;
+const clockTicksPerSecond = () => {
+  if (cachedHostHz !== undefined) return cachedHostHz;
+  const hz = Number(command('getconf', ['CLK_TCK']));
+  check(Number.isSafeInteger(hz) && hz > 0, 'Host clock-tick frequency is unavailable');
+  cachedHostHz = hz;
+  return cachedHostHz;
+};
+const numericTicks = (values) => values.map((value) => {
+  const tick = Number(value);
+  check(Number.isSafeInteger(tick) && tick >= 0, 'Invalid raw host CPU tick counter');
+  return tick;
+});
+export function parseHostSnapshot(loadavgRaw, cpuPressureRaw, procStatRaw, observedAt, monotonicNs, runnerCPUus, processTicks, hz) {
+  check(typeof loadavgRaw === 'string' && typeof cpuPressureRaw === 'string' && typeof procStatRaw === 'string', 'Missing required /proc host counters');
+  const load1 = Number(loadavgRaw.trim().split(/\s+/)[0]);
+  const pressure = cpuPressureRaw.match(/^some\s+avg10=([0-9.]+)/m);
+  const someAvg10 = Number(pressure?.[1]);
+  const cpuLine = procStatRaw.split('\n')[0];
+  check(/^cpu\s+/.test(cpuLine), 'Missing aggregate /proc/stat CPU line');
+  const ticks = numericTicks(cpuLine.trim().split(/\s+/).slice(1));
+  check(ticks.length >= 8 && Number.isFinite(load1) && load1 >= 0 && pressure && Number.isFinite(someAvg10) && someAvg10 >= 0 && Number.isSafeInteger(hz) && hz > 0, 'Invalid host load, pressure or tick frequency');
+  check(Number.isFinite(Date.parse(observedAt)) && /^\d+$/.test(monotonicNs) && Number.isSafeInteger(runnerCPUus) && runnerCPUus >= 0, 'Missing host observation clock or runner CPU');
+  check(isDeepStrictEqual(Object.keys(processTicks ?? {}).sort(), ['reference', 'translated']), 'Missing measured-arm CPU counter inventory');
+  for (const value of Object.values(processTicks)) check(value === null || Number.isSafeInteger(value) && value >= 0, 'Invalid measured-arm CPU ticks');
+  return {
+    observed_at: observedAt, monotonic_ns: monotonicNs, clock_hz: hz,
+    loadavg_raw: loadavgRaw.trim(), load1,
+    cpu_pressure_raw: cpuPressureRaw.trim(), cpu_some_avg10_percent: someAvg10,
+    proc_stat_cpu_raw: cpuLine.trim(), host_busy_ticks: ticks[0] + ticks[1] + ticks[2] + ticks[5] + ticks[6] + ticks[7],
+    host_total_ticks: ticks.reduce((sum, tick) => sum + tick, 0),
+    runner_cpu_us: runnerCPUus, arm_cpu_ticks: processTicks
+  };
+}
+function processStatFields(pid) {
+  check(Number.isSafeInteger(pid) && pid > 0, 'Missing measured-arm process ID');
+  const stat = readFileSync('/proc/' + pid + '/stat', 'utf8');
+  const end = stat.lastIndexOf(')');
+  check(end > 0, 'Invalid measured-arm /proc stat');
+  return stat.slice(end + 2).trim().split(/\s+/);
+}
+function processCPUTicks(pid) {
+  if (pid === null) return null;
+  const fields = processStatFields(pid);
+  return numericTicks([fields[11], fields[12]]).reduce((sum, ticks) => sum + ticks, 0);
+}
+const processStartTicks = (pid) => numericTicks([processStatFields(pid)[19]])[0];
+function hostSnapshot(arms = { reference: null, translated: null }) {
+  const cpu = process.cpuUsage();
+  return parseHostSnapshot(
+    readFileSync('/proc/loadavg', 'utf8'), readFileSync('/proc/pressure/cpu', 'utf8'), readFileSync('/proc/stat', 'utf8'),
+    new Date().toISOString(), process.hrtime.bigint().toString(), cpu.user + cpu.system,
+    { reference: processCPUTicks(arms.reference), translated: processCPUTicks(arms.translated) },
+    clockTicksPerSecond()
+  );
+}
+export function validateHostSnapshot(snapshot, requireArms = false) {
+  check(snapshot && isDeepStrictEqual(snapshot, parseHostSnapshot(snapshot.loadavg_raw, snapshot.cpu_pressure_raw, snapshot.proc_stat_cpu_raw, snapshot.observed_at, snapshot.monotonic_ns, snapshot.runner_cpu_us, snapshot.arm_cpu_ticks, snapshot.clock_hz)), 'Host counter receipt changed');
+  if (requireArms) check(snapshot.arm_cpu_ticks.reference !== null && (requireArms === 'paired' ? snapshot.arm_cpu_ticks.translated !== null : snapshot.arm_cpu_ticks.translated === null), 'Missing measured-arm CPU receipt');
+  return true;
+}
+export function validateQuietPreflight(samples) {
+  check(Array.isArray(samples) && samples.length === hostGuard.preflight_samples, 'Complete 60-second quiet preflight is required');
+  for (let i = 0; i < samples.length; i++) {
+    validateHostSnapshot(samples[i]);
+    check(samples[i].clock_hz === samples[0].clock_hz, 'Host clock frequency changed during quiet preflight');
+    check(samples[i].arm_cpu_ticks.reference === null && samples[i].arm_cpu_ticks.translated === null, 'Timed arm started during quiet preflight');
+    check(samples[i].load1 < hostGuard.load1_exclusive_max && samples[i].cpu_some_avg10_percent < hostGuard.cpu_some_avg10_percent_exclusive_max, 'Quiet preflight host load or CPU pressure exceeded its frozen limit');
+    if (i) check(BigInt(samples[i].monotonic_ns) - BigInt(samples[i - 1].monotonic_ns) >= BigInt(hostGuard.preflight_interval_ms) * 1000000n, 'Quiet preflight sample spacing was shortened');
+  }
+  return true;
+}
+export function validateBlockHostDiagnostics(before, after, mode) {
+  check(mode === 'baseline' || mode === 'paired', 'Unknown host diagnostic mode');
+  validateHostSnapshot(before, mode);
+  validateHostSnapshot(after, mode);
+  check(BigInt(after.monotonic_ns) > BigInt(before.monotonic_ns) && after.clock_hz === before.clock_hz && after.host_total_ticks >= before.host_total_ticks && after.host_busy_ticks >= before.host_busy_ticks && after.runner_cpu_us >= before.runner_cpu_us && after.arm_cpu_ticks.reference >= before.arm_cpu_ticks.reference, 'Host or reference CPU counters regressed within a block');
+  if (mode === 'paired') check(after.arm_cpu_ticks.translated >= before.arm_cpu_ticks.translated, 'Candidate CPU counters regressed within a block');
+  return true;
+}
+async function quietPreflight() {
+  const samples = [hostSnapshot()];
+  for (let i = 1; i < hostGuard.preflight_samples; i++) {
+    const target = BigInt(samples.at(-1).monotonic_ns) + BigInt(hostGuard.preflight_interval_ms) * 1000000n;
+    while (process.hrtime.bigint() < target) {
+      const remainingMs = Number((target - process.hrtime.bigint()) / 1000000n);
+      await new Promise((resolveWait) => setTimeout(resolveWait, Math.max(1, remainingMs)));
+    }
+    samples.push(hostSnapshot());
+  }
+  validateQuietPreflight(samples);
+  return samples;
+}
 const toolchain = () => command('go', ['version']);
 const buildEnvironment = () => command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS']);
 const sourceRevision = (cwd) => git(['rev-parse', 'HEAD'], cwd);
@@ -358,14 +463,84 @@ export function validateBuildEvidence(build, role, revision, expectedToolchain, 
 }
 const journalPathFor = (output) => `${output}.journal.jsonl`;
 const repositoryRelative = (path) => relative(process.cwd(), resolve(path));
+const interferencePathFor = (output) => output + '.interference.json';
+export function validateMaterialInterferenceNotice(notice) {
+  check(notice && Object.hasOwn(materialityReasons, notice.reason), 'Unknown or unregistered interference rationale');
+  check(Number.isSafeInteger(notice.pid) && notice.pid > 0 && typeof notice.process === 'string' && /^[A-Za-z0-9._+-]{1,160}$/.test(notice.process), 'Interference process identity must be a bounded executable basename');
+  check(typeof notice.observed_at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(notice.observed_at) && Number.isFinite(Date.parse(notice.observed_at)), 'Interference observation time is missing');
+  return true;
+}
+export function materialInterferenceEvent(notice, host) {
+  validateMaterialInterferenceNotice(notice);
+  validateHostSnapshot(host);
+  return {
+    event: 'material_interference', observed_at: notice.observed_at, recorded_at: new Date().toISOString(),
+    process: { pid: notice.pid, name: notice.process }, reason: notice.reason,
+    rationale: materialityReasons[notice.reason], host
+  };
+}
+function flagMaterialInterference(output, reason, pidText, processName) {
+  check([bOnlyPath, 'docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json'].includes(output), 'Unknown paired artifact for interference flag');
+  const journalPath = journalPathFor(output);
+  check(existsSync(journalPath), 'No active paired attempt reservation');
+  const reservation = JSON.parse(readFileSync(journalPath, 'utf8').split('\n')[0]);
+  check(reservation.event === 'reserved' && Number.isSafeInteger(reservation.runner_pid) && reservation.runner_pid > 0 && Number.isSafeInteger(reservation.runner_start_ticks) && reservation.runner_start_ticks === processStartTicks(reservation.runner_pid) && !existsSync(output) && !existsSync(`${output}.failed.json`), 'Paired attempt is not collecting under its original runner process');
+  const notice = { reason, pid: Number(pidText), process: processName, observed_at: new Date().toISOString() };
+  validateMaterialInterferenceNotice(notice);
+  writeFileSync(interferencePathFor(output), JSON.stringify(notice) + '\n', { flag: 'wx', mode: 0o600 });
+  process.kill(reservation.runner_pid, 'SIGUSR2');
+}
 export const goDiagnosticTailBytes = 64 << 10;
-export function boundedGoDiagnosticTail(previous, next) {
-  const sanitized = String(next)
+export function redactGoDiagnostic(value) {
+  return String(value)
+    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, '[redacted-database-url]')
+    .replace(/([?&]key=)[^&\s"'<>]+/gi, '$1[redacted-query-key]')
+    .replace(/(\\?["'](?:Authorization|X-Api-Key|X-Goog-Api-Key|Cookie|Set-Cookie)\\?["']\s*:\s*\\?["'])[^"'\\\r\n]*(\\?["'])/gi, '$1[redacted-header-value]$2')
+    .replace(/\b(Authorization|X-Api-Key|X-Goog-Api-Key|Cookie|Set-Cookie)\s*[:=]\s*(["'])[^"'\r\n]*\2/gi, '$1: $2[redacted-header-value]$2')
+    .replace(/(^|\n)([ \t]*(?:Authorization|X-Api-Key|X-Goog-Api-Key|Cookie|Set-Cookie)[ \t]*:[ \t]*)[^\r\n]*/gim, '$1$2[redacted-header-value]')
+    .replace(/\b(Cookie|Set-Cookie)\s*[:=]\s*[^\r\n\]\}]+/gi, '$1: [redacted-header-value]')
+    .replace(/\b(Authorization|X-Api-Key|X-Goog-Api-Key)\s*[:=]\s*(?:\[[^\]\r\n]*\]|(?:(?:Bearer|Basic)\s+)?[^\s"';,\]\}]+)/gi, '$1: [redacted-header-value]')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/%=-]+/gi, '$1 [redacted-token]')
     .replace(/olp_[A-Za-z0-9_-]+/g, '[redacted-api-key]')
-    .replace(/vendor-secret-[A-Za-z0-9_-]+/g, '[redacted-provider-secret]')
-    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[redacted-database-url]');
+    .replace(/vendor-secret-[A-Za-z0-9_-]+/g, '[redacted-provider-secret]');
+}
+export function boundedGoDiagnosticTail(previous, next) {
+  const sanitized = redactGoDiagnostic(next);
   const combined = Buffer.concat([Buffer.from(previous), Buffer.from(sanitized)]);
   return combined.subarray(Math.max(0, combined.length - goDiagnosticTailBytes)).toString('utf8');
+}
+export function newBoundedGoDiagnosticLines() {
+  let pending = '', dropping = false, tail = '', truncated = false;
+  const append = (line) => {
+    truncated ||= Buffer.byteLength(tail) + Buffer.byteLength(line) > goDiagnosticTailBytes;
+    tail = boundedGoDiagnosticTail(tail, line);
+  };
+  return {
+    push(chunk) {
+      pending += String(chunk);
+      let newline;
+      while ((newline = pending.indexOf('\n')) !== -1) {
+        const line = pending.slice(0, newline + 1);
+        pending = pending.slice(newline + 1);
+        if (dropping) {
+          append('[redacted-overlong-diagnostic-line]\n');
+          dropping = false;
+        } else append(line);
+      }
+      if (Buffer.byteLength(pending) > goDiagnosticTailBytes) {
+        pending = '';
+        dropping = true;
+        truncated = true;
+      }
+    },
+    finish() {
+      if (dropping) append('[redacted-overlong-diagnostic-line]\n');
+      else if (pending) append(pending);
+      pending = '';
+      dropping = false;
+    },
+    snapshot() { return { tail, truncated }; }
+  };
 }
 export function assertFreshAttemptOutput(output) {
   check(!existsSync(output) && !existsSync(`${output}.failed.json`) && !existsSync(journalPathFor(output)), 'Refusing an overwritten or interrupted write-once paired attempt');
@@ -400,6 +575,7 @@ export function validateJournalArtifact(artifact, artifactPath) {
   const first = entries[0], last = entries.at(-1);
   check(first?.event === 'reserved' && first.journal_id === artifact.journal_id && first.artifact_path === repositoryRelative(artifactPath) && digest(`${lines[0]}\n`) === artifact.journal_reservation_sha256, 'Journal reservation does not bind artifact');
   check(first.mode === artifact.mode && first.attempt_id === artifact.attempt_id && first.runner_sha256 === artifact.runner_sha256 && first.criteria_sha256 === artifact.criteria_sha256 && first.reference_revision === artifact.reference_overlay_revision && first.candidate_revision === artifact.candidate_revision && first.reference_executable_sha256 === artifact.builds?.reference?.executable_sha256 && first.candidate_executable_sha256 === (artifact.builds?.translated?.executable_sha256 ?? null), 'Journal reserved a different attempt, method, source or executable');
+  check(first.host_preflight_sha256 === digest(JSON.stringify(artifact.host_preflight)) && first.host_guard_sha256 === digest(JSON.stringify(artifact.host_guard)) && Number.isSafeInteger(first.runner_pid) && first.runner_pid > 0 && first.runner_start_ticks === artifact.runner_start_ticks, 'Journal does not bind the quiet preflight, runner and host guard');
   const recordedRuns = entries.filter((entry) => entry.event === 'run').map((entry) => entry.run);
   const recordedBlocks = entries.filter((entry) => entry.event === 'block_complete').map((entry) => entry.block);
   check(isDeepStrictEqual(recordedRuns, artifact.runs) && isDeepStrictEqual(recordedBlocks, artifact.blocks), 'Journal lost or changed measured subruns/blocks');
@@ -421,17 +597,23 @@ export function validateJournalArtifact(artifact, artifactPath) {
 }
 function launchArm(root, build, role) {
   const child = spawn(build.executable_path, build.run_command.slice(1), { cwd: root, env: { ...process.env, ...runtimeEnvironment }, stdio: ['pipe', 'pipe', 'pipe'] });
-  let buffer = '', stderrTail = '', stdoutTail = '', setup, ready = false, pending, dead;
-  let stdoutTruncated = false, stderrTruncated = false;
+  let buffer = '', stdoutTail = '', setup, ready = false, pending, dead;
+  let stdoutTruncated = false;
+  const stderrLines = newBoundedGoDiagnosticLines();
   let readyResolve, readyReject;
   const readyPromise = new Promise((resolveReady, rejectReady) => { readyResolve = resolveReady; readyReject = rejectReady; });
   let exitResolve, exitReject;
   const exitPromise = new Promise((resolveExit, rejectExit) => { exitResolve = resolveExit; exitReject = rejectExit; });
   const fail = (error) => { if (dead) return; dead = error; readyReject(error); if (pending) { pending.reject(error); pending = undefined; } };
-  child.stderr.on('data', (chunk) => {
-    stderrTruncated ||= Buffer.byteLength(stderrTail) + chunk.length > goDiagnosticTailBytes;
-    stderrTail = boundedGoDiagnosticTail(stderrTail, chunk.toString());
-  });
+  child.stderr.on('data', (chunk) => stderrLines.push(chunk.toString()));
+  const flushDiagnosticFragments = () => {
+    stderrLines.finish();
+    if (buffer && !buffer.startsWith('PAIRED_BARRIER_RUN ')) {
+      stdoutTruncated ||= Buffer.byteLength(stdoutTail) + Buffer.byteLength(buffer) > goDiagnosticTailBytes;
+      stdoutTail = boundedGoDiagnosticTail(stdoutTail, buffer);
+    }
+    buffer = '';
+  };
   child.stdout.on('data', (chunk) => {
     buffer += chunk.toString();
     let newline;
@@ -452,17 +634,23 @@ function launchArm(root, build, role) {
         stdoutTail = boundedGoDiagnosticTail(stdoutTail, `${line}\n`);
       }
     }
+    if (Buffer.byteLength(buffer) > (1 << 20)) {
+      fail(new Error(`${role} emitted an oversized unterminated Go output line`));
+      child.kill();
+    }
   });
   child.stdin.on('error', fail);
-  child.on('error', (error) => { fail(error); exitReject(error); });
+  child.on('error', (error) => { flushDiagnosticFragments(); fail(error); exitReject(error); });
   child.on('close', (code, signal) => {
+    flushDiagnosticFragments();
     if (!ready || code !== 0) {
-      const error = new Error(`${role} test process exited ${code ?? signal}; Go stdout: ${stdoutTail.slice(-4096)}; stderr: ${stderrTail.slice(-4096)}`);
+      const error = new Error(`${role} test process exited ${code ?? signal}; Go stdout: ${stdoutTail.slice(-4096)}; stderr: ${stderrLines.snapshot().tail.slice(-4096)}`);
       fail(error); exitReject(error);
     } else exitResolve();
   });
   const timeout = setTimeout(() => fail(new Error(`${role} benchmark startup timed out`)), 120000);
   return {
+    pid: child.pid,
     async ready() { try { return await readyPromise; } finally { clearTimeout(timeout); } },
     async run(work) {
       if (dead) throw dead;
@@ -473,7 +661,7 @@ function launchArm(root, build, role) {
     },
     close() { child.stdin.end(); return exitPromise; },
     kill() { child.kill(); },
-    diagnostics() { return { stdout_tail: stdoutTail, stderr_tail: stderrTail, stdout_truncated: stdoutTruncated, stderr_truncated: stderrTruncated }; }
+    diagnostics() { const stderr = stderrLines.snapshot(); return { stdout_tail: stdoutTail, stderr_tail: stderr.tail, stdout_truncated: stdoutTruncated, stderr_truncated: stderr.truncated }; }
   };
 }
 
@@ -512,6 +700,7 @@ async function capture(mode, output, baselinePath) {
   const cBinary = join(buildDir, 'translated.test');
   const bBuild = buildBinary(bRoot, bBinary, 'reference');
   const cBuild = mode === 'paired' ? buildBinary(process.cwd(), cBinary, 'translated') : null;
+  const preflight = await quietPreflight();
   const artifact = {
     schema, mode, attempt_id: attemptId, started_at: new Date().toISOString(), completed_at: null,
     prior_failed_sha256: fileHash(priorFailedPath), prior_journal_sha256: fileHash(priorJournalPath),
@@ -529,8 +718,11 @@ async function capture(mode, output, baselinePath) {
     candidate_dependency_sha256: Object.fromEntries(candidateDependencies.map((path) => [path, fileHash(path)])),
     candidate_workflow_sha256: mode === 'paired' ? fileHash('tests/integration/continuation_candidate_benchmark_test.go') : null,
     toolchain: toolchain(), go_build_environment: buildEnvironment(), runtime_environment: runtimeEnvironment,
-    hardware: hardware(), system_load: { before: load(), after: null }, storage: null, schedule: schedule(criteria),
+    hardware: hardware(), host_guard: hostGuard, materiality_reasons: materialityReasons,
+    host_preflight: preflight, clock_hz: clockTicksPerSecond(),
+    system_load: { before: hostSnapshot(), after: null }, storage: null, schedule: schedule(criteria),
     blocks: [], runs: [], analysis: null, error: null, process_diagnostics: null,
+    runner_start_ticks: processStartTicks(process.pid),
     journal_id: null, journal_path: null, journal_reservation_sha256: null,
     conditions
   };
@@ -538,20 +730,47 @@ async function capture(mode, output, baselinePath) {
     schema, mode, attempt_id: attemptId, runner_sha256: artifact.runner_sha256, criteria_sha256: artifact.criteria_sha256,
     reference_revision: artifact.reference_overlay_revision, candidate_revision: artifact.candidate_revision,
     reference_executable_sha256: bBuild.executable_sha256, candidate_executable_sha256: cBuild?.executable_sha256 ?? null,
-    reserved_at: new Date().toISOString()
+    host_preflight_sha256: digest(JSON.stringify(preflight)), host_guard_sha256: digest(JSON.stringify(hostGuard)),
+    runner_pid: process.pid, runner_start_ticks: artifact.runner_start_ticks, reserved_at: new Date().toISOString()
   });
   artifact.journal_id = journal.id;
   artifact.journal_path = journal.path;
   artifact.journal_reservation_sha256 = journal.reservation_sha256;
   let b, c;
+  let collectionOpen = true;
+  let interference = null;
+  const onMaterialInterference = () => {
+    if (!collectionOpen || interference) return;
+    try {
+      const notice = readJSON(interferencePathFor(output));
+      interference = materialInterferenceEvent(notice, hostSnapshot({ reference: b?.pid ?? null, translated: c?.pid ?? null }));
+    } catch (error) {
+      interference = { event: 'material_interference', observed_at: new Date().toISOString(), recorded_at: new Date().toISOString(),
+        process: { pid: null, name: null }, reason: 'unattributed-signal',
+        rationale: 'Operator interference signal lacked valid detail or host counters; the entire attempt is invalid.',
+        host: { loadavg_raw: optional('/proc/loadavg'), cpu_pressure_raw: optional('/proc/pressure/cpu') },
+        error: redactGoDiagnostic(error?.message || String(error)) };
+    }
+    journal.append(interference);
+    artifact.error = 'material unrelated host work was prospectively reported during collection';
+    b?.kill(); c?.kill();
+  };
+  process.on('SIGUSR2', onMaterialInterference);
+  const checkInterference = () => {
+    if (!interference && existsSync(interferencePathFor(output))) onMaterialInterference();
+    if (interference) throw new Error('material unrelated host work invalidated the whole attempt');
+  };
   try {
     b = launchArm(bRoot, bBuild, 'reference');
     c = mode === 'paired' ? launchArm(process.cwd(), cBuild, 'translated') : null;
     const [bSetup, cSetup] = await Promise.all([b.ready(), c ? c.ready() : Promise.resolve(null)]);
+    checkInterference();
     assertConditions(bSetup, cSetup);
     artifact.storage = { reference: bSetup, candidate: cSetup };
     for (const block of artifact.schedule) {
-      const diagnostic = { stratum: block.stratum, block: block.block, orientation: block.orientation, before: load(), after: null };
+      checkInterference();
+      const armPids = { reference: b.pid, translated: c?.pid ?? null };
+      const diagnostic = { stratum: block.stratum, block: block.block, orientation: block.orientation, before: hostSnapshot(armPids), after: null };
       for (let position = 0; position < block.arms.length; position++) {
         const arm = block.arms[position];
         if (mode === 'baseline' && arm === 'translated') continue;
@@ -560,25 +779,35 @@ async function capture(mode, output, baselinePath) {
         validateRun(run, criteria);
         artifact.runs.push(run);
         journal.append({ event: 'run', run });
+        checkInterference();
       }
-      diagnostic.after = load(); artifact.blocks.push(diagnostic);
+      diagnostic.after = hostSnapshot(armPids);
+      validateBlockHostDiagnostics(diagnostic.before, diagnostic.after, mode);
+      artifact.blocks.push(diagnostic);
       journal.append({ event: 'block_complete', block: diagnostic });
     }
+    await new Promise((resolveTick) => setImmediate(resolveTick));
+    checkInterference();
     artifact.analysis = analyze(artifact.runs, mode, criteria);
   } catch (error) {
-    artifact.error = error?.message || String(error);
+    artifact.error ||= error?.message || String(error);
   } finally {
     try { await Promise.all([...(b ? [b.close()] : []), ...(c ? [c.close()] : [])]); }
     catch (error) { artifact.error ||= error?.message || String(error); }
     try { attestUnchangedBinary(bBuild); if (cBuild) attestUnchangedBinary(cBuild); }
     catch (error) { artifact.error ||= error?.message || String(error); }
     if (artifact.error) artifact.process_diagnostics = { reference: b?.diagnostics() ?? null, translated: c?.diagnostics() ?? null };
-    artifact.completed_at = new Date().toISOString(); artifact.system_load.after = load();
+    artifact.completed_at = new Date().toISOString();
+    try { artifact.system_load.after = hostSnapshot(); }
+    catch (error) {
+      artifact.error ||= 'required host counters disappeared during final observation';
+      artifact.system_load.after = { error: redactGoDiagnostic(error?.message || String(error)), loadavg_raw: optional('/proc/loadavg'), cpu_pressure_raw: optional('/proc/pressure/cpu') };
+    }
     const destination = artifact.error ? `${output}.failed.json` : output;
     try {
       writeFileSync(destination, `${JSON.stringify(artifact, null, 2)}\n`, { flag: 'wx' });
       journal.append({ event: artifact.error ? 'failed' : 'complete', artifact_path: repositoryRelative(destination), artifact_sha256: fileHash(destination), runs: artifact.runs.length, blocks: artifact.blocks.length, passed: artifact.analysis?.passed ?? false, completed_at: artifact.completed_at });
-    } finally { journal.close(); }
+    } finally { collectionOpen = false; journal.close(); }
     if (artifact.error) { b?.kill(); c?.kill(); throw new Error(`${artifact.error}; retained ${destination} and ${journal.path}`); }
     console.log(`${mode}: ${artifact.runs.length} complete subruns, ${artifact.analysis.passed ? 'PASS' : 'INCONCLUSIVE'}; ${destination}`);
     if (!artifact.analysis.passed) process.exitCode = 1;
@@ -587,6 +816,13 @@ async function capture(mode, output, baselinePath) {
 
 export function validateArtifact(artifact, mode, criteria = verifyCriteria(), artifactPath = mode === 'baseline' ? bOnlyPath : 'docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json') {
   check(artifact.schema === schema && artifact.mode === mode && artifact.error === null, 'Incomplete paired artifact');
+  check(isDeepStrictEqual(artifact.host_guard, hostGuard) && isDeepStrictEqual(artifact.materiality_reasons, materialityReasons), 'Host stability guard changed');
+  validateQuietPreflight(artifact.host_preflight);
+  check(artifact.clock_hz === artifact.host_preflight[0].clock_hz, 'Host clock-tick frequency changed');
+  validateHostSnapshot(artifact.system_load?.before);
+  validateHostSnapshot(artifact.system_load?.after);
+  check(artifact.system_load.before.clock_hz === artifact.clock_hz && artifact.system_load.after.clock_hz === artifact.clock_hz, 'Host clock frequency changed outside measured blocks');
+  check(!existsSync(interferencePathFor(artifactPath)), 'A prospectively flagged unrelated process invalidated the whole attempt');
   check(artifact.attempt_id === attemptId && artifact.prior_failed_sha256 === fileHash(priorFailedPath) && artifact.prior_journal_sha256 === fileHash(priorJournalPath), 'Attempt 2 is not bound to the retained failed first attempt');
   validateJournalArtifact(artifact, artifactPath);
   check(artifact.criteria_sha256 === fileHash(criteriaPath) && artifact.runner_sha256 === fileHash(runnerPath) && artifact.historical_baseline_sha256 === fileHash(frozenReference) && artifact.historical_budget_sha256 === fileHash(frozenBudget), 'Frozen paired method changed');
@@ -617,6 +853,10 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria(), ar
   }
   check(isDeepStrictEqual(artifact.schedule, schedule(criteria)), 'Schedule changed');
   check(artifact.blocks?.length === strata.length * blocksPerStratum && artifact.blocks.every((block, i) => block.stratum === artifact.schedule[i].stratum && block.block === artifact.schedule[i].block && block.orientation === artifact.schedule[i].orientation && block.before && block.after), 'Missing block diagnostics');
+  for (const block of artifact.blocks) {
+    validateBlockHostDiagnostics(block.before, block.after, mode);
+    check(block.before.clock_hz === artifact.clock_hz, 'Host clock frequency changed during a measured block');
+  }
   check(isDeepStrictEqual(artifact.hardware, readJSON(frozenReference).hardware) && artifact.toolchain === readJSON(frozenReference).toolchain && artifact.go_build_environment === readJSON(frozenReference).go_build_environment && isDeepStrictEqual(artifact.runtime_environment, runtimeEnvironment), 'Incomparable host/runtime');
   check(artifact.storage?.reference?.postgresql_server_version === '180006' && artifact.storage.reference.postgresql_tls === false && (mode === 'baseline' ? artifact.storage.candidate === null : artifact.storage.candidate?.postgresql_server_version === '180006' && artifact.storage.candidate.postgresql_tls === false && artifact.storage.candidate.database_name !== artifact.storage.reference.database_name), 'Changed or shared storage');
   const result = analyze(artifact.runs, mode, criteria);
@@ -626,14 +866,15 @@ export function validateArtifact(artifact, mode, criteria = verifyCriteria(), ar
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [action, path, extra] = process.argv.slice(2);
+    const [action, path, extra, more, detail] = process.argv.slice(2);
     if (action === 'derive-criteria' && path && !extra) writeFileSync(path, `${JSON.stringify(deriveCriteria(), null, 2)}\n`, { flag: 'wx' });
     else if (action === 'record-baseline' && path && !extra) await capture('baseline', path);
     else if (action === 'record-paired' && path && extra) await capture('paired', path, extra);
+    else if (action === 'flag-interference' && path && extra && more && detail) flagMaterialInterference(path, extra, more, detail);
     else if (action === 'compare' && path && !extra) {
       const result = validateArtifact(readJSON(path), readJSON(path).mode, verifyCriteria(), path);
       console.log(JSON.stringify({ passed: result.passed, failures: result.failures, totals: result.totals }, null, 2));
       if (!result.passed) process.exitCode = 1;
-    } else throw new Error('Usage: derive-criteria <new-file> | record-baseline <new-file> | record-paired <new-file> <committed-baseline> | compare <artifact>');
+    } else throw new Error('Usage: derive-criteria <new-file> | record-baseline <new-file> | record-paired <new-file> <committed-baseline> | flag-interference <active-artifact> <unrelated-build|unrelated-test|unrelated-compute> <pid> <process-name> | compare <artifact>');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

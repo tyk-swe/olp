@@ -3,6 +3,20 @@
   "attempt_id": "barrier-v2-attempt2-authority-poll",
   "prior_failed_sha256": "a817f035b0fb4ade1197bd31b5404735192274218999d93557479622391c6a7e",
   "prior_journal_sha256": "f7d30a1eea00abac1897ae99800902afc1788743b6f8f3907cf77f59fd04593a",
+  "host_guard": {
+    "preflight_samples": 13,
+    "preflight_interval_ms": 5000,
+    "load1_exclusive_max": 2,
+    "cpu_some_avg10_percent_exclusive_max": 5,
+    "block_rule": "Record raw whole-host, runner, B/C process, load and CPU pressure counters. PostgreSQL is an owned measured service in another process, so do not label host-minus-B/C CPU as unrelated automatically.",
+    "interference_rule": "During collection only, an operator must immediately flag observed unrelated build, test or compute work. The runner fsyncs time/process/reason/load/pressure to the journal and invalidates the entire attempt before numeric analysis. No block is filtered and no retry is allowed.",
+    "unavailable_counters": "Fail closed before or during capture."
+  },
+  "materiality_reasons": {
+    "unrelated-build": "An unrelated build competes for host CPU, memory bandwidth or storage during the measured workflow.",
+    "unrelated-test": "An unrelated test suite competes for host CPU, memory bandwidth or storage during the measured workflow.",
+    "unrelated-compute": "An unrelated compute task materially competes with the measured workflow."
+  },
   "sequential_rule": "One and only one replacement attempt is allowed for the diagnosed >60s measurement-harness authority expiry. Attempt 1 ended before any C observation, so no C hypothesis was tested and its one-sided alpha was not spent. Retain the original d_(22) 97.494877% bound, all L-H margins, B controls, sample floor and exact semantics. A2 B or C failure/inconclusive result ends this preregistered sequence; no further timed retry may be selected for a pass.",
   "historical_revision": "29e18268ac23f7290d1881cbda3af2cc2ccab018",
   "historical_baseline_sha256": "4f51998f47d08eba252ea47dc5f7388ac319c4281f61e413fe70b719c3381115",

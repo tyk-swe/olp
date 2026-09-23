@@ -57,6 +57,32 @@ artifact and journal must be committed together before the candidate source
 can be locked; their exact hashes and strict ancestry to the reviewed product
 change are checked again offline.
 
+After binary builds and **before journal reservation**, the runner samples
+`/proc/loadavg`, `/proc/pressure/cpu` and aggregate `/proc/stat` 13 times at
+five-second intervals across at least 60 seconds. Every sample must have
+one-minute load strictly below 2 and CPU `some avg10` pressure strictly below
+5%; missing counters fail closed without starting a timed attempt. Each block
+then records raw host ticks/HZ, load and pressure plus runner and B/C process
+CPU counters before and after its measured subruns. PostgreSQL is an owned
+measured service in another process, so host CPU minus only B/C/runner is
+**not** called unrelated work or used as an automatic rejection threshold.
+
+If an operator observes a materially competing unrelated build, test or
+compute process **during** collection, they immediately run
+`flag-interference` with that process's PID/name and one of the frozen
+materiality reasons. The active runner captures time, process, host load and
+pressure in a fsynced journal event, aborts both arms, and marks the *whole*
+attempt inconclusive before numeric analysis. A later classification cannot
+select or discard favorable blocks. The accepted reasons are
+`unrelated-build`, `unrelated-test` and `unrelated-compute` as defined in the
+criteria. For example, while the B-only runner is active:
+
+```sh
+node scripts/continuation-barrier-paired-v2-attempt2.mjs flag-interference \
+  docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/baseline.json \
+  unrelated-build 12345 rustc
+```
+
 ```sh
 node --test scripts/continuation-barrier-paired-v2-attempt2.test.mjs
 OLP_PAIRED_B_ROOT=/tmp/olp-worktrees/paired-barrier-reference-attempt2 \
