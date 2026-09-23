@@ -138,9 +138,22 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	// Preserve the historical provider and compiled route contract. Resolving
 	// only a slot/attempt and then reading the current provider changes defaults,
 	// endpoint or profile behind a retained response/continuation handle.
+	current := x.request.release.Snapshot
+	if retained, slot, same := current.PinnedCurrent(*historical, p.provider, p.target, p.slot, x.keyID, x.family.Surface(), x.mode); same {
+		// The installed release was already validated and compiled at
+		// publication. Reusing its immutable target template avoids compiling
+		// the same strict contract again for every continuation turn.
+		x.historicalSnapshot = retained
+		route := retained.Routes[historical.Slug]
+		x.route = &route
+		x.attempts = []runtime.Attempt{p.attempt}
+		x.budget = 1
+		x.pinnedSlot = &slot
+		x.pinnedSecret = p.secret
+		return nil
+	}
 	historical.Targets = []runtime.Target{p.target}
 	p.provider.Slots = []runtime.Slot{p.slot}
-	current := x.request.release.Snapshot
 	retained := &runtime.Snapshot{Generation: current.Generation, Providers: map[string]runtime.Provider{p.provider.ID: p.provider}, Routes: map[string]runtime.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
 	if err := retained.Validate(); err != nil {
 		return pinUnavailable()
