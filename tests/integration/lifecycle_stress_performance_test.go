@@ -473,20 +473,42 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 	}
 	request.Header.Set("Authorization", "Bearer "+key)
 	request.Header.Set("Content-Type", "multipart/form-data; boundary=cancelled-upload")
-	done := make(chan struct{})
+	defer cancel()
+	defer writer.CloseWithError(context.Canceled)
+	requestDone := make(chan *http.Response, 1)
 	go func() {
-		defer close(done)
+		response, _ := http.DefaultClient.Do(request)
+		requestDone <- response
+	}()
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
 		_, _ = io.WriteString(writer, "--cancelled-upload\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n"+slug+"\r\n--cancelled-upload\r\nContent-Disposition: form-data; name=\"input_reference\"; filename=\"source.png\"\r\nContent-Type: image/png\r\n\r\n")
 		_, _ = writer.Write(image[:256<<10])
-		cancel()
-		writer.CloseWithError(context.Canceled)
 	}()
-	response, _ = http.DefaultClient.Do(request)
-	if response != nil {
-		response.Body.Close()
+	select {
+	case <-writeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled-upload control never reached the parser")
 	}
-	<-done
 	deadline := time.Now().Add(2 * time.Second)
+	for h.Media.Transport.Spool.UsedBytes() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.Media.Transport.Spool.UsedBytes() == 0 {
+		t.Fatal("cancelled-upload control did not stage bytes")
+	}
+	cancel()
+	writer.CloseWithError(context.Canceled)
+	select {
+	case response := <-requestDone:
+		if response != nil {
+			response.Body.Close()
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled upload did not terminate")
+	}
+	deadline = time.Now().Add(2 * time.Second)
 	for h.Media.Transport.Spool.UsedBytes() != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -500,6 +522,8 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 	// held upload must release its reservation when cancelled.
 	firstCtx, cancelFirst := context.WithCancel(t.Context())
 	firstReader, firstWriter := io.Pipe()
+	defer cancelFirst()
+	defer firstWriter.CloseWithError(context.Canceled)
 	firstRequest, err := http.NewRequestWithContext(firstCtx, http.MethodPost, h.HTTP.URL+"/v1/videos", firstReader)
 	if err != nil {
 		t.Fatal(err)
@@ -511,7 +535,7 @@ func stressNegativeControls(t *testing.T, h *accessHarness, fixture *stressVideo
 		response, _ := http.DefaultClient.Do(firstRequest)
 		firstResponse <- response
 	}()
-	writeDone := make(chan struct{})
+	writeDone = make(chan struct{})
 	go func() {
 		defer close(writeDone)
 		_, _ = io.WriteString(firstWriter, "--held-upload\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n"+slug+"\r\n--held-upload\r\nContent-Disposition: form-data; name=\"input_reference\"; filename=\"source.png\"\r\nContent-Type: image/png\r\n\r\n")
