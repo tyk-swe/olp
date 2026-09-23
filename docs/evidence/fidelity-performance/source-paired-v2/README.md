@@ -10,10 +10,11 @@ quality claim.
 Historical product B is `8e52f775df815c3a1a25d75064c3ffd540fb07f5`.
 The branch containing this file adds only measurement code and byte-identical
 copies of the v1 baseline and budgets to that checkout. `manifest.json`,
-`manifest-r2.json` and `manifest-r3.json` remain visible as superseded pre-data
+`manifest-r2.json`, `manifest-r3.json` and `manifest-r4.json` remain visible as superseded pre-data
 design revisions. The first accepted a non-strict C route; r2 omitted
 post-baseline product chronology; r3 did not bind the write-once journal or
-fix the output paths. **`manifest-r4.json` is active.** It requires the
+fix the output paths; r4 left B checkout reuse ambiguous after committing
+evidence. **`manifest-r5.json` is active.** It requires the
 exact explicit `{"fidelity":{"mode":"strict"}}` overlay for every native,
 translated and rejected route category, plus Git proof that the exact B-only
 artifact was committed before an affected production Go change. It must be
@@ -40,7 +41,7 @@ host pressure, GC and scheduler observations for every subrun and block. The
 fixed JSON and append-only journal paths are both under this directory. The
 journal is reserved before the first timed subrun; a failed run writes invalid
 status to the same JSON path, and an interrupted run retains its journal. Both
-paths prevent another r4 attempt. Do not remove/retry a block based on load or timing.
+paths prevent another r5 attempt. Do not remove/retry a block based on load or timing.
 
 For each of 224 path metrics, the frozen margin is `M = old v1 budget limit −
 median of the three historical B repetitions`. Thirty gateway-minus-relay
@@ -85,21 +86,32 @@ revision even if the checkout's HEAD later advances through documentation-only
 commits. A product change on a pre-evidence side branch does not become a
 post-evidence change just because it was later merged.
 
+The measured B checkout stays at the same **method commit M** for both the
+B-only and paired runs, retaining its fixed JSON and journal as untracked
+reservations. Create a separate evidence worktree from M, copy those exact two
+files there and commit them together as E (E's sole parent must be M). Merge E
+into C, then make the affected product commit. The paired runner requires B's
+revision and binary hash to match the B-only capture, requires its two reserved
+files to remain untracked and byte-identical to C's committed copies, and
+requires E to have M as its direct parent. Committing the files on the measured
+B checkout would change B's revision and fail this gate.
+
 ```sh
 # In the clean B measurement checkout, after pre-baseline review and before C measurement:
-node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json
+node scripts/fidelity-paired-v2.mjs freeze-manifest docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json
 node --test scripts/fidelity-paired-v2.test.mjs
 go test -mod=readonly ./internal/gateway -run 'TestFidelityBenchmarkOracleDetectsCorruption|TestFidelityPairedLookupPreservesFrozenInventory' -count=1
 OLP_SOURCE_PAIRED_LONG_LIVED_TEST=1 go test -mod=readonly -run '^TestFidelityPairedFixturePastManagerStaleWindow$' -benchtime=1x -count=1 -timeout=3m ./internal/gateway
-node scripts/fidelity-paired-v2.mjs record-B "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json /tmp/oif-source-B.test "$PWD"
+node scripts/fidelity-paired-v2.mjs record-B "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json /tmp/oif-source-B.test "$PWD"
 
-# Copy both B evidence files to C's matching paths and commit them together.
-# Keep the original B output/journal reservation in its checkout.
-# Commit a later affected production Go change, then lock C.
+# From a separate clean evidence worktree branched at measured B commit M,
+# copy both reserved B files and commit them together as E. Merge E into C.
+# Keep the measured B checkout at M with its untracked reservations.
+# Make a later affected production Go commit, then lock C.
 # The runner builds fresh B/C binaries into unused paths before timed blocks.
 export OLP_FIDELITY_BENCH_ROUTE_CONTRACT='{"native":{"fidelity":{"mode":"strict"}},"translated":{"fidelity":{"mode":"strict"}},"rejected":{"fidelity":{"mode":"strict"}}}'
-node scripts/fidelity-paired-v2.mjs record-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/reserved/B /tmp/oif-source-C.test "$PWD"
-node scripts/fidelity-paired-v2.mjs compare-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json "$PWD" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json"
+node scripts/fidelity-paired-v2.mjs record-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" /tmp/oif-source-B-confirm.test /path/to/measured/B-at-M /tmp/oif-source-C.test "$PWD"
+node scripts/fidelity-paired-v2.mjs compare-paired "$PWD/docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json" docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json "$PWD" "$PWD/docs/evidence/fidelity-performance/source-paired-v2/baseline.json"
 ```
 
 The route-contract JSON shown is the exact required C shape from the current

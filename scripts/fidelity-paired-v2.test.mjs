@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateOutputReservation, validateStrictRouteContracts, validateSubrun, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
+import { analyzeBaseline, analyzePaired, makeManifest, resolvePairedProvenance, sourceOrder, sourceSchedule, validateOutputReservation, validateStrictRouteContracts, validateSubrun, validateUntrackedBReservation, verifyPairedProvenance } from './fidelity-paired-v2.mjs';
 
 const manifest = makeManifest(process.cwd());
 const digest = (value) => createHash('sha256').update(value).digest('hex');
@@ -35,7 +35,7 @@ function gitFixture(t) {
   const baselinePath = join(root, manifest.B_only_evidence_path);
   const journalPath = join(root, manifest.B_only_journal_path);
   const baseline = { schema: 'openllmproxy.dev/fidelity-source-paired-v2', mode: 'B-only', status: 'complete',
-    manifest_sha256: digest(JSON.stringify(manifest)), B: metadata, C: null, provenance: null, blocks: [] };
+    manifest_sha256: digest(JSON.stringify(manifest)), B: { revision: initial, binary_sha256: 'same-B-binary' }, C: null, provenance: null, blocks: [] };
   const journal = syntheticJournal(baseline);
   baseline.journal_sha256 = digest(journal);
   const addBaseline = () => {
@@ -87,10 +87,10 @@ test('manifest derives exactly 224 path and 30 added-latency margins from immuta
   assert.equal(Object.values(manifest.comparisons).flatMap(Object.keys).length, 224);
   assert.equal(Object.values(manifest.added_latency).flatMap(Object.keys).length, 30);
   assert.equal(manifest.B_product_revision, '8e52f775df815c3a1a25d75064c3ffd540fb07f5');
-  assert.equal(manifest.manifest_revision, 'write-once-evidence-r4');
+  assert.equal(manifest.manifest_revision, 'separate-evidence-branch-r5');
   assert.equal(manifest.B_only_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json');
   assert.equal(manifest.B_only_journal_path, 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl');
-  assert.equal(manifest.paired_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json');
+  assert.equal(manifest.paired_evidence_path, 'docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json');
   assert.deepEqual(manifest.C_route_contract, { native: { fidelity: { mode: 'strict' } }, translated: { fidelity: { mode: 'strict' } }, rejected: { fidelity: { mode: 'strict' } } });
   for (const metrics of Object.values(manifest.comparisons)) for (const value of Object.values(metrics)) {
     assert.equal(value.margin, value.old_limit - value.old_B_median);
@@ -118,6 +118,14 @@ test('exact B-only blob precedes a real production change and stays verifiable a
   fixture.put(manifest.paired_journal_path, pairedJournal);
   capture.journal_sha256 = digest(pairedJournal);
   assert.deepEqual(verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), provenance);
+  capture.B = { ...capture.B, revision: evidence };
+  const wrongBJournal = syntheticJournal(capture);
+  fixture.put(manifest.paired_journal_path, wrongBJournal);
+  capture.journal_sha256 = digest(wrongBJournal);
+  assert.throws(() => verifyPairedProvenance(capture, fixture.baseline, manifest, fixture.root, fixture.baselinePath), /measured historical method revision/);
+  capture.B = fixture.baseline.B;
+  fixture.put(manifest.paired_journal_path, pairedJournal);
+  capture.journal_sha256 = digest(pairedJournal);
   capture.provenance = { ...provenance, evidence_commit: fixture.initial };
   const forgedJournal = syntheticJournal(capture);
   fixture.put(manifest.paired_journal_path, forgedJournal);
@@ -199,6 +207,15 @@ test('fixed output paths reject alternate attempts and existing journals', (t) =
   assert.throws(() => validateOutputReservation('paired', join(fixture.root, 'retry-paired.json'), fixture.root, manifest), /single frozen evidence path/);
   fixture.put(manifest.B_only_journal_path, fixture.journal);
   assert.throws(() => validateOutputReservation('B-only', B, fixture.root, manifest), /already reserves this attempt/);
+});
+
+test('paired B keeps exact reserved files untracked at the measured method revision', (t) => {
+  const fixture = gitFixture(t);
+  fixture.put(manifest.B_only_evidence_path, JSON.stringify(fixture.baseline, null, 2) + '\n');
+  fixture.put(manifest.B_only_journal_path, fixture.journal);
+  assert.equal(validateUntrackedBReservation(fixture.root, manifest), true);
+  fixture.commit('Evidence committed in B checkout');
+  assert.throws(() => validateUntrackedBReservation(fixture.root, manifest), /untracked reservation/);
 });
 
 test('a pre-evidence product side branch hidden behind a no-ff merge cannot qualify', (t) => {

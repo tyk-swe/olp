@@ -49,7 +49,7 @@ const oldFiles = {
 };
 const B_ONLY_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/baseline.json';
 const B_ONLY_JOURNAL_PATH = `${B_ONLY_EVIDENCE_PATH}.journal.jsonl`;
-const PAIRED_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/paired-r4.json';
+const PAIRED_EVIDENCE_PATH = 'docs/evidence/fidelity-performance/source-paired-v2/paired-r5.json';
 const PAIRED_JOURNAL_PATH = `${PAIRED_EVIDENCE_PATH}.journal.jsonl`;
 const affectedProductionPrefixes = ['internal/gateway/', 'internal/resources/', 'internal/interaction/'];
 
@@ -137,11 +137,11 @@ export function makeManifest(root) {
   invariant(Object.values(addedLatency).flatMap(Object.keys).length === 30, 'added latency inventory changed');
   const schedule = sourceSchedule();
   return {
-    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'write-once-evidence-r4',
-    supersedes_manifest_sha256: '3014471018afccaee491353e6cc095db2e77b6b83ba94017c2e8459c42c95cff',
+    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'separate-evidence-branch-r5',
+    supersedes_manifest_sha256: '87c5584162e0c2b2fa9d6d82ea52203aa297ff6208f2b340238857b9fabc2a49',
     B_only_evidence_path: B_ONLY_EVIDENCE_PATH, B_only_journal_path: B_ONLY_JOURNAL_PATH,
     paired_evidence_path: PAIRED_EVIDENCE_PATH, paired_journal_path: PAIRED_JOURNAL_PATH,
-    chronology: 'one normal commit creates the exact B-only JSON and append-only journal together; unchanged no-ff merge propagation is allowed, later edits/deletions/recreations are not; a strict later non-merge affected production Go change precedes locked C',
+    chronology: 'paired B stays at measured method commit M with fixed untracked reservations; a separate branch creates exact B JSON and journal together in normal commit E directly after M, merges E unchanged into C, and a later affected production Go commit precedes locked C',
     C_route_contract: strictRouteContracts, B_product_revision: B_PRODUCT,
     old_baseline_sha256: digest(full('baseline')), old_budgets_sha256: digest(full('budgets')),
     old_harness_sha256: digest(full('harness')), old_runner_sha256: digest(full('runner')),
@@ -201,6 +201,15 @@ export function validateOutputReservation(mode, output, root, manifest) {
   invariant(resolve(`${output}.journal.jsonl`) === resolve(root, journal), `${mode} journal must use the single frozen reservation path`);
   invariant(!existsSync(output) && !existsSync(resolve(root, journal)), `${mode} output or journal already reserves this attempt`);
   return { output: resolve(root, evidence), journal: resolve(root, journal) };
+}
+
+export function validateUntrackedBReservation(root, manifest) {
+  for (const path of [manifest.B_only_evidence_path, manifest.B_only_journal_path]) {
+    invariant(existsSync(resolve(root, path)), `measured B reservation is missing: ${path}`);
+    const status = command('git', ['status', '--porcelain', '--untracked-files=all', '--', path], root);
+    invariant(status === `?? ${path}`, `paired B must retain ${path} as an untracked reservation on the measured method commit`);
+  }
+  return true;
 }
 
 function gitBlob(root, revision, path, cache) {
@@ -293,6 +302,9 @@ export function verifyPairedProvenance(capture, baseline, manifest, root, baseli
   verifyJournal(baseline, resolve(root, manifest.B_only_journal_path));
   verifyJournal(capture, resolve(root, manifest.paired_journal_path));
   const expected = resolvePairedProvenance(root, baselinePath, capture.C?.revision, manifest);
+  invariant(capture.B?.revision === baseline.B?.revision, 'paired B must reuse the measured historical method revision');
+  const evidenceParents = command('git', ['rev-list', '--parents', '-n', '1', expected.evidence_commit], root).split(/\s+/);
+  invariant(evidenceParents.length === 2 && baseline.B?.revision === evidenceParents[1], 'separate B-only evidence branch must start at the measured method revision');
   invariant(isDeepStrictEqual(capture.provenance, expected), 'paired artifact chronology or blob provenance differs from Git history');
   return expected;
 }
@@ -311,7 +323,7 @@ function sourceIdentity(root, manifest, B, allowedUntracked = []) {
   invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
-    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
+    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
 }
@@ -498,7 +510,7 @@ export function analyzePaired(capture, baseline, manifest) {
   validateCapture(baseline, manifest, true);
   validateCapture(capture, manifest, false);
   invariant(isDeepStrictEqual(capture.hardware, baseline.hardware) && capture.manifest_sha256 === baseline.manifest_sha256, 'B-only and paired measurement conditions differ');
-  invariant(capture.B?.revision === baseline.B?.revision && capture.B?.binary_sha256 === baseline.B?.binary_sha256, 'historical B binary/revision changed');
+  invariant(capture.B?.revision === baseline.B?.revision && capture.B?.binary_sha256 === baseline.B?.binary_sha256, 'historical B method revision or binary changed');
   invariant(capture.B_only_sha256 === hash(JSON.stringify(baseline, null, 2) + '\n'), 'B-only artifact reference changed');
   const BOnly = analyzeBaseline(baseline, manifest);
   const failures = [...BOnly.failures.map((failure) => `B-only envelope: ${failure}`)];
@@ -582,10 +594,16 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   if (mode === 'paired') {
     invariant(BReserved.every(existsSync), 'original B-only output and journal reservation are missing from B checkout');
     invariant(digest(BReserved[0]) === digest(baselinePath) && digest(BReserved[1]) === digest(resolve(Croot, manifest.B_only_journal_path)), 'B checkout reservations differ from committed B evidence');
+    validateUntrackedBReservation(Broot, manifest);
   }
-  sourceIdentity(Broot, manifest, true, BReserved);
+  const BSource = sourceIdentity(Broot, manifest, true, BReserved);
   const CSource = mode === 'paired' ? sourceIdentity(Croot, manifest, false) : null;
   const provenance = CSource ? resolvePairedProvenance(Croot, baselinePath, CSource.revision, manifest) : null;
+  if (provenance) {
+    invariant(BSource.revision === frozenBaseline.B?.revision, 'paired B must remain at the measured historical method commit');
+    const parents = command('git', ['rev-list', '--parents', '-n', '1', provenance.evidence_commit], Croot).split(/\s+/);
+    invariant(parents.length === 2 && frozenBaseline.B?.revision === parents[1], 'separate B-only evidence branch must start at the measured method commit');
+  }
   if (mode === 'paired') invariant(resolve(Bbinary) !== resolve(Cbinary), 'B and C require distinct binary output paths');
   const routeContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT || 'null') : null;
   const providerContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT || 'null') : null;
