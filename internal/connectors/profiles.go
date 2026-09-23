@@ -498,6 +498,10 @@ func (p Profile) OperationDialect(operation string) string {
 		return "rerank"
 	case "bedrock_invoke":
 		return "bedrock-invoke"
+	case "realtime":
+		if (p.Kind == "openai" && p.Hosting == "direct-openai") || (p.Kind == "azure_openai" && p.Hosting == "azure-v1") {
+			return "openai-realtime"
+		}
 	}
 	return p.Hosting + "/" + operation
 }

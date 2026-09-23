@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/realtimecontract"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -150,6 +151,7 @@ type Snapshot struct {
 	operations         map[string]map[string]*operationplan.Template
 	media              map[string]map[string]*mediacontract.Template
 	durable            map[string]map[string]*durablecontract.Template
+	realtime           map[string]map[string]*realtimecontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -191,6 +193,7 @@ func (s *Snapshot) Validate() error {
 	s.operations = make(map[string]map[string]*operationplan.Template)
 	s.media = make(map[string]map[string]*mediacontract.Template)
 	s.durable = make(map[string]map[string]*durablecontract.Template)
+	s.realtime = make(map[string]map[string]*realtimecontract.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
@@ -258,6 +261,11 @@ func (s *Snapshot) Validate() error {
 			return fmt.Errorf("route %q durable: %w", slug, err)
 		}
 		s.durable[slug] = durable
+		duplex, err := s.compileRealtime(r)
+		if err != nil {
+			return fmt.Errorf("route %q realtime: %w", slug, err)
+		}
+		s.realtime[slug] = duplex
 		r.compiledContentPolicy = policy
 		s.Routes[slug] = r
 	}

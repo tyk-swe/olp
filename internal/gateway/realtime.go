@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,6 +17,8 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/realtimecontract"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -26,6 +29,8 @@ const realtimeReauth = 5 * time.Second
 const realtimePing = 30 * time.Second
 
 var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
+var errRealtimeProviderCredentialRevoked = errors.New("realtime provider credential revoked")
+var errRealtimeClientClosed = errors.New("realtime client disconnected")
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyRealtime, actor: "api_key"}
@@ -94,14 +99,35 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
+	if x.strict() {
+		if e := strictRealtimeHandshake(snapshot, &route, r); e != nil {
+			fail(e)
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), realtimeSession)
 	defer cancel()
-	p, e := s.selectPin(ctx, x, &route, "realtime", "realtime")
+	var p *pin
+	if x.strict() {
+		// Realtime has an operation-owned duplex contract. Retained Responses
+		// eligibility and the unary codec say nothing about a native session.
+		p, e = s.selectPinSurface(ctx, x, &route, "realtime", "openai", "realtime", func(provider *runtime.Provider, model string) bool {
+			return provider.Connector().Supports("realtime", "openai", "realtime") && provider.Supports(model, "realtime", "openai", "realtime")
+		})
+	} else {
+		p, e = s.selectPin(ctx, x, &route, "realtime", "realtime")
+	}
 	if e != nil {
 		fail(e)
 		return
 	}
 	defer s.resourceSettle(r.Context(), x, p)
+	if x.strict() {
+		if _, ok := snapshot.RealtimeTemplate(route.Slug, p.target.ID); !ok {
+			fail(policyUnavailable("realtime_contract_unavailable", "The selected target has no compiled strict realtime contract."))
+			return
+		}
+	}
 	if e := s.reserveState(ctx, x, authority, realtimeSession); e != nil {
 		fail(e)
 		return
@@ -130,12 +156,22 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
+	terminalStatus := http.StatusOK
+	if x.strict() {
+		// A strict WebSocket has already committed HTTP 101 at this boundary.
+		// Later transport errors are carried by close frames and the Attempt.
+		terminalStatus = http.StatusSwitchingProtocols
+	}
 	conn, e := realtimeDial(ctx, s, x, p, upstream)
 	if e != nil {
 
 		client.Close(websocket.StatusInternalError, "upstream unavailable")
 		x.failure = e
-		s.finish(x, nil, e.Status)
+		if x.strict() {
+			s.finish(x, &outcome{err: e, committed: true}, terminalStatus)
+		} else {
+			s.finish(x, nil, e.Status)
+		}
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
@@ -148,13 +184,15 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(limit)
 	x.dispatched = true
 	x.delivered(s.now())
-	usage, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
+	observedUsage, observed, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
 	class := classProtocol
 	cancelled := false
 	if relayErr != nil {
 		switch {
-		case errors.Is(relayErr, errRealtimeAuthorityRevoked):
+		case errors.Is(relayErr, errRealtimeAuthorityRevoked), errors.Is(relayErr, errRealtimeProviderCredentialRevoked):
 			class = classCredential
+		case errors.Is(relayErr, errRealtimeClientClosed):
+			class, cancelled = classCancelled, true
 		case errors.Is(relayErr, context.Canceled):
 			class, cancelled = classCancelled, true
 		case errors.Is(relayErr, context.DeadlineExceeded):
@@ -163,8 +201,19 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(x.facts) > 0 {
 		fact := &x.facts[len(x.facts)-1]
-		if usage != nil {
-			fact.Usage = usage
+		if fact.Interaction != nil {
+			if observed {
+				fact.Interaction.ClientState = usage.ClientPartial
+			}
+			if relayErr == nil {
+				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				fact.Interaction.ClientState = usage.ClientTerminal
+			} else {
+				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			}
+		}
+		if observedUsage != nil {
+			fact.Usage = observedUsage
 			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = true, relayErr == nil, relayErr != nil
 		} else {
 			fact.UsageComplete = false
@@ -176,13 +225,43 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	if relayErr != nil {
 		x.failure = serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
-		if class == classCredential {
+		switch {
+		case errors.Is(relayErr, errRealtimeAuthorityRevoked):
 			x.failure = permissionError("key_revoked", "The realtime session no longer has route authority.")
+		case errors.Is(relayErr, errRealtimeProviderCredentialRevoked):
+			x.failure = permissionError("provider_credential_revoked", "The realtime provider credential was revoked.")
+		case class == classCancelled:
+			x.failure = (&attemptFailure{class: classCancelled}).toError()
+		case class == classTimeout:
+			x.failure = (&attemptFailure{class: classTimeout}).toError()
 		}
-		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: cancelled}, x.failure.Status)
+		status := x.failure.Status
+		if x.strict() {
+			status = terminalStatus
+		}
+		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: cancelled}, status)
 		return
 	}
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
+	s.finish(x, &outcome{committed: true}, terminalStatus)
+}
+
+func strictRealtimeHandshake(snapshot *runtime.Snapshot, route *runtime.Route, r *http.Request) *Error {
+	for _, target := range route.Targets {
+		template, ok := snapshot.RealtimeTemplate(route.Slug, target.ID)
+		if !ok {
+			continue
+		}
+		if err := template.AdmitHandshake(r.URL.RawQuery, r.Header, route.Slug); err != nil {
+			var refusal *realtimecontract.Refusal
+			if errors.As(err, &refusal) {
+				parameter := refusal.Field
+				return invalidRequest("realtime_control_unavailable", refusal.Message, &parameter)
+			}
+			return invalidRequest("realtime_control_unavailable", "The realtime handshake is not qualified by this strict route.", nil)
+		}
+		return nil
+	}
+	return policyUnavailable("realtime_contract_unavailable", "The route has no compiled strict OpenAI realtime target.")
 }
 
 func realtimeUpgrade(r *http.Request) bool {
@@ -228,6 +307,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	fact.Mode = "realtime"
 	finish := func(class string, e *Error) *Error {
 		fact.Class = class
+		if fact.Interaction != nil && fact.Status > 0 {
+			fact.Interaction.UpstreamState = usage.UpstreamTerminal
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
 		x.facts = append(x.facts, fact)
@@ -254,6 +336,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
 	if err != nil {
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = usage.UpstreamUnknown
+		}
 		status := 0
 		if resp != nil {
 			status = resp.StatusCode
@@ -275,6 +360,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		return nil, finish(class, upstreamError(&attemptFailure{status: status, upstream: upstreamResponseError(resp)}))
 	}
 	fact.Class = "success"
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = usage.UpstreamAccepted
+	}
 	fact.Committed = true
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	fact.recordEvidence(true)
@@ -294,17 +382,22 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 	return openai.ParseErrorBody(body)
 }
 
-func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) (*openai.Usage, error) {
+func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) (*openai.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var usageMu sync.Mutex
 	usage := &openai.Usage{}
 	have := false
-	forward := func(dst, src *websocket.Conn, inspect bool) error {
+	observed := false
+	type relayEnd struct {
+		err    error
+		client bool
+	}
+	forward := func(dst, src *websocket.Conn, inspect bool) relayEnd {
 		for {
 			typ, data, err := src.Read(ctx)
 			if err != nil {
-				return err
+				return relayEnd{err: err, client: !inspect}
 			}
 			if inspect {
 				if u := realtimeUsage(data); u != nil {
@@ -326,11 +419,14 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 			err = dst.Write(writeCtx, typ, data)
 			stopWrite()
 			if err != nil {
-				return err
+				return relayEnd{err: err, client: inspect}
+			}
+			if inspect {
+				observed = true
 			}
 		}
 	}
-	done := make(chan error, 2)
+	done := make(chan relayEnd, 2)
 	go func() { done <- forward(conn, client, false) }()
 	go func() { done <- forward(client, conn, true) }()
 	reauth := time.NewTicker(realtimeReauth)
@@ -338,12 +434,13 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
 	var first error
+	clientClosed := false
 	closeCode := websocket.StatusCode(0)
 loop:
 	for {
 		select {
-		case err := <-done:
-			first = err
+		case end := <-done:
+			first, clientClosed = end.err, end.client
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
@@ -351,6 +448,12 @@ loop:
 				first = errRealtimeAuthorityRevoked
 				closeCode = websocket.StatusPolicyViolation
 				client.Close(websocket.StatusPolicyViolation, "key revoked")
+				break loop
+			}
+			if p.slot.CredentialID != nil && s.Runtime.Revoked(*p.slot.CredentialID) {
+				first = errRealtimeProviderCredentialRevoked
+				closeCode = websocket.StatusPolicyViolation
+				client.Close(websocket.StatusPolicyViolation, "provider credential revoked")
 				break loop
 			}
 		case <-heartbeat.C:
@@ -382,17 +485,20 @@ loop:
 	<-done
 	usageMu.Lock()
 	defer usageMu.Unlock()
-	var observed *openai.Usage
+	var observedUsage *openai.Usage
 	if have {
-		observed = usage
+		observedUsage = usage
 	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
-		return observed, nil
+		return observedUsage, observed, nil
+	}
+	if clientClosed {
+		return observedUsage, observed, fmt.Errorf("%w: %v", errRealtimeClientClosed, first)
 	}
 	if !have {
-		return nil, first
+		return nil, observed, first
 	}
-	return usage, first
+	return usage, observed, first
 }
 
 func realtimeUsage(data []byte) *openai.Usage {

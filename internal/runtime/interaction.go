@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"slices"
 )
 
@@ -100,17 +101,13 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 	}
 	templates := map[string]*operationplan.Template{}
 	for _, op := range route.Operations {
-		if op == "generation" || op == "batch" || mediacontract.IsMediaOperation(op) {
+		if op == "generation" || op == "batch" || op == "realtime" || mediacontract.IsMediaOperation(op) {
 			continue
 		}
 		for _, target := range route.Targets {
 			provider, ok := s.Providers[target.ProviderID]
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
-			}
-			// Live owns a duplex setup-first contract rather than a unary codec.
-			if op == "realtime" && provider.ProfileID == "gemini-live" {
-				continue
 			}
 			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
 			if err != nil {
@@ -120,6 +117,40 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 		}
 	}
 	return templates, nil
+}
+
+func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Template, error) {
+	if FidelityMode(route.Fidelity) != FidelityStrict || !slices.Contains(route.Operations, "realtime") {
+		return nil, nil
+	}
+	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	for _, target := range route.Targets {
+		provider, ok := s.Providers[target.ProviderID]
+		if !ok {
+			return nil, fmt.Errorf("route target references an unavailable provider")
+		}
+		// Gemini Live has its own setup-first contract on a distinct ingress.
+		if provider.ProfileID == "gemini-live" {
+			continue
+		}
+		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
+			return nil, fmt.Errorf("target %s has no certified OpenAI realtime capability", target.ID)
+		}
+		if len(provider.ParameterDefaults) > 0 {
+			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
+		}
+		template, err := realtimecontract.Compile(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.ContentPolicy})
+		if err != nil {
+			return nil, err
+		}
+		templates[target.ID] = template
+	}
+	return templates, nil
+}
+
+func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
+	template, ok := s.realtime[slug][target]
+	return template, ok
 }
 
 func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template, error) {
