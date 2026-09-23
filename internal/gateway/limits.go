@@ -406,11 +406,6 @@ const (
 	maxEstimate = 1<<53 - 1
 )
 
-func requestDemand(parsed *openai.Request) *runtime.TokenDemand {
-	input, output, _ := estimateParts(parsed)
-	return &runtime.TokenDemand{EstimatedInputTokens: input, MaxOutputTokens: output}
-}
-
 // estimateTokens is the tokens a request may consume, charged before the
 // upstream reports what it actually used. The prompt is walked rather than
 // weighed: text is charged at four characters per token, each media part at a
@@ -421,6 +416,10 @@ func requestDemand(parsed *openai.Request) *runtime.TokenDemand {
 // window is worse than deferring work that would have.
 func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
 	input, output, candidates := estimateParts(parsed, defaults...)
+	return estimateTokensFromParts(parsed, input, output, candidates)
+}
+
+func estimateTokensFromParts(parsed *openai.Request, input int64, output *int64, candidates int64) int64 {
 	if parsed != nil && parsed.Family.Operation() != "generation" {
 		return max(input, 1)
 	}

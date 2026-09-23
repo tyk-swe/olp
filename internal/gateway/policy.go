@@ -84,6 +84,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 		case matched:
 			x.parsed = transformed
 			x.preparedProviders = nil
+			x.sourceSummary = nil
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 		}
 	}

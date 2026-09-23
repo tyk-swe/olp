@@ -14,8 +14,38 @@ import (
 type preparedProvider struct {
 	invocation      providerinvoke.Invocation
 	estimate        int64
+	parameters      []string
+	demand          *runtime.TokenDemand
 	plan            *interaction.Plan
 	policyDecisions []contentpolicy.Decision
+}
+
+// A summary belongs to one source or one bound destination within an inference
+// request. The same complete token walk feeds routing and reservation; the
+// canonical parameter names still come from the effective request adapter.
+type requestSummary struct {
+	request    *openai.Request
+	parameters []string
+	demand     *runtime.TokenDemand
+	estimate   int64
+}
+
+func summarizeRequest(request *openai.Request) requestSummary {
+	input, output, candidates := estimateParts(request)
+	return requestSummary{
+		request:    request,
+		parameters: protocols.ParameterNames(request),
+		demand:     &runtime.TokenDemand{EstimatedInputTokens: input, MaxOutputTokens: output},
+		estimate:   estimateTokensFromParts(request, input, output, candidates),
+	}
+}
+
+func (x *execution) summarizeSource() requestSummary {
+	if x.sourceSummary == nil || x.sourceSummary.request != x.parsed {
+		summary := summarizeRequest(x.parsed)
+		x.sourceSummary = &summary
+	}
+	return *x.sourceSummary
 }
 
 func (x *execution) strict() bool {
@@ -52,7 +82,8 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 			return preparedProvider{}, err
 		}
 		decisions, err := plan.CheckInput()
-		prepared := preparedProvider{plan: plan, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, estimate: max(estimateTokens(x.parsed), estimateTokens(plan.EffectiveRequest())), policyDecisions: decisions}
+		source, effective := x.summarizeSource(), summarizeRequest(plan.EffectiveRequest())
+		prepared := preparedProvider{plan: plan, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, estimate: max(source.estimate, effective.estimate), parameters: effective.parameters, demand: effective.demand, policyDecisions: decisions}
 		if err != nil {
 			return prepared, err
 		}
@@ -103,13 +134,14 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 			invocation.Prepared = prepared.WithProvenance(invocation.Prepared.Provenance()...)
 		}
 	}
-	estimate := max(estimateTokens(x.parsed), estimateTokens(native))
+	source, effective := x.summarizeSource(), summarizeRequest(native)
+	estimate := max(source.estimate, effective.estimate)
 	// Bedrock's native tool catalogue is outside the OpenAI tools field. Its
 	// whole schema still contributes to the same conservative token reservation.
 	if invocation.Wire == openai.FamilyBedrock {
 		estimate = addBounded(estimate, estimateSchema(native.Field("toolConfig")))
 	}
-	prepared := preparedProvider{invocation: invocation, estimate: estimate, policyDecisions: decisions}
+	prepared := preparedProvider{invocation: invocation, estimate: estimate, parameters: effective.parameters, demand: effective.demand, policyDecisions: decisions}
 	if x.preparedProviders == nil {
 		x.preparedProviders = map[string]preparedProvider{}
 	}

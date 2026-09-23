@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -72,6 +73,53 @@ func TestKeyEstimateCoversEveryCandidate(t *testing.T) {
 	}
 	if got := requestEstimate(x); got != 101 {
 		t.Fatalf("key estimate = %d, want the largest effective request", got)
+	}
+}
+
+func TestPreparedRoutingKeepsTargetDefaultsDistinctThroughReservation(t *testing.T) {
+	h := newHarness(t, Config{})
+	var first runtime.Provider
+	for _, provider := range h.rt.release.Snapshot.Providers {
+		if provider.Name == "a" {
+			first = provider
+			break
+		}
+	}
+	first.ProfileID, first.ProfileRevision = "compatible-chat", "1"
+	first.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`5000`)}}}
+	second := first
+	second.ID, second.RevisionID = "different-provider", "different-revision"
+	second.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)}}}
+	parsed, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"abcd"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &execution{
+		parsed: parsed,
+		request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{
+			first.ID: first, second.ID: second,
+		}}}},
+		attempts: []runtime.Attempt{{ProviderID: first.ID, UpstreamModel: modelA}, {ProviderID: second.ID, UpstreamModel: modelA}},
+	}
+	for _, tc := range []struct {
+		provider *runtime.Provider
+		bound    int64
+	}{
+		{&first, 5000}, {&second, 9000},
+	} {
+		prepared, err := x.preparedProvider(tc.provider, modelA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prepared.demand.MaxOutputTokens == nil || *prepared.demand.MaxOutputTokens != tc.bound {
+			t.Fatalf("provider %s routing bound = %v, want %d", tc.provider.ID, prepared.demand.MaxOutputTokens, tc.bound)
+		}
+		if got := x.providerEstimate(tc.provider); got != tc.bound+1 {
+			t.Fatalf("provider %s reservation = %d, want %d", tc.provider.ID, got, tc.bound+1)
+		}
+	}
+	if got := requestEstimate(x); got != 9001 {
+		t.Fatalf("failover reservation = %d, want the largest target bound", got)
 	}
 }
 

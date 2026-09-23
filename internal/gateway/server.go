@@ -688,21 +688,18 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	}
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
+	source := x.summarizeSource()
 	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
-				return protocols.ParameterNames(x.parsed), requestDemand(x.parsed)
+				return source.parameters, source.demand
 			}
 			prepared, err := x.preparedProvider(&p, t.ProviderModel)
 			if err != nil {
 				return nil, nil
 			}
-			native := openai.NewSourceEnvelope(prepared.invocation.Wire, x.parsed.Route, x.parsed.Stream, prepared.invocation.Prepared.Document())
-			if prepared.plan != nil {
-				native = prepared.plan.EffectiveRequest()
-			}
-			return protocols.ParameterNames(native), requestDemand(native)
+			return prepared.parameters, prepared.demand
 		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
