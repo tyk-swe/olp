@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { cpus, totalmem, release, arch, platform } from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -16,6 +16,14 @@ const historicalBudget = 'docs/evidence/fidelity-performance/lifecycle-v1/replac
 const harness = 'tests/integration/fidelity_lifecycle_v2_test.go';
 const frozenHarness = 'tests/integration/fidelity_lifecycle_performance_test.go';
 const runner = 'scripts/fidelity-lifecycle-v2-benchmark.mjs';
+const captureSchema = 'openllmproxy.dev/fidelity-lifecycle-capture/v2';
+export const evidencePaths = Object.freeze({
+  baseline: 'docs/evidence/fidelity-performance/lifecycle-v2/baseline.jsonl',
+  budget: 'docs/evidence/fidelity-performance/lifecycle-v2/replacement-budgets.json',
+  candidate: 'docs/evidence/fidelity-performance/lifecycle-v2/strict-candidate.jsonl'
+});
+const methodCommit = 'd63e67bd05331757e25e11a18997950ac98d2126';
+const strictProductCommit = 'dfa6420e';
 // The reviewed source delta replaces the legacy unencrypted resource store
 // with NewEncrypted and extracts the same harness constructor for migration
 // tests. An unreviewed setup-helper revision invalidates this qualification.
@@ -40,7 +48,44 @@ const command = (name, args) => {
 };
 const optional = (path) => existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-const median = (values) => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)];
+function isAncestor(ancestor) {
+  const r = spawnSync('git', ['merge-base', '--is-ancestor', ancestor, 'HEAD'], { encoding: 'utf8' });
+  return r.status === 0;
+}
+export function verifyCandidateLineage({ methodAncestor, productAncestor, baselineAncestor, productDiff }) {
+  if (!methodAncestor || !productAncestor || !baselineAncestor || !productDiff) {
+    throw new Error('Pre-candidate method/reference ancestry or strict product change missing');
+  }
+}
+function committedClean(path) {
+  if (!existsSync(path) || !command('git', ['ls-files', '--error-unmatch', path]) || command('git', ['status', '--short', '--', path]) !== '') {
+    throw new Error(`Committed clean evidence required: ${path}`);
+  }
+}
+export function readCapture(path) {
+  const lines = readFileSync(path, 'utf8').trimEnd().split('\n');
+  if (lines.length !== 2) throw new Error('Incomplete or edited append-only lifecycle capture');
+  const start = JSON.parse(lines[0]);
+  const terminal = JSON.parse(lines[1]);
+  if (start.schema !== captureSchema || start.phase !== 'reserved' ||
+      terminal.schema !== captureSchema || terminal.capture_id !== start.capture_id ||
+      !['complete', 'failed'].includes(terminal.phase) || !terminal.artifact ||
+      terminal.artifact.source_revision !== start.source_revision ||
+      !isDeepStrictEqual(terminal.artifact.contract, start.contract) ||
+      terminal.artifact.started_at !== start.started_at) {
+    throw new Error('Invalid append-only lifecycle capture');
+  }
+  return terminal;
+}
+export function reserveCapture(path, source, contract, startedAt) {
+  const id = randomUUID();
+  writeFileSync(path, JSON.stringify({ schema: captureSchema, phase: 'reserved', capture_id: id,
+    source_revision: source, contract, started_at: startedAt }) + '\n', { flag: 'wx' });
+  return id;
+}
+export function completeCapture(path, id, phase, artifact) {
+  appendFileSync(path, JSON.stringify({ schema: captureSchema, phase, capture_id: id, artifact }) + '\n');
+}
 
 export function parseRuns(output) {
   return output.split('\n').filter((line) => line.includes('LIFECYCLE_V2_MEASUREMENT ')).map((line) => JSON.parse(line.slice(line.indexOf('LIFECYCLE_V2_MEASUREMENT ') + 25)));
@@ -84,55 +129,106 @@ export function historicalAddedLimits(reference) {
     return [metric, Math.ceil(Math.max(0, ...differences) * 1.5 + 1000)];
   }))]));
 }
+export function verifyBaselineReceipt(capture, budget, captureSHA) {
+  if (capture.phase !== 'complete' || budget.schema !== budgetSchema ||
+      !/^[0-9a-f]{64}$/.test(captureSHA) || budget.baseline_capture_sha256 !== captureSHA) {
+    throw new Error('Committed complete B-only capture SHA is required');
+  }
+  const b = capture.artifact;
+  if (!isDeepStrictEqual(budget.maxima, JSON.parse(readFileSync(historicalBudget, 'utf8')).maxima) ||
+      !isDeepStrictEqual(budget.added_latency_maxima, historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8'))))) {
+    throw new Error('B-only numeric method changed after preregistration');
+  }
+  if (b.schema !== schema || b.contract !== null || b.working_tree !== '' ||
+      b.source_revision !== budget.baseline.source_revision || b.harness_sha256 !== budget.harness_sha256 ||
+      b.runner_sha256 !== budget.runner_sha256 || !isDeepStrictEqual(measurement(b), budget.measurement)) {
+    throw new Error('Committed B-only capture and numeric receipt disagree');
+  }
+  const summary = validateV2Runs(b.runs);
+  for (const name of names) for (const [metric, limit] of Object.entries(budget.maxima[name])) {
+    if (summary[name][metric]?.median > limit) throw new Error(`B-only self-compare failed: ${name}/${metric}`);
+  }
+  for (const label of addedNames) for (const [metric, limit] of Object.entries(budget.added_latency_maxima[label])) {
+    if (addedLatency(summary, label, metric) > limit) throw new Error(`B-only added-latency self-compare failed: ${label}/${metric}`);
+  }
+  return b;
+}
 function referenceProductDiff() {
   return command('git', ['diff', '--name-only', historicalProduct, 'HEAD']).split('\n').filter(Boolean).sort();
 }
-function record(path, strict, budgetPath) {
-  if (existsSync(path)) throw new Error('Refusing to overwrite measured evidence');
+function record(strict) {
+  const path = strict ? evidencePaths.candidate : evidencePaths.baseline;
+  if (existsSync(path)) throw new Error(`Fixed write-once lifecycle capture already exists: ${path}`);
+  const source = command('git', ['rev-parse', 'HEAD']);
+  const workingTree = command('git', ['status', '--short']);
+  if (workingTree !== '') throw new Error('A clean source worktree is required before reserving lifecycle evidence');
   if (strict) {
-    if (!budgetPath || !existsSync(budgetPath)) throw new Error('Committed B-only v2 budget required before strict candidate measurement');
-    const tracked = command('git', ['ls-files', '--error-unmatch', budgetPath]);
-    if (!tracked || command('git', ['status', '--short', '--', budgetPath]) !== '') throw new Error('B-only v2 budget must be committed and clean');
-    const budget = JSON.parse(readFileSync(budgetPath, 'utf8'));
+    committedClean(evidencePaths.baseline);
+    committedClean(evidencePaths.budget);
+    const budget = JSON.parse(readFileSync(evidencePaths.budget, 'utf8'));
+    const b = readCapture(evidencePaths.baseline);
+    verifyBaselineReceipt(b, budget, hash(evidencePaths.baseline));
     const original = JSON.parse(readFileSync(historicalBudget, 'utf8'));
     const added = historicalAddedLimits(JSON.parse(readFileSync(historicalBaseline, 'utf8')));
-    if (budget.schema !== budgetSchema || budget.baseline.contract !== null || !budget.baseline.source_revision || budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner) ||
+    if (budget.harness_sha256 !== hash(harness) || budget.runner_sha256 !== hash(runner) ||
         budget.expected_candidate_setup_sha256 !== candidateSetupSHA256 || hash('tests/integration/access_test.go') !== budget.expected_candidate_setup_sha256 ||
         !isDeepStrictEqual(budget.maxima, original.maxima) || !isDeepStrictEqual(budget.added_latency_maxima, added)) throw new Error('Unfrozen or mismatched B-only v2 budget/setup');
+    verifyCandidateLineage({ methodAncestor: isAncestor(methodCommit), productAncestor: isAncestor(strictProductCommit),
+      baselineAncestor: isAncestor(b.artifact.source_revision),
+      productDiff: Boolean(command('git', ['diff', '--name-only', historicalProduct, 'HEAD', '--', 'internal/gateway/response_contract.go'])) });
     if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY !== '{"mode":"strict"}') throw new Error('Explicit strict route fidelity required');
-  } else if (budgetPath || process.env.OLP_LIFECYCLE_ROUTE_FIDELITY) {
-    throw new Error('Historical B reference must use the legacy route and no candidate budget');
+  } else {
+    if (process.env.OLP_LIFECYCLE_ROUTE_FIDELITY) throw new Error('Historical B reference must use the legacy route');
+    const allowed = [harness, runner, 'scripts/fidelity-lifecycle-v2-benchmark.test.mjs', 'docs/evidence/fidelity-performance/lifecycle-v2/README.md'];
+    const diff = referenceProductDiff();
+    if (!diff.every((file) => allowed.includes(file)) || !diff.includes(harness) || !diff.includes(runner)) {
+      throw new Error('Historical B product source differs from the pre-#216 revision');
+    }
   }
+  const contract = strict ? { mode: 'strict' } : null;
   const startedAt = new Date().toISOString();
   const loadBefore = optional('/proc/loadavg');
-  const result = spawnSync('go', args, { encoding: 'utf8', maxBuffer: 32 << 20, env: { ...process.env, ...runtimeEnvironment } });
-  process.stdout.write(result.stdout ?? ''); process.stderr.write(result.stderr ?? '');
-  if (result.status !== 0) throw new Error('Lifecycle-v2 run failed; no passing artifact written');
-  const runs = parseRuns(result.stdout);
-  const summary = validateV2Runs(runs);
-  const setup = result.stdout.split('\n').find((line) => line.includes('LIFECYCLE_V2_SETUP '));
-  if (!setup) throw new Error('Required storage condition missing');
-  const artifact = {
-    schema, contract: strict ? { mode: 'strict' } : null, started_at: startedAt, completed_at: new Date().toISOString(),
-    source_revision: command('git', ['rev-parse', 'HEAD']), working_tree: command('git', ['status', '--short']),
-    reference_product_diff: strict ? null : referenceProductDiff(),
-    harness_sha256: hash(harness), frozen_harness_sha256: hash(frozenHarness), runner_sha256: hash(runner),
-    historical_baseline_sha256: hash(historicalBaseline), historical_budget_sha256: hash(historicalBudget),
-    setup_sha256: hash('tests/integration/access_test.go'), command: ['go', ...args],
-    runtime_environment: runtimeEnvironment, toolchain: command('go', ['version']),
-    go_build_environment: command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS']),
-    hardware: { os: platform(), architecture: arch(), kernel: release(), cpu: cpus()[0]?.model, logical_cpus: cpus().length, total_memory_bytes: totalmem(), cpu_quota: optional('/sys/fs/cgroup/cpu.max'), memory_limit: optional('/sys/fs/cgroup/memory.max') },
-    system_load: { before: loadBefore, after: optional('/proc/loadavg') },
-    storage: JSON.parse(setup.slice(setup.indexOf('LIFECYCLE_V2_SETUP ') + 19)), conditions,
-    repetitions: 3, samples_per_repetition: 24, concurrency: [1, 4], runs, summary,
-    counts: { repetitions: runs.length, successes: runs.reduce((n, r) => n + r.succeeded, 0), provider_dispatches: runs.reduce((n, r) => n + r.dispatches, 0),
-      mapping_checks: runs.reduce((n, r) => n + r.mapping_checks, 0), retrieval_checks: runs.reduce((n, r) => n + r.retrieval_checks, 0), negative_controls: runs.reduce((n, r) => n + r.negative_controls, 0), negative_dispatches: 0, ambiguous_outcomes: 0 },
-    unmeasured: ['encrypted translated-tool state barrier', 'WAN/TLS inference hops', 'isolated gateway RSS', 'live-model quality'], raw_output: result.stdout
-  };
-  writeFileSync(path, JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx' });
-  console.log(`Recorded ${runs.length} lifecycle-v2 repetitions`);
+  const captureID = reserveCapture(path, source, contract, startedAt); // irreversible reservation precedes Go
+  let result;
+  try {
+    result = spawnSync('go', args, { encoding: 'utf8', maxBuffer: 32 << 20, env: { ...process.env, ...runtimeEnvironment } });
+    process.stdout.write(result.stdout ?? ''); process.stderr.write(result.stderr ?? '');
+    if (result.status !== 0) throw new Error(`Go lifecycle run failed: exit=${result.status} signal=${result.signal}`);
+    const runs = parseRuns(result.stdout);
+    const summary = validateV2Runs(runs);
+    const setup = result.stdout.split('\n').find((line) => line.includes('LIFECYCLE_V2_SETUP '));
+    if (!setup) throw new Error('Required storage condition missing');
+    const artifact = {
+      schema, contract, started_at: startedAt, completed_at: new Date().toISOString(),
+      source_revision: source, working_tree: workingTree,
+      reference_product_diff: strict ? null : referenceProductDiff(),
+      harness_sha256: hash(harness), frozen_harness_sha256: hash(frozenHarness), runner_sha256: hash(runner),
+      historical_baseline_sha256: hash(historicalBaseline), historical_budget_sha256: hash(historicalBudget),
+      setup_sha256: hash('tests/integration/access_test.go'), command: ['go', ...args],
+      runtime_environment: runtimeEnvironment, toolchain: command('go', ['version']),
+      go_build_environment: command('go', ['env', 'GOFLAGS', 'GOAMD64', 'GOARCH', 'GOOS']),
+      hardware: { os: platform(), architecture: arch(), kernel: release(), cpu: cpus()[0]?.model, logical_cpus: cpus().length, total_memory_bytes: totalmem(), cpu_quota: optional('/sys/fs/cgroup/cpu.max'), memory_limit: optional('/sys/fs/cgroup/memory.max') },
+      system_load: { before: loadBefore, after: optional('/proc/loadavg') },
+      storage: JSON.parse(setup.slice(setup.indexOf('LIFECYCLE_V2_SETUP ') + 19)), conditions,
+      repetitions: 3, samples_per_repetition: 24, concurrency: [1, 4], runs, summary,
+      counts: { repetitions: runs.length, successes: runs.reduce((n, r) => n + r.succeeded, 0), provider_dispatches: runs.reduce((n, r) => n + r.dispatches, 0),
+        mapping_checks: runs.reduce((n, r) => n + r.mapping_checks, 0), retrieval_checks: runs.reduce((n, r) => n + r.retrieval_checks, 0), negative_controls: runs.reduce((n, r) => n + r.negative_controls, 0), negative_dispatches: 0, ambiguous_outcomes: 0 },
+      unmeasured: ['encrypted translated-tool state barrier', 'WAN/TLS inference hops', 'isolated gateway RSS', 'live-model quality'], raw_output: result.stdout
+    };
+    completeCapture(path, captureID, 'complete', artifact);
+    console.log(`Recorded ${runs.length} lifecycle-v2 repetitions at fixed path ${path}`);
+  } catch (error) {
+    let partialRuns = [];
+    try { partialRuns = parseRuns(result?.stdout ?? ''); } catch { /* raw output is preserved below */ }
+    completeCapture(path, captureID, 'failed', { schema, contract, source_revision: source, started_at: startedAt,
+      completed_at: new Date().toISOString(), reason: error.message, exit_status: result?.status ?? null,
+      signal: result?.signal ?? null, partial_runs: partialRuns, raw_output: result?.stdout ?? '', raw_error: result?.stderr ?? '',
+      system_load: { before: loadBefore, after: optional('/proc/loadavg') } });
+    throw new Error(`Lifecycle-v2 attempt retained as failed at ${path}: ${error.message}`);
+  }
 }
-export function freeze(baseline, historical) {
+export function freeze(baseline, historical, captureSHA) {
+  if (!/^[0-9a-f]{64}$/.test(captureSHA)) throw new Error('Frozen B-only capture SHA required');
   if (baseline.schema !== schema || baseline.contract !== null || baseline.working_tree !== '' ||
       historical.schema !== 'openllmproxy.dev/fidelity-lifecycle-budget/v1' || historical.baseline_revision !== '373c58467a3a17da97d2b48b16473ffd715afeac') {
     throw new Error('Clean historical pre-#216 native reference required');
@@ -163,6 +259,7 @@ export function freeze(baseline, historical) {
   if (failures.length) throw new Error(`Historical B envelope failed: ${failures.join('; ')}`);
   return { schema: budgetSchema, declared_at: new Date().toISOString(), method: 'B-only reference predeclared before strict C: use every unchanged original lifecycle-v1 native limit plus 24 added-latency limits derived only from the three original pre-#216 gateway-minus-relay repetition differences as ceil(max(0,max difference)*1.5+1000us). Require v2 B and strict C medians within all limits. Fixed 24 successes and dispatches per repetition, exact bytes/events/cancellation, 24 owner/native mapping and retrieval checks plus one authenticated zero-dispatch denial per gateway durable repetition. Never reset to fit C.',
     baseline: { source_revision: baseline.source_revision, contract: null, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256 },
+    baseline_capture_sha256: captureSHA,
     historical_baseline_sha256: baseline.historical_baseline_sha256, historical_budget_sha256: baseline.historical_budget_sha256,
     frozen_harness_sha256: baseline.frozen_harness_sha256, harness_sha256: baseline.harness_sha256, runner_sha256: baseline.runner_sha256,
     expected_candidate_setup_sha256: candidateSetupSHA256,
@@ -197,13 +294,24 @@ export function compare(candidate, budget) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [action, path, other] = process.argv.slice(2);
-    if (action === 'record-baseline' && path && !other) record(path, false);
-    else if (action === 'freeze' && path && other) writeFileSync(other, JSON.stringify(freeze(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(readFileSync(historicalBudget, 'utf8'))), null, 2) + '\n', { flag: 'wx' });
-    else if (action === 'record-strict' && path && other) record(path, true, other);
-    else if (action === 'compare' && path && other) {
-      const failures = compare(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(readFileSync(other, 'utf8')));
+    const [action, unexpected] = process.argv.slice(2);
+    if (unexpected || process.argv.length !== 3) throw new Error('Only fixed preregistered evidence paths are accepted');
+    if (action === 'record-baseline') record(false);
+    else if (action === 'freeze') {
+      const b = readCapture(evidencePaths.baseline);
+      if (b.phase !== 'complete') throw new Error('Failed or partial B capture cannot be frozen');
+      writeFileSync(evidencePaths.budget, JSON.stringify(freeze(b.artifact,
+        JSON.parse(readFileSync(historicalBudget, 'utf8')), hash(evidencePaths.baseline)), null, 2) + '\n', { flag: 'wx' });
+    } else if (action === 'record-strict') record(true);
+    else if (action === 'compare') {
+      committedClean(evidencePaths.baseline);
+      committedClean(evidencePaths.budget);
+      const budget = JSON.parse(readFileSync(evidencePaths.budget, 'utf8'));
+      verifyBaselineReceipt(readCapture(evidencePaths.baseline), budget, hash(evidencePaths.baseline));
+      const c = readCapture(evidencePaths.candidate);
+      if (c.phase !== 'complete') throw new Error('Failed or partial C capture remains failed');
+      const failures = compare(c.artifact, budget);
       console.log(JSON.stringify({ passed: failures.length === 0, failures }, null, 2)); if (failures.length) process.exitCode = 1;
-    } else throw new Error('Usage: record-baseline <artifact> | freeze <baseline> <budgets> | record-strict <artifact> <committed-budgets> | compare <candidate> <budgets>');
+    } else throw new Error('Usage: record-baseline | freeze | record-strict | compare (fixed lifecycle-v2 paths only)');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

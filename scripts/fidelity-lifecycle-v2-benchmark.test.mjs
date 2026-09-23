@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { names } from './fidelity-lifecycle-benchmark.mjs';
-import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare, candidateSetupSHA256 } from './fidelity-lifecycle-v2-benchmark.mjs';
+import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare, candidateSetupSHA256,
+  evidencePaths, reserveCapture, completeCapture, readCapture, verifyBaselineReceipt, verifyCandidateLineage } from './fidelity-lifecycle-v2-benchmark.mjs';
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const syntheticCaptureSHA = 'a'.repeat(64);
 const originalBudget = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'));
 const originalBaseline = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/baseline.json'));
 
@@ -44,7 +50,7 @@ test('the complete v2 native inventory and strict candidate compare to pre-chang
   const b = baseline();
   assert.equal(Object.keys(validateV2Runs(b.runs)).length, 16);
   assert.deepEqual(parseRuns(b.runs.map((r) => `x: LIFECYCLE_V2_MEASUREMENT ${JSON.stringify(r)}`).join('\n')), b.runs);
-  const budget = freeze(b, historical());
+  const budget = freeze(b, historical(), syntheticCaptureSHA);
   assert.equal(Object.keys(budget.added_latency_maxima).length, 8);
   assert.equal(Object.values(budget.added_latency_maxima).flatMap(Object.values).length, 24);
   assert.deepEqual(budget.added_latency_maxima, historicalAddedLimits(originalBaseline));
@@ -53,7 +59,7 @@ test('the complete v2 native inventory and strict candidate compare to pre-chang
   assert.equal(b.runs.reduce((n, r) => n + r.retrieval_checks, 0), 288);
 });
 test('coverage and oracle mutations fail before numeric comparison', () => {
-  const budget = freeze(baseline(), historical());
+  const budget = freeze(baseline(), historical(), syntheticCaptureSHA);
   for (const mutate of [
     (a) => a.runs.pop(), (a) => a.runs[0].samples--, (a) => a.runs[0].dispatches--,
     (a) => a.runs[1].events_per_request--, (a) => a.runs[1].mapping_checks--,
@@ -65,7 +71,7 @@ test('coverage and oracle mutations fail before numeric comparison', () => {
   }
 });
 test('changed identity, conditions, source or budget cannot pass', () => {
-  const budget = freeze(baseline(), historical());
+  const budget = freeze(baseline(), historical(), syntheticCaptureSHA);
   for (const mutate of [
     (a) => a.contract = null, (a) => a.harness_sha256 = 'changed',
     (a) => a.frozen_harness_sha256 = 'changed', (a) => a.hardware.cpu = 'other',
@@ -79,12 +85,12 @@ test('changed identity, conditions, source or budget cannot pass', () => {
   assert.equal(compare(a, budget).length, 1);
   budget.maxima[names[0]]['B/op'] = NaN;
   assert.throws(() => compare(candidate(baseline()), budget));
-  const setupBudget = freeze(baseline(), historical());
+  const setupBudget = freeze(baseline(), historical(), syntheticCaptureSHA);
   setupBudget.expected_candidate_setup_sha256 = 'changed';
   assert.throws(() => compare(candidate(baseline()), setupBudget));
 });
 test('every added-latency limit is candidate-independent and mutation guarded', () => {
-  const budget = freeze(baseline(), historical());
+  const budget = freeze(baseline(), historical(), syntheticCaptureSHA);
   const label = 'durable_unary/c1';
   const metric = 'latency-p99-us';
   const a = candidate(baseline());
@@ -103,6 +109,72 @@ test('B-only freeze rejects changed historical product or source-envelope failur
     (a) => a.setup_sha256 = 'changed',
     (a) => a.runs.forEach((r) => { if (r.name === 'durable_unary/c1/gateway') r.metrics['ns/op'] = originalBudget.maxima[r.name]['ns/op'] + 1; }),
   ]) {
-    const a = baseline(); mutate(a); assert.throws(() => freeze(a, historical()));
+    const a = baseline(); mutate(a); assert.throws(() => freeze(a, historical(), syntheticCaptureSHA));
+  }
+});
+test('fixed evidence paths reject caller-selected retry paths before Go starts', () => {
+  assert.equal(evidencePaths.baseline, 'docs/evidence/fidelity-performance/lifecycle-v2/baseline.jsonl');
+  assert.equal(evidencePaths.candidate, 'docs/evidence/fidelity-performance/lifecycle-v2/strict-candidate.jsonl');
+  for (const action of ['record-baseline', 'record-strict', 'freeze', 'compare']) {
+    const result = spawnSync(process.execPath, ['scripts/fidelity-lifecycle-v2-benchmark.mjs', action, '/tmp/selective-retry.json'], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Only fixed preregistered evidence paths/);
+  }
+});
+test('reservation is exclusive and failed or partial append-only attempts remain visible', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'olp-lifecycle-v2-test-'));
+  try {
+    const path = join(dir, 'capture.jsonl');
+    const startedAt = '2026-09-23T00:00:00.000Z';
+    const id = reserveCapture(path, 'reference', null, startedAt);
+    assert.throws(() => readCapture(path), /Incomplete/);
+    assert.throws(() => reserveCapture(path, 'reference', null, startedAt), /EEXIST/);
+    completeCapture(path, id, 'failed', { source_revision: 'reference', contract: null, started_at: startedAt,
+      reason: 'Go failed', raw_output: 'LIFECYCLE_V2_MEASUREMENT partial' });
+    assert.equal(readCapture(path).phase, 'failed');
+    const budget = freeze(baseline(), historical(), syntheticCaptureSHA);
+    assert.throws(() => verifyBaselineReceipt(readCapture(path), budget, syntheticCaptureSHA), /complete B-only/);
+    completeCapture(path, id, 'complete', { source_revision: 'reference', contract: null, started_at: startedAt });
+    assert.throws(() => readCapture(path), /Incomplete/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('complete capture requires matching reservation identity, source and contract', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'olp-lifecycle-v2-complete-'));
+  try {
+    const path = join(dir, 'candidate.jsonl');
+    const startedAt = '2026-09-23T00:00:00.000Z';
+    const contract = { mode: 'strict' };
+    const id = reserveCapture(path, 'candidate', contract, startedAt);
+    completeCapture(path, id, 'complete', { source_revision: 'candidate', contract, started_at: startedAt });
+    assert.equal(readCapture(path).phase, 'complete');
+    const wrong = join(dir, 'wrong.jsonl');
+    const wrongID = reserveCapture(wrong, 'candidate', contract, startedAt);
+    completeCapture(wrong, wrongID, 'complete', { source_revision: 'different', contract, started_at: startedAt });
+    assert.throws(() => readCapture(wrong), /Invalid append-only/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('committed B receipt requires exact capture SHA, source, conditions and self-compare', () => {
+  const b = baseline();
+  const budget = freeze(b, historical(), syntheticCaptureSHA);
+  const capture = { phase: 'complete', artifact: b };
+  assert.equal(verifyBaselineReceipt(capture, budget, syntheticCaptureSHA), b);
+  assert.throws(() => verifyBaselineReceipt(capture, budget, 'b'.repeat(64)), /capture SHA/);
+  const mutated = structuredClone(capture);
+  mutated.artifact.source_revision = 'different';
+  assert.throws(() => verifyBaselineReceipt(mutated, budget, syntheticCaptureSHA), /disagree/);
+  mutated.artifact.source_revision = b.source_revision;
+  for (const run of mutated.artifact.runs) if (run.name === 'durable_unary/c1/gateway') {
+    run.metrics['ns/op'] = budget.maxima['durable_unary/c1/gateway']['ns/op'] + 1;
+  }
+  assert.throws(() => verifyBaselineReceipt(mutated, budget, syntheticCaptureSHA), /self-compare/);
+  const changed = structuredClone(budget);
+  delete changed.added_latency_maxima['durable_unary/c1'];
+  assert.throws(() => verifyBaselineReceipt(capture, changed, syntheticCaptureSHA), /numeric method/);
+});
+test('candidate requires all method, historical B, and strict product ancestry', () => {
+  const complete = { methodAncestor: true, productAncestor: true, baselineAncestor: true, productDiff: true };
+  assert.doesNotThrow(() => verifyCandidateLineage(complete));
+  for (const field of Object.keys(complete)) {
+    assert.throws(() => verifyCandidateLineage({ ...complete, [field]: false }), /ancestry or strict product change/);
   }
 });

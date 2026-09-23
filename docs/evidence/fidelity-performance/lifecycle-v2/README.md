@@ -66,21 +66,33 @@ node --test scripts/fidelity-lifecycle-v2-benchmark.test.mjs
 
 For a coordinated quiet timed capture, use a clean historical B checkout
 containing only the committed measurement files. Keep PostgreSQL running and
-other workloads idle. Write-once commands are:
+other workloads idle. The only accepted evidence paths are the fixed
+`baseline.jsonl`, `replacement-budgets.json` and `strict-candidate.jsonl` in
+this directory; the runner accepts no caller-selected path. It exclusively
+reserves the appropriate JSONL before starting Go, then appends one terminal
+record. A Go, coverage or setup failure appends the failure reason, partial
+runs and raw output. A crash leaves an incomplete reservation. Either outcome
+keeps the path occupied and cannot be retried as the same registered attempt.
+Write-once commands are:
 
 ```sh
-node scripts/fidelity-lifecycle-v2-benchmark.mjs record-baseline docs/evidence/fidelity-performance/lifecycle-v2/baseline.json
-node scripts/fidelity-lifecycle-v2-benchmark.mjs freeze docs/evidence/fidelity-performance/lifecycle-v2/baseline.json docs/evidence/fidelity-performance/lifecycle-v2/replacement-budgets.json
+node scripts/fidelity-lifecycle-v2-benchmark.mjs record-baseline
+node scripts/fidelity-lifecycle-v2-benchmark.mjs freeze
 
-# Only after both files are committed and the final C source is locked:
-OLP_LIFECYCLE_ROUTE_FIDELITY='{"mode":"strict"}' node scripts/fidelity-lifecycle-v2-benchmark.mjs record-strict /tmp/lifecycle-v2-strict-candidate.json docs/evidence/fidelity-performance/lifecycle-v2/replacement-budgets.json
-node scripts/fidelity-lifecycle-v2-benchmark.mjs compare /tmp/lifecycle-v2-strict-candidate.json docs/evidence/fidelity-performance/lifecycle-v2/replacement-budgets.json
+# Only after the complete B capture and budget are committed into final C:
+OLP_LIFECYCLE_ROUTE_FIDELITY='{"mode":"strict"}' node scripts/fidelity-lifecycle-v2-benchmark.mjs record-strict
+node scripts/fidelity-lifecycle-v2-benchmark.mjs compare
 ```
 
 The runner rejects missing/dirty B budgets, changed v2/v1 harnesses,
 hardware/runtime/storage/fixture changes, incomplete workload/dispatch/event
 inventory, missing mappings/retrievals/negative controls, ambiguous outcomes,
-and changed or invalid numeric limits. B and C use different committed
+and changed or invalid numeric limits. Before C starts, it requires the
+complete committed B capture's exact SHA and B self-comparison, and checks
+that the pre-candidate measurement method, historical B source and strict
+product changes are ancestors of the final source. Integrate the B evidence
+branch with its ancestry; copying its JSONL and budget without the historical
+B source will fail the preflight. B and C use different committed
 `access_test.go` setup helpers: C extracts the old constructor and installs
 the encrypted resource store required for strict Responses. The B helper hash
 is measured and verified at freeze; C must match the predeclared reviewed
