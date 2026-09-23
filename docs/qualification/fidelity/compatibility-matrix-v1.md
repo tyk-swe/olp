@@ -1,7 +1,10 @@
 # Compatibility and evidence matrix, version 1
 
-The [machine-readable matrix](compatibility-matrix-v1.json) assesses source
-`6f1aa0eb2d145b24e9171f001ca22cba6155d477` on 2026-09-23. It maps
+The [machine-readable matrix](compatibility-matrix-v1.json) assesses product
+source `66a3ccb3fc737010a345d309ee280a541d4176f5` on 2026-09-23. Its
+evidence anchor `2426aec0c6f6c39c1fcb48fdc8924b58f198862c` is a
+docs-only descendant that pins the execution receipt in Git; no product or
+test source changed between those revisions. It maps
 **all 47 original inventory rows exactly once**, using the frozen whole-file
 and individual-row SHA-256 values, and records 45 later operation/profile/mode/
 client combinations separately. The frozen
@@ -50,7 +53,7 @@ incompatibilities. Its [mutation tests](../../../scripts/compatibility-matrix.te
 exercise missing/renamed evidence, frozen-row changes and unsupported status
 promotion. A passing validator verifies ledger consistency, not the runtime
 behavior itself. The [row execution receipt](row-evidence-v1.md) gives the
-exact combined-tree public and official SDK runs. Its run revisions and
+exact current-product public and official SDK runs. Its run revisions and
 source/receipt hashes are repeated in machine-readable evidence entries so a
 later edit cannot silently inherit these claims.
 

@@ -1,14 +1,16 @@
 # Scoped compatibility execution receipt, version 1
 
 The assessed product revision is
-`250defcb0cb8c32df0052d2b858238e462dabc65`. The matrix's test branch
-at `7d8f4106d8a27abf2606661468ad1057e82b8c13` adds official video SDK,
-Live-refusal, variation, and same-resource Gemini background fixtures plus the
-required Python continuation build tag. It changes no provider model or
-frozen v1 inventory/benchmark reference. The selected test command below ran
-through public published-route gateway instances and independently scripted local providers
-with isolated PostgreSQL databases. Required service variables are described
-in [tests/README.md](../../../tests/README.md); no paid provider was called.
+`66a3ccb3fc737010a345d309ee280a541d4176f5`. The prior matrix fixtures
+and later realtime/continuation changes are present in this exact committed
+source; the frozen v1 inventory and benchmark budgets were not changed. The
+selected command below ran public published-route gateway instances,
+independently scripted local providers and isolated PostgreSQL databases.
+Required PostgreSQL and Valkey service variables were checked before execution,
+as described in [tests/README.md](../../../tests/README.md). No paid provider
+was called. The matrix pins this receipt in a later docs-only commit so its
+Git revision can authenticate these bytes; that anchor does not change the
+product or test source run at `66a3ccb3`.
 
 ```sh
 GOMAXPROCS=4 go test -mod=readonly -race -tags=integration,pythonsdk \
@@ -16,15 +18,30 @@ GOMAXPROCS=4 go test -mod=readonly -race -tags=integration,pythonsdk \
   -count=1 -v -timeout=15m ./tests/integration
 ```
 
-**Result: 31 top-level test symbols passed under race detection in 114.583 s;
+**Result: 31 top-level test symbols passed under race detection in 102.970 s;
 zero selected tests failed or skipped.** The full local output is retained at
-`/tmp/olp-spec-context/final-matrix-250-combined-race.log`. Each positive or
+`/tmp/olp-spec-context/final-matrix-66a3-combined-race.log`. Each positive or
 pre-dispatch-incompatible matrix row names the narrower test source and pins
 its SHA-256 and this receipt's SHA-256. The selected run includes the
 `integration && pythonsdk` official Python next-turn test that the ordinary
 integration tag alone would omit. `scripts/integration.sh` now includes
 `pythonsdk` in its required service/race suite, and the CI setup installs the
 pinned uv/Python toolchain.
+
+The fresh isolated worktree initially lacked pinned JavaScript packages, so
+one setup-only selection failed the JavaScript continuation, Gemini and batch
+SDK symbols before `pnpm install --frozen-lockfile` completed. The full
+selection above was rerun after installation and passed without skipped
+symbols or product assertions. Separately, `./tests/sdk-smoke/run.sh` and
+`./tests/sdk-smoke-python/run.sh` passed at this source. Each exercised its
+native OpenAI/Anthropic/Gemini SDK surface; the Anthropic native two-tool
+workflow observed all 19 events and exactly two verified dispatches. Their
+local outputs are `/tmp/olp-spec-context/final-matrix-66a3-native-js.log` and
+`/tmp/olp-spec-context/final-matrix-66a3-native-python.log`. An explicitly
+selected strict batch test with `OLP_TEST_DATABASE_URL` removed failed
+immediately with `OLP_TEST_DATABASE_URL is required; run make integration`;
+it did not silently skip. That negative check is recorded at
+`/tmp/olp-spec-context/final-matrix-66a3-missing-service.log`.
 
 | Checked class | Public/SDK observation |
 | --- | --- |
