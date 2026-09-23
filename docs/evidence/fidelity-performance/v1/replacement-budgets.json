@@ -1,0 +1,483 @@
+{
+  "schema": "openllmproxy.dev/fidelity-performance-budget/v1",
+  "declared_at": "2026-09-22T08:20:48.347Z",
+  "baseline_revision": "8e52f775df815c3a1a25d75064c3ffd540fb07f5",
+  "baseline_harness_sha256": "f58954d01e7896c0544f3827bdc9b1c76152d317a64fc9e865f0b043209c7ca0",
+  "baseline_runner_sha256": "968690501e45eaa86abc19f162571bb9de4d8b5f9e2a060d26df02809fd95cc1",
+  "measurement": {
+    "command": [
+      "go",
+      "test",
+      "-mod=readonly",
+      "-run",
+      "^$",
+      "-bench",
+      "^BenchmarkFidelity$",
+      "-benchmem",
+      "-benchtime=2s",
+      "-count=3",
+      "-cpu=4",
+      "-timeout=15m",
+      "./internal/gateway"
+    ],
+    "conditions": {
+      "network": "IPv4 loopback; two HTTP/1.1 hops; keep-alive; warm connection; no injected provider delay",
+      "tls": "none; explicit loopback-only egress exception",
+      "authority": "in-memory published runtime and credential slots; authenticated fixed-route native relay; no PostgreSQL/Valkey",
+      "resources": "Whole-process client + local provider + gateway/relay + independent fixture validation + instrumentation; sampled heap growth, not absolute RSS or exact peak",
+      "stream": "256 x 128-byte text events; slow workload 64 x 16384-byte events and 100us requested sleep after each read (OS timer may be coarser); exact content count and terminal markers validated",
+      "asset": "512x512 deterministic RGB PNG, approximately 1MiB JSON/base64 request; original provider-bound document checked",
+      "ordering": "Workloads sequential in fixed declaration order; repetitions serial; randomized model-quality trials are separate",
+      "scope": "Configured gateway runtime performance only; no intelligence claim, external network/TLS, durable state barrier or realtime jitter measurement"
+    },
+    "target_time_per_repetition": "2s",
+    "toolchain": "go version go1.27.1 linux/amd64",
+    "runtime_environment": {
+      "GOMAXPROCS": "4",
+      "GOGC": "100",
+      "GOMEMLIMIT": "off",
+      "GODEBUG": ""
+    },
+    "go_build_environment": "v1\namd64\nlinux"
+  },
+  "hardware": {
+    "os": "linux",
+    "architecture": "x64",
+    "kernel": "7.0.0-31-generic",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logical_cpus": 8,
+    "total_memory_bytes": 24598122496,
+    "cpu_quota": null,
+    "memory_limit": null,
+    "load_before": "0.50 0.91 1.08 2/350 57196",
+    "load_after": "2.54 1.78 1.39 1/351 57612"
+  },
+  "gomaxprocs": 4,
+  "repetitions": 3,
+  "method": "Before replacement: per-workload maximum of 3 baseline runs ×1.5 plus 1ms timing/CPU allowance, 16KiB allocation allowance or 8MiB sampled heap allowance. Allocation counts ×1.25 +64. These tolerances are change-regression budgets, not service SLOs. Never auto-rebase budgets on candidate results.",
+  "workloads": {
+    "native_unary/c1/relay": {
+      "maxima": {
+        "ns/op": 1621702,
+        "latency-p50-us": 1611,
+        "latency-p95-us": 1813,
+        "latency-p99-us": 2022,
+        "process-cpu-ns/op": 1926348,
+        "sampled-heap-growth-B": 15820316,
+        "B/op": 56415,
+        "allocs/op": 542
+      },
+      "exact": {
+        "request-bytes": 82,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_unary/c1/gateway": {
+      "maxima": {
+        "ns/op": 2128720,
+        "latency-p50-us": 2102,
+        "latency-p95-us": 2436,
+        "latency-p99-us": 3007,
+        "process-cpu-ns/op": 2507005,
+        "sampled-heap-growth-B": 15671324,
+        "B/op": 107265,
+        "allocs/op": 1223
+      },
+      "exact": {
+        "request-bytes": 84,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_unary/c8/relay": {
+      "maxima": {
+        "ns/op": 1123569,
+        "latency-p50-us": 1888,
+        "latency-p95-us": 2791,
+        "latency-p99-us": 4087,
+        "process-cpu-ns/op": 1482463,
+        "sampled-heap-growth-B": 19208468,
+        "B/op": 56286,
+        "allocs/op": 541
+      },
+      "exact": {
+        "request-bytes": 82,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_unary/c8/gateway": {
+      "maxima": {
+        "ns/op": 1235604,
+        "latency-p50-us": 2688,
+        "latency-p95-us": 4630,
+        "latency-p99-us": 6096,
+        "process-cpu-ns/op": 1918236,
+        "sampled-heap-growth-B": 18819260,
+        "B/op": 107131,
+        "allocs/op": 1222
+      },
+      "exact": {
+        "request-bytes": 84,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_stream_256/c1/relay": {
+      "maxima": {
+        "ns/op": 8398198,
+        "first-event-p50-us": 1856,
+        "first-event-p95-us": 2470,
+        "first-event-p99-us": 3118,
+        "latency-p50-us": 8382,
+        "latency-p95-us": 11527,
+        "latency-p99-us": 13527,
+        "max-inter-event-gap-p50-us": 1194,
+        "max-inter-event-gap-p95-us": 1641,
+        "max-inter-event-gap-p99-us": 2511,
+        "process-cpu-ns/op": 20182459,
+        "sampled-heap-growth-B": 17139884,
+        "B/op": 1465105,
+        "allocs/op": 22704
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 256
+      },
+      "minimum_samples": 20
+    },
+    "native_stream_256/c1/gateway": {
+      "maxima": {
+        "ns/op": 21400200,
+        "first-event-p50-us": 2533,
+        "first-event-p95-us": 3369,
+        "first-event-p99-us": 8571,
+        "latency-p50-us": 20949,
+        "latency-p95-us": 27528,
+        "latency-p99-us": 32461,
+        "max-inter-event-gap-p50-us": 1480,
+        "max-inter-event-gap-p95-us": 2673,
+        "max-inter-event-gap-p99-us": 5670,
+        "process-cpu-ns/op": 43905637,
+        "sampled-heap-growth-B": 17136104,
+        "B/op": 4052280,
+        "allocs/op": 46008
+      },
+      "exact": {
+        "request-bytes": 138,
+        "content-events/op": 256
+      },
+      "minimum_samples": 20
+    },
+    "native_stream_256/c8/relay": {
+      "maxima": {
+        "ns/op": 4625064,
+        "first-event-p50-us": 18742,
+        "first-event-p95-us": 36955,
+        "first-event-p99-us": 48483,
+        "latency-p50-us": 28749,
+        "latency-p95-us": 49437,
+        "latency-p99-us": 62587,
+        "max-inter-event-gap-p50-us": 2853,
+        "max-inter-event-gap-p95-us": 12783,
+        "max-inter-event-gap-p99-us": 21100,
+        "process-cpu-ns/op": 15124716,
+        "sampled-heap-growth-B": 19948928,
+        "B/op": 1461280,
+        "allocs/op": 22702
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 256
+      },
+      "minimum_samples": 20
+    },
+    "native_stream_256/c8/gateway": {
+      "maxima": {
+        "ns/op": 9642993,
+        "first-event-p50-us": 33993,
+        "first-event-p95-us": 61981,
+        "first-event-p99-us": 73767,
+        "latency-p50-us": 66729,
+        "latency-p95-us": 108067,
+        "latency-p99-us": 126427,
+        "max-inter-event-gap-p50-us": 14899,
+        "max-inter-event-gap-p95-us": 33238,
+        "max-inter-event-gap-p99-us": 42391,
+        "process-cpu-ns/op": 34695711,
+        "sampled-heap-growth-B": 22289204,
+        "B/op": 4042570,
+        "allocs/op": 46006
+      },
+      "exact": {
+        "request-bytes": 138,
+        "content-events/op": 256
+      },
+      "minimum_samples": 20
+    },
+    "native_slow_stream_64/c1/relay": {
+      "maxima": {
+        "ns/op": 56245024,
+        "first-event-p50-us": 3027,
+        "first-event-p95-us": 4234,
+        "first-event-p99-us": 5587,
+        "latency-p50-us": 57796,
+        "latency-p95-us": 68011,
+        "latency-p99-us": 72006,
+        "max-inter-event-gap-p50-us": 2997,
+        "max-inter-event-gap-p95-us": 3220,
+        "max-inter-event-gap-p99-us": 3544,
+        "process-cpu-ns/op": 56033590,
+        "sampled-heap-growth-B": 20234756,
+        "B/op": 10951840,
+        "allocs/op": 6788
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 64
+      },
+      "minimum_samples": 20
+    },
+    "native_slow_stream_64/c1/gateway": {
+      "maxima": {
+        "ns/op": 51728128,
+        "first-event-p50-us": 4251,
+        "first-event-p95-us": 5523,
+        "first-event-p99-us": 6126,
+        "latency-p50-us": 51255,
+        "latency-p95-us": 58188,
+        "latency-p99-us": 67089,
+        "max-inter-event-gap-p50-us": 2706,
+        "max-inter-event-gap-p95-us": 4312,
+        "max-inter-event-gap-p99-us": 9054,
+        "process-cpu-ns/op": 120063507,
+        "sampled-heap-growth-B": 22967444,
+        "B/op": 43378324,
+        "allocs/op": 14746
+      },
+      "exact": {
+        "request-bytes": 138,
+        "content-events/op": 64
+      },
+      "minimum_samples": 20
+    },
+    "native_slow_stream_64/c8/relay": {
+      "maxima": {
+        "ns/op": 11529799,
+        "first-event-p50-us": 13747,
+        "first-event-p95-us": 35245,
+        "first-event-p99-us": 52108,
+        "latency-p50-us": 82048,
+        "latency-p95-us": 116398,
+        "latency-p99-us": 136171,
+        "max-inter-event-gap-p50-us": 11788,
+        "max-inter-event-gap-p95-us": 19881,
+        "max-inter-event-gap-p99-us": 27475,
+        "process-cpu-ns/op": 40553565,
+        "sampled-heap-growth-B": 30511916,
+        "B/op": 10890702,
+        "allocs/op": 6763
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 64
+      },
+      "minimum_samples": 20
+    },
+    "native_slow_stream_64/c8/gateway": {
+      "maxima": {
+        "ns/op": 24109333,
+        "first-event-p50-us": 31339,
+        "first-event-p95-us": 65341,
+        "first-event-p99-us": 83722,
+        "latency-p50-us": 183600,
+        "latency-p95-us": 241246,
+        "latency-p99-us": 270685,
+        "max-inter-event-gap-p50-us": 17914,
+        "max-inter-event-gap-p95-us": 31336,
+        "max-inter-event-gap-p99-us": 42790,
+        "process-cpu-ns/op": 89174277,
+        "sampled-heap-growth-B": 32203808,
+        "B/op": 43199514,
+        "allocs/op": 14638
+      },
+      "exact": {
+        "request-bytes": 138,
+        "content-events/op": 64
+      },
+      "minimum_samples": 20
+    },
+    "native_asset_png/c1/relay": {
+      "maxima": {
+        "ns/op": 9188340,
+        "latency-p50-us": 8985,
+        "latency-p95-us": 11575,
+        "latency-p99-us": 12658,
+        "process-cpu-ns/op": 16943694,
+        "sampled-heap-growth-B": 30470924,
+        "B/op": 8044758,
+        "allocs/op": 717
+      },
+      "exact": {
+        "request-bytes": 1049989,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_asset_png/c1/gateway": {
+      "maxima": {
+        "ns/op": 174977196,
+        "latency-p50-us": 175267,
+        "latency-p95-us": 216883,
+        "latency-p99-us": 221472,
+        "process-cpu-ns/op": 249789289,
+        "sampled-heap-growth-B": 44792276,
+        "B/op": 150882195,
+        "allocs/op": 2121
+      },
+      "exact": {
+        "request-bytes": 1049991,
+        "content-events/op": 0
+      },
+      "minimum_samples": 19
+    },
+    "native_asset_png/c8/relay": {
+      "maxima": {
+        "ns/op": 4349464,
+        "latency-p50-us": 26746,
+        "latency-p95-us": 43824,
+        "latency-p99-us": 54906,
+        "process-cpu-ns/op": 13676515,
+        "sampled-heap-growth-B": 79260464,
+        "B/op": 8020762,
+        "allocs/op": 687
+      },
+      "exact": {
+        "request-bytes": 1049989,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "native_asset_png/c8/gateway": {
+      "maxima": {
+        "ns/op": 46481104,
+        "latency-p50-us": 357342,
+        "latency-p95-us": 456937,
+        "latency-p99-us": 584388,
+        "process-cpu-ns/op": 174223825,
+        "sampled-heap-growth-B": 199430492,
+        "B/op": 149126955,
+        "allocs/op": 2001
+      },
+      "exact": {
+        "request-bytes": 1049991,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "translated_unary/c1/relay": {
+      "maxima": {
+        "ns/op": 1672822,
+        "latency-p50-us": 1662,
+        "latency-p95-us": 1908,
+        "latency-p99-us": 2208,
+        "process-cpu-ns/op": 1995228,
+        "sampled-heap-growth-B": 15895472,
+        "B/op": 58242,
+        "allocs/op": 548
+      },
+      "exact": {
+        "request-bytes": 122,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "translated_unary/c1/gateway": {
+      "maxima": {
+        "ns/op": 2210893,
+        "latency-p50-us": 2178,
+        "latency-p95-us": 2533,
+        "latency-p99-us": 3124,
+        "process-cpu-ns/op": 2610630,
+        "sampled-heap-growth-B": 15768224,
+        "B/op": 125994,
+        "allocs/op": 1522
+      },
+      "exact": {
+        "request-bytes": 99,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "translated_unary/c8/relay": {
+      "maxima": {
+        "ns/op": 1127631,
+        "latency-p50-us": 1915,
+        "latency-p95-us": 2847,
+        "latency-p99-us": 4185,
+        "process-cpu-ns/op": 1498710,
+        "sampled-heap-growth-B": 19402172,
+        "B/op": 58087,
+        "allocs/op": 546
+      },
+      "exact": {
+        "request-bytes": 122,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "translated_unary/c8/gateway": {
+      "maxima": {
+        "ns/op": 1294884,
+        "latency-p50-us": 2986,
+        "latency-p95-us": 5557,
+        "latency-p99-us": 7593,
+        "process-cpu-ns/op": 2111169,
+        "sampled-heap-growth-B": 18939980,
+        "B/op": 125830,
+        "allocs/op": 1519
+      },
+      "exact": {
+        "request-bytes": 99,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "rejected_extension/c1/gateway": {
+      "maxima": {
+        "ns/op": 1518340,
+        "latency-p50-us": 1495,
+        "latency-p95-us": 1695,
+        "latency-p99-us": 1986,
+        "process-cpu-ns/op": 1701364,
+        "sampled-heap-growth-B": 15979256,
+        "B/op": 62677,
+        "allocs/op": 621
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    },
+    "rejected_extension/c8/gateway": {
+      "maxima": {
+        "ns/op": 1100574,
+        "latency-p50-us": 1700,
+        "latency-p95-us": 2679,
+        "latency-p99-us": 3699,
+        "process-cpu-ns/op": 1392639,
+        "sampled-heap-growth-B": 19534736,
+        "B/op": 62614,
+        "allocs/op": 621
+      },
+      "exact": {
+        "request-bytes": 136,
+        "content-events/op": 0
+      },
+      "minimum_samples": 20
+    }
+  },
+  "baseline_artifact_sha256": "30bd1503ddafc5ffe3b582cb179b88fc5e9451a6edd1516691494195d688569a"
+}
