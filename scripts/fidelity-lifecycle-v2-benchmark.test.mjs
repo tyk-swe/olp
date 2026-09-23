@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { names } from './fidelity-lifecycle-benchmark.mjs';
 import { parseRuns, validateV2Runs, historicalAddedLimits, freeze, compare, candidateSetupSHA256,
   evidencePaths, reserveCapture, completeCapture, readCapture, verifyBaselineReceipt, verifyCandidateLineage,
-  selectEvidenceAncestor } from './fidelity-lifecycle-v2-benchmark.mjs';
+  selectEvidenceAncestor, verifyOfflineSource } from './fidelity-lifecycle-v2-benchmark.mjs';
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const syntheticCaptureSHA = 'a'.repeat(64);
 const originalBudget = JSON.parse(readFileSync('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'));
@@ -33,6 +33,7 @@ function baseline() {
     working_tree: '', reference_product_diff: ['scripts/fidelity-lifecycle-v2-benchmark.mjs', 'tests/integration/fidelity_lifecycle_v2_test.go'],
     harness_sha256: sha256('tests/integration/fidelity_lifecycle_v2_test.go'),
     runner_sha256: sha256('scripts/fidelity-lifecycle-v2-benchmark.mjs'),
+    runner_test_sha256: sha256('scripts/fidelity-lifecycle-v2-benchmark.test.mjs'),
     frozen_harness_sha256: originalBudget.harness_sha256,
     historical_baseline_sha256: sha256('docs/evidence/fidelity-performance/lifecycle-v1/baseline.json'),
     historical_budget_sha256: sha256('docs/evidence/fidelity-performance/lifecycle-v1/replacement-budgets.json'),
@@ -199,4 +200,19 @@ test('B artifact and budget must exist with exact blobs in a strict ancestor of 
   const c = candidate(baseline());
   delete c.baseline_evidence_commit;
   assert.throws(() => compare(c, budget), /B evidence commit/);
+});
+test('offline comparison accepts a docs-only descendant but rejects unrelated or changed source', () => {
+  const c = candidate(baseline());
+  const sourceHashes = Object.fromEntries(['harness_sha256', 'runner_sha256', 'runner_test_sha256', 'frozen_harness_sha256', 'setup_sha256'].map((field) => [field, c[field]]));
+  const currentHashes = Object.fromEntries(['harness_sha256', 'runner_sha256', 'runner_test_sha256'].map((field) => [field, c[field]]));
+  const valid = { candidateAncestor: true, baselineBlobsMatch: true, evidenceCommit: c.baseline_evidence_commit, sourceHashes, currentHashes };
+  // The verifier takes ancestry, not HEAD equality: a later evidence/docs commit is valid.
+  assert.doesNotThrow(() => verifyOfflineSource(c, valid));
+  assert.throws(() => verifyOfflineSource(c, { ...valid, candidateAncestor: false }), /unrelated/);
+  assert.throws(() => verifyOfflineSource(c, { ...valid, baselineBlobsMatch: false }), /changed/);
+  assert.throws(() => verifyOfflineSource(c, { ...valid, evidenceCommit: 'e'.repeat(40) }), /changed/);
+  for (const field of Object.keys(sourceHashes)) {
+    assert.throws(() => verifyOfflineSource(c, { ...valid, sourceHashes: { ...sourceHashes, [field]: 'mutated' } }), /committed source/);
+  }
+  assert.throws(() => verifyOfflineSource(c, { ...valid, currentHashes: { ...currentHashes, runner_sha256: 'mutated' } }), /Current comparator/);
 });

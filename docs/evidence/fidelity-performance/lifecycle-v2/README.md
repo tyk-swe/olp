@@ -101,6 +101,12 @@ the encrypted resource store required for strict Responses. The B helper hash
 is measured and verified at freeze; C must match the predeclared reviewed
 candidate helper hash. Any further helper edit invalidates comparison. The
 runner records raw Go output, source and fixture hashes, conditions, load,
-full per-repetition metrics and counts.
+full per-repetition metrics and counts. After committing C evidence or adding
+documentation, offline `compare` accepts the captured C source as an ancestor
+of the current checkout. It re-reads that exact source revision's committed
+Go harness, runner, runner test, frozen v1 harness and setup helper blobs,
+requires the current comparator/harness files to match C, and checks that the
+B capture/budget blobs and their ancestor commit still
+match what C saw. An unrelated checkout or changed source/evidence is rejected.
 No paid model invocation is part of this qualification. Until a complete
 B-only baseline and final strict C comparison pass, G6 remains open.
