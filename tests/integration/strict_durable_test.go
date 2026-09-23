@@ -4,9 +4,11 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -32,7 +35,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	fixture.contentByID.Store("file-up-err", failure)
 
 	h := newAccessHarness(t)
-	owner, _, slug, plain := provisionOpenAIWith(t, h, fixture.URL,
+	owner, provider, slug, plain := provisionOpenAIWith(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
 		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
 		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
@@ -159,6 +162,17 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status, _, _ := h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, other, nil, nil); status != http.StatusNotFound {
 		t.Fatalf("other key read strict batch: %d", status)
 	}
+	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, http.StatusOK)
+	credentialID := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
+	provider = h.want(owner, "GET", providerPath, nil, nil, http.StatusOK)
+	h.want(owner, "POST", providerPath+"/credentials/"+credentialID+"/revoke", nil, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	h.refresh()
+	before = fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil)
+	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"provider_resource_credential_unavailable"`)) || fixture.dials.Load() != before {
+		t.Fatalf("revoked credential reached accepted strict batch: %d %s", status, raw)
+	}
 	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_batch' AND upstream_id='batch-up-1'`); err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +276,112 @@ func TestStrictBatchPinnedOpenAISDKs(t *testing.T) {
 				t.Fatalf("pinned %s SDK submitted %d batches; %s", test.name, fixture.batchCreates.Load()-before, output)
 			}
 		})
+	}
+}
+
+func TestAcceptedStrictBatchMappingSurvivesClientDisconnect(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	fixture.batchCreateRaw.Store(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-up-1"}`)
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}}, []string{"batch"},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	input := `{"custom_id":"one","method":"POST","url":"/v1/embeddings","body":{"model":"` + vendorModel + `","input":"alpha"}}` + "\n"
+	status, uploaded := h.uploadTestFile(slug, key, input)
+	if status != http.StatusOK {
+		t.Fatalf("upload: %d %v", status, uploaded)
+	}
+	before := fixture.batchCreates.Load()
+	const lockKey int64 = 21416016
+	locker, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	t.Cleanup(func() {
+		if locked {
+			_, _ = locker.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", lockKey)
+		}
+		locker.Release()
+	})
+	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_lock($1)", lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp_go.wait_strict_batch_mapping() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.kind='strict_batch' THEN PERFORM pg_advisory_xact_lock(21416016); END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER wait_strict_batch_mapping BEFORE INSERT ON olp_go.provider_resources
+FOR EACH ROW EXECUTE FUNCTION olp_go.wait_strict_batch_mapping()`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/batches",
+		strings.NewReader(`{"input_file_id":"`+uploaded["id"].(string)+`","endpoint":"/v1/embeddings","completion_window":"24h"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	finished := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		finished <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(
+SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+AND wait_event_type='Lock' AND wait_event='advisory')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("strict accepted batch never reached its encrypted mapping; submissions=%d", fixture.batchCreates.Load()-before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_unlock($1)", lockKey); err != nil {
+		t.Fatal(err)
+	}
+	locked = false
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled strict client did not release its HTTP request")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	var ownerID, localID string
+	for {
+		err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp_go.provider_resources
+WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &localID)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("accepted strict batch lost its encrypted owner mapping after client disconnect", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	local := "strict_batch_" + strings.ReplaceAll(localID, "-", "")
+	if _, payload, err := h.Gateway.Resources.ReadDurableContract(t.Context(), resources.KindStrictBatch, ownerID, local); err != nil || len(payload) == 0 {
+		t.Fatalf("accepted mapping is not decryptable: %v", err)
+	}
+	if fixture.batchCreates.Load() != before+1 {
+		t.Fatalf("client disconnect caused %d batch submissions", fixture.batchCreates.Load()-before)
 	}
 }
 
