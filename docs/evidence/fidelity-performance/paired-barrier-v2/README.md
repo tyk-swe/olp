@@ -114,3 +114,27 @@ gateway/relay, oracle and instrumentation, but exclude PostgreSQL itself.
 They are not an isolated gateway RSS, WAN/TLS test, actual SDK process CPU, or
 live-model quality measurement. The separate public race, recovery, replay,
 corruption and SDK suites retain their own gates.
+
+## Attempt 1 result: failed before a B-only baseline
+
+The single write-once B capture under method `3114e01c` stopped after 76 of
+768 B subruns and 12 of 128 blocks. The historical native gateway returned
+HTTP 503 during the next `large/c8` block. The complete partial measurements
+are retained in [baseline.json.failed.json](baseline.json.failed.json) and its
+exclusive [journal](baseline.json.journal.jsonl); the runner wrote no
+`baseline.json`, and no C timing was collected. The binary SHA-256 matched
+before and after the failed run.
+
+A separately labeled diagnostic replay on the exact retained B binary and a
+fresh scratch database reproduced a 503 after 77 subruns, while one isolated
+`large/c8/gateway` subrun passed. A second diagnostic-only binary changed only
+the measurement file to observe public error bodies. It reproduced a 503 after
+73 subruns: the first error was `upstream_unavailable`, followed by
+`authority_unavailable`, and provider dispatch counters stopped increasing.
+The historical test harness calls `h.refresh()` once, while the production
+runtime's key authority expires after 60 seconds unless its existing 5-second
+poll loop runs. The long v2 schedule crosses that boundary; the v1 reference
+finished in 26 seconds. This is a measurement-harness lifetime defect, not a
+passing performance result. The failed attempt and its frozen criteria remain
+unchanged. A further B attempt requires a separately named preregistration
+and symmetric production polling in both measurement arms.
