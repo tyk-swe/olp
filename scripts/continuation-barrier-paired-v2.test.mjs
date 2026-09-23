@@ -301,6 +301,31 @@ test('test-only or unrelated internal commits do not satisfy the post-B product-
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
+test('no-ff evidence merge preserves the one-time B creation commit before the product change', () => {
+  const repo = temporaryLineage(), path = 'evidence/baseline.json';
+  try {
+    const trunk = repo.git('symbolic-ref', '--short', 'HEAD');
+    repo.git('checkout', '-qb', 'evidence');
+    mkdirSync(join(repo.root, 'evidence'));
+    writeFileSync(join(repo.root, path), '{"schema":"synthetic-b-only"}\n');
+    writeFileSync(join(repo.root, `${path}.journal.jsonl`), '{"event":"reserved"}\n');
+    const bCommit = repo.commit('Record B-only evidence');
+    repo.git('checkout', '-q', trunk);
+    repo.git('merge', '--no-ff', '-m', 'Merge B evidence', 'evidence');
+    const mergeCommit = repo.git('rev-parse', 'HEAD');
+    assert.notEqual(mergeCommit, bCommit);
+    mkdirSync(join(repo.root, 'internal/resources'), { recursive: true });
+    writeFileSync(join(repo.root, 'internal/resources/continuation.go'), 'package resources\n');
+    const productCommit = repo.commit('Improve continuation hot path after B');
+    writeFileSync(join(repo.root, 'note.md'), 'final C\n');
+    const candidateCommit = repo.commit('Lock C source');
+    const binding = committedBaselineLineage(path, candidateCommit, repo.root);
+    assert.equal(binding.b_only_commit, bCommit);
+    assert.equal(binding.product_change_commit, productCommit);
+    assert.deepEqual(verifyPairedBaselineBinding({ ...binding, candidate_revision: candidateCommit }, repo.root), { schema: 'synthetic-b-only' });
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
 test('exclusive pre-run reservation survives interruption and complete journal binds every subrun and artifact byte', () => {
   const directory = mkdtempSync(join(tmpdir(), 'olp-paired-journal-test-'));
   const interrupted = join(directory, 'interrupted.json');

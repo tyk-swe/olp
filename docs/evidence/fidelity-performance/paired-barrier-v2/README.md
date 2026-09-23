@@ -70,7 +70,9 @@ write a new artifact only once. Before either arm starts, the runner creates
 an exclusive `*.journal.jsonl` reservation at the fixed output path. It
 durably appends each completed subrun and block, then a complete/failed
 terminal bound to the artifact bytes. A crash leaves the partial journal and
-blocks an invisible retry. Offline comparison checks the complete journal
+blocks an invisible retry. Each per-subrun journal write and fsync occurs after
+that subrun's measured interval and before the next checked warmup. Offline
+comparison checks the complete journal
 against every saved subrun and the exact artifact hash. The historical B
 overlay must be a clean commit
 whose only difference from B is the reference measurement file. The B-only
