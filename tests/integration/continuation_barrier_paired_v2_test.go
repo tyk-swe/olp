@@ -8,12 +8,14 @@ package integration_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"runtime/metrics"
 	"strings"
@@ -274,6 +276,12 @@ func TestPairedBarrierReferenceV2(t *testing.T) {
 	}
 	setup, _ := json.Marshal(map[string]any{"postgresql_server_version": version, "postgresql_tls": tls, "database_name": databaseName})
 	fmt.Printf("PAIRED_BARRIER_SETUP %s\n", setup)
+	// Ordinary integration runs complete checked setup without waiting for an
+	// inherited stdin pipe. Only the write-once benchmark runner opts into the
+	// long-lived command loop after required service configuration is checked.
+	if os.Getenv("OLP_PAIRED_BARRIER_COMMAND_MODE") != "1" {
+		return
+	}
 	fmt.Println("PAIRED_BARRIER_READY reference")
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -317,4 +325,36 @@ func TestPairedBarrierAuthorityFreshnessV2Attempt2(t *testing.T) {
 	if _, err := barrierWorkflow(t.Context(), barrierBinding{}, provider, client, d, h.HTTP.URL+"/anthropic", key, slug, "gateway"); err != nil {
 		t.Fatalf("public native workflow failed after authority refresh: %v", err)
 	}
+}
+
+func pairedBarrierDefaultOpenStdin(t *testing.T, selectedTest string) {
+	t.Helper()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, "-test.run", "^"+selectedTest+"$", "-test.v", "-test.timeout=15s")
+	command.Env = make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "OLP_PAIRED_BARRIER_COMMAND_MODE=") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close() // Deliberately keep stdin open until the child exits.
+	command.Stdin = reader
+	output, err := command.CombinedOutput()
+	if ctx.Err() != nil || err != nil || !bytes.Contains(output, []byte("PAIRED_BARRIER_SETUP ")) || bytes.Contains(output, []byte("PAIRED_BARRIER_READY ")) {
+		t.Fatalf("ordinary integration command loop did not exit with open stdin: timeout=%v err=%v setup=%v ready=%v", ctx.Err(), err, bytes.Contains(output, []byte("PAIRED_BARRIER_SETUP ")), bytes.Contains(output, []byte("PAIRED_BARRIER_READY ")))
+	}
+}
+
+func TestPairedBarrierReferenceDefaultOpenStdinV2Attempt2(t *testing.T) {
+	pairedBarrierDefaultOpenStdin(t, "TestPairedBarrierReferenceV2")
 }
