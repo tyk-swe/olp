@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { analyzeBaseline, analyzePaired, makeManifest, sourceOrder, sourceSchedule, validateSubrun } from './fidelity-paired-v2.mjs';
+import { analyzeBaseline, analyzePaired, makeManifest, sourceOrder, sourceSchedule, validateStrictRouteContracts, validateSubrun } from './fidelity-paired-v2.mjs';
 
 const manifest = makeManifest(process.cwd());
 const digest = (value) => createHash('sha256').update(value).digest('hex');
@@ -41,7 +41,7 @@ function capture(baselineOnly) {
     hardware: manifest.old_hardware, toolchain: manifest.old_toolchain, go_build_environment: manifest.old_go_build_environment,
     runtime_environment: manifest.old_runtime_environment, conditions: manifest.conditions, diagnostics_before: diagnostics, diagnostics_after: diagnostics,
     B: metadata, C: baselineOnly ? null : { revision: 'locked-C', binary_sha256: 'C-binary' },
-    C_route_contract: baselineOnly ? null : { native: { fidelity: 'strict' }, translated: { fidelity: 'strict' }, rejected: { fidelity: 'strict' } } };
+    C_route_contract: baselineOnly ? null : structuredClone(manifest.C_route_contract) };
 }
 
 test('manifest derives exactly 224 path and 30 added-latency margins from immutable B data', () => {
@@ -49,10 +49,34 @@ test('manifest derives exactly 224 path and 30 added-latency margins from immuta
   assert.equal(Object.values(manifest.comparisons).flatMap(Object.keys).length, 224);
   assert.equal(Object.values(manifest.added_latency).flatMap(Object.keys).length, 30);
   assert.equal(manifest.B_product_revision, '8e52f775df815c3a1a25d75064c3ffd540fb07f5');
+  assert.equal(manifest.manifest_revision, 'strict-contract-r2');
+  assert.deepEqual(manifest.C_route_contract, { native: { fidelity: { mode: 'strict' } }, translated: { fidelity: { mode: 'strict' } }, rejected: { fidelity: { mode: 'strict' } } });
   for (const metrics of Object.values(manifest.comparisons)) for (const value of Object.values(metrics)) {
     assert.equal(value.margin, value.old_limit - value.old_B_median);
     assert.ok(value.margin > 0);
   }
+});
+
+test('legacy, transformed, omitted and ambiguous C fidelity contracts fail closed', () => {
+  assert.deepEqual(validateStrictRouteContracts(structuredClone(manifest.C_route_contract)), manifest.C_route_contract);
+  for (const category of ['native', 'translated', 'rejected']) {
+    for (const fidelity of [{ mode: 'legacy' }, { mode: 'transformed' }, {}, null, { mode: 'strict', extra: true }]) {
+      const contracts = structuredClone(manifest.C_route_contract);
+      contracts[category].fidelity = fidelity;
+      assert.throws(() => validateStrictRouteContracts(contracts), /exact explicit strict fidelity/);
+    }
+    const omitted = structuredClone(manifest.C_route_contract);
+    delete omitted[category];
+    assert.throws(() => validateStrictRouteContracts(omitted), /exact explicit strict fidelity/);
+    const implicit = structuredClone(manifest.C_route_contract);
+    delete implicit[category].fidelity;
+    assert.throws(() => validateStrictRouteContracts(implicit), /exact explicit strict fidelity/);
+  }
+  assert.throws(() => validateStrictRouteContracts(null), /exact explicit strict fidelity/);
+  const baseline = capture(true), paired = capture(false);
+  paired.B_only_sha256 = digest(JSON.stringify(baseline, null, 2) + '\n');
+  paired.C_route_contract.native.fidelity.mode = 'legacy';
+  assert.throws(() => analyzePaired(paired, baseline, manifest), /exact explicit strict fidelity/);
 });
 
 test('fixed randomized schedule balances two orders per path and keeps four-arm palindromes', () => {

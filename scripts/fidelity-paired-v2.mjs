@@ -25,6 +25,7 @@ const metricKinds = ['ns/op', 'process-cpu-ns/op', 'B/op', 'allocs/op', 'sampled
 const streamMetrics = ['first-event-p50-us', 'first-event-p95-us', 'first-event-p99-us',
   'max-inter-event-gap-p50-us', 'max-inter-event-gap-p95-us', 'max-inter-event-gap-p99-us'];
 const latencyMetrics = ['latency-p50-us', 'latency-p95-us', 'latency-p99-us'];
+const strictRouteContracts = Object.fromEntries(['native', 'translated', 'rejected'].map((category) => [category, { fidelity: { mode: 'strict' } }]));
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const digest = (path) => hash(readFileSync(path));
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -89,6 +90,11 @@ export function sourceSchedule(seed = SEED) {
   return blocks;
 }
 
+export function validateStrictRouteContracts(contracts) {
+  invariant(isDeepStrictEqual(contracts, strictRouteContracts), 'C requires exact explicit strict fidelity for native, translated and rejected routes');
+  return contracts;
+}
+
 export function makeManifest(root) {
   const full = (key) => resolve(root, oldFiles[key]);
   const baseline = json(full('baseline'));
@@ -126,7 +132,9 @@ export function makeManifest(root) {
   invariant(Object.values(addedLatency).flatMap(Object.keys).length === 30, 'added latency inventory changed');
   const schedule = sourceSchedule();
   return {
-    schema: `${SCHEMA}-manifest`, method_version: 2, B_product_revision: B_PRODUCT,
+    schema: `${SCHEMA}-manifest`, method_version: 2, manifest_revision: 'strict-contract-r2',
+    supersedes_manifest_sha256: 'cbdd9e12470dff758d3d7f1f73332f4a94dbb4577a510e1e1cedf5dbf195fc7e',
+    C_route_contract: strictRouteContracts, B_product_revision: B_PRODUCT,
     old_baseline_sha256: digest(full('baseline')), old_budgets_sha256: digest(full('budgets')),
     old_harness_sha256: digest(full('harness')), old_runner_sha256: digest(full('runner')),
     paired_harness_sha256: digest(full('pairedHarness')), paired_runner_sha256: digest(full('pairedRunner')),
@@ -183,7 +191,7 @@ function sourceIdentity(root, manifest, B) {
   invariant(command('git', ['merge-base', manifest.B_product_revision, 'HEAD'], root) === manifest.B_product_revision, `${B ? 'B' : 'C'} does not descend from historical product`);
   if (B) {
     const changed = command('git', ['diff', '--name-only', manifest.B_product_revision, 'HEAD'], root).split('\n').filter(Boolean);
-    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
+    invariant(changed.every((name) => name === oldFiles.pairedHarness || name === oldFiles.pairedRunner || name === oldFiles.baseline || name === oldFiles.budgets || name === 'scripts/fidelity-paired-v2.test.mjs' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json' || name === 'docs/evidence/fidelity-performance/source-paired-v2/README.md'), `B product differs: ${changed}`);
   }
   return { revision, root, working_tree: status };
 }
@@ -296,7 +304,9 @@ function validateCapture(capture, manifest, baselineOnly) {
   invariant(isDeepStrictEqual(capture.conditions, manifest.conditions), 'source measurement conditions changed');
   invariant(typeof capture.B?.revision === 'string' && typeof capture.B?.binary_sha256 === 'string', 'B binary identity missing');
   if (!baselineOnly) {
-    invariant(capture.C && capture.C.revision !== capture.B.revision && ['native', 'translated', 'rejected'].every((name) => Object.keys(capture.C_route_contract?.[name] || {}).length > 0), 'C revision or strict route contract missing');
+    invariant(capture.C && capture.C.revision !== capture.B.revision, 'C revision missing');
+    validateStrictRouteContracts(capture.C_route_contract);
+    invariant(isDeepStrictEqual(capture.C_route_contract, manifest.C_route_contract), 'C route contract differs from frozen strict manifest');
     invariant(typeof capture.B_only_sha256 === 'string' && capture.B_only_sha256.length === 64, 'committed B-only artifact identity missing');
   }
   for (const diagnostics of [capture.diagnostics_before, capture.diagnostics_after]) invariant(typeof diagnostics?.loadavg === 'string' && typeof diagnostics?.cpu_pressure === 'string', 'capture host diagnostics missing');
@@ -451,7 +461,10 @@ async function record(mode, output, manifestPath, baselinePath, Bbinary, Broot, 
   if (mode === 'paired') invariant(resolve(Bbinary) !== resolve(Cbinary), 'B and C require distinct binary output paths');
   const routeContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_ROUTE_CONTRACT || 'null') : null;
   const providerContract = mode === 'paired' ? JSON.parse(process.env.OLP_FIDELITY_BENCH_PROVIDER_CONTRACT || 'null') : null;
-  if (mode === 'paired') invariant(routeContract && ['native', 'translated', 'rejected'].every((name) => Object.keys(routeContract[name] || {}).length > 0), 'C requires explicit native, translated and rejected route contracts');
+  if (mode === 'paired') {
+    validateStrictRouteContracts(routeContract);
+    invariant(isDeepStrictEqual(routeContract, manifest.C_route_contract), 'C route contract differs from frozen strict manifest');
+  }
   const currentHardware = hardware();
   invariant(hardwareMatches(currentHardware, manifest.old_hardware), 'physical hardware differs from v1');
   const toolchain = command('go', ['version'], Broot);
