@@ -236,3 +236,51 @@ func TestStrictRealtimeNativeIdentityAndRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestStrictRealtimeCurrentProviderCredentialRevocation(t *testing.T) {
+	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	fixture := newStrictRealtimeFixture(t, "openai")
+	slug, key := provisionStrictRealtime(t, h, "openai", fixture.URL+"/v1")
+	owner := &browser{}
+	h.want(owner, "POST", "/api/v3/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
+	var providerID, credentialID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp_go.providers p JOIN olp_go.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := strings.Replace(h.HTTP.URL, "http://", "ws://", 1) + "/v1/realtime?model=" + slug
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	before := fixture.dials.Load()
+	conn, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + key}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	for deadline := time.Now().Add(3 * time.Second); fixture.dials.Load() == before && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fixture.dials.Load() != before+1 {
+		t.Fatalf("active strict session did not reach exactly one provider: %d", fixture.dials.Load()-before)
+	}
+	detail := h.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, http.StatusOK)
+	h.want(owner, "POST", "/api/v3/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	h.refresh()
+	_, _, err = conn.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("revoked provider credential did not close active native session: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for sink.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sink.count() != 1 || fixture.dials.Load() != before+1 {
+		t.Fatalf("revocation caused missing/duplicate terminal or dispatch: terminals=%d dials=%d", sink.count(), fixture.dials.Load()-before)
+	}
+	terminal := sink.last()
+	if terminal.Outcome != "failure" || terminal.ErrorClass != "provider_credential_revoked" || !terminal.Committed ||
+		len(terminal.Attempts) != 1 || terminal.Attempts[0].Class != "credential" {
+		t.Fatalf("revoked provider credential lost its native Attempt classification: %+v", terminal)
+	}
+}

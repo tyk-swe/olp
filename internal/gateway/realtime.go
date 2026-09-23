@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -385,6 +386,13 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []byte, strict bool) *openai.Usage {
 	if typ != websocket.MessageText || len(data) > maxRealtimeTrackedFrameBytes {
 		s.unknown = true
+		return nil
+	}
+	if !strict && !bytes.Contains(data, []byte("response.done")) && bytes.IndexByte(data, '\\') < 0 {
+		// Legacy sessions do not promise terminal response tracking. They
+		// observe only response.done usage, and that exact type must appear
+		// literally or contain a JSON escape. Other native frames still pass
+		// through byte-for-byte without decoding or changed failure behavior.
 		return nil
 	}
 	var event realtimeFrame
@@ -811,6 +819,61 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 	return openai.ParseErrorBody(body)
 }
 
+// realtimeBoundedWriter keeps one watchdog per direction. Every frame gets a
+// fresh full write window without a new context timer for each frame. The
+// WebSocket's own cancellation hook still closes a stalled connection and
+// interrupts a writer waiting on its internal lock.
+type realtimeFrameSink interface {
+	Write(context.Context, websocket.MessageType, []byte) error
+}
+
+type realtimeBoundedWriter struct {
+	dst     realtimeFrameSink
+	parent  context.Context
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timeout time.Duration
+	timer   *time.Timer
+	expired atomic.Bool
+}
+
+func newRealtimeBoundedWriter(parent context.Context, dst realtimeFrameSink, timeout time.Duration) *realtimeBoundedWriter {
+	w := &realtimeBoundedWriter{dst: dst, parent: parent, timeout: timeout}
+	w.ctx, w.cancel = context.WithCancel(parent)
+	w.timer = time.AfterFunc(timeout, func() {
+		w.expired.Store(true)
+		w.cancel()
+	})
+	w.timer.Stop()
+	return w
+}
+
+func (w *realtimeBoundedWriter) close() {
+	w.timer.Stop()
+	w.cancel()
+}
+
+func (w *realtimeBoundedWriter) write(typ websocket.MessageType, data []byte) error {
+	if err := w.parent.Err(); err != nil {
+		return err
+	}
+	w.timer.Reset(w.timeout)
+	err := w.dst.Write(w.ctx, typ, data)
+	if !w.timer.Stop() {
+		// The deadline won a race with successful completion. Conservatively
+		// terminate this direction; it cannot start another bounded write.
+		w.expired.Store(true)
+		w.cancel()
+	}
+	if w.expired.Load() {
+		return context.DeadlineExceeded
+	}
+	if parentErr := w.parent.Err(); parentErr != nil {
+		return parentErr
+	}
+	return err
+}
+
 func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) (*openai.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -825,6 +888,8 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 		deliveryFailed bool
 	}
 	forward := func(dst, src *websocket.Conn, inspect bool) relayEnd {
+		writer := newRealtimeBoundedWriter(ctx, dst, responseWriteTimeout)
+		defer writer.close()
 		for {
 			typ, data, err := src.Read(ctx)
 			if err != nil {
@@ -850,9 +915,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				responses.clientFrame(typ, data)
 				usageMu.Unlock()
 			}
-			writeCtx, stopWrite := context.WithTimeout(ctx, responseWriteTimeout)
-			err = dst.Write(writeCtx, typ, data)
-			stopWrite()
+			err = writer.write(typ, data)
 			if err != nil {
 				return relayEnd{err: err, client: inspect, deliveryFailed: inspect}
 			}

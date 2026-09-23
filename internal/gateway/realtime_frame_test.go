@@ -49,6 +49,32 @@ func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 	}
 }
 
+func TestLegacyRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"response.audio.delta","response_id":"resp_1","delta":"AQID","output_index":0}`,
+		`{"type":"session.updated","event_id":"event_1"}`,
+		`{"type":"response.audio.delta","delta":"response.done is only text"}`,
+	} {
+		state := realtimeResponseState{}
+		if got := state.providerFrame(websocket.MessageText, []byte(raw), false); got != nil {
+			t.Fatalf("nonterminal legacy frame fabricated usage: frame=%s usage=%+v", raw, got)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		`{"type":"response.\u0064one","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		`{"type":"response.audio.delta","type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		`{"TYPE":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		`{"\u0074ype":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2}}}`,
+	} {
+		state := realtimeResponseState{}
+		usage := state.providerFrame(websocket.MessageText, []byte(raw), false)
+		if usage == nil || usage.InputTokens != 3 || usage.OutputTokens != 2 {
+			t.Fatalf("legacy terminal usage was lost for %s: %+v", raw, usage)
+		}
+	}
+}
+
 func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T) {
 	flat := []byte(`{"type":"response.audio.delta","event_id":"e1","response_id":"resp_1","delta":"AQID"}`)
 	event, ok := realtimeFlatFrame(flat)
