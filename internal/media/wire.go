@@ -791,8 +791,8 @@ type ListQuery struct {
 
 // ValidateVideoListQuery checks the OpenAI video list query parameters.
 func ValidateVideoListQuery(query url.Values) (*ListQuery, *Error) {
-	for name := range query {
-		if name != "after" && name != "limit" && name != "order" {
+	for name, values := range query {
+		if name != "after" && name != "limit" && name != "order" || len(values) != 1 {
 			return nil, invalidMedia("Video list contains unsupported query parameters.")
 		}
 	}
@@ -824,6 +824,11 @@ func ValidateVideoListQuery(query url.Values) (*ListQuery, *Error) {
 
 // ValidateVideoContentQuery checks the content variant parameter.
 func ValidateVideoContentQuery(query url.Values) (string, *Error) {
+	for name, values := range query {
+		if name != "variant" || len(values) != 1 {
+			return "", invalidMedia("Video content contains unsupported query parameters.")
+		}
+	}
 	variant := query.Get("variant")
 	switch variant {
 	case "", "video", "thumbnail", "spritesheet":
@@ -1466,6 +1471,52 @@ func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *
 		return nil, protocolError("The provider video metadata could not be encoded.")
 	}
 	return body, nil
+}
+
+// EncodeStrictVideoObject keeps every native metadata member and numeric token
+// intact while replacing only the provider resource ID and model binding with
+// the caller's owned local job identity and route. The original source stays
+// available in the encrypted job secret for recovery.
+func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route string) ([]byte, *Error) {
+	if !source.Valid() || source.Root().Kind() != oif.Object {
+		return nil, protocolError("The native video metadata is unavailable.")
+	}
+	id, ok := source.Root().Lookup("id")
+	actual, valid := id.Text()
+	if !ok || !valid || actual != upstreamID {
+		return nil, protocolError("The native video identity changed.")
+	}
+	localJSON, _ := json.Marshal(localID)
+	changes := []oif.Change{{Pointer: "/id", Value: string(localJSON), Origin: oif.ResourceBinding, Reason: "owned local video job identity"}}
+	if route != "" {
+		routeJSON, _ := json.Marshal(route)
+		changes = append(changes, oif.Change{Pointer: "/model", Value: string(routeJSON), Origin: oif.IdentityBinding, Reason: "published route identity"})
+	}
+	client, err := oif.Apply(source, changes)
+	if err != nil {
+		return nil, protocolError("The native video metadata could not be projected.")
+	}
+	return client.Bytes(), nil
+}
+
+// ValidStrictVideoJobSource guards autonomous polls, which have no gateway
+// response writer or route template. They may advance a strict job only from
+// an unambiguous provider object with the same pinned identity and model.
+func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bool {
+	if !source.Valid() || source.Root().Kind() != oif.Object {
+		return false
+	}
+	id, idOK := source.Root().Lookup("id")
+	modelValue, modelOK := source.Root().Lookup("model")
+	object, objectOK := source.Root().Lookup("object")
+	status, statusOK := source.Root().Lookup("status")
+	gotID, idText := id.Text()
+	gotModel, modelText := modelValue.Text()
+	gotObject, objectText := object.Text()
+	gotStatus, statusText := status.Text()
+	return idOK && idText && gotID == upstreamID && modelOK && modelText && gotModel == model &&
+		objectOK && objectText && gotObject == "video" && statusOK && statusText &&
+		slices.Contains([]string{"queued", "in_progress", "completed", "failed"}, gotStatus)
 }
 
 // DecodeVideoListResponse parses a provider list document.

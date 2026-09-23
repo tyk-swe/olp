@@ -377,6 +377,30 @@ func TestStrictPublicCallerSemanticHeadersArePreservedOrRejected(t *testing.T) {
 	}
 }
 
+// Anthropic's document block is a native generation asset, not a separate
+// conversion engine. The public route forwards its exact base64 bytes, title,
+// citation setting and ordering without OCR, extraction or frame sampling.
+func TestStrictPublicAnthropicDocumentAssetIdentity(t *testing.T) {
+	h := newAccessHarness(t)
+	f := newStrictProviderFixture(t, "anthropic-messages")
+	slug, key := publishStrictProvider(t, h, h.owner(), f, nil, nil, "strict")
+	before := len(f.captured())
+	encoded := "JVBERi0xLjQKAAECA//+" // fixed opaque PDF fixture bytes
+	request := fmt.Sprintf(`{"model":%q,"max_tokens":32,"messages":[{"role":"user","content":[{"type":"text","text":"read the original pages"},{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":%q},"title":"Original.pdf","citations":{"enabled":true}}]}]}`, slug, encoded)
+	status, response, _ := h.gatewayRaw("POST", "/anthropic/v1/messages", key, strings.NewReader(request), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK {
+		t.Fatalf("native document response=%d %s", status, response)
+	}
+	calls := f.captured()
+	want := strings.Replace(request, slug, vendorModel, 1)
+	if len(calls) != before+1 || string(calls[len(calls)-1].body) != want {
+		t.Fatalf("native document source changed: %q", calls[len(calls)-1].body)
+	}
+	if !bytes.Contains(calls[len(calls)-1].body, []byte(encoded)) || bytes.Contains(calls[len(calls)-1].body, []byte("extracted_text")) {
+		t.Fatal("document bytes were extracted or lost")
+	}
+}
+
 func TestPublicEffectiveDefaultsAreInspectedBeforeDispatch(t *testing.T) {
 	for _, mode := range []string{"strict", "transformed"} {
 		t.Run(mode, func(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 // Local fixtures cannot claim official OpenAI media certification. Seed only
 // the disposable installation's certified tuple after public provider creation
 // and nonbillable probe; production certification remains official-host only.
-func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, operation, mode string) {
+func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, operation, mode string, additional ...[2]string) {
 	t.Helper()
 	var raw []byte
 	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp_go.providers WHERE id=$1", providerID).Scan(&raw); err != nil {
@@ -47,9 +47,10 @@ func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, opera
 		t.Fatal(err)
 	}
 	credentialFP := transportFP + ":" + credentialID
+	all := append([][2]string{{operation, mode}}, additional...)
 	tuples := []string{}
-	for _, c := range [][3]string{{operation, "openai", mode}} {
-		encoded, _ := json.Marshal([]string{vendorModel, c[0], c[1], c[2]})
+	for _, c := range all {
+		encoded, _ := json.Marshal([]string{vendorModel, c[0], "openai", c[1]})
 		tuples = append(tuples, string(encoded))
 	}
 	sort.Strings(tuples)
@@ -57,7 +58,11 @@ func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, opera
 	tupleSum := sha256.Sum256(encodedTuples)
 	validatedFP := credentialFP + ":" + hex.EncodeToString(tupleSum[:])
 	now := time.Now().UTC()
-	capabilities, _ := json.Marshal([]map[string]any{{"operation": operation, "surface": "openai", "mode": mode, "source": "certified", "certified_at": now.Format(time.RFC3339Nano), "credential_fingerprint": credentialFP}})
+	capabilityItems := make([]map[string]any, 0, len(all))
+	for _, item := range all {
+		capabilityItems = append(capabilityItems, map[string]any{"operation": item[0], "surface": "openai", "mode": item[1], "source": "certified", "certified_at": now.Format(time.RFC3339Nano), "credential_fingerprint": credentialFP})
+	}
+	capabilities, _ := json.Marshal(capabilityItems)
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capabilities, providerID, vendorModel); err != nil {
 		t.Fatal(err)
 	}

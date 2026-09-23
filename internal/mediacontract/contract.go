@@ -46,18 +46,21 @@ func reject(code, field, requirement, message string) error {
 	return operations.Error(code, field, requirement, message)
 }
 
-// Compile qualifies only direct, native OpenAI media operations. Cloud image
-// wrappers and durable video identities need distinct contracts and cannot be
-// advertised as native identity by this runner.
+// Compile qualifies direct native media operations. The video create contract
+// has a durable local resource mapping; list remains an owner-scoped local
+// collection and cannot claim equivalence with a provider project-wide list.
 func Compile(c Config) (*Template, error) {
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, reject("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
 	}
-	if !slices.Contains([]string{"image_generation", "image_edit", "image_variation", "speech", "transcription"}, c.Operation) ||
+	if !slices.Contains([]string{"image_generation", "image_edit", "image_variation", "speech", "transcription", "video_create", "video_get", "video_content", "video_delete"}, c.Operation) ||
 		!slices.Contains(p.Operations, c.Operation) ||
 		!slices.Contains([]string{"direct-openai", "direct-compatible", "azure-v1", "azure-deployment"}, p.Hosting) {
 		return nil, reject("target_capability", "/operation", "native_media_contract", "This media operation and hosting combination has no strict native contract.")
+	}
+	if strings.HasPrefix(c.Operation, "video_") && !slices.Contains([]string{"direct-openai", "direct-compatible"}, p.Hosting) {
+		return nil, reject("target_capability", "/profile", "video_hosting", "This video hosting has no qualified native lifecycle contract.")
 	}
 	if !connectors.ModelValid(c.Provider.Kind, c.Provider.Model(c.Model)) {
 		return nil, reject("resource_affinity", "/model", "serving_binding", "The configured media model is invalid.")
@@ -106,6 +109,10 @@ func Compile(c Config) (*Template, error) {
 
 func (t *Template) Serving() oif.ServingIdentity { return t.serving }
 
+// Descriptor gives retained resource calls the same operation-owned result
+// identity as the request path, including durable effects and submission.
+func (t *Template) Descriptor(mode string) oif.Descriptor { return t.descriptor(mode) }
+
 // Part is an operation-owned view of one outbound multipart member. Blob is
 // already authorized and staged by the media spool; this type grants no read.
 type Part struct {
@@ -136,22 +143,37 @@ type Bound struct {
 }
 
 func (t *Template) receipt(d oif.Descriptor, dispositions []oif.Disposition) oif.Receipt {
-	return oif.Receipt{Class: "native_identity", Operation: t.op, SourceDialect: d.Dialect.ID, TargetDialect: d.Dialect.ID,
+	lifetime, submission, effects := "request", "immediate", []string{"inference"}
+	class := "native_identity"
+	if strings.HasPrefix(t.op, "video_") {
+		lifetime, effects, class = "durable", []string{"inference", "resource_mutation"}, "qualified_translation"
+		if t.op == "video_create" {
+			submission = "queued"
+		}
+	}
+	return oif.Receipt{Class: class, Operation: t.op, SourceDialect: d.Dialect.ID, TargetDialect: d.Dialect.ID,
 		ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: dispositions,
 		Evidence:    []string{"media/native-openai/1", t.profile.Documentation},
-		Obligations: oif.Obligations{Delivery: d.Execution.Delivery, Lifetime: "request", Submission: "immediate", Continuation: "none", Effects: []string{"inference"}, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: maxDocumentBytes, MaxEventBytes: 1 << 20, RejectAmbiguousFailover: true, GuardResults: true}}
+		Obligations: oif.Obligations{Delivery: d.Execution.Delivery, Lifetime: lifetime, Submission: submission, Continuation: "none", Effects: effects, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: maxDocumentBytes, MaxEventBytes: 1 << 20, RejectAmbiguousFailover: true, GuardResults: true}}
 }
 
 func (t *Template) descriptor(mode string) oif.Descriptor {
 	delivery := "unary"
+	lifetime, submission, effects := "request", "immediate", []string{"inference"}
 	if mode == "streaming" {
 		delivery = "incremental"
+	}
+	if strings.HasPrefix(t.op, "video_") {
+		lifetime, effects = "durable", []string{"inference", "resource_mutation"}
+		if t.op == "video_create" {
+			submission = "queued"
+		}
 	}
 	return oif.Descriptor{
 		Operation: oif.Identity{ID: t.op, Revision: "1"},
 		Dialect:   oif.Identity{ID: t.profile.OperationDialect(t.op), Revision: t.profile.Revision},
 		Profile:   oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision},
-		Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}},
+		Execution: oif.Execution{Delivery: delivery, Lifetime: lifetime, Submission: submission, Effects: effects},
 	}
 }
 
@@ -160,8 +182,11 @@ func (t *Template) descriptor(mode string) oif.Descriptor {
 // only the registered model identity and absent-only defaults may differ.
 func (t *Template) Bind(in Input) (Bound, error) {
 	d := t.descriptor(in.Mode)
-	if in.Mode != "unary" && in.Mode != "streaming" {
+	if in.Mode != "unary" && in.Mode != "streaming" && !(t.op == "video_create" && in.Mode == "async") {
 		return Bound{}, reject("target_capability", "/mode", "media_delivery", "The media delivery mode has no native contract.")
+	}
+	if t.op == "video_create" && in.Mode != "async" {
+		return Bound{}, reject("target_capability", "/mode", "video_submission", "Video creation requires an asynchronous durable job.")
 	}
 	if len(in.JSON) != 0 {
 		if !in.Source.Valid() || len(in.Parts) != 0 {
@@ -320,13 +345,17 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 				if part.Name != "file" {
 					return Bound{}, reject("target_capability", "/request", "audio_input", "Transcription file field is not qualified.")
 				}
+			case "video_create":
+				if part.Name != "input_reference" || !strings.HasPrefix(part.ContentType, "image/") {
+					return Bound{}, reject("target_capability", "/request", "video_reference", "Video creation requires one original image reference.")
+				}
 			}
 		}
 	}
-	if !modelSeen || fileCount == 0 || maskCount > 1 || t.op == "image_edit" && imageCount == 0 {
+	if !modelSeen || t.op != "video_create" && fileCount == 0 || maskCount > 1 || t.op == "image_edit" && imageCount == 0 {
 		return Bound{}, reject("target_capability", "/request", "media_assets", "The multipart source is incomplete.")
 	}
-	if t.op != "image_edit" && fileCount != 1 {
+	if t.op != "image_edit" && t.op != "video_create" && fileCount != 1 || t.op == "video_create" && fileCount > 1 {
 		return Bound{}, reject("target_capability", "/request", "media_assets", "The operation requires exactly one staged source asset.")
 	}
 	bound := Bound{Parts: parts}
@@ -424,6 +453,29 @@ func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result
 		data, ok := source.Root().Lookup("data")
 		if !ok || data.Kind() != oif.Array {
 			return oif.Result{}, reject("protocol_violation", "/result/data", "image_set", "The image result has no image set.")
+		}
+	}
+	if t.op == "video_create" || t.op == "video_get" {
+		id, idOK := source.Root().Lookup("id")
+		model, modelOK := source.Root().Lookup("model")
+		kind, kindOK := source.Root().Lookup("object")
+		status, statusOK := source.Root().Lookup("status")
+		upstreamID, idText := id.Text()
+		modelName, modelText := model.Text()
+		objectName, kindText := kind.Text()
+		state, statusText := status.Text()
+		if !idOK || !idText || upstreamID == "" || !modelOK || !modelText || modelName != t.model ||
+			!kindOK || !kindText || objectName != "video" || !statusOK || !statusText ||
+			!slices.Contains([]string{"queued", "in_progress", "completed", "failed"}, state) {
+			return oif.Result{}, reject("protocol_violation", "/result", "video_job_identity", "The native video job identity or status is invalid.")
+		}
+	}
+	if t.op == "video_delete" {
+		kind, kindOK := source.Root().Lookup("object")
+		deleted, deletedOK := source.Root().Lookup("deleted")
+		name, textOK := kind.Text()
+		if !kindOK || !textOK || name != "video.deleted" || !deletedOK || deleted.Raw() != "true" {
+			return oif.Result{}, reject("protocol_violation", "/result", "video_delete_receipt", "The native video deletion receipt is invalid.")
 		}
 	}
 	return oif.NewResult(d, source, oif.Complete)

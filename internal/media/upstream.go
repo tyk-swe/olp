@@ -201,7 +201,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Ambiguous: call.Ambiguous && sent, Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) {
 		// A provider can reject headers before reading the upload. Stop the
 		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {
@@ -313,9 +313,12 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if !call.Strict {
 			return nil
 		}
+		if (call.Kind == ResponseVideoJob || call.Kind == ResponseVideoList || call.Kind == ResponseVideoDelete) && len(body) > MaxNativeVideoSourceBytes {
+			return &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "native video metadata exceeds its durable bound"}
+		}
 		doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(t.MaxResponseBytes)})
 		if err != nil || doc.Root().Kind() != oif.Object {
-			return &Failure{Class: ClassProtocol, Detail: "native media result is malformed or ambiguous"}
+			return &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "native media result is malformed or ambiguous"}
 		}
 		result.Source = doc
 		return nil
@@ -437,6 +440,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		body, failure := t.collect(resp)
 		if failure != nil {
+			return nil, failure
+		}
+		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
 		var mErr *Error

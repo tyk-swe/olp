@@ -341,6 +341,10 @@ func strictMediaContext(x *execution) *Error {
 	if x.semanticQueryInvalid || len(x.semanticQuery) != 0 {
 		return invalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
 	}
+	return strictMediaHeaders(x)
+}
+
+func strictMediaHeaders(x *execution) *Error {
 	for name := range x.semanticHeaders {
 		canonical := http.CanonicalHeaderKey(name)
 		lower := strings.ToLower(canonical)
@@ -811,9 +815,15 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *medi
 		}
 		s.deliverMediaJSON(w, x, out, body)
 	case media.ResponseVideoJob:
-		out.committed = true
-		// Video create responses render the local identity.
-		body, failure := media.EncodeVideoObject(result.Video, outJobID(out), x.media.Route)
+		// Video create responses bind the owned durable identity. Strict
+		// responses retain every other native member and numeric token.
+		var body []byte
+		var failure *media.Error
+		if x.strict() {
+			body, failure = media.EncodeStrictVideoObject(result.Source, result.Video.ID, outJobID(out), x.media.Route)
+		} else {
+			body, failure = media.EncodeVideoObject(result.Video, outJobID(out), x.media.Route)
+		}
 		if failure != nil {
 			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
 			out.status, out.committed = out.err.Status, false
