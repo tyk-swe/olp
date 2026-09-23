@@ -117,7 +117,12 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	        DROP COLUMN submission_id,
 	        DROP CONSTRAINT provider_resources_kind_check,
 	        ADD CONSTRAINT provider_resources_kind_check CHECK (kind IN ('file','batch','response'));
+	    ALTER TABLE olp_go.media_jobs
+	        DROP CONSTRAINT media_jobs_strict_source,
+	        DROP COLUMN strict_contract,
+	        DROP COLUMN native_source_id;
 	    ALTER TABLE olp_go.secrets
+	        DROP CONSTRAINT secrets_media_job_source_bound,
 	        DROP CONSTRAINT secrets_continuation_ciphertext_bound,
 	        DROP CONSTRAINT secrets_purpose_check,
 	        ADD CONSTRAINT secrets_purpose_check CHECK (purpose IN ('oidc_client','oidc_flow','mutation_replay','provider_credential','notification_secret'));

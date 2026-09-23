@@ -1010,7 +1010,8 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 			c.runtime_generation_id::text, c.provider_revision_id::text,
 			c.credential_version_id::text, c.slot_id::text, c.reconciliation_claim_id::text,
 			c.reconciliation_attempts, c.next_reconciliation_at,
-			c.last_reconciliation_at, c.etag::text, c.created_at, c.updated_at
+			c.last_reconciliation_at, c.etag::text, c.created_at, c.updated_at,
+			c.strict_contract, c.native_source_id::text
 		FROM claimed c JOIN olp_go.providers p ON p.id = c.provider_id
 		ORDER BY c.created_at, c.id`,
 		now, limit, claimID, PollGateSeconds, uuid.Must(uuid.NewV7()))
