@@ -108,5 +108,17 @@ Go harness, runner, runner test, frozen v1 harness and setup helper blobs,
 requires the current comparator/harness files to match C, and checks that the
 B capture/budget blobs and their ancestor commit still
 match what C saw. An unrelated checkout or changed source/evidence is rejected.
-No paid model invocation is part of this qualification. Until a complete
-B-only baseline and final strict C comparison pass, G6 remains open.
+No paid model invocation is part of this qualification.
+
+## Final-source strict capture
+
+The write-once [strict C capture](strict-candidate.jsonl) measured clean
+`bc325da50c575803c771531dc4e3aab1ac203a53` after the committed B-only
+baseline and budget. Its SHA-256 is
+`cc22b2ff1f2c760ba1f1f9b782e1ad6fbf081abd6427aef89f369f736369a375`.
+The offline `compare` command passed every unchanged v1 and prospective v2
+limit with 48 complete repetitions, 1,152 exact dispatches, 288 mapping and
+retrieval checks, 12 wrong-owner negatives with zero dispatch, and no ambiguous
+outcomes. This is a scoped local scripted strict lifecycle pass; the
+[final-source record](../final-bc325-v2/README.md) explains why full G6
+remains open.

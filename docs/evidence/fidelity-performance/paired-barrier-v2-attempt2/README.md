@@ -1,7 +1,7 @@
 # Paired encrypted-barrier experiment, attempt 2
 
-Status: **the write-once B-only reference passed; no C timing has been
-collected.** This separately named attempt follows the retained
+Status: **the write-once B-only reference and final-source C comparison both
+passed their predeclared scoped criteria.** This separately named attempt follows the retained
 [attempt-1 failure](../paired-barrier-v2/README.md#attempt-1-result-failed-before-a-b-only-baseline).
 Attempt 1 ended after 76 of 768 historical B subruns, with no C observation.
 The public gateway returned `upstream_unavailable` and then
@@ -129,3 +129,19 @@ the journal SHA-256 is
 These B-only observations establish host/reference comparability, not a C
 added-cost pass. The first failed attempt remains visible and no C process or
 C timing was included in this capture.
+
+## Captured final-source C result
+
+Clean `bc325da50c575803c771531dc4e3aab1ac203a53` produced the write-once
+[candidate](candidate.json) and [journal](candidate.json.journal.jsonl) after
+the B evidence became a strict ancestor of the production resolver change.
+Their SHA-256 values are respectively
+`7fe2b9a6e1f1faabcc4c779b2dd8b052c7bb2fcbb8ad1ff87719135f275b7e8c`
+and `515f55e17261bd13ec33b64dc33be4447e9c2c0ab9b09dcbfb0778c43eceaceb`.
+Offline `compare` passed the complete journal, frozen B envelopes, controls
+and all candidate bounds. The 128 blocks retained 18,432 B and 6,144 C
+workflows, 49,152 exact provider dispatches, 466,944 native events, 49,152
+fixture actions, 6,144 ready reads on each arm, and zero rejects. The host
+preflight passed; all collected blocks, including later high-load observations,
+remain in the artifact. This qualifies the scoped local encrypted-barrier
+comparison, not the [full G6 gate](../final-bc325-v2/README.md).
