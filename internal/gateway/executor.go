@@ -630,6 +630,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 		}()
 		emit := func(frame []byte) error {
+			if wire == openai.FamilyResponses && bytes.Contains(frame, []byte("event: response.failed\n")) {
+				frame = []byte(redactCredentials(string(frame), credentialValues))
+			}
 			if x.providerState {
 				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame)
 				if mapErr != nil {

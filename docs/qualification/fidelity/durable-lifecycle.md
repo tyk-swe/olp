@@ -1,4 +1,4 @@
-# Strict durable file, batch, and unary background qualification (#216 slice)
+# Strict durable file, batch, and retained Responses qualification (#216 slice)
 
 Strict `batch` routes now compile a separate native OpenAI-family durable
 contract at publication. The admitted profile must be versioned, support the
@@ -58,15 +58,19 @@ stale provider poll cannot move `cancelling` back to `validating`, and a
 repeat cancel returns the committed local state without another provider
 mutation. Terminal batches reject another cancellation before dispatch.
 
-Strict native Responses additionally admits **unary** `background:true` only
-with retained provider state and an authorized state-enabled key. It records
-the encrypted native response resource before returning its local ID, keeps
-one content-free pending usage template, and reconciles terminal provider
-usage once across repeated GETs. `background:true,store:false` and strict
-background streaming are refused before dispatch. Existing native/legacy
-background streaming remains a separate compatibility control; it is not
-covered by this stronger strict contract. Strict Responses retain their
-24-hour resource window.
+Strict native Responses admits `background:true` with unary or streamed
+delivery when the request retains provider state and the key permits it. It
+records the encrypted native response resource before exposing its local ID,
+keeps one content-free pending usage template, and reconciles terminal usage
+once across repeated retrievals. A streamed reader can disconnect after the
+first owned event; `GET /v1/responses/{id}?stream=true&starting_after=…`
+resumes the same provider work under current owner and credential authority.
+The supported native `include[]` and `include_obfuscation` retrieval controls
+are forwarded, while unknown controls are refused. Pending, completed, failed,
+incomplete and cancelled native status remain distinct; terminal responses
+without provider usage retain an explicit billing-uncertain record.
+`background:true,store:false` remains refused before dispatch. Strict
+Responses retain their 24-hour resource window.
 
 Public `TestStrictBatchSourcePartialFilesAndLifecycle` publishes the provider
 and strict route through management, verifies exact source/effective/result
@@ -86,6 +90,11 @@ concurrent first polls keep one output/error identity, and prove a provider's
 early response to partial upload cannot become a successful file.
 `TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork`
 checks strict queued creation, polling and one terminal usage record.
+`TestStrictBackgroundResponseStreamRecoversAfterReaderLoss`,
+`TestStrictBackgroundResponseFailedTerminalIsVisibleAndSettled`, and
+`TestStrictBackgroundResponsePinnedJavaScriptSDKRecovery` cover streamed create, reader loss,
+resumption, native error delivery and single settlement. Pending, cancellation,
+expiry, and historical parent identity have separate public tests.
 
 The final selected strict batch/SDK/disconnect/partial-upload fault cases
 passed under `-race` in 19.109 seconds. The fresh-binary process,
@@ -99,5 +108,5 @@ remain unmeasured or separately failed in their retained evidence.
 
 This slice does not claim strict video, cloud media wrapper equivalence,
 document conversion, arbitrary batch endpoints, cross-provider failover of
-accepted work, or resumable strict streaming background. Those combinations
+accepted work. Those combinations
 remain outside its admitted contract and the broader #216/#218 gate.

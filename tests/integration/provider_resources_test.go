@@ -236,6 +236,9 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			out[k] = v
 		}
 		out["id"] = f.respID.Load().(string)
+		if previous, ok := body["previous_response_id"].(string); ok {
+			out["previous_response_id"] = previous
+		}
 		if stream, _ := body["stream"].(bool); stream {
 			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": map[string]any{"id": out["id"], "object": "response", "status": "in_progress", "model": r.PathValue("dep"), "created_at": 1, "output": []any{}}})
 			terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": out})
@@ -257,6 +260,9 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			out[k] = v
 		}
 		out["id"] = f.respID.Load().(string)
+		if previous, ok := body["previous_response_id"].(string); ok {
+			out["previous_response_id"] = previous
+		}
 		if stream, _ := body["stream"].(bool); stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			if custom := f.respPostStream.Load(); custom != nil {
@@ -276,7 +282,8 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 				return
 			}
 			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": out})
-			fmt.Fprintf(w, "event: response.created\ndata: %s\n\n", created)
+			completed, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": out})
+			fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, completed)
 			return
 		}
 		writeJSON(w, out)

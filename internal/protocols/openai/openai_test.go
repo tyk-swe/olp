@@ -258,7 +258,8 @@ func TestResponsesStream(t *testing.T) {
 	}
 	failed := event("response.failed", `{"type":"response.failed","sequence_number":2,"response":{"id":"resp_1","object":"response","status":"failed","output":[],"error":{"code":"server_error","message":"boom"}}}`)
 	var ue *UpstreamError
-	if _, err = Stream(FamilyResponses, strings.NewReader(created+failed), 1<<20, "r", true, collect(new([][]byte))); !errors.As(err, &ue) || ue.Code != "server_error" {
+	failedFrames := [][]byte{}
+	if _, err = Stream(FamilyResponses, strings.NewReader(created+failed), 1<<20, "r", true, collect(&failedFrames)); !errors.As(err, &ue) || ue.Code != "server_error" || len(failedFrames) != 2 || !bytes.Contains(failedFrames[1], []byte(`"type":"response.failed"`)) {
 		t.Fatalf("failed response: %v", err)
 	}
 }

@@ -45,14 +45,23 @@ type geminiLifecycleCall struct {
 	Key                 string
 }
 
+type geminiReplyGate struct {
+	method, suffix   string
+	reached, release chan struct{}
+}
+
 type geminiLifecycleProvider struct {
 	*httptest.Server
-	mu       sync.Mutex
-	calls    []geminiLifecycleCall
-	sequence int
-	slowSent atomic.Int32
-	slowDone chan struct{}
-	badAck   atomic.Bool
+	mu              sync.Mutex
+	calls           []geminiLifecycleCall
+	sequence        int
+	slowSent        atomic.Int32
+	slowDone        chan struct{}
+	badAck          atomic.Bool
+	escapedCreateID atomic.Bool
+	escapedReadID   atomic.Bool
+	escapedStreamID atomic.Bool
+	replyGate       atomic.Pointer[geminiReplyGate]
 }
 
 func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
@@ -82,6 +91,14 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 		p.sequence++
 		id := fmt.Sprintf("v1_fixture_%d", p.sequence)
 		p.mu.Unlock()
+		if gate := p.replyGate.Load(); gate != nil && r.Method == gate.method && strings.HasSuffix(r.URL.Path, gate.suffix) {
+			close(gate.reached)
+			select {
+			case <-gate.release:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
 			var input struct {
@@ -104,11 +121,19 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
+			if p.escapedCreateID.Load() {
+				fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[],"native":{"resource":"%s"}}`, id, vendorModel, strings.ReplaceAll(id, "_", `\u005f`))
+				return
+			}
 			fmt.Fprintf(w, `{ "id":%q,"model":%q,"status":"completed","steps":[{"type":"thought","signature":"opaque-native","content":[{"type":"text","text":"thinking"}]},{"type":"model_output","content":[{"type":"text","text":"OK"}]}],"usage":{"total_input_tokens":3,"total_output_tokens":2},"native":{"number":9007199254740993}}`, id, vendorModel)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/"):
 			id = strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/")
 			if r.URL.Query().Get("stream") == "true" {
 				w.Header().Set("Content-Type", "text/event-stream")
+				if p.escapedStreamID.Load() {
+					fmt.Fprintf(w, "id: cursor-created\ndata: {\"event_type\":\"interaction.created\",\"interaction\":{\"id\":%q,\"status\":\"in_progress\"},\"native\":{\"resource\":\"%s\"}}\n\n", id, strings.ReplaceAll(id, "_", `\u005f`))
+					return
+				}
 				if r.URL.Query().Get("last_event_id") == "" {
 					fmt.Fprintf(w, "id: cursor-created\ndata: {\"event_type\":\"interaction.created\",\"interaction\":{\"id\":%q,\"status\":\"in_progress\"}}\n\n", id)
 					fmt.Fprint(w, "id: cursor-start\ndata: {\"event_type\":\"step.start\",\"step\":{\"type\":\"model_output\"}}\n\n")
@@ -119,6 +144,10 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
+			if p.escapedReadID.Load() {
+				fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[],"native":{"resource":"%s"}}`, id, vendorModel, strings.ReplaceAll(id, "_", `\u005f`))
+				return
+			}
 			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"retrieved"}]}]}`, id, vendorModel)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel"):
 			id = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/"), "/cancel")

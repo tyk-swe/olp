@@ -60,6 +60,9 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
 			return nil, false, invalidRequest("invalid_request", "The response retrieval query has an unsupported control.", nil)
 		}
 	}
+	if query.Has("include") && query.Has("include[]") {
+		return nil, false, invalidRequest("invalid_request", "Use one include selector spelling for response retrieval.", nil)
+	}
 	if !stream && query.Has("starting_after") {
 		return nil, false, invalidRequest("invalid_request", "starting_after requires stream=true.", nil)
 	}
@@ -79,7 +82,7 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 		return nil, nil, errors.New("response stream frame has no data")
 	}
 	payload := bytes.TrimSpace(frame[i+7:])
-	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(payload)})
+	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(frame) + 2048})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, nil, errors.New("response stream frame is malformed")
 	}
@@ -155,7 +158,17 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	committed := false
 	nativeIncomplete := false
 	fact := &x.facts[len(x.facts)-1]
+	credentialValues := []string{string(s.pinSecret(x, p))}
+	if resp.Request != nil {
+		names := append([]string{"Authorization", "Api-Key", "X-Goog-Api-Key"}, p.provider.CredentialHeaders...)
+		for _, name := range names {
+			credentialValues = append(credentialValues, resp.Request.Header.Values(name)...)
+		}
+	}
 	emit := func(frame []byte) error {
+		if bytes.Contains(frame, []byte("event: response.failed\n")) {
+			frame = []byte(redactCredentials(string(frame), credentialValues))
+		}
 		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
 		if err != nil || len(projected) > limit {
 			return errors.New("retained response event could not be projected")
@@ -198,10 +211,19 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	_, streamErr := protocols.StreamWithEvents(openai.FamilyResponses, openai.FamilyResponses,
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, nil)
 	if streamErr != nil {
-		x.failure = serverError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
-		fact.Class = classProtocol
+		var upstream *openai.UpstreamError
+		if errors.As(streamErr, &upstream) {
+			x.failure = serverError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
+			fact.Class = classUpstreamServer
+		} else {
+			x.failure = serverError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
+			fact.Class = classProtocol
+		}
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			if upstream != nil {
+				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+			}
 		}
 		if !committed {
 			return x.failure

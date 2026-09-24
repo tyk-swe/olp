@@ -232,7 +232,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 				return nil, e
 			}
 		}
-		doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
+		doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
 		if parseErr != nil {
 			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed response object.")
 		}
@@ -375,7 +375,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	}
 	var strictResultBody []byte
 	if res.Kind == resources.KindStrictResponse {
-		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: len(result)})
+		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
 		if parseErr != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
 		}

@@ -250,11 +250,12 @@ func (s *chatStream) finish() (*Completion, error) {
 }
 
 type responsesStream struct {
-	collect bool
-	route   string
-	emit    Emit
-	done    bool
-	c       *Completion
+	collect     bool
+	route       string
+	emit        Emit
+	done        bool
+	terminalErr error
+	c           *Completion
 }
 
 func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
@@ -294,15 +295,17 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 			if !s.collect {
 				s.c.OutputText, s.c.Refusal, s.c.ToolCalls = "", "", nil
 			}
-			if err := terminalResponseError(response); err != nil {
-				return err
+			terminalErr := terminalResponseError(response)
+			if terminalErr != nil && kind != "response.failed" {
+				return terminalErr
 			}
-			if kind == "response.failed" {
-				return &UpstreamError{Message: "upstream reported a failed response"}
+			if kind == "response.failed" && terminalErr == nil {
+				terminalErr = &UpstreamError{Message: "upstream reported a failed response"}
 			}
 			if status, present := stringField(response, "status"); present && status != strings.TrimPrefix(kind, "response.") {
 				return &ProtocolError{Detail: "terminal event disagrees with response status"}
 			}
+			s.terminalErr = terminalErr
 			s.done = true
 		}
 		if _, present := source.Lookup("/response/model"); present {
@@ -345,5 +348,5 @@ func (s *responsesStream) finish() (*Completion, error) {
 	if !s.done || s.c == nil {
 		return s.c, &ProtocolError{Detail: "stream ended before the terminal response event", Truncated: true}
 	}
-	return s.c, nil
+	return s.c, s.terminalErr
 }
