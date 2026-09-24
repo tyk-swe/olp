@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -21,6 +22,15 @@ func TestAudioTranslationPublicStrictRouteAndPinnedSDK(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "tests/sdk-smoke/node_modules/openai")); err != nil {
 		t.Fatal("pinned OpenAI SDK missing; run pnpm install --frozen-lockfile")
+	}
+	audio, err := os.ReadFile(filepath.Join(root, "tests/fixtures/media/tiny-pcm.wav"))
+	if err != nil || len(audio) != 48 || !bytes.Equal(audio[:4], []byte("RIFF")) ||
+		binary.LittleEndian.Uint32(audio[4:8]) != uint32(len(audio)-8) || !bytes.Equal(audio[8:12], []byte("WAVE")) ||
+		!bytes.Equal(audio[12:16], []byte("fmt ")) || binary.LittleEndian.Uint16(audio[20:22]) != 1 ||
+		binary.LittleEndian.Uint16(audio[22:24]) != 1 || binary.LittleEndian.Uint32(audio[24:28]) != 8000 ||
+		binary.LittleEndian.Uint16(audio[34:36]) != 16 || !bytes.Equal(audio[36:40], []byte("data")) ||
+		binary.LittleEndian.Uint32(audio[40:44]) != 4 {
+		t.Fatalf("translation fixture is not a tiny mono PCM WAV: %v", err)
 	}
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -82,7 +92,7 @@ func TestAudioTranslationPublicStrictRouteAndPinnedSDK(t *testing.T) {
 					t.Fatal("filename changed")
 				}
 			}
-			if len(fields) != 5 || fields["model"] != vendorModel || fields["file"] != string([]byte{0, 1, 255, 3}) || fields["temperature"] != "0" || fields["prompt"] != "English hint" || fields["response_format"] != test.format {
+			if len(fields) != 5 || fields["model"] != vendorModel || fields["file"] != string(audio) || fields["temperature"] != "0" || fields["prompt"] != "English hint" || fields["response_format"] != test.format {
 				t.Fatalf("translation native fields changed: %v", fields)
 			}
 			event := sink.last()
