@@ -43,6 +43,16 @@ image qualification. CI records its exact source and results separately;
 neither an ancestor's green run nor the selected local tests substitute for
 that final run. No feature gate is waived by the benchmark amendment.
 
+The first [published-head CI run](https://github.com/tyk-swe/olp/actions/runs/35992739073)
+passed its other jobs but failed one integration assertion in
+`TestGeminiAcceptedResourceCommitsOutliveClientDisconnect`. The test had
+observed a queued PostgreSQL status UPDATE, cancelled the client, released its
+blocking row lock, then used a plain MVCC SELECT that could still see the old
+committed state before the detached update finished. The assertion now uses a
+row-locking read queued behind that observed writer. Production code and the
+earlier execution receipt are unchanged; full CI must rerun on the corrected
+head.
+
 ## Bounded performance smoke
 
 Run the canonical local benchmark with a fixed iteration count and timeout:

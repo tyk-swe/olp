@@ -88,7 +88,7 @@ func TestGeminiAcceptedResourceCommitsOutliveClientDisconnect(t *testing.T) {
 		if method == http.MethodPost && providerSuffix == "/v1beta/interactions" {
 			waitForLock("olp_go.api_keys")
 		} else {
-			waitForLock("olp_go.provider_resources")
+			waitForLock("UPDATE olp_go.provider_resources SET state")
 		}
 		cancel()
 		if err := tx.Commit(t.Context()); err != nil {
@@ -132,23 +132,23 @@ func TestGeminiAcceptedResourceCommitsOutliveClientDisconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateCall(http.MethodGet, "/v1beta/interactions/"+upstream, path+"/"+local, nil, lockResource)
-	if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE id=$1`, resourceID).Scan(&state); err != nil || state != "completed" {
+	// The client has disconnected, but the detached write is still allowed to
+	// finish. A plain MVCC SELECT can read the old committed row while that
+	// UPDATE waits; a row-locking read joins the already-queued writer.
+	readCtx, stopRead := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stopRead()
+	if err := h.Pool.QueryRow(readCtx, `SELECT state FROM olp_go.provider_resources WHERE id=$1 FOR UPDATE`, resourceID).Scan(&state); err != nil || state != "completed" {
 		t.Fatalf("accepted status refresh was lost after disconnect: state=%q err=%v", state, err)
 	}
 	gateCall(http.MethodDelete, "/v1beta/interactions/"+upstream, path+"/"+local, nil, lockResource)
 	var ciphertext bool
-	deadline = time.Now().Add(3 * time.Second)
-	var deleteErr error
-	for time.Now().Before(deadline) {
-		deleteErr = h.Pool.QueryRow(t.Context(), `SELECT r.state,EXISTS(SELECT 1 FROM olp_go.secrets s WHERE s.id=r.id)
- FROM olp_go.provider_resources r WHERE r.id=$1`, resourceID).Scan(&state, &ciphertext)
-		if deleteErr == nil && state == "deleted" && !ciphertext {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	deleteCtx, stopDelete := context.WithTimeout(t.Context(), 3*time.Second)
+	defer stopDelete()
+	if err := h.Pool.QueryRow(deleteCtx, `SELECT state FROM olp_go.provider_resources WHERE id=$1 FOR UPDATE`, resourceID).Scan(&state); err != nil || state != "deleted" {
+		t.Fatalf("accepted delete was not tombstoned after disconnect: state=%q err=%v", state, err)
 	}
-	if deleteErr != nil || state != "deleted" || ciphertext {
-		t.Fatalf("accepted delete was not tombstoned after disconnect: state=%q ciphertext=%t err=%v", state, ciphertext, deleteErr)
+	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.secrets WHERE id=$1)`, resourceID).Scan(&ciphertext); err != nil || ciphertext {
+		t.Fatalf("accepted delete retained encrypted native ID: ciphertext=%t err=%v", ciphertext, err)
 	}
 	if response, _ := geminiPublic(t, h, http.MethodGet, path+"/"+local, key, nil); response.StatusCode != http.StatusNotFound {
 		t.Fatalf("deleted accepted Interaction remained public: %d", response.StatusCode)
