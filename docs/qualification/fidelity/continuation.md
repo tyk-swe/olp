@@ -77,7 +77,7 @@ The mTLS handle-revocation case passed in 1.429 s and under race detection in
 combined network/rejection race run in 5.779 s.
 
 The [frozen native encrypted barrier](../../evidence/fidelity-performance/barrier-v1/README.md)
-was not changed. The first clean [translated candidate capture](../../evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json)
+was not changed. The first clean [translated candidate capture](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json)
 at source `4e086098` completed all 12 repetitions: 288 workflows, 576 exact
 provider dispatches, 5,472 native events, 3,744 first-turn and 576 final-turn
 observations, 576 enabled actions, 288 authenticated ready reads and zero
@@ -87,7 +87,7 @@ metrics**: concurrency 1 `ns/op`, CPU/op and workflow p50/p95/p99; concurrency
 action-ready metric, passed. The artifact remains in the repository for review.
 The later one-resolution and combined claim/journal optimizations preserve
 semantics but do not erase the recorded failure. A second clean
-[candidate capture](../../evidence/fidelity-performance/barrier-v1/candidate-failed-7f333ee7.json)
+[candidate capture](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/barrier-v1/candidate-failed-7f333ee7.json)
 at `7f333ee7` completed the same full semantic inventory and **failed 13
 frozen metrics**, mainly small-history workflow/CPU/latency and one large c1
 workflow p50. Its source, storage and hardware identities passed the runner's
