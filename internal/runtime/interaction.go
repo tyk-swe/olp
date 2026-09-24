@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -11,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
-	"slices"
 )
 
 // CompileRouteExecution validates the complete configured links of a route.

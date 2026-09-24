@@ -16,8 +16,12 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
 | Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
 | Ordered generation views and independent operation contracts | `internal/operations/` |
+| Strict generation admission, continuation and semantic obligations | `internal/interaction/` |
+| Registered non-generation strict operation contracts | `internal/operationplan/`, `internal/operationregistry/` |
+| Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
+| Legacy provider preparation and wire defaults | `internal/providerinvoke/` |
 | OpenAI, Anthropic, Gemini, Bedrock codecs and legacy adapters | `internal/protocols/` |
-| Immutable runtime publication, activation, authority refresh | `internal/runtime/` |
+| Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |
@@ -63,8 +67,13 @@ the defaults it actually applied. Explicit destination dialects cannot fall
 back to another API. `protocols.PrepareIdentity` preserves native subtrees and
 allows only registered model/resource/transport changes; it does not normalize
 Responses input strings, rename token controls, or qualify an interaction by
-itself. The planner still owns policy coverage, profile compatibility, source
-requirements and client continuation. See [the source decision](adr/0001-immutable-operation-sources.md)
+itself. Strict contracts compile per published route target: `internal/interaction`
+owns generation admission, `internal/operationplan` and the `internal/operationregistry`
+composition root own the other unary operations, and `internal/mediacontract`,
+`internal/durablecontract`, `internal/realtimecontract` and `internal/geminilifecycle`
+own their surfaces. The planner still owns policy coverage, profile compatibility,
+source requirements and client continuation; `internal/providerinvoke` retains the
+legacy admission path. See [the source decision](adr/0001-immutable-operation-sources.md)
 and [OIF conservation checks](qualification/fidelity/oif-source.md).
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting

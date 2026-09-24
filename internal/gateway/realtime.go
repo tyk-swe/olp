@@ -22,7 +22,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -689,10 +688,10 @@ func strictRealtimeHandshake(snapshot *runtime.Snapshot, route *runtime.Route, r
 			continue
 		}
 		if err := template.AdmitHandshake(r.URL.RawQuery, r.Header, route.Slug); err != nil {
-			var refusal *realtimecontract.Refusal
+			var refusal *oif.Incompatibility
 			if errors.As(err, &refusal) {
 				parameter := refusal.Field
-				return invalidRequest("realtime_control_unavailable", refusal.Message, &parameter)
+				return invalidRequest(refusal.Code, refusal.Message, &parameter)
 			}
 			return invalidRequest("realtime_control_unavailable", "The realtime handshake is not qualified by this strict route.", nil)
 		}

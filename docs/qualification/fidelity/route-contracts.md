@@ -73,6 +73,7 @@ Validation executed on 2026-09-22:
   retains omitted legacy contracts, the installed digest, sessions, encrypted
   replays, OIDC identity and working inference.
 
-These checks qualify this configuration foundation. Strict inference and the
-complete planner remain unavailable until #213 is integrated; no inference
-quality or complete-interaction claim follows from storing this mode.
+These checks qualified this configuration foundation at their recorded date.
+Current admitted scope and inference qualification live in
+[strict interaction admission](strict-planning.md) and the
+[release crosswalk](release-validation.md).
