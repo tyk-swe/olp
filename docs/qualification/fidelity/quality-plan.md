@@ -1,5 +1,10 @@
 # Preregistered quality study, version 1
 
+This study is optional follow-up under the amended
+[release criteria](release-validation.md). Its design and unknown result remain
+unchanged; deferral does not authorize an empirical parity claim or a missing
+feature.
+
 Status: **unknown; not executed**. No live-provider credentials, cost ceiling,
 privacy approval or serving-identity observations have been supplied for this
 study. The fixture baseline establishes no intelligence-parity result. Paid

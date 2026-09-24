@@ -11,10 +11,10 @@ paid-provider intelligence, WAN/TLS latency, or isolated gateway RSS.
 | [Strict native lifecycle](../lifecycle-v2/strict-candidate.jsonl) | `cc22b2ff1f2c760ba1f1f9b782e1ad6fbf081abd6427aef89f369f736369a375` | Pass |
 | [Strict registered-profile stress](stress-strict.json) | `e172116d960f7a7e3c17f36fd3c1839235a2b35441173022dfbc9b14d54ec0df` | Pass |
 | [Legacy registered-profile stress](stress-legacy.json) | `2975425365c11e8104cc63cedca95a2e220a1746f7e4323b65f61155882997b1` | Pass |
-| [Paired encrypted barrier](../paired-barrier-v2-attempt2/candidate.json) | `7fe2b9a6e1f1faabcc4c779b2dd8b052c7bb2fcbb8ad1ff87719135f275b7e8c` | Pass |
-| [Barrier reservation journal](../paired-barrier-v2-attempt2/candidate.json.journal.jsonl) | `515f55e17261bd13ec33b64dc33be4447e9c2c0ab9b09dcbfb0778c43eceaceb` | Complete |
-| [Source paired r6 attempt](../source-paired-v2/paired-r6.json) | `33f5efb6dc681b2be570e5e2352e53ea35f01d8adfbaff836a05083a8bf1f023` | Invalid |
-| [Source r6 reservation journal](../source-paired-v2/paired-r6.json.journal.jsonl) | `25f76f751721fa4252d4969e5c0583ea354a1deecd34eeb13e0953552c41bdde` | Incomplete |
+| [Paired encrypted barrier](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json) | `7fe2b9a6e1f1faabcc4c779b2dd8b052c7bb2fcbb8ad1ff87719135f275b7e8c` | Pass |
+| [Barrier reservation journal](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json.journal.jsonl) | `515f55e17261bd13ec33b64dc33be4447e9c2c0ab9b09dcbfb0778c43eceaceb` | Complete |
+| [Source paired r6 attempt](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json) | `33f5efb6dc681b2be570e5e2352e53ea35f01d8adfbaff836a05083a8bf1f023` | Invalid |
+| [Source r6 reservation journal](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json.journal.jsonl) | `25f76f751721fa4252d4969e5c0583ea354a1deecd34eeb13e0953552c41bdde` | Incomplete |
 
 The strict native lifecycle comparison passed every frozen v1 and prospective
 v2 limit. Its 48 repetitions contained 1,152 complete native dispatches, 288
@@ -46,8 +46,12 @@ source-cost result, and empirical live-model quality remains unknown without
 authorized trials. No numeric criterion, fixture, original runner or failed
 artifact was edited to obtain the v2 passes.
 
-Recheck the successful captures from this source or a documentation-only
-descendant with the committed benchmark methods and frozen budgets:
+The following commands belong to the historical source above. Reproduce the
+complete record in that archived checkout: the paired-barrier runner and raw
+captures now live in the [immutable archive](../archive.md). The retained
+lifecycle/stress comparators remain available in the active tree. Use the
+[current release criteria](../../../qualification/fidelity/release-validation.md)
+for candidate validation; the original G6 disposition above is historical.
 
 ```sh
 node scripts/fidelity-lifecycle-v2-benchmark.mjs compare

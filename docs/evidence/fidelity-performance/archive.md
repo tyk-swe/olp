@@ -1,0 +1,137 @@
+# Archived performance studies
+
+Superseded experimental runners and raw repeated captures were removed from the
+active tree for the September 24, 2026 release-scope cleanup. Their exact bytes
+remain in immutable commit [`16769b6a`](https://github.com/tyk-swe/olp/tree/16769b6abee5008d33279542ccd96088254a6c82).
+The commit-pinned links and SHA-256 values below preserve methods, raw data and
+failed/invalid outcomes without carrying repeated study machinery into normal
+maintenance. Git history has not been rewritten.
+
+The original v1 fixture inventories, source benchmark/oracle, native lifecycle
+and continuation references, and frozen budget files remain byte-identical in
+the active tree. Canonical source, lifecycle, media-stress and continuation
+runners remain available. All functional public/SDK/recovery/browser tests
+remain; the retired Go file is only a stdin measurement adapter and its own
+protocol/diagnostic tests. `make test-scripts` continues to discover all retained
+`scripts/*.test.mjs`; tests specific to retired runners are archived with them.
+
+Use [release validation](../../qualification/fidelity/release-validation.md) for
+the bounded strict performance smoke and required correctness gates. Long
+studies are optional. Historical failures do not pass merely because they no
+longer block a statistical release claim; any identified functional defect still
+requires a fix. Live empirical quality remains unknown.
+
+| Historical study | Recorded outcome |
+| --- | --- |
+| Source v1 and services-off repeat | Failed original slow-relay control; frozen limits unchanged. |
+| Continuation barrier v1 candidates | Failed numeric limits; all recorded failed candidate data remain archived. |
+| Paired barrier attempt 1 | Failed B-only capture after 76/768 subruns; no C result. |
+| Paired barrier attempt 2 | Scoped B-only and C comparison passed at the recorded source; not current-head or live quality evidence. |
+| Source r6 | Invalid, zero complete paired blocks. |
+| Source r7 B-only | Inconclusive reference. |
+| Source r8 C | Failed semantic gate; no timed source-cost qualification. |
+| Source r9 C | Complete 480-block capture, failed numeric criteria. |
+| Source r10 C | Host-invalid after 255/480 blocks; no numeric qualification. |
+| Lifecycle v3 / paired barrier attempt 3 / final-source repeat lock | Retired follow-up methods; no completed capture in this archived tree. |
+
+To retrieve any entry exactly, use its repository path with the pinned commit:
+
+```sh
+git show 16769b6abee5008d33279542ccd96088254a6c82:scripts/fidelity-paired-r10.mjs > /tmp/fidelity-paired-r10.mjs
+sha256sum /tmp/fidelity-paired-r10.mjs
+```
+
+For reproduction, check out the complete historical tree in an isolated
+worktree. Individual historical runners depend on their matching source,
+fixtures, service setup and data; they are not supported commands in the current
+tree. Original criteria remain available at their original paths and commit.
+
+## Exact archived paths
+
+Paths are relative to the repository root. Replaced historical README versions
+are indexed as well as deleted files. Every link pins the full commit above.
+
+| Path at archived commit | Bytes | SHA-256 |
+| --- | ---: | --- |
+| [docs/evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/barrier-v1/candidate-failed-4e086098.json) | 41824 | `67637368d1a648d3d4286fbd4d87522789092c872b2ce272fcb29e1bab3b987e` |
+| [docs/evidence/fidelity-performance/barrier-v1/candidate-failed-7f333ee7.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/barrier-v1/candidate-failed-7f333ee7.json) | 41812 | `731221f07f37c42505bfa74a1a67c2d92e3b1d2ff0975a4e52969ed79557eb37` |
+| [docs/evidence/fidelity-performance/final-source-repeat-v1/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/final-source-repeat-v1/README.md) | 1336 | `a7506e539cb19bf6934b35beeabe26578c18b555dd6ff135946daaa562b38be2` |
+| [docs/evidence/fidelity-performance/lifecycle-stress-v2/baseline.json.failed-20260923T025739193Z.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/lifecycle-stress-v2/baseline.json.failed-20260923T025739193Z.json) | 12858 | `9e2f243fdda18515b05651ca18a31cfbff52c70cec524cdfe1ef92cb20aec0fb` |
+| [docs/evidence/fidelity-performance/lifecycle-v3/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/lifecycle-v3/README.md) | 1962 | `c3bf172876331c59692e5e1a7a4ee589f20554c74a0971ccebae749fd7405fc9` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/README.md) | 9079 | `6247d11678ba20e1b51c2844c265d8b9ca0b62a7ca19d4fca3ac7bdcdf952cd4` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/baseline.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/baseline.json) | 6323732 | `5cec1e3c2dbfc62c8511d5c236867ecbd7aaedbd7b2772ddeec44c36f9b999a9` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/baseline.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/baseline.json.journal.jsonl) | 3763891 | `96d4876b6c1ebb2dc7d8530ec7e4c783b6f8e3c837337ac72485a880db576b55` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json) | 8101987 | `7fe2b9a6e1f1faabcc4c779b2dd8b052c7bb2fcbb8ad1ff87719135f275b7e8c` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt2/candidate.json.journal.jsonl) | 4849421 | `515f55e17261bd13ec33b64dc33be4447e9c2c0ab9b09dcbfb0778c43eceaceb` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2-attempt3/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2-attempt3/README.md) | 2934 | `ee2934924a5c1005600aa1d5f82423ca75fcf7ee4d0ded9be5ce45f09d7783f2` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2/README.md) | 8976 | `8c59983f700ac26a5052d3869fc97e150211855b18b8ec2563b4854d48863b32` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json.failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json.failed.json) | 617680 | `a817f035b0fb4ade1197bd31b5404735192274218999d93557479622391c6a7e` |
+| [docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/paired-barrier-v2/baseline.json.journal.jsonl) | 364164 | `f7d30a1eea00abac1897ae99800902afc1788743b6f8f3907cf77f59fd04593a` |
+| [docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-legacy-4aa-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-legacy-4aa-failed.json) | 105310 | `9bc3620e0c36c20c33ddb5e27246e31753ac5716cd4bc4a5fd63d0e648f6afd7` |
+| [docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-strict-4aa-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-strict-4aa-failed.json) | 105263 | `735885f8d60370e0ea4d489104f630a3a30036e85ef0c40dba1777ea6810e3b0` |
+| [docs/evidence/fidelity-performance/replacement-38e-v1/barrier-38e-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-38e-v1/barrier-38e-failed.json) | 41634 | `d5a7c7c5d65bd84b39e62eeee062be880a3f8c3188f9261e177d6020cfb7331f` |
+| [docs/evidence/fidelity-performance/replacement-38e-v1/barrier-a23-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-38e-v1/barrier-a23-failed.json) | 41936 | `63d5e5591e7e26fa5c22bf4c4279fe9a39c8217d7e7c9b0fd8880373c58d3d20` |
+| [docs/evidence/fidelity-performance/replacement-38e-v1/barrier-bef4-rejected-experiment.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-38e-v1/barrier-bef4-rejected-experiment.json) | 41922 | `3077cb23822c7fa205d3d064c7edc3ac7e20cb0c76383d0d92a83139bac74ad2` |
+| [docs/evidence/fidelity-performance/replacement-38e-v1/stress-v2-legacy-38e-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-38e-v1/stress-v2-legacy-38e-failed.json) | 105211 | `28b613a9e9f9343d1b076aa6e6ae3a4b8a4acbb5e3ebb17605ce4726c1648a8d` |
+| [docs/evidence/fidelity-performance/replacement-38e-v1/stress-v2-strict-38e-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-38e-v1/stress-v2-strict-38e-failed.json) | 105293 | `77d888132d27b357892828a6037c2ad1f06e6b35432683a04aef994fbfa9023b` |
+| [docs/evidence/fidelity-performance/replacement-517-v1/barrier-517-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-517-v1/barrier-517-failed.json) | 41691 | `c717939b224dc8deecd299e41731edb774f9c4348e954a2f32ad476836320368` |
+| [docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-517-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-517-failed.json) | 41691 | `c717939b224dc8deecd299e41731edb774f9c4348e954a2f32ad476836320368` |
+| [docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-66fb-rejected.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-66fb-rejected.json) | 41862 | `6b6412d3f94e4c6762fdcaac3eb2d0236a7b2d3718a97f274539e5ed61d0d703` |
+| [docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-fa6-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-fa6-failed.json) | 41754 | `e55f6357ac77c6a491c8d28eb8e796659e97492e7e563ac180302b0b38650b9d` |
+| [docs/evidence/fidelity-performance/replacement-source-bc1-v1/source-bc1-services-off-failed.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-source-bc1-v1/source-bc1-services-off-failed.json) | 123998 | `f702e8559eecd43d9c67a7920a7e405f9a387c61d7a3c97934dc7a5902992165` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r10-failed.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r10-failed.md) | 2056 | `b8259f24b90e80a47252ca4400e5982830b7c49767c7beb10caf56954cb6244b` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r10.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r10.md) | 10086 | `d04cbb1e7688a5d2ccac75ec7065024906ede188087a1bcc1da23cee20ce2128` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r7.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r7.md) | 7754 | `aed3f10b1ef678833485e8cbabb88ce4681a4bbf3a4ab852bff077c1f4f0ca35` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r8-failed.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r8-failed.md) | 2319 | `b25a5cf719ec655c06e1226777b27d05af925838d820e293562f82982d46f4cf` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r8.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r8.md) | 8365 | `4ed77d72221c658ed65796264cd41f8ed08036fa32e3379ed50e897ab5e415b8` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r9-failed.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r9-failed.md) | 3678 | `f229642b35206ff141fd4c75f24ed1d54c10dd46fa1eac11a882169d769fa42e` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README-r9.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README-r9.md) | 6740 | `7c77565c76cbee56c4c1b1732a3b5605a197ba7272fa3e99044ad9f3fa12e1ae` |
+| [docs/evidence/fidelity-performance/source-paired-v2/README.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/README.md) | 11826 | `d33327e0626b03fc9f379c888c3583d71d970454377b24e2fbc2b11d4e38b53e` |
+| [docs/evidence/fidelity-performance/source-paired-v2/attempt-r5-invalid.md](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/attempt-r5-invalid.md) | 2064 | `c9a0f9408fbdefd44994363099124593376d50e2a8f3032f8bcb0b3685f68731` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json) | 34749869 | `8ff81c73939e0a31b1fd78d1d9811181b1a73b9781a6c2451c857227491edb82` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r6.json.journal.jsonl) | 14832360 | `bd1e9b78805a8c11b6fb60081d8555d6e0387166974c71db66fb424c9da646ab` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r7.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r7.json) | 35269847 | `73d4701f9684789296bf51d52e54a0fbe7fd759469cb7a36e9f8995fa2687b00` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r7.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r7.json.journal.jsonl) | 15098042 | `3d10f864608e2b318fabaa83ff42037dd25d82940526d5abe38c6272ed0f5308` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r8.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r8.json) | 45632276 | `f537f5a936eccdaaf123707689898c8fd88d197900c9fa351c53dc79a590678f` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline-r8.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline-r8.json.journal.jsonl) | 19543301 | `b6941932994aaebe3a900de79f02abe051efdf9e670677b8405b373bb17858fb` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline.json) | 13561914 | `68f7bb88ce70bcc4b179179749577faf085838c0fd2696c7e3b2f9ba3b239b06` |
+| [docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/baseline.json.journal.jsonl) | 5735027 | `5127ea75ec3688cbadf433eae8d021ce0d473b269f571fe03face683f7dd8295` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r10.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r10.json) | 48190 | `d02024805937579739bf951a1c98f847b9da73ed3f364fddad9f1d8676653388` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r2.json) | 37404 | `eaa1d50764d550c81b27f6566615fe12fadc3a4d6a6f3089b616f1441a901ad1` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r3.json) | 37703 | `3014471018afccaee491353e6cc095db2e77b6b83ba94017c2e8459c42c95cff` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r4.json) | 38079 | `87c5584162e0c2b2fa9d6d82ea52203aa297ff6208f2b340238857b9fabc2a49` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r5.json) | 38102 | `ffc6fa688a6394fe3f350d483587dfc0c13e23874d6d8f99d9b7355569966fca` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r6.json) | 39678 | `ca611cb5ad4f7716039319d910f561e1f2bf72ff0754ee0d3ee79179ef0d563a` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r7.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r7.json) | 40882 | `5fcaae31ab22fb0f89c8cf43906d052e6d38b229efb5ec5a3f363933d33394aa` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r8.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r8.json) | 43531 | `385dcf24a6a767e16cb16c66b3f6feb20f22f4d0e50b96ed1e4dda80329fca78` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest-r9.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest-r9.json) | 44643 | `8595b5c66211cc41309581803d964db3f0f133c76a0007f382a8569adfbd6c40` |
+| [docs/evidence/fidelity-performance/source-paired-v2/manifest.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/manifest.json) | 36997 | `cbdd9e12470dff758d3d7f1f73332f4a94dbb4577a510e1e1cedf5dbf195fc7e` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r10.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r10.json) | 47618231 | `ff93b3c8e5b28a22ee43db1af1a553db44bfcc51749196206640076c5018126a` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r10.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r10.json.journal.jsonl) | 20555147 | `b39836f3141cafbf3327fcd2cf479ec5fceeb0e2a1324ddb597c60f38f9d76af` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json) | 30538 | `33f5efb6dc681b2be570e5e2352e53ea35f01d8adfbaff836a05083a8bf1f023` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r6.json.journal.jsonl) | 23456 | `25f76f751721fa4252d4969e5c0583ea354a1deecd34eeb13e0953552c41bdde` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r8.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r8.json) | 71199 | `64f5a68119af5c00720c1e7eb740b78f84fc238199c3a94a3dad75e89ab052e6` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r8.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r8.json.journal.jsonl) | 24283 | `ddc2909c8443ab0230e2af1665b1216cf792ca430b527c62c7cbb670ec1845a5` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r9.json](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r9.json) | 89510106 | `db0fd64596800f08f9e237bf74dcc28fb50225b99735f14793082e2dd3e67d64` |
+| [docs/evidence/fidelity-performance/source-paired-v2/paired-r9.json.journal.jsonl](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/source-paired-v2/paired-r9.json.journal.jsonl) | 38126445 | `660b8a33823de6d3e496a5ad1d9ac289705aaa282333454f0aad42dbaa95a265` |
+| [internal/gateway/fidelity_paired_benchmark_test.go](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/internal/gateway/fidelity_paired_benchmark_test.go) | 16385 | `f71a37e2ca2ff943910a25de4ca895b0fc2da769f049f1dc413d88ca778d3b57` |
+| [scripts/continuation-barrier-paired-v2-attempt2.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2-attempt2.mjs) | 68305 | `ddd9f6e0d195ba06e444c3f9c5338977ed7166933498cb066436352381c347aa` |
+| [scripts/continuation-barrier-paired-v2-attempt2.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2-attempt2.test.mjs) | 30575 | `b512178d51395de6f9cac0ea643d116ecb3767204def7fd8a172249dcc0acc70` |
+| [scripts/continuation-barrier-paired-v2-attempt3.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2-attempt3.mjs) | 72626 | `ea8e2dc859c584b974c864a00b2f90a160bccd5d11029e6755a2ea1020eaa41d` |
+| [scripts/continuation-barrier-paired-v2-attempt3.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2-attempt3.test.mjs) | 3647 | `5b27a18f7f478ff8b94894f13cbb3c6aafd986db7443c821cbdf4b265b73a38f` |
+| [scripts/continuation-barrier-paired-v2.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2.mjs) | 49317 | `f3a3742103de68c0b01a05632d4c8da05199f2786d1e2795e07e9334d6530d6b` |
+| [scripts/continuation-barrier-paired-v2.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/continuation-barrier-paired-v2.test.mjs) | 23247 | `d69e1fa50db67a24a14ed4e61f187d1e5d4acbdd4e4b259445efff1995cfe883` |
+| [scripts/fidelity-final-source-lock.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-final-source-lock.mjs) | 7193 | `5c2da1df0c5ddab344b5a5a9114f717e7cd3b4409037cd907624bc821ddddf19` |
+| [scripts/fidelity-final-source-lock.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-final-source-lock.test.mjs) | 2686 | `2167b01fc10cc044d318d45ba4c0a35541b8aed3c61a170311235f2a7905b2ff` |
+| [scripts/fidelity-lifecycle-v3-benchmark.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-lifecycle-v3-benchmark.mjs) | 12023 | `5caba0f934a644957ec0bcd1693afef728c60d26d68cf779a76f1fef4898dd64` |
+| [scripts/fidelity-lifecycle-v3-benchmark.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-lifecycle-v3-benchmark.test.mjs) | 1517 | `42b7cd9cfdc02d06a9d4f19662eae537719c7ab9c1e74f4609306c25542437de` |
+| [scripts/fidelity-paired-r10.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r10.mjs) | 98452 | `2125c55e9b18b3b8dc80bdcbf49a82fe5945c81c1182fcb560695eac85aa4f7d` |
+| [scripts/fidelity-paired-r10.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r10.test.mjs) | 36382 | `31e1d88ec2c77d29a3f2c376aa5fb0d261c6202301b159bd9d860489e40f040c` |
+| [scripts/fidelity-paired-r7.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r7.mjs) | 70851 | `418fe4a2f4e550a76269f92a5acd7c8eaf537fd3b9bd3be0b58b01c0f8d5b139` |
+| [scripts/fidelity-paired-r7.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r7.test.mjs) | 33693 | `1f34dcf9cee9606af55ca20491858ec8c90766128b03536f004a690cb0b21586` |
+| [scripts/fidelity-paired-r8.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r8.mjs) | 81990 | `f97cb1b3f8850eab989c8abe9e9c560c77c25a855a3da95869ef187373b91d49` |
+| [scripts/fidelity-paired-r8.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r8.test.mjs) | 39918 | `acf96e8f52899ff1915afba9b42c1c4e0a4b568a8ba3ea987a50674c69890234` |
+| [scripts/fidelity-paired-r9.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r9.mjs) | 83269 | `f9ab988e916bed7f92b12a92302bd20b4d1e8f5324a0975cb8fd99bdd7bf1109` |
+| [scripts/fidelity-paired-r9.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-r9.test.mjs) | 17196 | `ef0d5ddf0c158c2177b6153a63f96bfc5f76d3d46847888af1e81cd54f084609` |
+| [scripts/fidelity-paired-v2.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-v2.mjs) | 64238 | `ba889f9bb83069b05e681b17cce093f1d6ed84f941cb08063cfca467d9347e07` |
+| [scripts/fidelity-paired-v2.test.mjs](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/scripts/fidelity-paired-v2.test.mjs) | 29256 | `eef82e56805a04da66012a62c51e2c91531489087271f1a61eab21075a91ea08` |

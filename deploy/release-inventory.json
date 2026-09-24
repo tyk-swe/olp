@@ -6317,7 +6317,6 @@
     "internal/gateway/events_test.go",
     "internal/gateway/evidence_test.go",
     "internal/gateway/fidelity_benchmark_test.go",
-    "internal/gateway/fidelity_paired_benchmark_test.go",
     "internal/gateway/gateway_test.go",
     "internal/gateway/gemini_lifecycle_test.go",
     "internal/gateway/health_parity_test.go",

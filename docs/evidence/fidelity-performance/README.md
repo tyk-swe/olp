@@ -1,9 +1,21 @@
 # Fidelity performance evidence
 
+Under the September 24, 2026 [release criteria](../../qualification/fidelity/release-validation.md),
+bounded representative performance smoke and resource/overflow correctness
+are required. Long captures and statistical studies are optional follow-up.
+All historical outcomes and frozen criteria below remain unchanged; failures
+and invalid captures do not become passes under the revised release gate.
+
+Superseded experimental runners and repeated raw captures are preserved in
+the [commit-pinned archive index](archive.md), with exact paths and SHA-256
+checksums. Canonical benchmark commands, original references/budgets and all
+functional validation remain in the active tree.
+
 The [exact final-source v2 record](final-bc325-v2/README.md) preserves passing
 local lifecycle, stress and encrypted-barrier captures alongside the invalid
 source paired attempt. The original v1 baselines, limits and failures remain
-unchanged. Full G6 is still open.
+unchanged. They did not complete G6 under the original study requirements;
+current candidate validation is separate.
 
 This harness records an authenticated native relay and the current gateway before
 replacement of its dispatch representation. It sends HTTP requests through the

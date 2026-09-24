@@ -1,6 +1,6 @@
 # Source-v1 replacement capture at `bc1e28ff`
 
-The write-once [services-off candidate](source-bc1-services-off-failed.json) is
+The write-once [services-off candidate](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-source-bc1-v1/source-bc1-services-off-failed.json) is
 the complete original source-v1 benchmark at clean product source
 `bc1e28fffbe71a79b47c92cad9e9750ae47284a1`. Its SHA-256 is
 `f702e8559eecd43d9c67a7920a7e405f9a387c61d7a3c97934dc7a5902992165`.
