@@ -166,15 +166,26 @@ func cloneProfile(p Profile) Profile {
 	return p
 }
 
-func LookupProfile(id, revision string) (Profile, error) {
+// profileView borrows immutable catalogue metadata for connector methods that
+// only read it. Registration detaches caller-owned maps and slices before
+// publication; registered entries are never modified after publication.
+func profileView(id, revision string) (Profile, error) {
 	profileMu.RLock()
 	defer profileMu.RUnlock()
 	for _, p := range profileRegistry {
 		if p.ID == id && p.Revision == revision {
-			return cloneProfile(p), nil
+			return p, nil
 		}
 	}
 	return Profile{}, errors.New("unknown provider profile or unsupported profile revision")
+}
+
+func LookupProfile(id, revision string) (Profile, error) {
+	p, err := profileView(id, revision)
+	if err != nil {
+		return Profile{}, err
+	}
+	return cloneProfile(p), nil
 }
 
 func (c Config) Profile() (Profile, error) {
@@ -182,7 +193,7 @@ func (c Config) Profile() (Profile, error) {
 }
 
 func (c Config) Hosting() string {
-	if p, err := c.Profile(); err == nil {
+	if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
 		return p.Hosting
 	}
 	return ""
@@ -195,7 +206,7 @@ func (c Config) ValidateProfile() error {
 		}
 		return nil
 	}
-	p, err := c.Profile()
+	p, err := profileView(c.ProfileID, c.ProfileRevision)
 	if err != nil {
 		return err
 	}
@@ -254,7 +265,7 @@ func (c Config) ValidateProfile() error {
 // TargetFamily is explicit for generation and operation-owned for other calls.
 // The raw model-specific Invoke profile deliberately cannot enter a chat codec.
 func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
-	p, err := c.Profile()
+	p, err := profileView(c.ProfileID, c.ProfileRevision)
 	if err != nil {
 		return "", err
 	}
@@ -313,7 +324,7 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 
 func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID != "" {
-		if p, err := c.Profile(); err == nil {
+		if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
 			switch p.Dialect {
 			case "gemini-interactions":
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
@@ -338,7 +349,7 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID == "" {
 		return true
 	}
-	p, err := c.Profile()
+	p, err := profileView(c.ProfileID, c.ProfileRevision)
 	return err == nil && slices.Contains(p.Operations, operation)
 }
 
@@ -352,7 +363,7 @@ func (c Config) ApplySemantic(req *http.Request) error {
 	if err := c.ValidateProfile(); err != nil {
 		return err
 	}
-	p, _ := c.Profile()
+	p, _ := profileView(c.ProfileID, c.ProfileRevision)
 	if p.Hosting == "direct-anthropic" {
 		req.Header.Set("Anthropic-Version", p.DialectRevision)
 	}
@@ -451,7 +462,7 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("cloud request must be a JSON object")
 	}
-	p, _ := c.Profile()
+	p, _ := profileView(c.ProfileID, c.ProfileRevision)
 	version, _ := json.Marshal(p.DialectRevision)
 	if prior, found := fields["anthropic_version"]; found && string(prior) != string(version) {
 		return nil, errors.New("native cloud version collides with the configured profile")

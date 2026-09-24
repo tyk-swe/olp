@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
@@ -253,6 +254,86 @@ func TestExistingDialectProviderExtensionNeedsOnlyRegistrationAndBinding(t *test
 	if reflect.DeepEqual(copy.OperationDialects, fresh.OperationDialects) {
 		t.Fatal("catalogue metadata aliases registry")
 	}
+}
+
+func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
+	profile, err := LookupProfile("compatible-chat", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ID = "fixture-" + uuid.NewString()
+	profile.Label = "Registered snapshot"
+	if err := RegisterProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{ProfileID: profile.ID, ProfileRevision: profile.Revision, Kind: profile.Kind, AuthMode: "api_key", Endpoint: "https://provider.example/v1"}
+	originalSchema := bytes.Clone(profile.DefaultSchemas["generation"])
+
+	// Registration owns its metadata even if its caller later changes every
+	// reference-shaped component. Public lookups remain detached as well.
+	profile.OperationDialects["generation"] = "corrupted"
+	profile.DefaultSchemas["generation"][0] = '!'
+	profile.Authentication[0] = "corrupted"
+	profile.Operations[0] = "corrupted"
+	profile.SemanticHeaders[0] = "corrupted"
+	copy, err := config.Profile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy.OperationDialects["generation"] = "corrupted"
+	copy.DefaultSchemas["generation"][0] = '!'
+	copy.Authentication[0] = "corrupted"
+	copy.Operations[0] = "corrupted"
+	copy.SemanticHeaders[0] = "corrupted"
+	if config.Hosting() != "direct-compatible" || !config.Supports("generation", "openai", "unary") {
+		t.Fatal("internal connector read changed after caller mutation")
+	}
+	if err := config.ValidateProfile(); err != nil {
+		t.Fatalf("registered profile changed after caller mutation: %v", err)
+	}
+	if wire, err := config.TargetFamily(openai.FamilyChat); err != nil || wire != openai.FamilyChat {
+		t.Fatalf("registered profile dialect changed: wire=%s err=%v", wire, err)
+	}
+	fresh, err := config.Profile()
+	if err != nil || fresh.OperationDialects["generation"] != "openai-chat" || !bytes.Equal(fresh.DefaultSchemas["generation"], originalSchema) || fresh.Authentication[0] != "api_key" || fresh.Operations[0] != "generation" || fresh.SemanticHeaders[0] != "Openai-Beta" {
+		t.Fatalf("public lookup leaked mutated metadata: err=%v", err)
+	}
+	next := fresh
+	next.Revision = "2"
+	next.Authentication = []string{"none"}
+	if err := RegisterProfile(next); err != nil {
+		t.Fatal(err)
+	}
+	otherRevision := config
+	otherRevision.ProfileRevision = next.Revision
+	if err := otherRevision.ValidateProfile(); err == nil {
+		t.Fatal("a different profile revision admitted the first revision's authentication")
+	}
+	if err := config.ValidateProfile(); err != nil {
+		t.Fatalf("another revision changed the selected profile: %v", err)
+	}
+
+	// Appending unrelated revisions cannot change a selected revision while
+	// existing requests read it concurrently.
+	var readers sync.WaitGroup
+	for range 8 {
+		readers.Go(func() {
+			for range 32 {
+				if config.Hosting() != "direct-compatible" || !config.Supports("generation", "openai", "unary") || config.ValidateProfile() != nil {
+					t.Error("concurrent registration changed an existing profile")
+					return
+				}
+			}
+		})
+	}
+	for range 4 {
+		another := next
+		another.ID = "fixture-" + uuid.NewString()
+		if err := RegisterProfile(another); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readers.Wait()
 }
 
 func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {

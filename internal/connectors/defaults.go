@@ -267,7 +267,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 // A whole member (including an array/schema/null) from the binding replaces the
 // provider member. Request member presence is applied by the operation lowerer.
 func (c Config) DefaultsFor(operation, model string) (map[string]json.RawMessage, []DefaultProvenance, error) {
-	p, err := c.Profile()
+	p, err := profileView(c.ProfileID, c.ProfileRevision)
 	if err != nil {
 		return nil, nil, err
 	}
