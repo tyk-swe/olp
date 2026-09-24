@@ -276,11 +276,11 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		return &ProtocolError{Detail: "terminal event has no response"}
 	}
 	if kind == "error" {
-		upstream := errorObject([]byte(f.Data))
+		upstream := errorObject(fields["error"])
 		if upstream == nil {
 			upstream = &UpstreamError{Message: "upstream reported an error"}
 		}
-		return upstream
+		s.terminalErr, s.done = upstream, true
 	}
 	if raw, present := fields["response"]; present && !isNull(raw) {
 		response, err := object(raw)
@@ -345,6 +345,9 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 }
 
 func (s *responsesStream) finish() (*Completion, error) {
+	if s.done && s.terminalErr != nil {
+		return s.c, s.terminalErr
+	}
 	if !s.done || s.c == nil {
 		return s.c, &ProtocolError{Detail: "stream ended before the terminal response event", Truncated: true}
 	}

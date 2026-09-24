@@ -433,3 +433,84 @@ func TestStrictBackgroundResourceHTTPErrorRedactsEscapedCredential(t *testing.T)
 		t.Fatalf("upstream HTTP error exposed decoded provider credential: %d %s", status, body)
 	}
 }
+
+func TestStrictBackgroundStreamErrorKeepsAcceptedWorkRecoverable(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}},
+		[]string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	escapedSecret := strings.ReplaceAll(vendorSecret, "-", `\u002d`)
+	fixture.respPostStream.Store("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"" + vendorModel + "\",\"output\":[]}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"code\":\"provider_interrupted\",\"message\":\"provider echoed " + escapedSecret + "\"}}\n\n")
+	fixture.resps["resp-up-1"]["status"] = "in_progress"
+	fixture.resps["resp-up-1"]["usage"] = nil
+	before := fixture.respCreates.Load()
+	status, stream, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"background provider error","background":true,"store":true,"stream":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	var local string
+	for line := range strings.SplitSeq(string(stream), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event struct {
+			Response struct {
+				ID string `json:"id"`
+			} `json:"response"`
+		}
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && event.Response.ID != "" {
+			local = event.Response.ID
+			break
+		}
+	}
+	if status != http.StatusOK || !strings.HasPrefix(local, "strict_response_") ||
+		!bytes.Contains(stream, []byte(`"type":"error"`)) || !bytes.Contains(stream, []byte("[REDACTED]")) ||
+		bytes.Contains(stream, []byte(vendorSecret)) || bytes.Contains(stream, []byte(escapedSecret)) || fixture.respCreates.Load() != before+1 {
+		t.Fatalf("provider stream error was not safely delivered: status=%d stream=%s", status, stream)
+	}
+	var state string
+	var pending bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT state, metadata ? 'pending_usage' FROM olp_go.provider_resources
+ WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state, &pending); err != nil || state != "in_progress" || !pending {
+		t.Fatalf("stream error falsely terminated accepted work: state=%q pending=%t err=%v", state, pending, err)
+	}
+	fixture.resps["resp-up-1"]["status"] = "completed"
+	fixture.resps["resp-up-1"]["usage"] = map[string]any{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}
+	status, result, _ := h.gatewayRaw(http.MethodGet, "/v1/responses/"+local, key, nil, nil)
+	if status != http.StatusOK || !bytes.Contains(result, []byte(`"status":"completed"`)) ||
+		!bytes.Contains(result, []byte(`"id":"`+local+`"`)) || fixture.respCreates.Load() != before+1 {
+		t.Fatalf("accepted work could not finish after native stream error: %d %s", status, result)
+	}
+	var count, input, output int64
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
+ FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
+		t.Fatalf("accepted work after stream error was billed twice or lost: count=%d input=%d output=%d err=%v", count, input, output, err)
+	}
+}
+
+func TestStrictBackgroundStreamRejectsResponseIDDrift(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}},
+		[]string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	fixture.respPostStream.Store("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-drift-1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"" + vendorModel + "\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-drift-2\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n")
+	status, stream, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"identity drift","background":true,"store":true,"stream":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK || !bytes.Contains(stream, []byte(`"type":"response.created"`)) ||
+		bytes.Contains(stream, []byte(`"type":"response.completed"`)) || !bytes.Contains(stream, []byte(`"code":"provider_protocol_error"`)) {
+		t.Fatalf("provider changed response ID without an incomplete result: %d %s", status, stream)
+	}
+	var first, second int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE upstream_id='resp-drift-1'),
+ count(*) FILTER (WHERE upstream_id='resp-drift-2') FROM olp_go.provider_resources WHERE kind='strict_response'`).Scan(&first, &second); err != nil || first != 1 || second != 0 {
+		t.Fatalf("ID drift installed another accepted resource: first=%d second=%d err=%v", first, second, err)
+	}
+}

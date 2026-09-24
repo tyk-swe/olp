@@ -637,7 +637,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 				frame = mapped
 			}
-			if wire == openai.FamilyResponses && bytes.Contains(frame, []byte("event: response.failed\n")) {
+			if wire == openai.FamilyResponses && (bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n"))) {
 				var err error
 				frame, err = redactFailedResponseFrame(frame, credentialValues)
 				if err != nil {

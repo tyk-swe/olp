@@ -548,6 +548,9 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	}
 	local, ok := x.responseMap[upstreamID]
 	if !ok {
+		if x.strict() && len(x.responseMap) != 0 {
+			return nil, errResponseMapping
+		}
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		res, err := s.Resources.GetByUpstream(commitCtx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
 		if errors.Is(err, resources.ErrNotFound) {

@@ -234,6 +234,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	}
 	committed := false
 	nativeIncomplete := false
+	nativeTerminalFailure := false
 	fact := &x.facts[len(x.facts)-1]
 	credentialValues := s.responseCredentialValues(x, p, resp)
 	emit := func(frame []byte) error {
@@ -245,6 +246,9 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			if status, ok := upstreamString(original, "status"); ok {
 				if status == "incomplete" {
 					nativeIncomplete = true
+				}
+				if status == "failed" {
+					nativeTerminalFailure = true
 				}
 				switch status {
 				case "completed", "failed", "incomplete", "cancelled":
@@ -261,7 +265,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 				}
 			}
 		}
-		if bytes.Contains(projected, []byte("event: response.failed\n")) {
+		if bytes.Contains(projected, []byte("event: response.failed\n")) || bytes.Contains(projected, []byte("event: error\n")) {
 			projected, err = redactFailedResponseFrame(projected, credentialValues)
 			if err != nil {
 				return err
@@ -289,7 +293,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, nil)
 	if streamErr != nil {
 		var upstream *openai.UpstreamError
-		if errors.As(streamErr, &upstream) {
+		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
 			x.failure = serverError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 			fact.Class = classUpstreamServer
 		} else {
@@ -298,7 +302,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		}
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			if upstream != nil {
+			if nativeTerminalFailure {
 				fact.Interaction.UpstreamState = usage.UpstreamTerminal
 			}
 		}
