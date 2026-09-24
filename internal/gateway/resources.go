@@ -294,7 +294,8 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	if _, err := s.auth.Apply(ctx, req, cfg, s.pinSecret(x, p), body); err != nil {
+	credentialValues, err := s.auth.Apply(ctx, req, cfg, s.pinSecret(x, p), body)
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -341,6 +342,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
+	if f.upstream != nil {
+		f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
+	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		f.class = classCredential

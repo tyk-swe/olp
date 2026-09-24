@@ -63,28 +63,31 @@ func (c *captureSink) all() []gateway.Envelope {
 
 type openaiFixture struct {
 	*httptest.Server
-	files          map[string]map[string]any
-	batches        map[string]map[string]any
-	resps          map[string]map[string]any
-	mu             sync.Mutex
-	lastReq        atomic.Value
-	lastBatchRaw   atomic.Value
-	batchCreates   atomic.Int64
-	earlyFileReply atomic.Bool
-	batchCreateRaw atomic.Value
-	batchFetchRaw  atomic.Value
-	fileCreateRaw  atomic.Value
-	fileFetchRaw   atomic.Value
-	contentByID    sync.Map
-	lastPath       atomic.Value
-	content        atomic.Value
-	respID         atomic.Value
-	respCreates    atomic.Int64
-	respPostStream atomic.Value
-	respGetStream  atomic.Value
-	lastRespQuery  atomic.Value
-	holdCreated    atomic.Bool
-	dials          atomic.Int64
+	files           map[string]map[string]any
+	batches         map[string]map[string]any
+	resps           map[string]map[string]any
+	mu              sync.Mutex
+	lastReq         atomic.Value
+	lastBatchRaw    atomic.Value
+	batchCreates    atomic.Int64
+	earlyFileReply  atomic.Bool
+	batchCreateRaw  atomic.Value
+	batchFetchRaw   atomic.Value
+	fileCreateRaw   atomic.Value
+	fileFetchRaw    atomic.Value
+	contentByID     sync.Map
+	lastPath        atomic.Value
+	content         atomic.Value
+	respID          atomic.Value
+	respCreates     atomic.Int64
+	respPostStream  atomic.Value
+	respGetStream   atomic.Value
+	respFetchRaw    atomic.Value
+	respFetchStatus atomic.Int32
+	respCancelRaw   atomic.Value
+	lastRespQuery   atomic.Value
+	holdCreated     atomic.Bool
+	dials           atomic.Int64
 }
 
 func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
@@ -307,6 +310,14 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 			fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, completed)
 			return
 		}
+		if raw := f.respFetchRaw.Load(); raw != nil {
+			w.Header().Set("Content-Type", "application/json")
+			if status := f.respFetchStatus.Load(); status != 0 {
+				w.WriteHeader(int(status))
+			}
+			_, _ = io.WriteString(w, raw.(string))
+			return
+		}
 		writeJSON(w, res)
 	})
 	mux.HandleFunc("POST /openai/responses/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +325,11 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		res, ok := f.resps[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
+			return
+		}
+		if raw := f.respCancelRaw.Load(); raw != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, raw.(string))
 			return
 		}
 		out := map[string]any{}

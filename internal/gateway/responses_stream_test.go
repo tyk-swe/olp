@@ -64,3 +64,17 @@ func TestResponseRetrievalQueryForwardsOnlyRegisteredControls(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedResponseFrameRedactsDecodedCredentialsWithoutChangingOtherSource(t *testing.T) {
+	frame := []byte("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_up\",\"status\":\"failed\",\"error\":{\"message\":\"provider\\u002dsecret\"},\"native\":{\"big\":9007199254740993,\"zero\":-0}}}\n\n")
+	safe, err := redactFailedResponseFrame(frame, []string{"provider-secret"})
+	if err != nil || !bytes.Contains(safe, []byte(`"message":"[REDACTED]"`)) ||
+		!bytes.Contains(safe, []byte(`"big":9007199254740993,"zero":-0`)) ||
+		bytes.Contains(safe, []byte(`provider\u002dsecret`)) {
+		t.Fatalf("escaped credential survived redaction or native bytes changed: %v %s", err, safe)
+	}
+	maliciousKey := bytes.Replace(frame, []byte(`"native"`), []byte(`"provider\u002dsecret"`), 1)
+	if _, err := redactFailedResponseFrame(maliciousKey, []string{"provider-secret"}); err == nil {
+		t.Fatal("escaped credential in a native member name was forwarded")
+	}
+}

@@ -120,6 +120,83 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 	return out, response.Bytes(), nil
 }
 
+// A provider error can echo authentication with arbitrary JSON escape
+// spelling. Redact decoded strings while OIF keeps every unrelated member and
+// number byte-for-byte. A credential-bearing member name cannot be renamed
+// without changing the native grammar, so refuse it.
+func redactNativeFailureDocument(doc oif.Document, credentials []string) (oif.Document, error) {
+	changes := []oif.Change{}
+	var inspect func(oif.Value, string) error
+	inspect = func(value oif.Value, pointer string) error {
+		switch value.Kind() {
+		case oif.Object:
+			for _, member := range value.Members() {
+				if redactCredentials(member.Name, credentials) != member.Name {
+					return errors.New("failed response event has a credential-bearing member name")
+				}
+				if err := inspect(member.Value, oif.Pointer(pointer, member.Name)); err != nil {
+					return err
+				}
+			}
+		case oif.Array:
+			for index, item := range value.Elements() {
+				if err := inspect(item, oif.Pointer(pointer, strconv.Itoa(index))); err != nil {
+					return err
+				}
+			}
+		case oif.String:
+			text, ok := value.Text()
+			if !ok {
+				return errors.New("failed response event has invalid text")
+			}
+			if safe := redactCredentials(text, credentials); safe != text {
+				encoded, _ := json.Marshal(safe)
+				changes = append(changes, oif.Change{Pointer: pointer, Value: string(encoded), Origin: oif.ExplicitTransform, Reason: "provider error credential redaction"})
+			}
+		}
+		return nil
+	}
+	if err := inspect(doc.Root(), ""); err != nil {
+		return oif.Document{}, err
+	}
+	if len(changes) == 0 {
+		return doc, nil
+	}
+	return oif.Apply(doc, changes)
+}
+
+func redactFailedResponseFrame(frame []byte, credentials []string) ([]byte, error) {
+	i := bytes.Index(frame, []byte("\ndata: "))
+	if i < 0 || redactCredentials(string(frame[:i]), credentials) != string(frame[:i]) {
+		return nil, errors.New("failed response event has unsafe framing")
+	}
+	payload := bytes.TrimSpace(frame[i+7:])
+	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(frame) + 2048})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return nil, errors.New("failed response event is malformed")
+	}
+	redacted, err := redactNativeFailureDocument(doc, credentials)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, i+7+redacted.Len()+2)
+	out = append(out, frame[:i+7]...)
+	out = append(out, redacted.Bytes()...)
+	out = append(out, '\n', '\n')
+	return out, nil
+}
+
+func (s *Server) responseCredentialValues(x *execution, p *pin, response *http.Response) []string {
+	values := []string{string(s.pinSecret(x, p))}
+	if response.Request != nil {
+		names := append([]string{"Authorization", "Api-Key", "X-Goog-Api-Key"}, p.provider.CredentialHeaders...)
+		for _, name := range names {
+			values = append(values, response.Request.Header.Values(name)...)
+		}
+	}
+	return values
+}
+
 func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *execution, res *resources.Resource, p *pin, query url.Values) *Error {
 	if res.Kind == resources.KindStrictResponse &&
 		(!p.provider.Supports(p.model, "generation", "openai", "streaming") || !p.provider.Connector().Supports("generation", "openai", "streaming")) {
@@ -158,17 +235,8 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	committed := false
 	nativeIncomplete := false
 	fact := &x.facts[len(x.facts)-1]
-	credentialValues := []string{string(s.pinSecret(x, p))}
-	if resp.Request != nil {
-		names := append([]string{"Authorization", "Api-Key", "X-Goog-Api-Key"}, p.provider.CredentialHeaders...)
-		for _, name := range names {
-			credentialValues = append(credentialValues, resp.Request.Header.Values(name)...)
-		}
-	}
+	credentialValues := s.responseCredentialValues(x, p, resp)
 	emit := func(frame []byte) error {
-		if bytes.Contains(frame, []byte("event: response.failed\n")) {
-			frame = []byte(redactCredentials(string(frame), credentialValues))
-		}
 		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
 		if err != nil || len(projected) > limit {
 			return errors.New("retained response event could not be projected")
@@ -191,6 +259,15 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 						return errors.New("retained response terminal state could not be committed")
 					}
 				}
+			}
+		}
+		if bytes.Contains(projected, []byte("event: response.failed\n")) {
+			projected, err = redactFailedResponseFrame(projected, credentialValues)
+			if err != nil {
+				return err
+			}
+			if len(projected) > limit {
+				return errors.New("redacted response event exceeds byte limit")
 			}
 		}
 		if !committed {

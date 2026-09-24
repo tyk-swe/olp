@@ -133,6 +133,7 @@ func TestStrictBackgroundResponseFailedTerminalIsVisibleAndSettled(t *testing.T)
 	h.refresh()
 	fixture.resps["resp-up-1"]["status"] = "in_progress"
 	fixture.resps["resp-up-1"]["usage"] = nil
+	escapedVendorSecret := strings.ReplaceAll(vendorSecret, "-", `\u002d`)
 	status, created, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
 		strings.NewReader(`{"model":"`+slug+`","input":"background failure","background":true,"store":true}`),
 		map[string]string{"Content-Type": "application/json"})
@@ -140,12 +141,12 @@ func TestStrictBackgroundResponseFailedTerminalIsVisibleAndSettled(t *testing.T)
 	if status != http.StatusOK || !ok || !strings.HasPrefix(local, "strict_response_") {
 		t.Fatalf("pending strict response: %d %s", status, created)
 	}
-	fixture.respGetStream.Store("event: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":7,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"failed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":6,\"total_tokens\":10},\"error\":{\"code\":\"server_error\",\"message\":\"provider echoed " + vendorSecret + "\"}}}\n\n")
+	fixture.respGetStream.Store("event: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":7,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"failed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":6,\"total_tokens\":10},\"error\":{\"code\":\"server_error\",\"message\":\"provider echoed " + escapedVendorSecret + "\"}}}\n\n")
 	before := fixture.dials.Load()
 	status, failed, _ := h.gatewayRaw(http.MethodGet, "/v1/responses/"+local+"?stream=true&starting_after=6", key, nil, nil)
 	if status != http.StatusOK || !bytes.Contains(failed, []byte(`"type":"response.failed"`)) ||
 		!bytes.Contains(failed, []byte(`"id":"`+local+`"`)) || bytes.Contains(failed, []byte("resp-up-1")) ||
-		bytes.Contains(failed, []byte(vendorSecret)) || !bytes.Contains(failed, []byte("[REDACTED]")) || fixture.dials.Load() != before+1 {
+		bytes.Contains(failed, []byte(vendorSecret)) || bytes.Contains(failed, []byte(escapedVendorSecret)) || !bytes.Contains(failed, []byte("[REDACTED]")) || fixture.dials.Load() != before+1 {
 		t.Fatalf("native failed terminal was lost or exposed a credential: status=%d body=%s", status, failed)
 	}
 	terminal := sink.last()
@@ -314,14 +315,19 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
 	key := stateKey(t, h, owner, slug, true)
 	h.refresh()
-	fixture.respPostStream.Store("event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"" + vendorModel + "\",\"output\":[]}}\n\nevent: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"failed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":6,\"total_tokens\":10},\"error\":{\"code\":\"server_error\",\"message\":\"provider echoed " + vendorSecret + "\"}}}\n\n")
+	escapedVendorSecret := strings.ReplaceAll(vendorSecret, "-", `\u002d`)
+	fixture.respPostStream.Store("event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"" + vendorModel + "\",\"output\":[]}}\n\nevent: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"failed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":6,\"total_tokens\":10},\"error\":{\"code\":\"server_error\",\"message\":\"provider echoed " + escapedVendorSecret + "\"}}}\n\n")
 	status, stream, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
 		strings.NewReader(`{"model":"`+slug+`","input":"failed in stream","background":true,"store":true,"stream":true}`),
 		map[string]string{"Content-Type": "application/json"})
 	if status != http.StatusOK || !bytes.Contains(stream, []byte(`"type":"response.created"`)) ||
 		!bytes.Contains(stream, []byte(`"type":"response.failed"`)) || !bytes.Contains(stream, []byte(`"id":"strict_response_`)) ||
-		bytes.Contains(stream, []byte(`"id":"resp-up-1"`)) || bytes.Contains(stream, []byte(vendorSecret)) {
-		t.Fatalf("failed native POST terminal was not safely delivered: status=%d stream=%s", status, stream)
+		bytes.Contains(stream, []byte(`"id":"resp-up-1"`)) || bytes.Contains(stream, []byte(vendorSecret)) || bytes.Contains(stream, []byte(escapedVendorSecret)) {
+		var state string
+		_ = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state)
+		var facts int64
+		_ = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&facts)
+		t.Fatalf("failed native POST terminal was not safely delivered: status=%d state=%q facts=%d stream=%s", status, state, facts, stream)
 	}
 	terminal := sink.last()
 	if terminal.Outcome != "failure" || terminal.Committed != true || len(terminal.Attempts) != 1 || !terminal.Attempts[0].ResponseUsageDeferred {
@@ -331,5 +337,99 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
  FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
 		t.Fatalf("failed POST metering not committed before terminal: count=%d input=%d output=%d err=%v", count, input, output, err)
+	}
+	// A credential in an unknown decoded member name cannot be safely renamed.
+	// Refuse that frame, but retain the provider's already-observed terminal
+	// state and usage before closing the client stream.
+	fixture.respPostStream.Store("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-up-2\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"" + vendorModel + "\",\"output\":[]}}\n\nevent: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-up-2\",\"object\":\"response\",\"status\":\"failed\",\"model\":\"" + vendorModel + "\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2},\"error\":{\"code\":\"server_error\",\"message\":\"safe\",\"" + escapedVendorSecret + "\":true}}}\n\n")
+	status, stream, _ = h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"unsafe failed frame","background":true,"store":true,"stream":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK || !bytes.Contains(stream, []byte(`"type":"response.created"`)) ||
+		bytes.Contains(stream, []byte(`"type":"response.failed"`)) || bytes.Contains(stream, []byte(escapedVendorSecret)) || bytes.Contains(stream, []byte(vendorSecret)) {
+		t.Fatalf("unsafe failed frame was delivered: status=%d stream=%s", status, stream)
+	}
+	var state string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-2'`).Scan(&state); err != nil || state != "failed" {
+		t.Fatalf("unsafe failed frame lost accepted terminal state: state=%q err=%v", state, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
+ FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 2 || input != 5 || output != 8 {
+		t.Fatalf("unsafe failed frame lost observed billing: count=%d input=%d output=%d err=%v", count, input, output, err)
+	}
+}
+
+func TestStrictBackgroundFailedUnaryResourceRedactsEscapedCredential(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+		[]string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	fixture.resps["resp-up-1"]["status"] = "in_progress"
+	fixture.resps["resp-up-1"]["usage"] = nil
+	status, created, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"pending failure","background":true,"store":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	local, ok := jsonStringField(created, "id")
+	if status != http.StatusOK || !ok || !strings.HasPrefix(local, "strict_response_") {
+		t.Fatalf("strict pending failure setup: %d %s", status, created)
+	}
+	escapedSecret := strings.ReplaceAll(vendorSecret, "-", `\u002d`)
+	failed := `{"id":"resp-up-1","object":"response","status":"failed","model":"` + vendorModel + `","output":[],"usage":{"input_tokens":4,"output_tokens":6,"total_tokens":10},"error":{"code":"server_error","message":"provider echoed ` + escapedSecret + `"},"native":{"big":9007199254740993,"zero":-0}}`
+	fixture.respFetchRaw.Store(failed)
+	fixture.respCancelRaw.Store(failed)
+	for _, call := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/responses/" + local},
+		{http.MethodPost, "/v1/responses/" + local + "/cancel"},
+	} {
+		status, body, _ := h.gatewayRaw(call.method, call.path, key, nil, nil)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"id":"`+local+`"`)) ||
+			!bytes.Contains(body, []byte(`"message":"provider echoed [REDACTED]"`)) ||
+			!bytes.Contains(body, []byte(`"big":9007199254740993,"zero":-0`)) ||
+			bytes.Contains(body, []byte(vendorSecret)) || bytes.Contains(body, []byte(escapedSecret)) {
+			t.Fatalf("unary failed resource exposed credential or changed native bytes: status=%d body=%s", status, body)
+		}
+	}
+	unsafeKey := strings.Replace(failed, `"native"`, `"`+escapedSecret+`"`, 1)
+	fixture.respFetchRaw.Store(unsafeKey)
+	status, body, _ := h.gatewayRaw(http.MethodGet, "/v1/responses/"+local, key, nil, nil)
+	if status != http.StatusBadGateway || !bytes.Contains(body, []byte("fidelity_protocol_violation")) || bytes.Contains(body, []byte(vendorSecret)) || bytes.Contains(body, []byte(escapedSecret)) {
+		t.Fatalf("credential-bearing native member name was exposed: %d %s", status, body)
+	}
+	var count, input, output int64
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
+ FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
+		t.Fatalf("failed resource reconciliation changed by redaction refusal: count=%d input=%d output=%d err=%v", count, input, output, err)
+	}
+}
+
+func TestStrictBackgroundResourceHTTPErrorRedactsEscapedCredential(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+		[]string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	fixture.resps["resp-up-1"]["status"] = "in_progress"
+	fixture.resps["resp-up-1"]["usage"] = nil
+	status, created, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"pending HTTP failure","background":true,"store":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	local, ok := jsonStringField(created, "id")
+	if status != http.StatusOK || !ok {
+		t.Fatalf("strict response setup: %d %s", status, created)
+	}
+	escapedSecret := strings.ReplaceAll(vendorSecret, "-", `\u002d`)
+	fixture.respFetchRaw.Store(`{"error":{"code":"bad_request","message":"provider echoed ` + escapedSecret + `"}}`)
+	fixture.respFetchStatus.Store(http.StatusBadRequest)
+	status, body, _ := h.gatewayRaw(http.MethodGet, "/v1/responses/"+local, key, nil, nil)
+	if status != http.StatusBadRequest || !bytes.Contains(body, []byte("[REDACTED]")) ||
+		bytes.Contains(body, []byte(vendorSecret)) || bytes.Contains(body, []byte(escapedSecret)) {
+		t.Fatalf("upstream HTTP error exposed decoded provider credential: %d %s", status, body)
 	}
 }

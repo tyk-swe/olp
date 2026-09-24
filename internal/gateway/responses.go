@@ -373,7 +373,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	var strictResultBody []byte
+	var strictResultDoc oif.Document
 	if res.Kind == resources.KindStrictResponse {
 		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
 		if parseErr != nil {
@@ -388,21 +388,28 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 		if mapErr != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an unbound response identity.")
 		}
-		strictResultBody = mapped.Bytes()
+		strictResultDoc = mapped
 	}
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	if e := s.reconcileResponse(commitCtx, res.ID, result); e != nil {
 		return e
 	}
-	if status, ok := upstreamString(result, "status"); ok {
-		if err := s.Resources.Update(commitCtx, res.ID, status, nil, nil); err != nil {
+	nativeStatus, hasStatus := upstreamString(result, "status")
+	if hasStatus {
+		if err := s.Resources.Update(commitCtx, res.ID, nativeStatus, nil, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The response status could not be committed.")
 		}
 	}
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
-		out = strictResultBody
+		if nativeStatus == "failed" {
+			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, s.responseCredentialValues(x, p, resp))
+			if err != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider failure contained unsafe native fields.")
+			}
+		}
+		out = strictResultDoc.Bytes()
 	} else {
 		out, err = rewriteID(result, "id", res.ID)
 	}
@@ -554,12 +561,28 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		fact.ResponseUsageDeferred = backgroundResponseRequested(x.parsed)
 		x.responseMap[upstreamID] = local
 	}
-	if fact.ResponseUsageDeferred {
-		commitCtx, stopCommit := resourceCommitContext(ctx)
-		e := s.reconcileResponse(commitCtx, local, response.Bytes())
-		stopCommit()
-		if e != nil {
+	if statusValue, present := response.Lookup("status"); present {
+		status, valid := statusValue.Text()
+		if !valid {
 			return nil, errResponseMapping
+		}
+		switch status {
+		case "completed", "failed", "incomplete", "cancelled":
+			commitCtx, stopCommit := resourceCommitContext(ctx)
+			var settleErr error
+			if fact.ResponseUsageDeferred {
+				if e := s.reconcileResponse(commitCtx, local, response.Bytes()); e != nil {
+					settleErr = e
+				}
+			}
+			if settleErr == nil {
+				settleErr = s.Resources.Update(commitCtx, local, status, nil, nil)
+			}
+			stopCommit()
+			if settleErr != nil {
+				s.log.Warn("retained response terminal persistence failed", "error", settleErr)
+				return nil, errResponseMapping
+			}
 		}
 	}
 	encoded, err := json.Marshal(local)
