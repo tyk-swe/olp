@@ -257,7 +257,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The Interaction result contains an unbound resource reference."))
 		return
 	}
-	if input.Store && (bytes.Contains(projection, []byte(result.ID)) || previousUpstream != "" && bytes.Contains(projection, []byte(previousUpstream))) {
+	if input.Store && containsNativeResourceID(projection, result.ID, previousUpstream) {
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The Interaction result contains an unbound native resource identity."))
 		return
 	}
@@ -308,7 +308,49 @@ func (s *Server) storeGeminiInteraction(ctx context.Context, x *execution, p *pi
 	if parent != nil {
 		r.ParentID = &parent.UUID
 	}
-	return s.Resources.PutInteractionContract(ctx, r, upstreamID)
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	return s.Resources.PutInteractionContract(commitCtx, r, upstreamID)
+}
+
+// Untouched OIF strings keep their source escape spelling. Inspect decoded
+// values as well as member names before exposing an owner-scoped projection:
+// a raw byte search misses IDs such as "int\\u005ffoo".
+func containsNativeResourceID(body []byte, ids ...string) bool {
+	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
+	if err != nil {
+		return true
+	}
+	contains := func(value string) bool {
+		for _, id := range ids {
+			if id != "" && strings.Contains(value, id) {
+				return true
+			}
+		}
+		return false
+	}
+	var visit func(oif.Value) bool
+	visit = func(value oif.Value) bool {
+		switch value.Kind() {
+		case oif.String:
+			text, ok := value.Text()
+			return !ok || contains(text)
+		case oif.Object:
+			for _, member := range value.Members() {
+				if contains(member.Name) || visit(member.Value) {
+					return true
+				}
+			}
+		case oif.Array:
+			for _, item := range value.Elements() {
+				if visit(item) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return visit(doc.Root())
 }
 
 func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Request) {
@@ -444,7 +486,10 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		// A prior successful DELETE may have lost its response. A provider 404
 		// still permits deleting the gateway's now-stale local mapping.
 		if method == http.MethodDelete && failure.status == http.StatusNotFound {
-			if err := s.Resources.DeleteInteractionContract(ctx, authority.ID, localID); err == nil {
+			commitCtx, stopCommit := resourceCommitContext(ctx)
+			err := s.Resources.DeleteInteractionContract(commitCtx, authority.ID, localID)
+			stopCommit()
+			if err == nil {
 				w.WriteHeader(http.StatusOK)
 				if len(x.facts) > 0 {
 					x.facts[len(x.facts)-1].Committed = true
@@ -463,7 +508,10 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if method == http.MethodDelete {
-		if err := s.Resources.DeleteInteractionContract(ctx, authority.ID, localID); err != nil {
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		err := s.Resources.DeleteInteractionContract(commitCtx, authority.ID, localID)
+		stopCommit()
+		if err != nil {
 			fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The deleted Interaction could not be tombstoned."))
 			return
 		}
@@ -511,7 +559,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an unbound Interaction reference."))
 		return
 	}
-	if bytes.Contains(projection, []byte(upstreamID)) {
+	if containsNativeResourceID(projection, upstreamID) {
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an unbound native resource identity."))
 		return
 	}
@@ -519,7 +567,10 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		fail(serverError(http.StatusBadGateway, "upstream_response_too_large", "The projected Interaction exceeded its configured limit."))
 		return
 	}
-	if err := s.Resources.MarkInteractionStatus(ctx, authority.ID, localID, result.Status); err != nil {
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	err = s.Resources.MarkInteractionStatus(commitCtx, authority.ID, localID, result.Status)
+	stopCommit()
+	if err != nil {
 		fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction state could not be updated."))
 		return
 	}
@@ -598,7 +649,10 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			localID = local.ID
 		}
 		if local != nil && event.Status != "" {
-			if err := s.Resources.MarkInteractionStatus(ctx, authority.ID, local.ID, event.Status); err != nil {
+			commitCtx, stopCommit := resourceCommitContext(ctx)
+			err := s.Resources.MarkInteractionStatus(commitCtx, authority.ID, local.ID, event.Status)
+			stopCommit()
+			if err != nil {
 				return err
 			}
 		}
@@ -606,7 +660,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		if err != nil {
 			return err
 		}
-		if local != nil && bytes.Contains(projected, []byte(state.ID)) {
+		if local != nil && containsNativeResourceID(projected, state.ID) {
 			return errors.New("Interaction event contains an unbound native resource identity")
 		}
 		var output bytes.Buffer

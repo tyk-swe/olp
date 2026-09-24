@@ -949,7 +949,8 @@ loop:
 				client.Close(websocket.StatusPolicyViolation, "key revoked")
 				break loop
 			}
-			if p.slot.CredentialID != nil && s.Runtime.Revoked(*p.slot.CredentialID) {
+			if p.slot.CredentialID != nil && s.Runtime.Revoked(*p.slot.CredentialID) ||
+				p.provider.Network != nil && p.provider.Network.CredentialID != "" && s.Runtime.Revoked(p.provider.Network.CredentialID) {
 				first = errRealtimeProviderCredentialRevoked
 				closeCode = websocket.StatusPolicyViolation
 				client.Close(websocket.StatusPolicyViolation, "provider credential revoked")
