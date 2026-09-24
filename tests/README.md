@@ -70,6 +70,14 @@ and cloud identity variables. Live calls consume provider quota.
 
 ## Qualification evidence
 
+Fidelity release validation retains every feature and functional gate and adds
+a [bounded strict performance smoke](../docs/qualification/fidelity/release-validation.md).
+Long statistical quality/performance studies are optional. Superseded study
+runners, their runner-specific tests and raw captures have a
+[commit-pinned archive](../docs/evidence/fidelity-performance/archive.md);
+`make test-scripts` discovers all retained `scripts/*.test.mjs` automatically.
+No public behavior or semantic integration tests were retired with those runners.
+
 The independent [frozen reference](fixtures/reference-inventory.json) preserves
 100 management tuples, 77 inference tuples, 133 suite sources, and SHA-256
 hashes of the 18 neutral fixtures. [Behavior mappings](release-behaviors.json)

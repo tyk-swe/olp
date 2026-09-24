@@ -20,13 +20,19 @@ revisions separately from historical evidence.
 Run the canonical local benchmark with a fixed iteration count and timeout:
 
 ```sh
+OLP_FIDELITY_BENCH_ROUTE_CONTRACT='{"native":{"fidelity":{"mode":"strict"}},"translated":{"fidelity":{"mode":"strict"}},"rejected":{"fidelity":{"mode":"strict"}}}' \
+OLP_FIDELITY_BENCH_PROVIDER_CONTRACT='{"native":{"profile_id":"compatible-chat","profile_revision":"1"},"translated":{"profile_id":"anthropic-messages","profile_revision":"1"},"rejected":{"profile_id":"anthropic-messages","profile_revision":"1"}}' \
 go test -mod=readonly -run '^$' -bench '^BenchmarkFidelity$' \
-  -benchmem -benchtime=1x -count=1 -cpu=4 -timeout=2m ./internal/gateway
+  -benchmem -benchtime=64x -count=1 -cpu=4 -timeout=2m ./internal/gateway
 ```
 
-This covers all 22 native-relay/gateway workload combinations: native unary,
+The explicit overlays select strict routes and versioned compatible-chat and
+Anthropic profiles; without them the harness selects legacy behavior. This
+covers all 22 native-relay/strict-gateway workload combinations: native unary,
 native streaming, slow readers, large assets, translated unary and precise
-pre-dispatch rejection at concurrency 1 and 8. Every request retains the
+pre-dispatch rejection at concurrency 1 and 8, with 64 measured requests per
+combination (1,280 successful dispatches and 128 intentional zero-dispatch
+rejections, excluding warmup and benchmark calibration). Every request retains the
 independent provider/client oracle and dispatch-count checks. Record output,
 source revision, elapsed duration, outcomes and resource observations. Short
 samples expose gross regressions and stalls; their percentiles are descriptive,

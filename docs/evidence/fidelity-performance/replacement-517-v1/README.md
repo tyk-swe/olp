@@ -1,6 +1,6 @@
 # Encrypted continuation barrier candidate at `517455c3`
 
-The write-once [candidate](barrier-517-failed.json) is the full negotiated
+The write-once [candidate](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-517-v1/barrier-517-failed.json) is the full negotiated
 OpenAI Chat-to-Anthropic two-turn continuation workload at clean product source
 `517455c30a894f217faab4d4423fcd99bd0742c4`. It compares to the unchanged
 [native encrypted barrier reference](../barrier-v1/README.md) and its frozen

@@ -10,9 +10,9 @@ The original `517455c3` capture is also retained in its
 
 | Capture (SHA-256) | Clean source | Load before → after | Frozen comparator misses |
 | --- | --- | --- | --- |
-| [517](barrier-517-failed.json) (`c717939b224dc8deecd299e41731edb774f9c4348e954a2f32ad476836320368`) | `517455c30a894f217faab4d4423fcd99bd0742c4` | 1.07 → 2.48 | small/c1 wall time, CPU, workflow p50/p95/p99 |
-| [fa6](barrier-fa6-failed.json) (`e55f6357ac77c6a491c8d28eb8e796659e97492e7e563ac180302b0b38650b9d`) | `fa6e42f88d929dd34bd795e951298a66956fcd88` | 0.97 → 2.00 | small/c1 wall time, workflow p50/p95 |
-| [66fb](barrier-66fb-rejected.json) (`6b6412d3f94e4c6762fdcaac3eb2d0236a7b2d3718a97f274539e5ed61d0d703`) | `66fb41f9cd95aeee51f42809eb5514bf4fc9b28d` | 1.56 → 1.90 | small/c1 wall time, workflow p95/p99; large/c8 sampled heap |
+| [517](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-517-failed.json) (`c717939b224dc8deecd299e41731edb774f9c4348e954a2f32ad476836320368`) | `517455c30a894f217faab4d4423fcd99bd0742c4` | 1.07 → 2.48 | small/c1 wall time, CPU, workflow p50/p95/p99 |
+| [fa6](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-fa6-failed.json) (`e55f6357ac77c6a491c8d28eb8e796659e97492e7e563ac180302b0b38650b9d`) | `fa6e42f88d929dd34bd795e951298a66956fcd88` | 0.97 → 2.00 | small/c1 wall time, workflow p50/p95 |
+| [66fb](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-continuation-v2/barrier-66fb-rejected.json) (`6b6412d3f94e4c6762fdcaac3eb2d0236a7b2d3718a97f274539e5ed61d0d703`) | `66fb41f9cd95aeee51f42809eb5514bf4fc9b28d` | 1.56 → 1.90 | small/c1 wall time, workflow p95/p99; large/c8 sampled heap |
 
 Every capture completed all 12 repetitions: **288** two-turn workflows,
 **576** exact provider dispatches, **5,472** native events, **576** fixture tool

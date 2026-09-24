@@ -12,8 +12,8 @@ hashes and exact host conditions. No live model or paid inference was used.
 
 | Product source revision and contract | Write-once candidate | Frozen comparison |
 | --- | --- | --- |
-| `4aa83d7b`, strict | [retained failure](stress-v2-strict-4aa-failed.json) | Failed only duplex c1 added-latency p95/p99: 4,265 µs > 3,294 µs. |
-| `4aa83d7b`, legacy | [retained failure](stress-v2-legacy-4aa-failed.json) | Failed only duplex c1 added-latency p95/p99: 3,636 µs > 3,294 µs. |
+| `4aa83d7b`, strict | [retained failure](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-strict-4aa-failed.json) | Failed only duplex c1 added-latency p95/p99: 4,265 µs > 3,294 µs. |
+| `4aa83d7b`, legacy | [retained failure](https://github.com/tyk-swe/olp/blob/16769b6abee5008d33279542ccd96088254a6c82/docs/evidence/fidelity-performance/replacement-383-v2/stress-v2-legacy-4aa-failed.json) | Failed only duplex c1 added-latency p95/p99: 3,636 µs > 3,294 µs. |
 | `38358293`, strict | [passing candidate](stress-v2-strict-383-passed.json) | **Passed every frozen workload/path, numeric and added-latency limit.** |
 | `38358293`, legacy | [passing candidate](stress-v2-legacy-383-passed.json) | **Passed every frozen workload/path, numeric and added-latency limit.** |
 
