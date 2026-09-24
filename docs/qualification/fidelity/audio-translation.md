@@ -48,3 +48,8 @@ dispatch to the native VTT result. A separate Chromium smoke exercised the same
 component with a scripted successful response; the [reviewed screenshot](console-audio-translation.png)
 shows only synthetic fixture content and a masked fixture key. That visual
 receipt is separate from the public gateway/SDK execution above.
+
+The [integrated release execution](release-execution-2026-09-24.md) reran the
+public SDK test under race detection at the final code revision. The current
+[matrix](compatibility-matrix-v1.md) publishes separate raw HTTP and pinned SDK
+rows; the direct-OpenAI frozen conjunction remains honestly scoped as partial.

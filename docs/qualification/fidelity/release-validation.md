@@ -15,6 +15,34 @@ repository checks and code review. A fixture's existence or an ancestor's run
 does not establish candidate execution. Report actual commands and source
 revisions separately from historical evidence.
 
+## Current execution and gate crosswalk
+
+The [September 24 execution receipt](release-execution-2026-09-24.md) records
+committed code `3a3a3644ab06220478e07080e864f19e9e540c05`: `make check`,
+`make test-race`, `make build`, contract/inventory/Helm checks, 50 selected
+public/SDK race tests with zero skips, both native SDK suites and the bounded
+strict smoke all passed. The [matrix](compatibility-matrix-v1.md) pins that
+source and receipt; later evidence publication does not change executable
+product or protocol-test code.
+
+| Gate | Evidence and required validation |
+| --- | --- |
+| G1 Conservation | Independent frozen fixtures and mutation controls; source/oracle suites in `make check` and race checks; public conservation, strict native/translated and ambiguity tests. |
+| G2 Complete interaction | Native and translated official SDK next turns, encrypted continuation and acceptance/actionability recovery; selected public races plus full recovery/process CI. |
+| G3 Operation breadth | Registered unary storage/rerank/count/classification, native Cohere, audio translation, media/video, file/batch, Responses and Gemini durable streams, realtime; public boundary tests and the unchanged denominator. |
+| G4 Configuration/security | Public configuration/profile/egress/policy suites, secret/identity negative controls, revocation and canceled-client commit races; full service CI. |
+| G5 Usable control plane | 652 local console tests, clean Svelte/types/lint and reviewed screenshots; full CI browser journeys for configuration, inspection, operation playgrounds and migration. |
+| G6 Honest quality/performance | All 22 bounded strict smoke paths passed; per-event limits, slow-reader backpressure, capacity, cancellation and overflow remain functional/race/service checks. Empirical quality remains unknown and historical failed/invalid studies remain visible. |
+| G7 Sustainable delivery | Extension demos and forward/mixed-version migration in full CI, explicit legacy migration, generated contracts, release inventory, build, documentation and independent Standards/Spec reviews. |
+
+The [final PR CI checks](https://github.com/tyk-swe/olp/pull/219/checks) must
+pass on the published head before the PR is ready. They run `make check`,
+`make test-race`, **full `make integration`** (disposable services, recovery,
+mixed versions, SDKs and Chromium), dependencies, Helm, and amd64/arm64 native
+image qualification. CI records its exact source and results separately;
+neither an ancestor's green run nor the selected local tests substitute for
+that final run. No feature gate is waived by the benchmark amendment.
+
 ## Bounded performance smoke
 
 Run the canonical local benchmark with a fixed iteration count and timeout:

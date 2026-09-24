@@ -35,7 +35,7 @@ unchanged frozen Cohere embedding row combines sparse/multivector features not
 defined by this native API and must **not** be promoted from this evidence.
 TEI remains the independently qualified native sparse/multivector path.
 
-## Proposed additive matrix rows after final-source integration
+## Published additive matrix rows
 
 | Row ID | Operation/profile/dialect | Mode/client | Qualified features and evidence |
 | --- | --- | --- | --- |
@@ -62,6 +62,8 @@ original provider JSON available. The screenshot uses a mock browser response;
 public Go tests above establish backend dispatch and semantic behavior. The
 focused `cohereNativeOperation.test.ts` and `cohere-native.spec.ts` exercise
 browser request routing, storage groups, exact numeric spelling and ranking
-ties. Final matrix/fixture inventory assessed revision and exact-head CI are
-owned by the integrated release receipt; no frozen row or historical evidence
-was edited in this slice.
+ties. The three rows are published in the [current matrix](compatibility-matrix-v1.md);
+the [integrated execution receipt](release-execution-2026-09-24.md) records
+these public tests under race detection and repository validation. Full CI
+publishes the browser result separately. Frozen inputs and historical
+execution receipts remain unchanged.

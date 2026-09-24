@@ -1,8 +1,10 @@
 # Fidelity qualification baseline
 
 Current release requirements are in [release validation](release-validation.md).
-The additive [audio translation](audio-translation.md) receipt covers the native
-multipart operation introduced after the historical matrix snapshot.
+The [current execution receipt](release-execution-2026-09-24.md) records local
+checks, 50 public/SDK race tests and the bounded strict smoke. The current
+[matrix](compatibility-matrix-v1.md) includes native [audio translation](audio-translation.md),
+[Cohere v2](cohere-native-v2.md) and retained Responses background streaming.
 All features and functional gates remain required; long quality/performance
 studies are optional and cannot be used to claim unmeasured parity.
 
@@ -36,9 +38,9 @@ The additive [compatibility and evidence matrix](compatibility-matrix-v1.md)
 maps those 47 frozen rows without changing them, and records newer unary and
 Gemini, media, durable and duplex combinations separately. Its statuses are
 scoped to a pinned source revision and distinguish integrated execution from
-incomplete evidence. The [qualification status receipt](qualification-status-v1.md)
-keeps row counts, ambiguous outcomes, failed/pending timed comparisons and
-unknown empirical quality separate.
+incomplete evidence. The [historical qualification status receipt](qualification-status-v1.md)
+retains its dated row counts, ambiguous outcomes and failed/pending studies.
+Use the current execution receipt and release validation for release status.
 
 The [counterexamples](../../../tests/fixtures/fidelity/v1/counterexamples.json)
 contain seven independently authored native invocations: the five recorded
