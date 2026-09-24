@@ -339,9 +339,19 @@ func cohereInputText(request oif.Request) ([]operations.Text, error) {
 		out = append(out, operations.Text{Pointer: "/texts/" + strconv.Itoa(index), Value: operations.String(value)})
 	}
 	for i, item := range operations.Member(root, "inputs").Elements() {
+		for _, field := range item.Members() {
+			if field.Name != "content" {
+				return nil, operations.Error("policy_conflict", "/inputs/"+strconv.Itoa(i), "input_policy_coverage", "The text policy cannot inspect an unknown native Cohere input member.")
+			}
+		}
 		for j, part := range operations.Member(item, "content").Elements() {
 			if operations.String(operations.Member(part, "type")) == "image_url" {
 				return nil, operations.Error("policy_conflict", "/inputs", "media_policy_coverage", "The text policy cannot inspect native image bytes.")
+			}
+			for _, field := range part.Members() {
+				if field.Name != "type" && field.Name != "text" {
+					return nil, operations.Error("policy_conflict", "/inputs/"+strconv.Itoa(i)+"/content/"+strconv.Itoa(j), "input_policy_coverage", "The text policy cannot inspect an unknown native Cohere text part member.")
+				}
 			}
 			out = append(out, operations.Text{Pointer: "/inputs/" + strconv.Itoa(i) + "/content/" + strconv.Itoa(j) + "/text", Value: operations.String(operations.Member(part, "text"))})
 		}

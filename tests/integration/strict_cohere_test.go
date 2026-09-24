@@ -162,6 +162,19 @@ func TestStrictCohereNativeRejectsForeignControlsAndUninspectablePolicyFields(t 
 	if status != 400 || len(policy.snapshot()) != 0 || !bytes.Contains(raw, []byte(`"code":"policy_conflict"`)) {
 		t.Fatalf("uninspectable native extension bypassed input policy: %d %s", status, raw)
 	}
+	embedPolicy := newOperationFixture(t, "/v2/embed", `{"embeddings":{"float":[[1,-2]]},"meta":{"billed_units":{"input_tokens":2}}}`)
+	embedPolicy.policy = fidelityPolicy("block", "input")
+	slug, key = publishCohereOperation(t, h, owner, embedPolicy, "cohere-embed-v2", "embeddings", `{"embeddings":{"float":[[1,-2]]},"meta":{"billed_units":{"input_tokens":2}}}`)
+	for _, input := range []string{
+		`{"content":[{"type":"text","text":"safe"}],"native_extension":{"hidden":"private"}}`,
+		`{"content":[{"type":"text","text":"safe","native_extension":{"hidden":"private"}}]}`,
+	} {
+		request := fmt.Sprintf(`{"model":%q,"input_type":"search_document","inputs":[%s],"embedding_types":["float"]}`, slug, input)
+		status, raw, _ := h.gatewayRaw("POST", "/native/cohere-embed-v2/models/"+slug, key, strings.NewReader(request), map[string]string{"Content-Type": "application/json"})
+		if status != 400 || len(embedPolicy.snapshot()) != 0 || !bytes.Contains(raw, []byte(`"code":"policy_conflict"`)) {
+			t.Fatalf("nested native Cohere text bypassed restrictive policy: %d %s", status, raw)
+		}
+	}
 }
 
 func TestStrictCohereNativeEmbedV2RetainsMultimodalInputAndRejectsCorruption(t *testing.T) {
@@ -192,9 +205,14 @@ func TestStrictCohereNativeEmbedV2RetainsMultimodalInputAndRejectsCorruption(t *
 	if used := sink.last().Attempts[0].Usage; used == nil || used.InputTokens != 1 || used.MediaUnits == nil || *used.MediaUnits != "1" {
 		t.Fatalf("Cohere native text/image billing changed: %+v", used)
 	}
+	nestedExtension := strings.Replace(request, `"text":"diagram"`, `"text":"diagram","native_extension":{"hidden":"private"}`, 1)
+	status, raw, _ = h.gatewayRaw("POST", path, key, strings.NewReader(nestedExtension), map[string]string{"Content-Type": "application/json"})
+	if status != 200 || string(raw) != response || len(f.snapshot()) != 2 || string(f.snapshot()[1].body) != strings.ReplaceAll(nestedExtension, slug, vendorModel) {
+		t.Fatalf("unrestricted native Cohere extension was not preserved: %d %s", status, raw)
+	}
 	imageRequest := fmt.Sprintf(`{"model":%q,"input_type":"image","images":[%q],"embedding_types":["float"]}`, slug, cohereTinyPNG)
 	status, raw, _ = h.gatewayRaw("POST", path, key, strings.NewReader(imageRequest), map[string]string{"Content-Type": "application/json"})
-	if status != 200 || string(raw) != response || len(f.snapshot()) != 2 || string(f.snapshot()[1].body) != strings.ReplaceAll(imageRequest, slug, vendorModel) {
+	if status != 200 || string(raw) != response || len(f.snapshot()) != 3 || string(f.snapshot()[2].body) != strings.ReplaceAll(imageRequest, slug, vendorModel) {
 		t.Fatalf("original Cohere image collection changed: %d %s", status, raw)
 	}
 	for _, body := range []string{
