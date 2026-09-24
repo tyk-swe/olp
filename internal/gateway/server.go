@@ -12,23 +12,28 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Config bounds the inference surface.
@@ -72,14 +77,15 @@ type Server struct {
 
 	Resolver *resources.Resolver
 
-	log       *slog.Logger
-	cfg       Config
-	egress    *egress.Policy
-	client    *http.Client
-	auth      *connectors.Auth
-	admission *observability.Pool
-	health    *healthTracker
-	now       func() time.Time
+	log         *slog.Logger
+	cfg         Config
+	egress      *egress.Policy
+	client      *http.Client
+	connections *egress.ConnectionClientCache
+	auth        *connectors.Auth
+	admission   *observability.Pool
+	health      *healthTracker
+	now         func() time.Time
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -98,16 +104,17 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
 	}
 	return &Server{
-		Runtime:   rt,
-		Sink:      LogSink{Log: log},
-		log:       log,
-		cfg:       cfg,
-		egress:    policy,
-		client:    policy.Client(upstreamHeaderTimeout),
-		auth:      connectors.NewAuth(policy),
-		admission: pool,
-		health:    newHealthTracker(time.Now),
-		now:       time.Now,
+		Runtime:     rt,
+		Sink:        LogSink{Log: log},
+		log:         log,
+		cfg:         cfg,
+		egress:      policy,
+		client:      policy.Client(upstreamHeaderTimeout),
+		connections: egress.NewConnectionClientCache(128),
+		auth:        connectors.NewAuth(policy),
+		admission:   pool,
+		health:      newHealthTracker(time.Now),
+		now:         time.Now,
 	}
 }
 
@@ -124,6 +131,7 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerNative(mux)
+	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
 	s.registerState(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
@@ -188,14 +196,14 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After")
+	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay")
 }
 
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Route, X-OLP-Attribution, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -378,6 +386,25 @@ func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
 }
 
 func requestError(err error) *Error {
+	if gatewayError, ok := errors.AsType[*Error](err); ok {
+		return gatewayError
+	}
+	var contract interface {
+		Incompatibility() (code, field, requirement, message string)
+	}
+	if errors.As(err, &contract) {
+		code, field, requirement, message := contract.Incompatibility()
+		var param *string
+		if field != "" {
+			param = &field
+		}
+		if code == "target_capability" && requirement == "source_control_mapping" {
+			// Preserve the established ingress error for an unmapped control;
+			// the planner and inspector retain its precise requirement/category.
+			return invalidRequest("unsupported_parameter", message, param)
+		}
+		return invalidRequest(code, message, param)
+	}
 	if re, ok := errors.AsType[*openai.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
@@ -403,9 +430,22 @@ func selectionError(err error, model string) *Error {
 const requestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family openai.Family) http.HandlerFunc {
+	return s.inferenceOperation(family, "")
+}
+func (s *Server) inferenceOperation(family openai.Family, dialect string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeError := func(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, family.Surface()) }
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		writeError := func(w http.ResponseWriter, e *Error) {
+			if x.strict() && x.dispatched && e.Status >= 500 {
+				copy := *e
+				copy.NoRetry = true
+				e = &copy
+			}
+			writeSurfaceError(w, e, family.Surface())
+		}
+		x.semanticHeaders = r.Header.Clone()
+		query, queryErr := url.ParseQuery(r.URL.RawQuery)
+		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 		status := http.StatusInternalServerError
 		var out *outcome
 		defer func() {
@@ -452,7 +492,23 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
-		parsed, err := protocols.Parse(family, body, r.PathValue("model"))
+		if selected, err := s.selectUnary(x, family, dialect, body, r.PathValue("model")); selected || err != nil {
+			if err != nil {
+				e = requestError(err)
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+			out, status = s.serveUnary(w, r, x, body)
+			return
+		}
+		var parsed *openai.Request
+		var err error
+		if family == openai.FamilyBedrock {
+			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
+		} else {
+			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+		}
 		if err != nil {
 			e = requestError(err)
 			x.failure, status = e, e.Status
@@ -466,6 +522,15 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		x.parsed = parsed
+		if e := s.prepareContinuation(r.Context(), x); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		if x.continuation != nil && x.continuation.replay != nil {
+			status, _ = s.replayContinuation(w, x)
+			return
+		}
 		if family == openai.FamilyResponses {
 			if e := s.responsesStateGate(r.Context(), x, authority, parsed); e != nil {
 				x.failure, status = e, e.Status
@@ -557,6 +622,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
 		x.facts[len(x.facts)-1].Committed = true
+		if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+			fact.Interaction.ClientState = usage.ClientPartial
+		}
 		_, err = w.Write(out.completion.Body)
 		if err == nil {
 			// Flush buffered responses before recording successful delivery.
@@ -567,6 +635,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			out.cancelled = true
 		} else {
 			x.delivered(s.now())
+			if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+				fact.Interaction.ClientState = usage.ClientTerminal
+			}
 		}
 	}
 }
@@ -578,7 +649,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	if x.parsed.Stream {
 		x.mode = "streaming"
 	}
-	snapshot := x.request.release.Snapshot
+	snapshot := x.snapshot()
 	route, ok := snapshot.Routes[x.parsed.Route]
 	if !ok {
 		return modelNotFound(x.parsed.Route)
@@ -587,19 +658,62 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
+	if x.pin != nil {
+		if e := s.pinAttempts(ctx, x); e != nil {
+			return e
+		}
+		snapshot = x.snapshot()
+		route = *x.route
+	}
+	if x.strict() {
+		if x.actor == "playground" {
+			param := "client_contract"
+			return invalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
+		}
+		if x.semanticQueryInvalid {
+			param := "query"
+			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
+		}
+		if x.family.Surface() == "gemini" {
+			if keys, present := x.semanticQuery["key"]; present {
+				if len(keys) != 1 || keys[0] == "" {
+					param := "key"
+					return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
+				}
+				// Authentication already resolved the gateway key. It is neither
+				// native semantics nor an upstream query/default/receipt value.
+				delete(x.semanticQuery, "key")
+			}
+		}
+	}
 	var semantic error
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+	var policyDecisions []contentpolicy.Decision
+	source := x.summarizeSource()
+	options := runtime.SelectionOptions{
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
+				return source.parameters, source.demand
+			}
+			prepared, err := x.preparedProvider(&p, t.ProviderModel)
+			if err != nil {
+				return nil, nil
+			}
+			return prepared.parameters, prepared.demand
+		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
-			if !connectors.Supports(p.Kind, p.VendorID, x.family.Operation(), x.family.Surface(), x.mode) {
+			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
+				return errors.New("provider network credential unavailable")
+			}
+			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
 				return errors.New("connector capability unavailable")
 			}
 			if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
 				semantic = errors.New("provider-state capability unavailable")
 				return semantic
 			}
-			if protocols.StructuredOutputRequested(x.parsed) {
+			if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
 				var metadata runtime.ModelMetadata
 				_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
 				if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
@@ -607,12 +721,31 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 					return semantic
 				}
 			}
-			_, _, e := protocols.Encode(x.parsed, p.Kind, p.VendorID, cfg.Model(t.ProviderModel), p.ParameterDefaults)
+			var e error
+			if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
+				var prepared preparedProvider
+				prepared, e = x.preparedProvider(&p, t.ProviderModel)
+				if e != nil {
+					policyDecisions = prepared.policyDecisions
+				}
+			} else {
+				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+			}
 			if e != nil {
 				semantic = e
 			}
 			return e
-		}})
+		}}
+	if !x.strict() && route.ContentPolicy == nil {
+		hasProfile := false
+		for _, target := range route.Targets {
+			hasProfile = hasProfile || snapshot.Providers[target.ProviderID].ProfileID != ""
+		}
+		if !hasProfile {
+			options.Effective = nil
+		}
+	}
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
 		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
@@ -626,11 +759,24 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	x.budget = plan.Budget
 	if len(plan.Attempts) == 0 {
 		if semantic != nil {
+			for _, decision := range policyDecisions {
+				recordDecision(x, decision)
+			}
 			return requestError(semantic)
+		}
+		if x.strict() {
+			for _, decision := range plan.Decisions {
+				if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
+					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
+				}
+			}
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
-	return s.pinAttempts(ctx, x)
+	if x.pin != nil {
+		x.budget = 1
+	}
+	return nil
 }
 
 // modelObject renders a route as an OpenAI model object.
@@ -723,6 +869,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 	if !sw.committed {
 		h := sw.w.Header()
 		h.Set("Content-Type", "text/event-stream; charset=utf-8")
+		if sw.family == openai.FamilyBedrock {
+			h.Set("Content-Type", "application/vnd.amazon.eventstream")
+		}
 		h.Set("X-Accel-Buffering", "no")
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
@@ -754,6 +903,16 @@ func (sw *streamWriter) finish(out *outcome) int {
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion
 	// marker so the client cannot mistake it for success.
+	if sw.family == openai.FamilyBedrock {
+		headers := eventstream.Headers{}
+		headers.Set(":message-type", eventstream.StringValue("exception"))
+		headers.Set(":exception-type", eventstream.StringValue("modelStreamErrorException"))
+		payload, _ := json.Marshal(map[string]string{"message": out.err.Message, "code": out.err.Code})
+		http.NewResponseController(sw.w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = eventstream.NewEncoder().Encode(sw.w, eventstream.Message{Headers: headers, Payload: payload})
+		_ = http.NewResponseController(sw.w).Flush()
+		return http.StatusOK
+	}
 	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
 	if sw.family == openai.FamilyResponses || sw.family.Surface() == "anthropic" {
 		frame = "event: error\n" + frame

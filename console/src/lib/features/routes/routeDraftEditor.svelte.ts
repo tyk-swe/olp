@@ -5,6 +5,8 @@ import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
 import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+import type { components } from '$lib/api/schema';
 import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
@@ -69,6 +71,7 @@ export class RouteDraftEditorState {
   operations = $state<string[]>(['generation']);
   overallTimeoutMs = $state(120000);
   maxAttempts = $state(2);
+  fidelity = $state<RouteDraft['fidelity']>({ mode: 'strict' });
   targets = $state<EditableTarget[]>([]);
   policyRules = $state<EditablePolicyRule[]>([]);
   outputPolicyActive = $derived(hasOutputRules(this.policyRules));
@@ -96,6 +99,8 @@ export class RouteDraftEditorState {
   simulationOperation = $state('generation');
   simulationSurface = $state('openai');
   simulationMode = $state('streaming');
+  simulationDialect = $state('');
+  simulationRequestJson = $state('');
   simulation = $state<RouteSimulation | null>(null);
   private simulationVersion = 0;
   simulationInputs = $derived.by(() =>
@@ -106,6 +111,8 @@ export class RouteDraftEditorState {
       this.simulationOperation,
       this.simulationSurface,
       this.simulationMode,
+      this.simulationDialect,
+      this.simulationRequestJson,
       this.seed,
       this.policyDirty,
       this.routingPreferences
@@ -119,7 +126,8 @@ export class RouteDraftEditorState {
     maxAttempts: this.maxAttempts,
     targets: this.targets,
     contentPolicyRules: this.policyRules,
-    projectId: this.projectId
+    projectId: this.projectId,
+    fidelity: this.fidelity
   });
   concurrentNotice = $derived(conflictNotice(this.sync));
   routeEligibilityWarnings = $derived(
@@ -147,6 +155,7 @@ export class RouteDraftEditorState {
     this.operations = ['generation'];
     this.overallTimeoutMs = 120000;
     this.maxAttempts = 2;
+    this.fidelity = { mode: 'strict' };
     this.targets = [];
     this.policyRules = [];
     this.sync = initialConcurrentEdit();
@@ -160,6 +169,8 @@ export class RouteDraftEditorState {
     this.simulationOperation = 'generation';
     this.simulationSurface = 'openai';
     this.simulationMode = 'streaming';
+    this.simulationDialect = '';
+    this.simulationRequestJson = '';
     this.simulation = null;
     this.simulationVersion += 1;
     this.activation = null;
@@ -250,7 +261,7 @@ export class RouteDraftEditorState {
       {
         id: `rule-${this.policyRules.length + 1}`,
         phase: 'input',
-        action: 'redact',
+        action: this.fidelity?.mode === 'strict' ? 'block' : 'redact',
         pattern: '',
         replacement: ''
       }
@@ -322,12 +333,23 @@ export class RouteDraftEditorState {
     await this.run('simulate', async (isCurrent) => {
       let simulation: RouteSimulation;
       try {
+        const source = this.simulationRequestJson.trim();
+        let nativeRequest: Record<string, unknown> | undefined;
+        if (source) {
+          const parsed = parseNativeJSON(source);
+          if (!nativeObject(parsed))
+            throw new Error('The native request must be a JSON object.');
+          nativeRequest = parsed;
+        }
         simulation = await simulateRoute(current.id, {
           operation: this.simulationOperation,
           surface: this.simulationSurface,
           mode: this.simulationMode,
           seed: this.seed || 'preview',
-          preferences: JSON.parse(this.routingPreferences)
+          preferences: JSON.parse(this.routingPreferences),
+          request: nativeRequest,
+          dialect: (this.simulationDialect || undefined) as
+            components['schemas']['SimulationDialect'] | undefined
         });
       } catch (error) {
         if (isCurrent() && version === this.simulationVersion) throw error;
@@ -431,6 +453,7 @@ export class RouteDraftEditorState {
       this.operations = [...current.operations];
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
+      this.fidelity = current.fidelity ?? null;
       this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,

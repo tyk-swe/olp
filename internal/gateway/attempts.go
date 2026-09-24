@@ -31,7 +31,7 @@ type attemptOutcome[Result any] struct {
 // settlement and final downstream delivery continue after the loop returns.
 func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapter attemptAdapter[Result]) attemptOutcome[Result] {
 	deadline, _ := ctx.Deadline()
-	snapshot := x.request.release.Snapshot
+	snapshot := x.snapshot()
 	used := 0
 	unmeterable := false
 	var last *attemptFailure
@@ -47,6 +47,9 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 		for _, slot := range s.slots(x, attempt, &provider) {
 			if used >= x.budget || ctx.Err() != nil {
 				break
+			}
+			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
+				continue
 			}
 			gate := s.gateSlot(ctx, &provider, &slot, adapter.estimate(&provider), deadline)
 			switch gate.verdict {
@@ -64,6 +67,10 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 			case gateUnmeterable:
 				unmeterable = true
 			case gateAdmitted:
+				if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, true) {
+					s.releaseHold(ctx, gate.hold)
+					continue
+				}
 				used++
 				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, used)
 				// Only work handed to an upstream spends the request's key

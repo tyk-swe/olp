@@ -12,13 +12,14 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func responsePath(cfg connectors.Config, suffix string) string {
-	if cfg.Kind == "azure_openai" {
+	if cfg.Kind == "azure_openai" && cfg.Hosting() != "azure-v1" && cfg.Hosting() != "azure-responses-legacy" {
 		return "deployments/responses" + suffix
 	}
 	return "responses" + suffix
@@ -40,6 +41,24 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if raw := parsed.Field("store"); raw != nil {
 		_ = json.Unmarshal(raw, &store)
 	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+		if parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null")) {
+			// Native Responses omission requests provider retention. Strict admission
+			// cannot silently inject store:false to avoid the caller's state policy.
+			store = true
+		}
+		if background && !store {
+			param := "store"
+			return invalidRequest("state_carrier", "Background generation requires retained provider state.", &param)
+		}
+		if !authority.Policy.AllowProviderState && (store || previous != "") {
+			param := "store"
+			if previous != "" {
+				param = "previous_response_id"
+			}
+			return invalidRequest("policy_conflict", "The native invocation retains provider state but this API key does not permit it.", &param)
+		}
+	}
 	if previous == "" && !background && !store {
 		return nil
 	}
@@ -58,11 +77,14 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if s.Resources == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && !s.Resources.Encrypted() {
+		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Strict retained Responses requires encrypted resource authority.")
+	}
 	x.providerState = true
 	if previous == "" {
 		return nil
 	}
-	res, err := s.Resources.Get(ctx, resources.KindResponse, authority.ID, previous)
+	res, contract, err := s.readResponseResource(ctx, authority.ID, previous)
 	if errors.Is(err, resources.ErrNotFound) {
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must name a stored response owned by this key.", &param)
@@ -73,6 +95,18 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if res.RouteSlug != parsed.Route {
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must reference a response created under this model.", &param)
+	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && contract == nil {
+		return invalidRequest("state_carrier", "This retained response has no historical strict interaction contract.", nil)
+	}
+	if contract != nil {
+		if e := s.authorizeResponseContract(ctx, x, authority, res, contract); e != nil {
+			return e
+		}
+		x.responseContract = contract
+		x.serving = &contract.Receipt.Serving
+		x.servingSlot = res.SlotID
+		x.servingBinding = contract.Binding
 	}
 	x.pin = res
 	x.providerState = true
@@ -88,14 +122,45 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	if x.pin == nil {
 		return nil
 	}
-	p, _, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation())
+	p, historical, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation())
 	if e != nil {
 		return e
+	}
+	if x.continuation != nil && x.continuation.parentState != nil {
+		if e := s.authorizeContinuationPin(ctx, x, x.continuation.parent, x.continuation.parentState, p); e != nil {
+			return e
+		}
 	}
 	if !p.provider.Supports(p.model, x.family.Operation(), x.family.Surface(), x.mode) {
 		return serverError(http.StatusConflict, "provider_resource_credential_unavailable",
 			"The provider that owns this object can no longer serve this operation.")
 	}
+	// Preserve the historical provider and compiled route contract. Resolving
+	// only a slot/attempt and then reading the current provider changes defaults,
+	// endpoint or profile behind a retained response/continuation handle.
+	current := x.request.release.Snapshot
+	if retained, slot, same := current.PinnedCurrent(*historical, p.provider, p.target, p.slot, x.keyID, x.family.Surface(), x.mode); same {
+		// The installed release was already validated and compiled at
+		// publication. Reusing its immutable target template avoids compiling
+		// the same strict contract again for every continuation turn.
+		x.historicalSnapshot = retained
+		route := retained.Routes[historical.Slug]
+		x.route = &route
+		x.attempts = []runtime.Attempt{p.attempt}
+		x.budget = 1
+		x.pinnedSlot = &slot
+		x.pinnedSecret = p.secret
+		return nil
+	}
+	historical.Targets = []runtime.Target{p.target}
+	p.provider.Slots = []runtime.Slot{p.slot}
+	retained := &runtime.Snapshot{Generation: current.Generation, Providers: map[string]runtime.Provider{p.provider.ID: p.provider}, Routes: map[string]runtime.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
+	if err := retained.Validate(); err != nil {
+		return pinUnavailable()
+	}
+	x.historicalSnapshot = retained
+	route := retained.Routes[historical.Slug]
+	x.route = &route
 	x.attempts = []runtime.Attempt{p.attempt}
 	x.budget = 1
 	x.pinnedSlot = &p.slot
@@ -105,7 +170,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 
 func responseStoreRequested(parsed *openai.Request) bool {
 	raw := parsed.Field("store")
-	if raw == nil {
+	if raw == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true
 	}
 	var store bool
@@ -149,6 +214,37 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 			at := time.Unix(seconds, 0).UTC()
 			expires = &at
 		}
+	}
+	if x.strict() {
+		deferred := s.pendingResponseUsage(x, &fact, metadata)
+		encoded, _ := json.Marshal(metadata)
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		defer stopCommit()
+		res, err := s.putStrictResponse(commitCtx, x, &fact, upstreamID, state, encoded, expires)
+		if err != nil {
+			return nil, serverError(http.StatusInternalServerError, "continuation_unavailable", "The strict response contract could not be committed.")
+		}
+		if deferred {
+			last := &x.facts[len(x.facts)-1]
+			last.ResponseUsageDeferred = true
+			last.recordEvidence(false)
+			if e := s.reconcileResponse(commitCtx, res.ID, body); e != nil {
+				return nil, e
+			}
+		}
+		doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+		if parseErr != nil {
+			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed response object.")
+		}
+		projection := responseProjection{upstreamID: upstreamID, localID: res.ID, route: x.route.Slug}
+		if x.pin != nil {
+			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		}
+		mapped, err := projection.project(doc, "")
+		if err != nil {
+			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unbound response identity.")
+		}
+		return mapped.Bytes(), nil
 	}
 	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
@@ -218,7 +314,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 		s.stateFail(x, w, providerStateForbidden(), x.family)
 		return
 	}
-	res, err := s.Resources.Get(r.Context(), resources.KindResponse, authority.ID, r.PathValue("id"))
+	res, contract, err := s.readResponseResource(r.Context(), authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No stored response with this identifier exists for this key."), x.family)
 		return
@@ -226,6 +322,14 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."), x.family)
 		return
+	}
+	x.authority = authority
+	if contract != nil {
+		if e := s.authorizeResponseContract(r.Context(), x, authority, res, contract); e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
+		x.responseContract = contract
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation")
 	if e != nil {
@@ -251,8 +355,8 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 	}
 }
 
-func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter) *Error {
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), suffix), nil)
+func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *Error {
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), suffix), query)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -269,13 +373,46 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	if e := s.reconcileResponse(ctx, res.ID, result); e != nil {
+	var strictResultDoc oif.Document
+	if res.Kind == resources.KindStrictResponse {
+		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+		if parseErr != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
+		}
+		projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
+		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.responseContract)
+		if err != nil {
+			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
+		}
+		mapped, mapErr := projection.project(doc, "")
+		if mapErr != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an unbound response identity.")
+		}
+		strictResultDoc = mapped
+	}
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	if e := s.reconcileResponse(commitCtx, res.ID, result); e != nil {
 		return e
 	}
-	if status, ok := upstreamString(result, "status"); ok {
-		_ = s.Resources.Update(ctx, res.ID, status, nil, nil)
+	nativeStatus, hasStatus := upstreamString(result, "status")
+	if hasStatus {
+		if err := s.Resources.Update(commitCtx, res.ID, nativeStatus, nil, nil); err != nil {
+			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The response status could not be committed.")
+		}
 	}
-	out, err := rewriteID(result, "id", res.ID)
+	var out []byte
+	if res.Kind == resources.KindStrictResponse {
+		if nativeStatus == "failed" {
+			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, s.responseCredentialValues(x, p, resp))
+			if err != nil {
+				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider failure contained unsafe native fields.")
+			}
+		}
+		out = strictResultDoc.Bytes()
+	} else {
+		out, err = rewriteID(result, "id", res.ID)
+	}
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
@@ -285,13 +422,20 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 
 func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
-		return s.responseUpstream(ctx, x, res, p, http.MethodGet, "/"+url.PathEscape(res.UpstreamID), nil, w)
+		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
+		if e != nil {
+			return e
+		}
+		if stream {
+			return s.streamStoredResponse(ctx, w, x, res, p, query)
+		}
+		return s.responseUpstream(ctx, x, res, p, http.MethodGet, "/"+url.PathEscape(res.UpstreamID), nil, w, query)
 	})
 }
 
 func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
-		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w)
+		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
@@ -375,32 +519,44 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	if len(payload) == 0 || payload[0] != '{' {
 		return frame, nil
 	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(payload, &fields) != nil {
+	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.cfg.MaxEventBytes)})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return nil, errResponseMapping
+	}
+	response, present := doc.Root().Lookup("response")
+	if !present || response.Kind() == oif.Null {
+		if x.strict() {
+			if kind, found := doc.Root().Lookup("type"); found {
+				if name, valid := kind.Text(); valid && (name == "response.created" || name == "response.in_progress" || name == "response.queued") {
+					return nil, errResponseMapping
+				}
+			}
+		}
 		return frame, nil
 	}
-	raw, ok := fields["response"]
-	if !ok {
-		return frame, nil
+	if response.Kind() != oif.Object {
+		return nil, errResponseMapping
 	}
-	var response map[string]json.RawMessage
-	if json.Unmarshal(raw, &response) != nil || len(response) == 0 {
-		return frame, nil
-	}
-	var upstreamID string
-	if json.Unmarshal(response["id"], &upstreamID) != nil || upstreamID == "" || len(upstreamID) > 512 ||
-		strings.HasPrefix(upstreamID, resources.KindResponse+"_") {
-		return frame, nil
+	id, present := response.Lookup("id")
+	upstreamID, valid := id.Text()
+	if !present || !valid || upstreamID == "" || len(upstreamID) > 512 ||
+		strings.HasPrefix(upstreamID, resources.KindResponse+"_") || strings.HasPrefix(upstreamID, resources.KindStrictResponse+"_") {
+		return nil, errResponseMapping
 	}
 	if x.responseMap == nil {
 		x.responseMap = map[string]string{}
 	}
 	local, ok := x.responseMap[upstreamID]
 	if !ok {
-		res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, x.keyID, fact.ProviderID, upstreamID)
-		if errors.Is(err, resources.ErrNotFound) {
-			res, err = s.putStreamResponse(ctx, x, fact, upstreamID, response)
+		if x.strict() && len(x.responseMap) != 0 {
+			return nil, errResponseMapping
 		}
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		res, err := s.Resources.GetByUpstream(commitCtx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
+		if errors.Is(err, resources.ErrNotFound) {
+			res, err = s.putStreamResponse(commitCtx, x, fact, upstreamID, response)
+		}
+		stopCommit()
 		if err != nil {
 			return nil, errResponseMapping
 		}
@@ -408,24 +564,48 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		fact.ResponseUsageDeferred = backgroundResponseRequested(x.parsed)
 		x.responseMap[upstreamID] = local
 	}
-	if fact.ResponseUsageDeferred {
-		if e := s.reconcileResponse(ctx, local, raw); e != nil {
+	if statusValue, present := response.Lookup("status"); present {
+		status, valid := statusValue.Text()
+		if !valid {
 			return nil, errResponseMapping
+		}
+		switch status {
+		case "completed", "failed", "incomplete", "cancelled":
+			commitCtx, stopCommit := resourceCommitContext(ctx)
+			var settleErr error
+			if fact.ResponseUsageDeferred {
+				if e := s.reconcileResponse(commitCtx, local, response.Bytes()); e != nil {
+					settleErr = e
+				}
+			}
+			if settleErr == nil {
+				settleErr = s.Resources.Update(commitCtx, local, status, nil, nil)
+			}
+			stopCommit()
+			if settleErr != nil {
+				s.log.Warn("retained response terminal persistence failed", "error", settleErr)
+				return nil, errResponseMapping
+			}
 		}
 	}
 	encoded, err := json.Marshal(local)
 	if err != nil {
 		return nil, errResponseMapping
 	}
-	response["id"] = encoded
-	fields["response"], err = json.Marshal(response)
+	var mapped oif.Document
+	if x.strict() {
+		projection := responseProjection{upstreamID: upstreamID, localID: local, route: x.route.Slug}
+		if x.pin != nil {
+			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		}
+		mapped, err = projection.project(doc, "/response")
+	} else {
+		mapped, err = oif.Apply(doc, []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}})
+	}
 	if err != nil {
 		return nil, errResponseMapping
 	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		return nil, errResponseMapping
-	}
+	body := mapped.Bytes()
 	out := make([]byte, 0, i+7+len(body)+2)
 	out = append(out, frame[:i+7]...)
 	out = append(out, body...)
@@ -433,11 +613,11 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	return out, nil
 }
 
-func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID string, response map[string]json.RawMessage) (*resources.Resource, error) {
+func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
-		if raw, present := response[name]; present {
-			metadata[name] = raw
+		if value, present := response.Lookup(name); present {
+			metadata[name] = value.Bytes()
 		}
 	}
 	if fact.UpstreamModel != "" {
@@ -445,16 +625,16 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		metadata["upstream_model"] = encoded
 	}
 	state := "created"
-	if raw, present := response["status"]; present {
+	if value, present := response.Lookup("status"); present {
 		var status string
-		if json.Unmarshal(raw, &status) == nil && status != "" {
+		if json.Unmarshal(value.Bytes(), &status) == nil && status != "" {
 			state = status
 		}
 	}
 	var expires *time.Time
-	if raw, present := response["expires_at"]; present {
+	if value, present := response.Lookup("expires_at"); present {
 		var seconds int64
-		if json.Unmarshal(raw, &seconds) == nil && seconds > 0 {
+		if json.Unmarshal(value.Bytes(), &seconds) == nil && seconds > 0 {
 			at := time.Unix(seconds, 0).UTC()
 			expires = &at
 		}
@@ -465,6 +645,9 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 	}
 	deferred := s.pendingResponseUsage(x, fact, metadata)
 	encoded, _ := json.Marshal(metadata)
+	if x.strict() {
+		return s.putStrictResponse(ctx, x, fact, upstreamID, state, encoded, expires)
+	}
 	res, err := s.Resources.Put(ctx, &resources.Resource{
 		Kind:               resources.KindResponse,
 		APIKeyID:           x.keyID,

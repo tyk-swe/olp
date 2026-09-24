@@ -82,7 +82,9 @@ func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	h := newAccessHarness(t)
 	var err error
-	owner := h.owner()
+	fixture := newOpenAIFixture(t, "")
+	owner, _, slug, secret := provisionOpenAI(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"})
+	previousDigest := h.Runtime.Release().Digest
 	profile := h.want(owner, "GET", "/api/v3/profile", nil, nil, 200)
 	if _, err = h.Pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link)
         VALUES(gen_random_uuid(),$1,'https://identity.example','existing-subject','owner@example.com')`, profile["id"]); err != nil {
@@ -91,10 +93,46 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
-	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
+	// Recreate the pre-0021 schema changes that later migrations cannot apply
+	// twice. Removing history alone would manufacture duplicate columns/triggers
+	// rather than exercise a valid populated forward migration. The 0024 JSON
+	// source types can be converted again without changing this fixture's values.
+	if _, err = h.Pool.Exec(t.Context(), `DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
+	    DROP FUNCTION olp_go.check_runtime_route_contracts();
+	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
+	    DROP FUNCTION olp_go.check_route_revision_contract();
+	    DROP TRIGGER preserve_route_contract_identity ON olp_go.routes;
+	    DROP FUNCTION olp_go.preserve_route_contract_identity();
+	    ALTER TABLE olp_go.routes DROP COLUMN strict_contract;
+	    DROP INDEX olp_go.provider_resources_submission_identity;
+	    DROP INDEX olp_go.provider_resources_parent;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
+	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_strict_durable_check;
+	    ALTER TABLE olp_go.provider_resources
+	        DROP CONSTRAINT provider_resources_contract_version_check,
+	        DROP CONSTRAINT provider_resources_continuation_contract_check,
+	        DROP CONSTRAINT provider_resources_submission_check,
+	        DROP COLUMN contract_version,
+	        DROP COLUMN parent_id,
+	        DROP COLUMN submission_id,
+	        DROP CONSTRAINT provider_resources_kind_check,
+	        ADD CONSTRAINT provider_resources_kind_check CHECK (kind IN ('file','batch','response'));
+	    ALTER TABLE olp_go.media_jobs
+	        DROP CONSTRAINT media_jobs_strict_source,
+	        DROP COLUMN strict_contract,
+	        DROP COLUMN native_source_id;
+	    ALTER TABLE olp_go.secrets
+	        DROP CONSTRAINT secrets_media_job_source_bound,
+	        DROP CONSTRAINT secrets_continuation_ciphertext_bound,
+	        DROP CONSTRAINT secrets_purpose_check,
+	        ADD CONSTRAINT secrets_purpose_check CHECK (purpose IN ('oidc_client','oidc_flow','mutation_replay','provider_credential','notification_secret'));
+	    ALTER TABLE olp_go.route_drafts DROP COLUMN fidelity;
+	    ALTER TABLE olp_go.route_revisions DROP COLUMN fidelity;
+	    DROP TABLE IF EXISTS olp_go.provider_network_credentials;
+	    ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.route_revisions DROP COLUMN content_policy;
 	    ALTER TABLE olp_go.requests DROP COLUMN policy_decisions;
-	    DELETE FROM olp_go.migrations WHERE version='0021_content_policies.sql'`); err != nil {
+	    DELETE FROM olp_go.migrations WHERE version>='0021_content_policies.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.Installation(t.Context(), h.Pool); err == nil {
@@ -116,6 +154,19 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	if err = h.Pool.QueryRow(t.Context(), `SELECT role_claims IS NULL AND subject='existing-subject' AND email_at_link='owner@example.com'
         FROM olp_go.oidc_identities WHERE user_id=$1`, profile["id"]).Scan(&retained); err != nil || !retained {
 		t.Fatal("forward migration changed the identity or invented verified role inputs")
+	}
+	for _, table := range []string{"route_drafts", "route_revisions"} {
+		var legacy bool
+		if err = h.Pool.QueryRow(t.Context(), "SELECT count(*)>0 AND bool_and(fidelity IS NULL) FROM olp_go."+table).Scan(&legacy); err != nil || !legacy {
+			t.Fatal("forward migration reinterpreted a populated legacy route", table, err)
+		}
+	}
+	h.refresh()
+	if h.Runtime.Release().Digest != previousDigest || h.Runtime.Release().Snapshot.Routes[slug].Fidelity != nil {
+		t.Fatal("historical release digest or fidelity changed across forward migration")
+	}
+	if status, body, _ := h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "after migration"}}}); status != 200 {
+		t.Fatal("legacy route stopped serving after migration", status, body)
 	}
 }
 

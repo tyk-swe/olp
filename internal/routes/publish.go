@@ -20,6 +20,9 @@ import (
 // check verifies that every target can serve the draft's operations from its
 // provider's activated revision.
 func check(d *draft, live map[string]*resolved) error {
+	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
+		return err
+	}
 	for _, t := range d.Targets {
 		r, ok := live[t.ProviderModelID]
 		label := t.ProviderName + "/" + t.ProviderModel
@@ -74,6 +77,12 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if err = check(current, live); err != nil {
+		return access.Reply{}, err
+	}
+	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
+		return access.Reply{}, err
+	}
+	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if len(current.ContentPolicy) > 0 {
@@ -135,6 +144,15 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err = check(current, live); err != nil {
 		return access.Reply{}, err
 	}
+	if err = requireFidelityExecution(current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
+	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
+		return access.Reply{}, err
+	}
+	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	for i := range current.Targets {
 		t := &current.Targets[i]
 		if l := live[t.ProviderModelID]; l != nil {
@@ -149,7 +167,11 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		routeID, revision = access.NewID(), 1
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID); err != nil {
+		fidelity, err := runtime.DecodeFidelity(current.Fidelity)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id,strict_contract) VALUES($1,$2,$3,1,$4,$5,$6,$7)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID, runtime.FidelityMode(fidelity) == runtime.FidelityStrict); err != nil {
 			return access.Reply{}, err
 		}
 	case err != nil:
@@ -161,7 +183,7 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	}
 	operations, _ := json.Marshal(current.Operations)
 	targets, _ := json.Marshal(current.Targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), current.ContentPolicy); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,fidelity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), current.ContentPolicy, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	policy, _, err := loadPolicy(r.Context(), tx, "route-draft", current.ID, false)
@@ -203,18 +225,19 @@ type revisionRow struct {
 	MaxAttempts      int
 	Targets          []runtime.PublishedTarget
 	ContentPolicy    []byte
+	Fidelity         []byte
 	SourceDraftID    string
 	ActivatedBy      string
 	ActivatedAt      time.Time
 	Policy           *runtime.Policy
 }
 
-const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy"
+const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity"
 
 func scanRevision(row pgx.Row) (*revisionRow, error) {
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
+	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -244,7 +267,7 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy)}
+	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy), "fidelity": json.RawMessage(v.Fidelity)}
 }
 
 type routeRow struct {
@@ -287,7 +310,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	var r routeRow
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
+	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -566,6 +589,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
 		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
 		"content_policy_changed": !bytes.Equal(bytes.TrimSpace(from.ContentPolicy), bytes.TrimSpace(to.ContentPolicy)),
+		"fidelity_changed":       !bytes.Equal(bytes.TrimSpace(from.Fidelity), bytes.TrimSpace(to.Fidelity)), "fidelity_before": json.RawMessage(from.Fidelity), "fidelity_after": json.RawMessage(to.Fidelity),
 	}), nil
 }
 
@@ -603,6 +627,9 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = ValidateFidelityMigration(r.Context(), tx, v.Slug, v.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	draftID, etag := access.NewID(), access.NewID()
 	operations, _ := json.Marshal(v.Operations)
 	targets := slices.Clone(v.Targets)
@@ -610,7 +637,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		targets[i].ID = access.NewID()
 	}
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, v.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if v.Policy != nil {

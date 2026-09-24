@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"math"
 	"strings"
 	"time"
@@ -96,14 +97,15 @@ type AttemptUsage struct {
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
-	Policy               *json.RawMessage `json:"policy,omitempty"`
-	Mode                 *string          `json:"mode,omitempty"`
-	FirstOutputMS        *int64           `json:"first_output_ms,omitempty"`
-	StreamedOutputTokens *int64           `json:"streamed_output_tokens,omitempty"`
-	CredentialSlotID     *string          `json:"credential_slot_id"`
-	CredentialVersionID  *string          `json:"credential_version_id"`
-	ProviderRevisionID   string           `json:"provider_revision_id"`
-	PricingRevisionID    *string          `json:"pricing_revision_id"`
+	Interaction          *InteractionEvidence `json:"interaction,omitempty"`
+	Policy               *json.RawMessage     `json:"policy,omitempty"`
+	Mode                 *string              `json:"mode,omitempty"`
+	FirstOutputMS        *int64               `json:"first_output_ms,omitempty"`
+	StreamedOutputTokens *int64               `json:"streamed_output_tokens,omitempty"`
+	CredentialSlotID     *string              `json:"credential_slot_id"`
+	CredentialVersionID  *string              `json:"credential_version_id"`
+	ProviderRevisionID   string               `json:"provider_revision_id"`
+	PricingRevisionID    *string              `json:"pricing_revision_id"`
 }
 
 // Encode renders the event as a versioned stream payload.
@@ -230,14 +232,15 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
-	Policy               *json.RawMessage `json:"policy"`
-	Mode                 *string          `json:"mode"`
-	FirstOutputMS        *uint64          `json:"first_output_ms"`
-	StreamedOutputTokens *uint64          `json:"streamed_output_tokens"`
-	CredentialSlotID     *string          `json:"credential_slot_id"`
-	CredentialVersionID  *string          `json:"credential_version_id"`
-	ProviderRevisionID   *string          `json:"provider_revision_id"`
-	PricingRevisionID    *string          `json:"pricing_revision_id"`
+	Interaction          *InteractionEvidence `json:"interaction"`
+	Policy               *json.RawMessage     `json:"policy"`
+	Mode                 *string              `json:"mode"`
+	FirstOutputMS        *uint64              `json:"first_output_ms"`
+	StreamedOutputTokens *uint64              `json:"streamed_output_tokens"`
+	CredentialSlotID     *string              `json:"credential_slot_id"`
+	CredentialVersionID  *string              `json:"credential_version_id"`
+	ProviderRevisionID   *string              `json:"provider_revision_id"`
+	PricingRevisionID    *string              `json:"pricing_revision_id"`
 }
 
 // knownOperations and knownSurfaces are the canonical labels; an event outside them would
@@ -245,14 +248,14 @@ type wireRouting struct {
 // acknowledged, so it is rejected here instead.
 var knownOperations = map[string]struct{}{
 	"generation": {}, "embeddings": {}, "token_count": {}, "image_generation": {},
-	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {},
+	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
 	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
 	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {},
 }
 
 var knownSurfaces = map[string]struct{}{
-	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "unknown": {},
+	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
 func (w wireEvent) decode() (*Event, error) {
@@ -299,7 +302,9 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, err
 	}
 	event.UpstreamModel = w.UpstreamModel
-	if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
+	if w.Operation != nil && operationregistry.Default.HasOperation(*w.Operation) {
+		event.Operation = *w.Operation
+	} else if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
 		return nil, err
 	}
 	if event.Surface, err = requiredLabel("surface", w.Surface, knownSurfaces); err != nil {
@@ -427,7 +432,10 @@ func (w wireUsage) decode() (*AttemptUsage, error) {
 }
 
 func (w wireRouting) decode() (*Routing, error) {
-	routing := &Routing{Policy: w.Policy, Mode: w.Mode}
+	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
+	if err := routing.Interaction.validate(); err != nil {
+		return nil, err
+	}
 	var err error
 	if routing.FirstOutputMS, err = optionalMilliseconds("routing.first_output_ms", w.FirstOutputMS); err != nil {
 		return nil, err
@@ -669,6 +677,11 @@ func Validate(e *Event) (*Validated, error) {
 }
 
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
+	if attempt.Routing != nil {
+		if err := attempt.Routing.Interaction.validate(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
+	}
 	switch {
 	case attempt.Ordinal != index+1:
 		return nil, fmt.Errorf("%w: attempt %d has a non-contiguous ordinal", ErrInvalidEvent, index)

@@ -406,11 +406,6 @@ const (
 	maxEstimate = 1<<53 - 1
 )
 
-func requestDemand(parsed *openai.Request) *runtime.TokenDemand {
-	input, output, _ := estimateParts(parsed)
-	return &runtime.TokenDemand{EstimatedInputTokens: input, MaxOutputTokens: output}
-}
-
 // estimateTokens is the tokens a request may consume, charged before the
 // upstream reports what it actually used. The prompt is walked rather than
 // weighed: text is charged at four characters per token, each media part at a
@@ -421,6 +416,10 @@ func requestDemand(parsed *openai.Request) *runtime.TokenDemand {
 // window is worse than deferring work that would have.
 func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
 	input, output, candidates := estimateParts(parsed, defaults...)
+	return estimateTokensFromParts(parsed, input, output, candidates)
+}
+
+func estimateTokensFromParts(parsed *openai.Request, input int64, output *int64, candidates int64) int64 {
 	if parsed != nil && parsed.Family.Operation() != "generation" {
 		return max(input, 1)
 	}
@@ -483,6 +482,11 @@ func estimateParts(parsed *openai.Request, defaults ...map[string]json.RawMessag
 		if value, ok := integerValue(field(name)); ok {
 			output = &value
 			break
+		}
+	}
+	if parsed != nil && parsed.Family == openai.FamilyBedrock {
+		if value, ok := integerValue(jsonObject(field("inferenceConfig"))["maxTokens"]); ok {
+			output = &value
 		}
 	}
 	if parsed != nil && parsed.Family.Surface() == "gemini" {
@@ -661,8 +665,8 @@ func integerValue(raw json.RawMessage) (int64, bool) {
 func requestEstimate(x *execution) int64 {
 	var estimate int64
 	for _, attempt := range x.attempts {
-		provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
-		estimate = max(estimate, estimateTokens(x.parsed, provider.ParameterDefaults))
+		provider := x.snapshot().Providers[attempt.ProviderID]
+		estimate = max(estimate, x.providerEstimate(&provider))
 	}
 	return max(estimate, 1)
 }

@@ -6,7 +6,8 @@ if (!process.env.OLP_DATABASE_URL || !process.env.OLP_VALKEY_URL) {
 
 function database(name: string) {
   const url = new URL(process.env.OLP_DATABASE_URL!);
-  url.pathname = '/' + name;
+  url.pathname =
+    '/' + (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') + name;
   return url.toString();
 }
 
@@ -73,6 +74,16 @@ export default defineConfig({
     {
       command: 'node tests/gateway/mock-openai.mjs',
       url: 'http://127.0.0.1:4187/health',
+      reuseExistingServer: false
+    },
+    {
+      command: 'node tests/gateway/mock-anthropic.mjs',
+      url: 'http://127.0.0.1:4188/health',
+      reuseExistingServer: false
+    },
+    {
+      command: 'node tests/gateway/mock-native-operations.mjs',
+      url: 'http://127.0.0.1:4189/health',
       reuseExistingServer: false
     },
     {

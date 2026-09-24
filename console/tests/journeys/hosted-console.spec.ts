@@ -374,6 +374,8 @@ test.describe('Go-hosted console integration', () => {
       page.getByLabel('Provider model').first().locator('option:checked')
     ).toContainText(vertical.deployment);
     await page.getByLabel('Maximum attempts').fill('1');
+    // This journey intentionally qualifies the historical compatibility route.
+    await page.getByLabel('Fidelity mode').selectOption('legacy');
     await page.getByRole('button', { name: 'Create draft' }).click();
     await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
     await verifyDraftSave(page, 'route', vertical.route);

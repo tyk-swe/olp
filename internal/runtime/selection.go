@@ -61,8 +61,29 @@ func Score(routeID, targetID uuid.UUID, weight int64, operation, surface, mode s
 	h.Write([]byte("olp-v2-weighted-rendezvous\x00"))
 	h.Write(routeID[:])
 	h.Write(targetID[:])
-	h.Write([]byte{operationTag(operation), surfaceTag(surface), modeTag(mode)})
+	opTag, surfaceID, modeID := operationTag(operation), surfaceTag(surface), modeTag(mode)
+	h.Write([]byte{opTag, surfaceID, modeID})
 	var length [8]byte
+	// Keep the exact historical hash input for existing tuples. New registered
+	// operations and native surfaces otherwise collide at their fallback tags.
+	// Each extended dimension carries its own length so adjacent names cannot
+	// alias one another or an existing affinity suffix.
+	if !legacyScoreOperation(operation) || !legacyScoreSurface(surface) || !legacyScoreMode(mode) {
+		h.Write([]byte{0xff})
+		for _, dimension := range []struct {
+			name   string
+			legacy bool
+		}{{operation, legacyScoreOperation(operation)}, {surface, legacyScoreSurface(surface)}, {mode, legacyScoreMode(mode)}} {
+			if dimension.legacy {
+				h.Write([]byte{0})
+				continue
+			}
+			h.Write([]byte{1})
+			binary.BigEndian.PutUint64(length[:], uint64(len(dimension.name)))
+			h.Write(length[:])
+			h.Write([]byte(dimension.name))
+		}
+	}
 	binary.BigEndian.PutUint64(length[:], uint64(len(affinity)))
 	h.Write(length[:])
 	h.Write(affinity)
@@ -72,6 +93,29 @@ func Score(routeID, targetID uuid.UUID, weight int64, operation, surface, mode s
 		weight = 1
 	}
 	return float64(weight) / -math.Log(sample)
+}
+
+func legacyScoreOperation(operation string) bool {
+	if operationTag(operation) != 15 {
+		return true
+	}
+	// These original operations already used fallback tag 15. Preserve their
+	// published affinity ordering while new trusted labels get distinct names.
+	switch operation {
+	case "rerank", "batch", "realtime", "bedrock_invoke":
+		return true
+	}
+	return false
+}
+
+func legacyScoreSurface(surface string) bool {
+	// Bedrock originally shared OpenAI's zero tag; both keep their old scores.
+	return surface == "openai" || surface == "anthropic" || surface == "gemini" || surface == "bedrock"
+}
+
+func legacyScoreMode(mode string) bool {
+	// Realtime originally shared unary's zero tag.
+	return mode == "unary" || mode == "streaming" || mode == "async" || mode == "realtime"
 }
 
 func operationTag(operation string) byte {

@@ -2,6 +2,7 @@
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
   import { modesFor, surfacesFor } from '$lib/features/routes/routeEditor';
+  import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 </script>
@@ -58,6 +59,27 @@
     />
     <label for="simulation-seed">Dry-run seed</label>
     <input id="simulation-seed" bind:value={editor.seed} />
+    <label for="simulation-dialect">Native request dialect</label>
+    <select id="simulation-dialect" bind:value={editor.simulationDialect}>
+      <option value="">Default for operation and surface</option>
+      {#each inspectionDialects(editor.simulationOperation, editor.simulationSurface) as dialect (dialect)}
+        <option value={dialect}>{dialect}</option>
+      {/each}
+    </select>
+    <label for="simulation-request">Native request for inspection</label>
+    <textarea
+      id="simulation-request"
+      bind:value={editor.simulationRequestJson}
+      rows="7"
+      spellcheck="false"
+      placeholder={`{"model":"${editor.slug}","messages":[{"role":"user","content":"Example"}]}`}
+      aria-describedby="simulation-request-help"></textarea>
+    <small id="simulation-request-help">
+      Optional. An empty field checks target eligibility only. Paste a native
+      request naming this route to inspect the exact prepared plan. Content
+      stays in this browser and is redacted from the result. No inference is
+      sent and no job or tool is run.
+    </small>
     <button
       class="button button-secondary"
       type="button"
@@ -120,7 +142,7 @@
   }
   /* These controls sit outside .form-field, so the shared control recipe is
      restated here. */
-  .publish-panel > :is(input, select) {
+  .publish-panel > :is(input, select, textarea) {
     min-height: 2.5rem;
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--border);

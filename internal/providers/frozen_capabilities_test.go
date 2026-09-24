@@ -26,6 +26,9 @@ func TestFrozenCertificationMatrix(t *testing.T) {
 	for _, tuple := range reference.Inference {
 		want = append(want, strings.Join([]string{tuple.Provider, tuple.Operation, tuple.Surface, tuple.Transport}, "/"))
 	}
+	// Additive native audio translation is qualified by the public strict-route
+	// and pinned OpenAI SDK tests; the independent frozen inventory is unchanged.
+	want = append(want, "OpenAi/Translation/OpenAi/Unary")
 	names := map[string]string{
 		KindOpenAI: "OpenAi", KindOpenAICompatible: "OpenAiCompatible",
 		KindAnthropic: "Anthropic", KindGemini: "Gemini", KindAzure: "AzureOpenAi",

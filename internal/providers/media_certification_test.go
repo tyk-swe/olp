@@ -69,8 +69,8 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 			t.Fatalf("certify %v: %v", tuple, err)
 		}
 	}
-	if mediaTuples != 16 {
-		t.Fatalf("media capabilities=%d, want 16", mediaTuples)
+	if mediaTuples != 17 {
+		t.Fatalf("media capabilities=%d, want 17", mediaTuples)
 	}
 	if err := s.certifyTuple(t.Context(), &cfg, []byte("test-credential"), "missing-model", CapabilityInput{"speech", "openai", "unary"}, 4096); err == nil {
 		t.Fatal("inaccessible media model certified")

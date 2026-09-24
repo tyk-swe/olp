@@ -1,0 +1,2628 @@
+{
+  "schema": "openllmproxy.dev/lifecycle-stress-performance/v2",
+  "contract": null,
+  "started_at": "2026-09-23T10:57:42.315Z",
+  "completed_at": "2026-09-23T10:58:29.913Z",
+  "source_revision": "bc325da50c575803c771531dc4e3aab1ac203a53",
+  "working_tree": "",
+  "harness_sha256": "9f299a2aa23600086691de0ab4fc5a8332c1716c0c8eb134a437a9d1b9f49609",
+  "shared_harness_sha256": "7b739ec513dcfd4767f5ac2dee9620a546f236c79d6955aef7c229262d1ade0a",
+  "fixture_sha256": "635559ec6eb6eb66388eed150f1fe188b9ad3350184f0cebcfe93f61efabadf6",
+  "runner_sha256": "acf264271248bfd4f45d5bd2fd84793833751459c0961add1cab27a466a36ba3",
+  "command": [
+    "go",
+    "test",
+    "-mod=readonly",
+    "-tags=integration",
+    "-run",
+    "^TestLifecycleStressV2Performance$",
+    "-count=1",
+    "-v",
+    "-timeout=15m",
+    "./tests/integration"
+  ],
+  "runtime_environment": {
+    "GOMAXPROCS": "4",
+    "GOGC": "100",
+    "GOMEMLIMIT": "off",
+    "GODEBUG": "",
+    "OLP_LIFECYCLE_STRESS_V2_MEASURE": "1"
+  },
+  "toolchain": "go version go1.27.1 linux/amd64",
+  "go_build_environment": "v1\namd64\nlinux",
+  "hardware": {
+    "os": "linux",
+    "architecture": "x64",
+    "kernel": "7.0.0-31-generic",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logical_cpus": 8,
+    "total_memory_bytes": 24598122496,
+    "cpu_quota": null,
+    "memory_limit": null
+  },
+  "system_load": {
+    "before": "0.77 1.39 1.84 1/581 1800159",
+    "after": "1.06 1.40 1.82 2/582 1802527"
+  },
+  "storage": {
+    "postgresql_server_version": "180006",
+    "postgresql_tls": false
+  },
+  "profiles": {
+    "video": {
+      "id": "openai-responses",
+      "revision": "1"
+    },
+    "realtime": {
+      "id": "azure-v1-responses",
+      "revision": "1"
+    }
+  },
+  "conditions": {
+    "network": "IPv4 loopback, two HTTP/1.1 or WebSocket hops, warmed connections, no TLS on measured hops",
+    "authority": "Publicly configured versioned direct OpenAI openai-responses rev1 video jobs and Azure-v1 Responses rev1 realtime; real isolated PostgreSQL, local scripted provider and bounded media spool. Concurrent 4MiB parsers use distinct equally authorized API keys because one API key may hold only one parser lease.",
+    "media": "4 MiB original image input reference; accepted video creation, one 50% partial status, one complete status, exact 1 MiB content retrieval. Slow reader delays 250us after each 8 KiB read.",
+    "duplex": "64 exact native JSON/audio exchanges with independent RTT and successive absolute RTT-difference jitter measurements; provider observes client closure",
+    "resources": "Process CPU, allocations and sampled heap include client, fixture, gateway or relay and checks; PostgreSQL is separate. Spool high water and final reservation are observed from the public harness.",
+    "ordering": "Fixed sequential workload/path/concurrency order, three repetitions, eight successful workflows each; negative controls run outside timed samples",
+    "scope": "Scripted native transport and durable media lifecycle; not live-model quality, WAN, encrypted translated-tool state, or partial batch item errors"
+  },
+  "repetitions": 3,
+  "samples_per_repetition": 8,
+  "concurrency": {
+    "media": [
+      1,
+      2
+    ],
+    "duplex": [
+      1,
+      4
+    ]
+  },
+  "runs": [
+    {
+      "name": "media_cycle_4m/c1/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 326289,
+        "allocs/op": 918.875,
+        "elapsed_ns": 208465476,
+        "first-byte-p50-us": 442.149,
+        "first-byte-p95-us": 465.476,
+        "first-byte-p99-us": 465.476,
+        "inter-read-gap-p50-us": 19.905,
+        "inter-read-gap-p95-us": 37.141,
+        "inter-read-gap-p99-us": 82.866,
+        "latency-p50-us": 25850.096,
+        "latency-p95-us": 28304.282,
+        "latency-p99-us": 28304.282,
+        "ns/op": 26058184.5,
+        "process-cpu-ns/op": 39018125,
+        "sampled-heap-growth-B": 2610312,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c1/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 321591,
+        "allocs/op": 908.625,
+        "elapsed_ns": 197356921,
+        "first-byte-p50-us": 360.555,
+        "first-byte-p95-us": 434.811,
+        "first-byte-p99-us": 434.811,
+        "inter-read-gap-p50-us": 19.884,
+        "inter-read-gap-p95-us": 34.692,
+        "inter-read-gap-p99-us": 73.451,
+        "latency-p50-us": 24350.385,
+        "latency-p95-us": 27290.368,
+        "latency-p99-us": 27290.368,
+        "ns/op": 24669615.125,
+        "process-cpu-ns/op": 34389000,
+        "sampled-heap-growth-B": 2572728,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c1/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 329419,
+        "allocs/op": 905.125,
+        "elapsed_ns": 189930710,
+        "first-byte-p50-us": 360.68,
+        "first-byte-p95-us": 455.521,
+        "first-byte-p99-us": 455.521,
+        "inter-read-gap-p50-us": 19.856,
+        "inter-read-gap-p95-us": 37.498,
+        "inter-read-gap-p99-us": 69.104,
+        "latency-p50-us": 23500.977,
+        "latency-p95-us": 26100.862,
+        "latency-p99-us": 26100.862,
+        "ns/op": 23741338.75,
+        "process-cpu-ns/op": 33454125,
+        "sampled-heap-growth-B": 2635352,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c1/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 970120,
+        "allocs/op": 4135.125,
+        "elapsed_ns": 629514528,
+        "first-byte-p50-us": 6686.011,
+        "first-byte-p95-us": 8040.274,
+        "first-byte-p99-us": 8040.274,
+        "inter-read-gap-p50-us": 20.338,
+        "inter-read-gap-p95-us": 41.316,
+        "inter-read-gap-p99-us": 95.582,
+        "latency-p50-us": 74707.939,
+        "latency-p95-us": 88676.836,
+        "latency-p99-us": 88676.836,
+        "ns/op": 78689316,
+        "process-cpu-ns/op": 89205000,
+        "sampled-heap-growth-B": 7760960,
+        "sampled-spool-peak-B": 4194304,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c1/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 967633,
+        "allocs/op": 4119.625,
+        "elapsed_ns": 675462744,
+        "first-byte-p50-us": 7708.315,
+        "first-byte-p95-us": 8647.352,
+        "first-byte-p99-us": 8647.352,
+        "inter-read-gap-p50-us": 31.594,
+        "inter-read-gap-p95-us": 46.764,
+        "inter-read-gap-p99-us": 97.316,
+        "latency-p50-us": 82690.121,
+        "latency-p95-us": 94894.804,
+        "latency-p99-us": 94894.804,
+        "ns/op": 84432843,
+        "process-cpu-ns/op": 98710250,
+        "sampled-heap-growth-B": 7741064,
+        "sampled-spool-peak-B": 4194304,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c1/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 976148,
+        "allocs/op": 4118,
+        "elapsed_ns": 696794468,
+        "first-byte-p50-us": 7841.848,
+        "first-byte-p95-us": 9601.007,
+        "first-byte-p99-us": 9601.007,
+        "inter-read-gap-p50-us": 33.519,
+        "inter-read-gap-p95-us": 50.404,
+        "inter-read-gap-p99-us": 98.609,
+        "latency-p50-us": 88237.142,
+        "latency-p95-us": 94265.511,
+        "latency-p99-us": 94265.511,
+        "ns/op": 87099308.5,
+        "process-cpu-ns/op": 104971375,
+        "sampled-heap-growth-B": 7809184,
+        "sampled-spool-peak-B": 4194304,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 327916,
+        "allocs/op": 919.5,
+        "elapsed_ns": 132997531,
+        "first-byte-p50-us": 494.293,
+        "first-byte-p95-us": 791.467,
+        "first-byte-p99-us": 791.467,
+        "inter-read-gap-p50-us": 29.997,
+        "inter-read-gap-p95-us": 48.414,
+        "inter-read-gap-p99-us": 103.155,
+        "latency-p50-us": 32974.857,
+        "latency-p95-us": 34926.855,
+        "latency-p99-us": 34926.855,
+        "ns/op": 16624691.375,
+        "process-cpu-ns/op": 40453000,
+        "sampled-heap-growth-B": 2623328,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 321205,
+        "allocs/op": 900.875,
+        "elapsed_ns": 126582183,
+        "first-byte-p50-us": 451.379,
+        "first-byte-p95-us": 841.343,
+        "first-byte-p99-us": 841.343,
+        "inter-read-gap-p50-us": 23.399,
+        "inter-read-gap-p95-us": 39.383,
+        "inter-read-gap-p99-us": 91.714,
+        "latency-p50-us": 29984.008,
+        "latency-p95-us": 33721.098,
+        "latency-p99-us": 33721.098,
+        "ns/op": 15822772.875,
+        "process-cpu-ns/op": 37674500,
+        "sampled-heap-growth-B": 2569640,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 316151,
+        "allocs/op": 900.25,
+        "elapsed_ns": 127262472,
+        "first-byte-p50-us": 552.45,
+        "first-byte-p95-us": 904.333,
+        "first-byte-p99-us": 904.333,
+        "inter-read-gap-p50-us": 26.627,
+        "inter-read-gap-p95-us": 41.699,
+        "inter-read-gap-p99-us": 107.991,
+        "latency-p50-us": 31067.04,
+        "latency-p95-us": 32577.75,
+        "latency-p99-us": 32577.75,
+        "ns/op": 15907809,
+        "process-cpu-ns/op": 40090625,
+        "sampled-heap-growth-B": 2529208,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 993957,
+        "allocs/op": 4201.625,
+        "elapsed_ns": 361690133,
+        "first-byte-p50-us": 7872.019,
+        "first-byte-p95-us": 8876.645,
+        "first-byte-p99-us": 8876.645,
+        "inter-read-gap-p50-us": 27.514,
+        "inter-read-gap-p95-us": 46.846,
+        "inter-read-gap-p99-us": 96.451,
+        "latency-p50-us": 84532.698,
+        "latency-p95-us": 90300.61,
+        "latency-p99-us": 90300.61,
+        "ns/op": 45211266.625,
+        "process-cpu-ns/op": 87087625,
+        "sampled-heap-growth-B": 7951656,
+        "sampled-spool-peak-B": 8388608,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 967242,
+        "allocs/op": 4114.375,
+        "elapsed_ns": 386960953,
+        "first-byte-p50-us": 8617.165,
+        "first-byte-p95-us": 9271.366,
+        "first-byte-p99-us": 9271.366,
+        "inter-read-gap-p50-us": 33.202,
+        "inter-read-gap-p95-us": 48.939,
+        "inter-read-gap-p99-us": 110.945,
+        "latency-p50-us": 95401.399,
+        "latency-p95-us": 103381.051,
+        "latency-p99-us": 103381.051,
+        "ns/op": 48370119.125,
+        "process-cpu-ns/op": 95628875,
+        "sampled-heap-growth-B": 7737936,
+        "sampled-spool-peak-B": 8388608,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_cycle_4m/c2/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 32,
+      "accepted": 8,
+      "partial": 8,
+      "retrieved": 16,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 33554432,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 969918,
+        "allocs/op": 4115,
+        "elapsed_ns": 300101264,
+        "first-byte-p50-us": 6527.663,
+        "first-byte-p95-us": 7648.709,
+        "first-byte-p99-us": 7648.709,
+        "inter-read-gap-p50-us": 19.907,
+        "inter-read-gap-p95-us": 38.732,
+        "inter-read-gap-p99-us": 81.903,
+        "latency-p50-us": 70877.701,
+        "latency-p95-us": 85446.793,
+        "latency-p99-us": 85446.793,
+        "ns/op": 37512658,
+        "process-cpu-ns/op": 73080250,
+        "sampled-heap-growth-B": 7759344,
+        "sampled-spool-peak-B": 8388608,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59055,
+        "allocs/op": 188.125,
+        "elapsed_ns": 1241784006,
+        "first-byte-p50-us": 976.934,
+        "first-byte-p95-us": 1506.443,
+        "first-byte-p99-us": 1506.443,
+        "inter-read-gap-p50-us": 1159.621,
+        "inter-read-gap-p95-us": 1284.438,
+        "inter-read-gap-p99-us": 1384.714,
+        "latency-p50-us": 151817.192,
+        "latency-p95-us": 152979.533,
+        "latency-p99-us": 152979.533,
+        "ns/op": 155223000.75,
+        "process-cpu-ns/op": 31015500,
+        "sampled-heap-growth-B": 472440,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59055,
+        "allocs/op": 188.125,
+        "elapsed_ns": 1260975148,
+        "first-byte-p50-us": 1017.561,
+        "first-byte-p95-us": 1442.773,
+        "first-byte-p99-us": 1442.773,
+        "inter-read-gap-p50-us": 1176.211,
+        "inter-read-gap-p95-us": 1313.366,
+        "inter-read-gap-p99-us": 1423.183,
+        "latency-p50-us": 154491.63,
+        "latency-p95-us": 156044.229,
+        "latency-p99-us": 156044.229,
+        "ns/op": 157621893.5,
+        "process-cpu-ns/op": 35159375,
+        "sampled-heap-growth-B": 472440,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59423,
+        "allocs/op": 189,
+        "elapsed_ns": 1234684544,
+        "first-byte-p50-us": 1086.039,
+        "first-byte-p95-us": 1289.037,
+        "first-byte-p99-us": 1289.037,
+        "inter-read-gap-p50-us": 1157.551,
+        "inter-read-gap-p95-us": 1283.929,
+        "inter-read-gap-p99-us": 1321.429,
+        "latency-p50-us": 150855.459,
+        "latency-p95-us": 152724.646,
+        "latency-p99-us": 152724.646,
+        "ns/op": 154335568,
+        "process-cpu-ns/op": 27511375,
+        "sampled-heap-growth-B": 475384,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 167022,
+        "allocs/op": 683.5,
+        "elapsed_ns": 1336448895,
+        "first-byte-p50-us": 7700.972,
+        "first-byte-p95-us": 10965.993,
+        "first-byte-p99-us": 10965.993,
+        "inter-read-gap-p50-us": 1174.026,
+        "inter-read-gap-p95-us": 1291.025,
+        "inter-read-gap-p99-us": 1343.235,
+        "latency-p50-us": 161893.452,
+        "latency-p95-us": 164742.457,
+        "latency-p99-us": 164742.457,
+        "ns/op": 167056111.875,
+        "process-cpu-ns/op": 41864000,
+        "sampled-heap-growth-B": 1336176,
+        "sampled-spool-peak-B": 1048576,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 170084,
+        "allocs/op": 680.125,
+        "elapsed_ns": 1333577537,
+        "first-byte-p50-us": 9326.118,
+        "first-byte-p95-us": 9954.19,
+        "first-byte-p99-us": 9954.19,
+        "inter-read-gap-p50-us": 1174.928,
+        "inter-read-gap-p95-us": 1291.044,
+        "inter-read-gap-p99-us": 1356.166,
+        "latency-p50-us": 162936.145,
+        "latency-p95-us": 163471.99,
+        "latency-p99-us": 163471.99,
+        "ns/op": 166697192.125,
+        "process-cpu-ns/op": 41298125,
+        "sampled-heap-growth-B": 1360672,
+        "sampled-spool-peak-B": 1048576,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c1/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 173155,
+        "allocs/op": 679.125,
+        "elapsed_ns": 1347864568,
+        "first-byte-p50-us": 9001.944,
+        "first-byte-p95-us": 10525.416,
+        "first-byte-p99-us": 10525.416,
+        "inter-read-gap-p50-us": 1169.194,
+        "inter-read-gap-p95-us": 1298.727,
+        "inter-read-gap-p99-us": 1400.984,
+        "latency-p50-us": 162569.12,
+        "latency-p95-us": 167292.414,
+        "latency-p99-us": 167292.414,
+        "ns/op": 168483071,
+        "process-cpu-ns/op": 41841000,
+        "sampled-heap-growth-B": 1385240,
+        "sampled-spool-peak-B": 1048576,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59707,
+        "allocs/op": 190.875,
+        "elapsed_ns": 629756564,
+        "first-byte-p50-us": 1333.873,
+        "first-byte-p95-us": 2036.249,
+        "first-byte-p99-us": 2036.249,
+        "inter-read-gap-p50-us": 1180.88,
+        "inter-read-gap-p95-us": 1350.295,
+        "inter-read-gap-p99-us": 1559.863,
+        "latency-p50-us": 151808.027,
+        "latency-p95-us": 154540.004,
+        "latency-p99-us": 154540.004,
+        "ns/op": 78719570.5,
+        "process-cpu-ns/op": 21238625,
+        "sampled-heap-growth-B": 477656,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59141,
+        "allocs/op": 190.75,
+        "elapsed_ns": 628840789,
+        "first-byte-p50-us": 1168.265,
+        "first-byte-p95-us": 1499.096,
+        "first-byte-p99-us": 1499.096,
+        "inter-read-gap-p50-us": 1180.384,
+        "inter-read-gap-p95-us": 1358.781,
+        "inter-read-gap-p99-us": 1495.134,
+        "latency-p50-us": 153159.772,
+        "latency-p95-us": 154538.736,
+        "latency-p99-us": 154538.736,
+        "ns/op": 78605098.625,
+        "process-cpu-ns/op": 21768375,
+        "sampled-heap-growth-B": 473128,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 59403,
+        "allocs/op": 191,
+        "elapsed_ns": 625168813,
+        "first-byte-p50-us": 1293.75,
+        "first-byte-p95-us": 1483.191,
+        "first-byte-p99-us": 1483.191,
+        "inter-read-gap-p50-us": 1170.975,
+        "inter-read-gap-p95-us": 1313.118,
+        "inter-read-gap-p99-us": 1454.392,
+        "latency-p50-us": 151088.334,
+        "latency-p95-us": 152080.719,
+        "latency-p99-us": 152080.719,
+        "ns/op": 78146101.625,
+        "process-cpu-ns/op": 20214000,
+        "sampled-heap-growth-B": 475224,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 170726,
+        "allocs/op": 683.875,
+        "elapsed_ns": 664707951,
+        "first-byte-p50-us": 9590.71,
+        "first-byte-p95-us": 10079.413,
+        "first-byte-p99-us": 10079.413,
+        "inter-read-gap-p50-us": 1183.599,
+        "inter-read-gap-p95-us": 1349.664,
+        "inter-read-gap-p99-us": 1427.349,
+        "latency-p50-us": 160499.053,
+        "latency-p95-us": 163776.65,
+        "latency-p99-us": 163776.65,
+        "ns/op": 83088493.875,
+        "process-cpu-ns/op": 30450625,
+        "sampled-heap-growth-B": 1365808,
+        "sampled-spool-peak-B": 1773462,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 165020,
+        "allocs/op": 681.125,
+        "elapsed_ns": 667052294,
+        "first-byte-p50-us": 8820.182,
+        "first-byte-p95-us": 10454.903,
+        "first-byte-p99-us": 10454.903,
+        "inter-read-gap-p50-us": 1175.752,
+        "inter-read-gap-p95-us": 1329.769,
+        "inter-read-gap-p99-us": 1461.561,
+        "latency-p50-us": 160502.343,
+        "latency-p95-us": 165407.62,
+        "latency-p99-us": 165407.62,
+        "ns/op": 83381536.75,
+        "process-cpu-ns/op": 27008500,
+        "sampled-heap-growth-B": 1320160,
+        "sampled-spool-peak-B": 2035606,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "media_slow_content_1m/c2/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 8,
+      "content": 8,
+      "events": 0,
+      "rtt_observations": 0,
+      "jitter_observations": 0,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 8388608,
+      "metrics": {
+        "B/op": 165469,
+        "allocs/op": 685.25,
+        "elapsed_ns": 669745013,
+        "first-byte-p50-us": 9475.171,
+        "first-byte-p95-us": 9854.701,
+        "first-byte-p99-us": 9854.701,
+        "inter-read-gap-p50-us": 1170.854,
+        "inter-read-gap-p95-us": 1356.008,
+        "inter-read-gap-p99-us": 1484.484,
+        "latency-p50-us": 160199.258,
+        "latency-p95-us": 165022.728,
+        "latency-p99-us": 165022.728,
+        "ns/op": 83718126.625,
+        "process-cpu-ns/op": 30018375,
+        "sampled-heap-growth-B": 1323752,
+        "sampled-spool-peak-B": 1707926,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1840830,
+        "allocs/op": 8393.5,
+        "cancellation-p50-us": 327.355,
+        "cancellation-p95-us": 417.873,
+        "cancellation-p99-us": 417.873,
+        "elapsed_ns": 105216998,
+        "event-jitter-p50-us": 16.21,
+        "event-jitter-p95-us": 67.376,
+        "event-jitter-p99-us": 111.983,
+        "event-rtt-p50-us": 173.968,
+        "event-rtt-p95-us": 228.5,
+        "event-rtt-p99-us": 258.58,
+        "latency-p50-us": 12779.629,
+        "latency-p95-us": 13180.835,
+        "latency-p99-us": 13180.835,
+        "ns/op": 13152124.75,
+        "process-cpu-ns/op": 14299250,
+        "sampled-heap-growth-B": 14726640,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1838337,
+        "allocs/op": 8390.625,
+        "cancellation-p50-us": 357.62,
+        "cancellation-p95-us": 396.642,
+        "cancellation-p99-us": 396.642,
+        "elapsed_ns": 105271773,
+        "event-jitter-p50-us": 13.371,
+        "event-jitter-p95-us": 89.141,
+        "event-jitter-p99-us": 136.592,
+        "event-rtt-p50-us": 173.114,
+        "event-rtt-p95-us": 238.742,
+        "event-rtt-p99-us": 301.193,
+        "latency-p50-us": 11778.98,
+        "latency-p95-us": 14226.651,
+        "latency-p99-us": 14226.651,
+        "ns/op": 13158971.625,
+        "process-cpu-ns/op": 14374000,
+        "sampled-heap-growth-B": 14706696,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1840895,
+        "allocs/op": 8393.625,
+        "cancellation-p50-us": 287.1,
+        "cancellation-p95-us": 329.519,
+        "cancellation-p99-us": 329.519,
+        "elapsed_ns": 89601776,
+        "event-jitter-p50-us": 12.928,
+        "event-jitter-p95-us": 118.88,
+        "event-jitter-p99-us": 338.569,
+        "event-rtt-p50-us": 134.949,
+        "event-rtt-p95-us": 263.349,
+        "event-rtt-p99-us": 442.203,
+        "latency-p50-us": 9340.354,
+        "latency-p95-us": 13829.502,
+        "latency-p99-us": 13829.502,
+        "ns/op": 11200222,
+        "process-cpu-ns/op": 11681125,
+        "sampled-heap-growth-B": 14727160,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1999131,
+        "allocs/op": 9095.125,
+        "cancellation-p50-us": 384.57,
+        "cancellation-p95-us": 488.156,
+        "cancellation-p99-us": 488.156,
+        "elapsed_ns": 79009391,
+        "event-jitter-p50-us": 8.324,
+        "event-jitter-p95-us": 45.046,
+        "event-jitter-p99-us": 67.951,
+        "event-rtt-p50-us": 114.834,
+        "event-rtt-p95-us": 175.415,
+        "event-rtt-p99-us": 204.459,
+        "latency-p50-us": 8193.965,
+        "latency-p95-us": 11932.725,
+        "latency-p99-us": 11932.725,
+        "ns/op": 9876173.875,
+        "process-cpu-ns/op": 11076250,
+        "sampled-heap-growth-B": 15993048,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1996198,
+        "allocs/op": 9082.125,
+        "cancellation-p50-us": 323.993,
+        "cancellation-p95-us": 345.188,
+        "cancellation-p99-us": 345.188,
+        "elapsed_ns": 73241987,
+        "event-jitter-p50-us": 9.149,
+        "event-jitter-p95-us": 65.026,
+        "event-jitter-p99-us": 97.674,
+        "event-rtt-p50-us": 110.418,
+        "event-rtt-p95-us": 173.95,
+        "event-rtt-p99-us": 209.059,
+        "latency-p50-us": 7987.72,
+        "latency-p95-us": 10553.922,
+        "latency-p99-us": 10553.922,
+        "ns/op": 9155248.375,
+        "process-cpu-ns/op": 10632875,
+        "sampled-heap-growth-B": 15969584,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c1/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1994995,
+        "allocs/op": 9080.875,
+        "cancellation-p50-us": 325.87,
+        "cancellation-p95-us": 411.43,
+        "cancellation-p99-us": 411.43,
+        "elapsed_ns": 87544894,
+        "event-jitter-p50-us": 10.061,
+        "event-jitter-p95-us": 63.472,
+        "event-jitter-p99-us": 102.161,
+        "event-rtt-p50-us": 141.564,
+        "event-rtt-p95-us": 188.814,
+        "event-rtt-p99-us": 220.136,
+        "latency-p50-us": 10678.687,
+        "latency-p95-us": 11603.017,
+        "latency-p99-us": 11603.017,
+        "ns/op": 10943111.75,
+        "process-cpu-ns/op": 12910500,
+        "sampled-heap-growth-B": 15959960,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/relay",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1845158,
+        "allocs/op": 8398.375,
+        "cancellation-p50-us": 150.245,
+        "cancellation-p95-us": 288.183,
+        "cancellation-p99-us": 288.183,
+        "elapsed_ns": 25279213,
+        "event-jitter-p50-us": 38.748,
+        "event-jitter-p95-us": 159.648,
+        "event-jitter-p99-us": 543.043,
+        "event-rtt-p50-us": 150.117,
+        "event-rtt-p95-us": 270.167,
+        "event-rtt-p99-us": 323.501,
+        "latency-p50-us": 12010.921,
+        "latency-p95-us": 12814.123,
+        "latency-p99-us": 12814.123,
+        "ns/op": 3159901.625,
+        "process-cpu-ns/op": 11150875,
+        "sampled-heap-growth-B": 14761264,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/relay",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1839446,
+        "allocs/op": 8394,
+        "cancellation-p50-us": 133.687,
+        "cancellation-p95-us": 156.205,
+        "cancellation-p99-us": 156.205,
+        "elapsed_ns": 22661617,
+        "event-jitter-p50-us": 37.31,
+        "event-jitter-p95-us": 132.799,
+        "event-jitter-p99-us": 165.501,
+        "event-rtt-p50-us": 146.168,
+        "event-rtt-p95-us": 259.02,
+        "event-rtt-p99-us": 298.723,
+        "latency-p50-us": 10924.484,
+        "latency-p95-us": 11282.282,
+        "latency-p99-us": 11282.282,
+        "ns/op": 2832702.125,
+        "process-cpu-ns/op": 10529750,
+        "sampled-heap-growth-B": 14715568,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/relay",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1838159,
+        "allocs/op": 8390.875,
+        "cancellation-p50-us": 196.765,
+        "cancellation-p95-us": 222.175,
+        "cancellation-p99-us": 222.175,
+        "elapsed_ns": 25802576,
+        "event-jitter-p50-us": 41.722,
+        "event-jitter-p95-us": 188.928,
+        "event-jitter-p99-us": 376.908,
+        "event-rtt-p50-us": 161.084,
+        "event-rtt-p95-us": 320.844,
+        "event-rtt-p99-us": 416.216,
+        "latency-p50-us": 12086.723,
+        "latency-p95-us": 13349.94,
+        "latency-p99-us": 13349.94,
+        "ns/op": 3225322,
+        "process-cpu-ns/op": 11627875,
+        "sampled-heap-growth-B": 14705272,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/gateway",
+      "repetition": 0,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 2001829,
+        "allocs/op": 9106,
+        "cancellation-p50-us": 264.172,
+        "cancellation-p95-us": 440.77,
+        "cancellation-p99-us": 440.77,
+        "elapsed_ns": 29615519,
+        "event-jitter-p50-us": 50.248,
+        "event-jitter-p95-us": 156.544,
+        "event-jitter-p99-us": 212.266,
+        "event-rtt-p50-us": 186.918,
+        "event-rtt-p95-us": 307.57,
+        "event-rtt-p99-us": 359.694,
+        "latency-p50-us": 13889.142,
+        "latency-p95-us": 14925.692,
+        "latency-p99-us": 14925.692,
+        "ns/op": 3701939.875,
+        "process-cpu-ns/op": 13639375,
+        "sampled-heap-growth-B": 16014632,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/gateway",
+      "repetition": 1,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1997737,
+        "allocs/op": 9086,
+        "cancellation-p50-us": 269.765,
+        "cancellation-p95-us": 465.514,
+        "cancellation-p99-us": 465.514,
+        "elapsed_ns": 28478905,
+        "event-jitter-p50-us": 44.443,
+        "event-jitter-p95-us": 185.504,
+        "event-jitter-p99-us": 257.153,
+        "event-rtt-p50-us": 169.17,
+        "event-rtt-p95-us": 318.627,
+        "event-rtt-p99-us": 369.671,
+        "latency-p50-us": 13647.889,
+        "latency-p95-us": 13750.123,
+        "latency-p99-us": 13750.123,
+        "ns/op": 3559863.125,
+        "process-cpu-ns/op": 12934000,
+        "sampled-heap-growth-B": 15981896,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    },
+    {
+      "name": "duplex_jitter_64/c4/gateway",
+      "repetition": 2,
+      "samples": 8,
+      "succeeded": 8,
+      "rejected": 0,
+      "incomplete": 0,
+      "ambiguous": 0,
+      "dispatches": 8,
+      "accepted": 0,
+      "partial": 0,
+      "retrieved": 0,
+      "content": 0,
+      "events": 512,
+      "rtt_observations": 512,
+      "jitter_observations": 504,
+      "uploaded_bytes": 0,
+      "downloaded_bytes": 0,
+      "metrics": {
+        "B/op": 1997349,
+        "allocs/op": 9097.875,
+        "cancellation-p50-us": 245.173,
+        "cancellation-p95-us": 512.632,
+        "cancellation-p99-us": 512.632,
+        "elapsed_ns": 26952162,
+        "event-jitter-p50-us": 41.022,
+        "event-jitter-p95-us": 149.186,
+        "event-jitter-p99-us": 192.628,
+        "event-rtt-p50-us": 161.504,
+        "event-rtt-p95-us": 283.452,
+        "event-rtt-p99-us": 324.165,
+        "latency-p50-us": 12687.369,
+        "latency-p95-us": 12785.399,
+        "latency-p99-us": 12785.399,
+        "ns/op": 3369020.25,
+        "process-cpu-ns/op": 12328750,
+        "sampled-heap-growth-B": 15978792,
+        "sampled-spool-peak-B": 0,
+        "spool-final-B": 0
+      }
+    }
+  ],
+  "negatives": [
+    {
+      "name": "oversize_upload",
+      "path": "gateway",
+      "admitted": 0,
+      "rejected": 1,
+      "provider_dispatches": 0,
+      "spool_final_bytes": 0
+    },
+    {
+      "name": "cancelled_upload",
+      "path": "gateway",
+      "admitted": 0,
+      "rejected": 1,
+      "provider_dispatches": 0,
+      "spool_final_bytes": 0
+    },
+    {
+      "name": "parser_contention",
+      "path": "gateway",
+      "admitted": 0,
+      "rejected": 1,
+      "provider_dispatches": 0,
+      "spool_final_bytes": 0
+    }
+  ],
+  "summary": {
+    "media_cycle_4m/c1/relay": {
+      "B/op": {
+        "median": 326289,
+        "maximum": 329419,
+        "minimum": 321591
+      },
+      "allocs/op": {
+        "median": 908.625,
+        "maximum": 918.875,
+        "minimum": 905.125
+      },
+      "elapsed_ns": {
+        "median": 197356921,
+        "maximum": 208465476,
+        "minimum": 189930710
+      },
+      "first-byte-p50-us": {
+        "median": 360.68,
+        "maximum": 442.149,
+        "minimum": 360.555
+      },
+      "first-byte-p95-us": {
+        "median": 455.521,
+        "maximum": 465.476,
+        "minimum": 434.811
+      },
+      "first-byte-p99-us": {
+        "median": 455.521,
+        "maximum": 465.476,
+        "minimum": 434.811
+      },
+      "inter-read-gap-p50-us": {
+        "median": 19.884,
+        "maximum": 19.905,
+        "minimum": 19.856
+      },
+      "inter-read-gap-p95-us": {
+        "median": 37.141,
+        "maximum": 37.498,
+        "minimum": 34.692
+      },
+      "inter-read-gap-p99-us": {
+        "median": 73.451,
+        "maximum": 82.866,
+        "minimum": 69.104
+      },
+      "latency-p50-us": {
+        "median": 24350.385,
+        "maximum": 25850.096,
+        "minimum": 23500.977
+      },
+      "latency-p95-us": {
+        "median": 27290.368,
+        "maximum": 28304.282,
+        "minimum": 26100.862
+      },
+      "latency-p99-us": {
+        "median": 27290.368,
+        "maximum": 28304.282,
+        "minimum": 26100.862
+      },
+      "ns/op": {
+        "median": 24669615.125,
+        "maximum": 26058184.5,
+        "minimum": 23741338.75
+      },
+      "process-cpu-ns/op": {
+        "median": 34389000,
+        "maximum": 39018125,
+        "minimum": 33454125
+      },
+      "sampled-heap-growth-B": {
+        "median": 2610312,
+        "maximum": 2635352,
+        "minimum": 2572728
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_cycle_4m/c1/gateway": {
+      "B/op": {
+        "median": 970120,
+        "maximum": 976148,
+        "minimum": 967633
+      },
+      "allocs/op": {
+        "median": 4119.625,
+        "maximum": 4135.125,
+        "minimum": 4118
+      },
+      "elapsed_ns": {
+        "median": 675462744,
+        "maximum": 696794468,
+        "minimum": 629514528
+      },
+      "first-byte-p50-us": {
+        "median": 7708.315,
+        "maximum": 7841.848,
+        "minimum": 6686.011
+      },
+      "first-byte-p95-us": {
+        "median": 8647.352,
+        "maximum": 9601.007,
+        "minimum": 8040.274
+      },
+      "first-byte-p99-us": {
+        "median": 8647.352,
+        "maximum": 9601.007,
+        "minimum": 8040.274
+      },
+      "inter-read-gap-p50-us": {
+        "median": 31.594,
+        "maximum": 33.519,
+        "minimum": 20.338
+      },
+      "inter-read-gap-p95-us": {
+        "median": 46.764,
+        "maximum": 50.404,
+        "minimum": 41.316
+      },
+      "inter-read-gap-p99-us": {
+        "median": 97.316,
+        "maximum": 98.609,
+        "minimum": 95.582
+      },
+      "latency-p50-us": {
+        "median": 82690.121,
+        "maximum": 88237.142,
+        "minimum": 74707.939
+      },
+      "latency-p95-us": {
+        "median": 94265.511,
+        "maximum": 94894.804,
+        "minimum": 88676.836
+      },
+      "latency-p99-us": {
+        "median": 94265.511,
+        "maximum": 94894.804,
+        "minimum": 88676.836
+      },
+      "ns/op": {
+        "median": 84432843,
+        "maximum": 87099308.5,
+        "minimum": 78689316
+      },
+      "process-cpu-ns/op": {
+        "median": 98710250,
+        "maximum": 104971375,
+        "minimum": 89205000
+      },
+      "sampled-heap-growth-B": {
+        "median": 7760960,
+        "maximum": 7809184,
+        "minimum": 7741064
+      },
+      "sampled-spool-peak-B": {
+        "median": 4194304,
+        "maximum": 4194304,
+        "minimum": 4194304
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_cycle_4m/c2/relay": {
+      "B/op": {
+        "median": 321205,
+        "maximum": 327916,
+        "minimum": 316151
+      },
+      "allocs/op": {
+        "median": 900.875,
+        "maximum": 919.5,
+        "minimum": 900.25
+      },
+      "elapsed_ns": {
+        "median": 127262472,
+        "maximum": 132997531,
+        "minimum": 126582183
+      },
+      "first-byte-p50-us": {
+        "median": 494.293,
+        "maximum": 552.45,
+        "minimum": 451.379
+      },
+      "first-byte-p95-us": {
+        "median": 841.343,
+        "maximum": 904.333,
+        "minimum": 791.467
+      },
+      "first-byte-p99-us": {
+        "median": 841.343,
+        "maximum": 904.333,
+        "minimum": 791.467
+      },
+      "inter-read-gap-p50-us": {
+        "median": 26.627,
+        "maximum": 29.997,
+        "minimum": 23.399
+      },
+      "inter-read-gap-p95-us": {
+        "median": 41.699,
+        "maximum": 48.414,
+        "minimum": 39.383
+      },
+      "inter-read-gap-p99-us": {
+        "median": 103.155,
+        "maximum": 107.991,
+        "minimum": 91.714
+      },
+      "latency-p50-us": {
+        "median": 31067.04,
+        "maximum": 32974.857,
+        "minimum": 29984.008
+      },
+      "latency-p95-us": {
+        "median": 33721.098,
+        "maximum": 34926.855,
+        "minimum": 32577.75
+      },
+      "latency-p99-us": {
+        "median": 33721.098,
+        "maximum": 34926.855,
+        "minimum": 32577.75
+      },
+      "ns/op": {
+        "median": 15907809,
+        "maximum": 16624691.375,
+        "minimum": 15822772.875
+      },
+      "process-cpu-ns/op": {
+        "median": 40090625,
+        "maximum": 40453000,
+        "minimum": 37674500
+      },
+      "sampled-heap-growth-B": {
+        "median": 2569640,
+        "maximum": 2623328,
+        "minimum": 2529208
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_cycle_4m/c2/gateway": {
+      "B/op": {
+        "median": 969918,
+        "maximum": 993957,
+        "minimum": 967242
+      },
+      "allocs/op": {
+        "median": 4115,
+        "maximum": 4201.625,
+        "minimum": 4114.375
+      },
+      "elapsed_ns": {
+        "median": 361690133,
+        "maximum": 386960953,
+        "minimum": 300101264
+      },
+      "first-byte-p50-us": {
+        "median": 7872.019,
+        "maximum": 8617.165,
+        "minimum": 6527.663
+      },
+      "first-byte-p95-us": {
+        "median": 8876.645,
+        "maximum": 9271.366,
+        "minimum": 7648.709
+      },
+      "first-byte-p99-us": {
+        "median": 8876.645,
+        "maximum": 9271.366,
+        "minimum": 7648.709
+      },
+      "inter-read-gap-p50-us": {
+        "median": 27.514,
+        "maximum": 33.202,
+        "minimum": 19.907
+      },
+      "inter-read-gap-p95-us": {
+        "median": 46.846,
+        "maximum": 48.939,
+        "minimum": 38.732
+      },
+      "inter-read-gap-p99-us": {
+        "median": 96.451,
+        "maximum": 110.945,
+        "minimum": 81.903
+      },
+      "latency-p50-us": {
+        "median": 84532.698,
+        "maximum": 95401.399,
+        "minimum": 70877.701
+      },
+      "latency-p95-us": {
+        "median": 90300.61,
+        "maximum": 103381.051,
+        "minimum": 85446.793
+      },
+      "latency-p99-us": {
+        "median": 90300.61,
+        "maximum": 103381.051,
+        "minimum": 85446.793
+      },
+      "ns/op": {
+        "median": 45211266.625,
+        "maximum": 48370119.125,
+        "minimum": 37512658
+      },
+      "process-cpu-ns/op": {
+        "median": 87087625,
+        "maximum": 95628875,
+        "minimum": 73080250
+      },
+      "sampled-heap-growth-B": {
+        "median": 7759344,
+        "maximum": 7951656,
+        "minimum": 7737936
+      },
+      "sampled-spool-peak-B": {
+        "median": 8388608,
+        "maximum": 8388608,
+        "minimum": 8388608
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_slow_content_1m/c1/relay": {
+      "B/op": {
+        "median": 59055,
+        "maximum": 59423,
+        "minimum": 59055
+      },
+      "allocs/op": {
+        "median": 188.125,
+        "maximum": 189,
+        "minimum": 188.125
+      },
+      "elapsed_ns": {
+        "median": 1241784006,
+        "maximum": 1260975148,
+        "minimum": 1234684544
+      },
+      "first-byte-p50-us": {
+        "median": 1017.561,
+        "maximum": 1086.039,
+        "minimum": 976.934
+      },
+      "first-byte-p95-us": {
+        "median": 1442.773,
+        "maximum": 1506.443,
+        "minimum": 1289.037
+      },
+      "first-byte-p99-us": {
+        "median": 1442.773,
+        "maximum": 1506.443,
+        "minimum": 1289.037
+      },
+      "inter-read-gap-p50-us": {
+        "median": 1159.621,
+        "maximum": 1176.211,
+        "minimum": 1157.551
+      },
+      "inter-read-gap-p95-us": {
+        "median": 1284.438,
+        "maximum": 1313.366,
+        "minimum": 1283.929
+      },
+      "inter-read-gap-p99-us": {
+        "median": 1384.714,
+        "maximum": 1423.183,
+        "minimum": 1321.429
+      },
+      "latency-p50-us": {
+        "median": 151817.192,
+        "maximum": 154491.63,
+        "minimum": 150855.459
+      },
+      "latency-p95-us": {
+        "median": 152979.533,
+        "maximum": 156044.229,
+        "minimum": 152724.646
+      },
+      "latency-p99-us": {
+        "median": 152979.533,
+        "maximum": 156044.229,
+        "minimum": 152724.646
+      },
+      "ns/op": {
+        "median": 155223000.75,
+        "maximum": 157621893.5,
+        "minimum": 154335568
+      },
+      "process-cpu-ns/op": {
+        "median": 31015500,
+        "maximum": 35159375,
+        "minimum": 27511375
+      },
+      "sampled-heap-growth-B": {
+        "median": 472440,
+        "maximum": 475384,
+        "minimum": 472440
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_slow_content_1m/c1/gateway": {
+      "B/op": {
+        "median": 170084,
+        "maximum": 173155,
+        "minimum": 167022
+      },
+      "allocs/op": {
+        "median": 680.125,
+        "maximum": 683.5,
+        "minimum": 679.125
+      },
+      "elapsed_ns": {
+        "median": 1336448895,
+        "maximum": 1347864568,
+        "minimum": 1333577537
+      },
+      "first-byte-p50-us": {
+        "median": 9001.944,
+        "maximum": 9326.118,
+        "minimum": 7700.972
+      },
+      "first-byte-p95-us": {
+        "median": 10525.416,
+        "maximum": 10965.993,
+        "minimum": 9954.19
+      },
+      "first-byte-p99-us": {
+        "median": 10525.416,
+        "maximum": 10965.993,
+        "minimum": 9954.19
+      },
+      "inter-read-gap-p50-us": {
+        "median": 1174.026,
+        "maximum": 1174.928,
+        "minimum": 1169.194
+      },
+      "inter-read-gap-p95-us": {
+        "median": 1291.044,
+        "maximum": 1298.727,
+        "minimum": 1291.025
+      },
+      "inter-read-gap-p99-us": {
+        "median": 1356.166,
+        "maximum": 1400.984,
+        "minimum": 1343.235
+      },
+      "latency-p50-us": {
+        "median": 162569.12,
+        "maximum": 162936.145,
+        "minimum": 161893.452
+      },
+      "latency-p95-us": {
+        "median": 164742.457,
+        "maximum": 167292.414,
+        "minimum": 163471.99
+      },
+      "latency-p99-us": {
+        "median": 164742.457,
+        "maximum": 167292.414,
+        "minimum": 163471.99
+      },
+      "ns/op": {
+        "median": 167056111.875,
+        "maximum": 168483071,
+        "minimum": 166697192.125
+      },
+      "process-cpu-ns/op": {
+        "median": 41841000,
+        "maximum": 41864000,
+        "minimum": 41298125
+      },
+      "sampled-heap-growth-B": {
+        "median": 1360672,
+        "maximum": 1385240,
+        "minimum": 1336176
+      },
+      "sampled-spool-peak-B": {
+        "median": 1048576,
+        "maximum": 1048576,
+        "minimum": 1048576
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_slow_content_1m/c2/relay": {
+      "B/op": {
+        "median": 59403,
+        "maximum": 59707,
+        "minimum": 59141
+      },
+      "allocs/op": {
+        "median": 190.875,
+        "maximum": 191,
+        "minimum": 190.75
+      },
+      "elapsed_ns": {
+        "median": 628840789,
+        "maximum": 629756564,
+        "minimum": 625168813
+      },
+      "first-byte-p50-us": {
+        "median": 1293.75,
+        "maximum": 1333.873,
+        "minimum": 1168.265
+      },
+      "first-byte-p95-us": {
+        "median": 1499.096,
+        "maximum": 2036.249,
+        "minimum": 1483.191
+      },
+      "first-byte-p99-us": {
+        "median": 1499.096,
+        "maximum": 2036.249,
+        "minimum": 1483.191
+      },
+      "inter-read-gap-p50-us": {
+        "median": 1180.384,
+        "maximum": 1180.88,
+        "minimum": 1170.975
+      },
+      "inter-read-gap-p95-us": {
+        "median": 1350.295,
+        "maximum": 1358.781,
+        "minimum": 1313.118
+      },
+      "inter-read-gap-p99-us": {
+        "median": 1495.134,
+        "maximum": 1559.863,
+        "minimum": 1454.392
+      },
+      "latency-p50-us": {
+        "median": 151808.027,
+        "maximum": 153159.772,
+        "minimum": 151088.334
+      },
+      "latency-p95-us": {
+        "median": 154538.736,
+        "maximum": 154540.004,
+        "minimum": 152080.719
+      },
+      "latency-p99-us": {
+        "median": 154538.736,
+        "maximum": 154540.004,
+        "minimum": 152080.719
+      },
+      "ns/op": {
+        "median": 78605098.625,
+        "maximum": 78719570.5,
+        "minimum": 78146101.625
+      },
+      "process-cpu-ns/op": {
+        "median": 21238625,
+        "maximum": 21768375,
+        "minimum": 20214000
+      },
+      "sampled-heap-growth-B": {
+        "median": 475224,
+        "maximum": 477656,
+        "minimum": 473128
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "media_slow_content_1m/c2/gateway": {
+      "B/op": {
+        "median": 165469,
+        "maximum": 170726,
+        "minimum": 165020
+      },
+      "allocs/op": {
+        "median": 683.875,
+        "maximum": 685.25,
+        "minimum": 681.125
+      },
+      "elapsed_ns": {
+        "median": 667052294,
+        "maximum": 669745013,
+        "minimum": 664707951
+      },
+      "first-byte-p50-us": {
+        "median": 9475.171,
+        "maximum": 9590.71,
+        "minimum": 8820.182
+      },
+      "first-byte-p95-us": {
+        "median": 10079.413,
+        "maximum": 10454.903,
+        "minimum": 9854.701
+      },
+      "first-byte-p99-us": {
+        "median": 10079.413,
+        "maximum": 10454.903,
+        "minimum": 9854.701
+      },
+      "inter-read-gap-p50-us": {
+        "median": 1175.752,
+        "maximum": 1183.599,
+        "minimum": 1170.854
+      },
+      "inter-read-gap-p95-us": {
+        "median": 1349.664,
+        "maximum": 1356.008,
+        "minimum": 1329.769
+      },
+      "inter-read-gap-p99-us": {
+        "median": 1461.561,
+        "maximum": 1484.484,
+        "minimum": 1427.349
+      },
+      "latency-p50-us": {
+        "median": 160499.053,
+        "maximum": 160502.343,
+        "minimum": 160199.258
+      },
+      "latency-p95-us": {
+        "median": 165022.728,
+        "maximum": 165407.62,
+        "minimum": 163776.65
+      },
+      "latency-p99-us": {
+        "median": 165022.728,
+        "maximum": 165407.62,
+        "minimum": 163776.65
+      },
+      "ns/op": {
+        "median": 83381536.75,
+        "maximum": 83718126.625,
+        "minimum": 83088493.875
+      },
+      "process-cpu-ns/op": {
+        "median": 30018375,
+        "maximum": 30450625,
+        "minimum": 27008500
+      },
+      "sampled-heap-growth-B": {
+        "median": 1323752,
+        "maximum": 1365808,
+        "minimum": 1320160
+      },
+      "sampled-spool-peak-B": {
+        "median": 1773462,
+        "maximum": 2035606,
+        "minimum": 1707926
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "duplex_jitter_64/c1/relay": {
+      "B/op": {
+        "median": 1840830,
+        "maximum": 1840895,
+        "minimum": 1838337
+      },
+      "allocs/op": {
+        "median": 8393.5,
+        "maximum": 8393.625,
+        "minimum": 8390.625
+      },
+      "cancellation-p50-us": {
+        "median": 327.355,
+        "maximum": 357.62,
+        "minimum": 287.1
+      },
+      "cancellation-p95-us": {
+        "median": 396.642,
+        "maximum": 417.873,
+        "minimum": 329.519
+      },
+      "cancellation-p99-us": {
+        "median": 396.642,
+        "maximum": 417.873,
+        "minimum": 329.519
+      },
+      "elapsed_ns": {
+        "median": 105216998,
+        "maximum": 105271773,
+        "minimum": 89601776
+      },
+      "event-jitter-p50-us": {
+        "median": 13.371,
+        "maximum": 16.21,
+        "minimum": 12.928
+      },
+      "event-jitter-p95-us": {
+        "median": 89.141,
+        "maximum": 118.88,
+        "minimum": 67.376
+      },
+      "event-jitter-p99-us": {
+        "median": 136.592,
+        "maximum": 338.569,
+        "minimum": 111.983
+      },
+      "event-rtt-p50-us": {
+        "median": 173.114,
+        "maximum": 173.968,
+        "minimum": 134.949
+      },
+      "event-rtt-p95-us": {
+        "median": 238.742,
+        "maximum": 263.349,
+        "minimum": 228.5
+      },
+      "event-rtt-p99-us": {
+        "median": 301.193,
+        "maximum": 442.203,
+        "minimum": 258.58
+      },
+      "latency-p50-us": {
+        "median": 11778.98,
+        "maximum": 12779.629,
+        "minimum": 9340.354
+      },
+      "latency-p95-us": {
+        "median": 13829.502,
+        "maximum": 14226.651,
+        "minimum": 13180.835
+      },
+      "latency-p99-us": {
+        "median": 13829.502,
+        "maximum": 14226.651,
+        "minimum": 13180.835
+      },
+      "ns/op": {
+        "median": 13152124.75,
+        "maximum": 13158971.625,
+        "minimum": 11200222
+      },
+      "process-cpu-ns/op": {
+        "median": 14299250,
+        "maximum": 14374000,
+        "minimum": 11681125
+      },
+      "sampled-heap-growth-B": {
+        "median": 14726640,
+        "maximum": 14727160,
+        "minimum": 14706696
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "duplex_jitter_64/c1/gateway": {
+      "B/op": {
+        "median": 1996198,
+        "maximum": 1999131,
+        "minimum": 1994995
+      },
+      "allocs/op": {
+        "median": 9082.125,
+        "maximum": 9095.125,
+        "minimum": 9080.875
+      },
+      "cancellation-p50-us": {
+        "median": 325.87,
+        "maximum": 384.57,
+        "minimum": 323.993
+      },
+      "cancellation-p95-us": {
+        "median": 411.43,
+        "maximum": 488.156,
+        "minimum": 345.188
+      },
+      "cancellation-p99-us": {
+        "median": 411.43,
+        "maximum": 488.156,
+        "minimum": 345.188
+      },
+      "elapsed_ns": {
+        "median": 79009391,
+        "maximum": 87544894,
+        "minimum": 73241987
+      },
+      "event-jitter-p50-us": {
+        "median": 9.149,
+        "maximum": 10.061,
+        "minimum": 8.324
+      },
+      "event-jitter-p95-us": {
+        "median": 63.472,
+        "maximum": 65.026,
+        "minimum": 45.046
+      },
+      "event-jitter-p99-us": {
+        "median": 97.674,
+        "maximum": 102.161,
+        "minimum": 67.951
+      },
+      "event-rtt-p50-us": {
+        "median": 114.834,
+        "maximum": 141.564,
+        "minimum": 110.418
+      },
+      "event-rtt-p95-us": {
+        "median": 175.415,
+        "maximum": 188.814,
+        "minimum": 173.95
+      },
+      "event-rtt-p99-us": {
+        "median": 209.059,
+        "maximum": 220.136,
+        "minimum": 204.459
+      },
+      "latency-p50-us": {
+        "median": 8193.965,
+        "maximum": 10678.687,
+        "minimum": 7987.72
+      },
+      "latency-p95-us": {
+        "median": 11603.017,
+        "maximum": 11932.725,
+        "minimum": 10553.922
+      },
+      "latency-p99-us": {
+        "median": 11603.017,
+        "maximum": 11932.725,
+        "minimum": 10553.922
+      },
+      "ns/op": {
+        "median": 9876173.875,
+        "maximum": 10943111.75,
+        "minimum": 9155248.375
+      },
+      "process-cpu-ns/op": {
+        "median": 11076250,
+        "maximum": 12910500,
+        "minimum": 10632875
+      },
+      "sampled-heap-growth-B": {
+        "median": 15969584,
+        "maximum": 15993048,
+        "minimum": 15959960
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "duplex_jitter_64/c4/relay": {
+      "B/op": {
+        "median": 1839446,
+        "maximum": 1845158,
+        "minimum": 1838159
+      },
+      "allocs/op": {
+        "median": 8394,
+        "maximum": 8398.375,
+        "minimum": 8390.875
+      },
+      "cancellation-p50-us": {
+        "median": 150.245,
+        "maximum": 196.765,
+        "minimum": 133.687
+      },
+      "cancellation-p95-us": {
+        "median": 222.175,
+        "maximum": 288.183,
+        "minimum": 156.205
+      },
+      "cancellation-p99-us": {
+        "median": 222.175,
+        "maximum": 288.183,
+        "minimum": 156.205
+      },
+      "elapsed_ns": {
+        "median": 25279213,
+        "maximum": 25802576,
+        "minimum": 22661617
+      },
+      "event-jitter-p50-us": {
+        "median": 38.748,
+        "maximum": 41.722,
+        "minimum": 37.31
+      },
+      "event-jitter-p95-us": {
+        "median": 159.648,
+        "maximum": 188.928,
+        "minimum": 132.799
+      },
+      "event-jitter-p99-us": {
+        "median": 376.908,
+        "maximum": 543.043,
+        "minimum": 165.501
+      },
+      "event-rtt-p50-us": {
+        "median": 150.117,
+        "maximum": 161.084,
+        "minimum": 146.168
+      },
+      "event-rtt-p95-us": {
+        "median": 270.167,
+        "maximum": 320.844,
+        "minimum": 259.02
+      },
+      "event-rtt-p99-us": {
+        "median": 323.501,
+        "maximum": 416.216,
+        "minimum": 298.723
+      },
+      "latency-p50-us": {
+        "median": 12010.921,
+        "maximum": 12086.723,
+        "minimum": 10924.484
+      },
+      "latency-p95-us": {
+        "median": 12814.123,
+        "maximum": 13349.94,
+        "minimum": 11282.282
+      },
+      "latency-p99-us": {
+        "median": 12814.123,
+        "maximum": 13349.94,
+        "minimum": 11282.282
+      },
+      "ns/op": {
+        "median": 3159901.625,
+        "maximum": 3225322,
+        "minimum": 2832702.125
+      },
+      "process-cpu-ns/op": {
+        "median": 11150875,
+        "maximum": 11627875,
+        "minimum": 10529750
+      },
+      "sampled-heap-growth-B": {
+        "median": 14715568,
+        "maximum": 14761264,
+        "minimum": 14705272
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    },
+    "duplex_jitter_64/c4/gateway": {
+      "B/op": {
+        "median": 1997737,
+        "maximum": 2001829,
+        "minimum": 1997349
+      },
+      "allocs/op": {
+        "median": 9097.875,
+        "maximum": 9106,
+        "minimum": 9086
+      },
+      "cancellation-p50-us": {
+        "median": 264.172,
+        "maximum": 269.765,
+        "minimum": 245.173
+      },
+      "cancellation-p95-us": {
+        "median": 465.514,
+        "maximum": 512.632,
+        "minimum": 440.77
+      },
+      "cancellation-p99-us": {
+        "median": 465.514,
+        "maximum": 512.632,
+        "minimum": 440.77
+      },
+      "elapsed_ns": {
+        "median": 28478905,
+        "maximum": 29615519,
+        "minimum": 26952162
+      },
+      "event-jitter-p50-us": {
+        "median": 44.443,
+        "maximum": 50.248,
+        "minimum": 41.022
+      },
+      "event-jitter-p95-us": {
+        "median": 156.544,
+        "maximum": 185.504,
+        "minimum": 149.186
+      },
+      "event-jitter-p99-us": {
+        "median": 212.266,
+        "maximum": 257.153,
+        "minimum": 192.628
+      },
+      "event-rtt-p50-us": {
+        "median": 169.17,
+        "maximum": 186.918,
+        "minimum": 161.504
+      },
+      "event-rtt-p95-us": {
+        "median": 307.57,
+        "maximum": 318.627,
+        "minimum": 283.452
+      },
+      "event-rtt-p99-us": {
+        "median": 359.694,
+        "maximum": 369.671,
+        "minimum": 324.165
+      },
+      "latency-p50-us": {
+        "median": 13647.889,
+        "maximum": 13889.142,
+        "minimum": 12687.369
+      },
+      "latency-p95-us": {
+        "median": 13750.123,
+        "maximum": 14925.692,
+        "minimum": 12785.399
+      },
+      "latency-p99-us": {
+        "median": 13750.123,
+        "maximum": 14925.692,
+        "minimum": 12785.399
+      },
+      "ns/op": {
+        "median": 3559863.125,
+        "maximum": 3701939.875,
+        "minimum": 3369020.25
+      },
+      "process-cpu-ns/op": {
+        "median": 12934000,
+        "maximum": 13639375,
+        "minimum": 12328750
+      },
+      "sampled-heap-growth-B": {
+        "median": 15981896,
+        "maximum": 16014632,
+        "minimum": 15978792
+      },
+      "sampled-spool-peak-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      },
+      "spool-final-B": {
+        "median": 0,
+        "maximum": 0,
+        "minimum": 0
+      }
+    }
+  },
+  "unmeasured": [
+    "live-model quality",
+    "WAN/TLS inference hops",
+    "isolated gateway RSS",
+    "partial batch item errors",
+    "encrypted translated-tool state barrier"
+  ],
+  "raw_output": "=== RUN   TestLifecycleStressV2Performance\n    lifecycle_stress_v2_performance_test.go:149: LIFECYCLE_STRESS_V2_SETUP {\"postgresql_server_version\":\"180006\",\"postgresql_tls\":false}\n    lifecycle_stress_v2_performance_test.go:161: LIFECYCLE_STRESS_V2_PROFILES {\"video\":{\"id\":\"openai-responses\",\"revision\":\"1\"},\"realtime\":{\"id\":\"azure-v1-responses\",\"revision\":\"1\"}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":326289,\"allocs/op\":918.875,\"elapsed_ns\":208465476,\"first-byte-p50-us\":442.149,\"first-byte-p95-us\":465.476,\"first-byte-p99-us\":465.476,\"inter-read-gap-p50-us\":19.905,\"inter-read-gap-p95-us\":37.141,\"inter-read-gap-p99-us\":82.866,\"latency-p50-us\":25850.096,\"latency-p95-us\":28304.282,\"latency-p99-us\":28304.282,\"ns/op\":26058184.5,\"process-cpu-ns/op\":39018125,\"sampled-heap-growth-B\":2610312,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":321591,\"allocs/op\":908.625,\"elapsed_ns\":197356921,\"first-byte-p50-us\":360.555,\"first-byte-p95-us\":434.811,\"first-byte-p99-us\":434.811,\"inter-read-gap-p50-us\":19.884,\"inter-read-gap-p95-us\":34.692,\"inter-read-gap-p99-us\":73.451,\"latency-p50-us\":24350.385,\"latency-p95-us\":27290.368,\"latency-p99-us\":27290.368,\"ns/op\":24669615.125,\"process-cpu-ns/op\":34389000,\"sampled-heap-growth-B\":2572728,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":329419,\"allocs/op\":905.125,\"elapsed_ns\":189930710,\"first-byte-p50-us\":360.68,\"first-byte-p95-us\":455.521,\"first-byte-p99-us\":455.521,\"inter-read-gap-p50-us\":19.856,\"inter-read-gap-p95-us\":37.498,\"inter-read-gap-p99-us\":69.104,\"latency-p50-us\":23500.977,\"latency-p95-us\":26100.862,\"latency-p99-us\":26100.862,\"ns/op\":23741338.75,\"process-cpu-ns/op\":33454125,\"sampled-heap-growth-B\":2635352,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":970120,\"allocs/op\":4135.125,\"elapsed_ns\":629514528,\"first-byte-p50-us\":6686.011,\"first-byte-p95-us\":8040.274,\"first-byte-p99-us\":8040.274,\"inter-read-gap-p50-us\":20.338,\"inter-read-gap-p95-us\":41.316,\"inter-read-gap-p99-us\":95.582,\"latency-p50-us\":74707.939,\"latency-p95-us\":88676.836,\"latency-p99-us\":88676.836,\"ns/op\":78689316,\"process-cpu-ns/op\":89205000,\"sampled-heap-growth-B\":7760960,\"sampled-spool-peak-B\":4194304,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":967633,\"allocs/op\":4119.625,\"elapsed_ns\":675462744,\"first-byte-p50-us\":7708.315,\"first-byte-p95-us\":8647.352,\"first-byte-p99-us\":8647.352,\"inter-read-gap-p50-us\":31.594,\"inter-read-gap-p95-us\":46.764,\"inter-read-gap-p99-us\":97.316,\"latency-p50-us\":82690.121,\"latency-p95-us\":94894.804,\"latency-p99-us\":94894.804,\"ns/op\":84432843,\"process-cpu-ns/op\":98710250,\"sampled-heap-growth-B\":7741064,\"sampled-spool-peak-B\":4194304,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c1/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":976148,\"allocs/op\":4118,\"elapsed_ns\":696794468,\"first-byte-p50-us\":7841.848,\"first-byte-p95-us\":9601.007,\"first-byte-p99-us\":9601.007,\"inter-read-gap-p50-us\":33.519,\"inter-read-gap-p95-us\":50.404,\"inter-read-gap-p99-us\":98.609,\"latency-p50-us\":88237.142,\"latency-p95-us\":94265.511,\"latency-p99-us\":94265.511,\"ns/op\":87099308.5,\"process-cpu-ns/op\":104971375,\"sampled-heap-growth-B\":7809184,\"sampled-spool-peak-B\":4194304,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":327916,\"allocs/op\":919.5,\"elapsed_ns\":132997531,\"first-byte-p50-us\":494.293,\"first-byte-p95-us\":791.467,\"first-byte-p99-us\":791.467,\"inter-read-gap-p50-us\":29.997,\"inter-read-gap-p95-us\":48.414,\"inter-read-gap-p99-us\":103.155,\"latency-p50-us\":32974.857,\"latency-p95-us\":34926.855,\"latency-p99-us\":34926.855,\"ns/op\":16624691.375,\"process-cpu-ns/op\":40453000,\"sampled-heap-growth-B\":2623328,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":321205,\"allocs/op\":900.875,\"elapsed_ns\":126582183,\"first-byte-p50-us\":451.379,\"first-byte-p95-us\":841.343,\"first-byte-p99-us\":841.343,\"inter-read-gap-p50-us\":23.399,\"inter-read-gap-p95-us\":39.383,\"inter-read-gap-p99-us\":91.714,\"latency-p50-us\":29984.008,\"latency-p95-us\":33721.098,\"latency-p99-us\":33721.098,\"ns/op\":15822772.875,\"process-cpu-ns/op\":37674500,\"sampled-heap-growth-B\":2569640,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":316151,\"allocs/op\":900.25,\"elapsed_ns\":127262472,\"first-byte-p50-us\":552.45,\"first-byte-p95-us\":904.333,\"first-byte-p99-us\":904.333,\"inter-read-gap-p50-us\":26.627,\"inter-read-gap-p95-us\":41.699,\"inter-read-gap-p99-us\":107.991,\"latency-p50-us\":31067.04,\"latency-p95-us\":32577.75,\"latency-p99-us\":32577.75,\"ns/op\":15907809,\"process-cpu-ns/op\":40090625,\"sampled-heap-growth-B\":2529208,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":993957,\"allocs/op\":4201.625,\"elapsed_ns\":361690133,\"first-byte-p50-us\":7872.019,\"first-byte-p95-us\":8876.645,\"first-byte-p99-us\":8876.645,\"inter-read-gap-p50-us\":27.514,\"inter-read-gap-p95-us\":46.846,\"inter-read-gap-p99-us\":96.451,\"latency-p50-us\":84532.698,\"latency-p95-us\":90300.61,\"latency-p99-us\":90300.61,\"ns/op\":45211266.625,\"process-cpu-ns/op\":87087625,\"sampled-heap-growth-B\":7951656,\"sampled-spool-peak-B\":8388608,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":967242,\"allocs/op\":4114.375,\"elapsed_ns\":386960953,\"first-byte-p50-us\":8617.165,\"first-byte-p95-us\":9271.366,\"first-byte-p99-us\":9271.366,\"inter-read-gap-p50-us\":33.202,\"inter-read-gap-p95-us\":48.939,\"inter-read-gap-p99-us\":110.945,\"latency-p50-us\":95401.399,\"latency-p95-us\":103381.051,\"latency-p99-us\":103381.051,\"ns/op\":48370119.125,\"process-cpu-ns/op\":95628875,\"sampled-heap-growth-B\":7737936,\"sampled-spool-peak-B\":8388608,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_cycle_4m/c2/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":32,\"accepted\":8,\"partial\":8,\"retrieved\":16,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":33554432,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":969918,\"allocs/op\":4115,\"elapsed_ns\":300101264,\"first-byte-p50-us\":6527.663,\"first-byte-p95-us\":7648.709,\"first-byte-p99-us\":7648.709,\"inter-read-gap-p50-us\":19.907,\"inter-read-gap-p95-us\":38.732,\"inter-read-gap-p99-us\":81.903,\"latency-p50-us\":70877.701,\"latency-p95-us\":85446.793,\"latency-p99-us\":85446.793,\"ns/op\":37512658,\"process-cpu-ns/op\":73080250,\"sampled-heap-growth-B\":7759344,\"sampled-spool-peak-B\":8388608,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59055,\"allocs/op\":188.125,\"elapsed_ns\":1241784006,\"first-byte-p50-us\":976.934,\"first-byte-p95-us\":1506.443,\"first-byte-p99-us\":1506.443,\"inter-read-gap-p50-us\":1159.621,\"inter-read-gap-p95-us\":1284.438,\"inter-read-gap-p99-us\":1384.714,\"latency-p50-us\":151817.192,\"latency-p95-us\":152979.533,\"latency-p99-us\":152979.533,\"ns/op\":155223000.75,\"process-cpu-ns/op\":31015500,\"sampled-heap-growth-B\":472440,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59055,\"allocs/op\":188.125,\"elapsed_ns\":1260975148,\"first-byte-p50-us\":1017.561,\"first-byte-p95-us\":1442.773,\"first-byte-p99-us\":1442.773,\"inter-read-gap-p50-us\":1176.211,\"inter-read-gap-p95-us\":1313.366,\"inter-read-gap-p99-us\":1423.183,\"latency-p50-us\":154491.63,\"latency-p95-us\":156044.229,\"latency-p99-us\":156044.229,\"ns/op\":157621893.5,\"process-cpu-ns/op\":35159375,\"sampled-heap-growth-B\":472440,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59423,\"allocs/op\":189,\"elapsed_ns\":1234684544,\"first-byte-p50-us\":1086.039,\"first-byte-p95-us\":1289.037,\"first-byte-p99-us\":1289.037,\"inter-read-gap-p50-us\":1157.551,\"inter-read-gap-p95-us\":1283.929,\"inter-read-gap-p99-us\":1321.429,\"latency-p50-us\":150855.459,\"latency-p95-us\":152724.646,\"latency-p99-us\":152724.646,\"ns/op\":154335568,\"process-cpu-ns/op\":27511375,\"sampled-heap-growth-B\":475384,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":167022,\"allocs/op\":683.5,\"elapsed_ns\":1336448895,\"first-byte-p50-us\":7700.972,\"first-byte-p95-us\":10965.993,\"first-byte-p99-us\":10965.993,\"inter-read-gap-p50-us\":1174.026,\"inter-read-gap-p95-us\":1291.025,\"inter-read-gap-p99-us\":1343.235,\"latency-p50-us\":161893.452,\"latency-p95-us\":164742.457,\"latency-p99-us\":164742.457,\"ns/op\":167056111.875,\"process-cpu-ns/op\":41864000,\"sampled-heap-growth-B\":1336176,\"sampled-spool-peak-B\":1048576,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":170084,\"allocs/op\":680.125,\"elapsed_ns\":1333577537,\"first-byte-p50-us\":9326.118,\"first-byte-p95-us\":9954.19,\"first-byte-p99-us\":9954.19,\"inter-read-gap-p50-us\":1174.928,\"inter-read-gap-p95-us\":1291.044,\"inter-read-gap-p99-us\":1356.166,\"latency-p50-us\":162936.145,\"latency-p95-us\":163471.99,\"latency-p99-us\":163471.99,\"ns/op\":166697192.125,\"process-cpu-ns/op\":41298125,\"sampled-heap-growth-B\":1360672,\"sampled-spool-peak-B\":1048576,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c1/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":173155,\"allocs/op\":679.125,\"elapsed_ns\":1347864568,\"first-byte-p50-us\":9001.944,\"first-byte-p95-us\":10525.416,\"first-byte-p99-us\":10525.416,\"inter-read-gap-p50-us\":1169.194,\"inter-read-gap-p95-us\":1298.727,\"inter-read-gap-p99-us\":1400.984,\"latency-p50-us\":162569.12,\"latency-p95-us\":167292.414,\"latency-p99-us\":167292.414,\"ns/op\":168483071,\"process-cpu-ns/op\":41841000,\"sampled-heap-growth-B\":1385240,\"sampled-spool-peak-B\":1048576,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59707,\"allocs/op\":190.875,\"elapsed_ns\":629756564,\"first-byte-p50-us\":1333.873,\"first-byte-p95-us\":2036.249,\"first-byte-p99-us\":2036.249,\"inter-read-gap-p50-us\":1180.88,\"inter-read-gap-p95-us\":1350.295,\"inter-read-gap-p99-us\":1559.863,\"latency-p50-us\":151808.027,\"latency-p95-us\":154540.004,\"latency-p99-us\":154540.004,\"ns/op\":78719570.5,\"process-cpu-ns/op\":21238625,\"sampled-heap-growth-B\":477656,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59141,\"allocs/op\":190.75,\"elapsed_ns\":628840789,\"first-byte-p50-us\":1168.265,\"first-byte-p95-us\":1499.096,\"first-byte-p99-us\":1499.096,\"inter-read-gap-p50-us\":1180.384,\"inter-read-gap-p95-us\":1358.781,\"inter-read-gap-p99-us\":1495.134,\"latency-p50-us\":153159.772,\"latency-p95-us\":154538.736,\"latency-p99-us\":154538.736,\"ns/op\":78605098.625,\"process-cpu-ns/op\":21768375,\"sampled-heap-growth-B\":473128,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":59403,\"allocs/op\":191,\"elapsed_ns\":625168813,\"first-byte-p50-us\":1293.75,\"first-byte-p95-us\":1483.191,\"first-byte-p99-us\":1483.191,\"inter-read-gap-p50-us\":1170.975,\"inter-read-gap-p95-us\":1313.118,\"inter-read-gap-p99-us\":1454.392,\"latency-p50-us\":151088.334,\"latency-p95-us\":152080.719,\"latency-p99-us\":152080.719,\"ns/op\":78146101.625,\"process-cpu-ns/op\":20214000,\"sampled-heap-growth-B\":475224,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":170726,\"allocs/op\":683.875,\"elapsed_ns\":664707951,\"first-byte-p50-us\":9590.71,\"first-byte-p95-us\":10079.413,\"first-byte-p99-us\":10079.413,\"inter-read-gap-p50-us\":1183.599,\"inter-read-gap-p95-us\":1349.664,\"inter-read-gap-p99-us\":1427.349,\"latency-p50-us\":160499.053,\"latency-p95-us\":163776.65,\"latency-p99-us\":163776.65,\"ns/op\":83088493.875,\"process-cpu-ns/op\":30450625,\"sampled-heap-growth-B\":1365808,\"sampled-spool-peak-B\":1773462,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":165020,\"allocs/op\":681.125,\"elapsed_ns\":667052294,\"first-byte-p50-us\":8820.182,\"first-byte-p95-us\":10454.903,\"first-byte-p99-us\":10454.903,\"inter-read-gap-p50-us\":1175.752,\"inter-read-gap-p95-us\":1329.769,\"inter-read-gap-p99-us\":1461.561,\"latency-p50-us\":160502.343,\"latency-p95-us\":165407.62,\"latency-p99-us\":165407.62,\"ns/op\":83381536.75,\"process-cpu-ns/op\":27008500,\"sampled-heap-growth-B\":1320160,\"sampled-spool-peak-B\":2035606,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"media_slow_content_1m/c2/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":8,\"content\":8,\"events\":0,\"rtt_observations\":0,\"jitter_observations\":0,\"uploaded_bytes\":0,\"downloaded_bytes\":8388608,\"metrics\":{\"B/op\":165469,\"allocs/op\":685.25,\"elapsed_ns\":669745013,\"first-byte-p50-us\":9475.171,\"first-byte-p95-us\":9854.701,\"first-byte-p99-us\":9854.701,\"inter-read-gap-p50-us\":1170.854,\"inter-read-gap-p95-us\":1356.008,\"inter-read-gap-p99-us\":1484.484,\"latency-p50-us\":160199.258,\"latency-p95-us\":165022.728,\"latency-p99-us\":165022.728,\"ns/op\":83718126.625,\"process-cpu-ns/op\":30018375,\"sampled-heap-growth-B\":1323752,\"sampled-spool-peak-B\":1707926,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1840830,\"allocs/op\":8393.5,\"cancellation-p50-us\":327.355,\"cancellation-p95-us\":417.873,\"cancellation-p99-us\":417.873,\"elapsed_ns\":105216998,\"event-jitter-p50-us\":16.21,\"event-jitter-p95-us\":67.376,\"event-jitter-p99-us\":111.983,\"event-rtt-p50-us\":173.968,\"event-rtt-p95-us\":228.5,\"event-rtt-p99-us\":258.58,\"latency-p50-us\":12779.629,\"latency-p95-us\":13180.835,\"latency-p99-us\":13180.835,\"ns/op\":13152124.75,\"process-cpu-ns/op\":14299250,\"sampled-heap-growth-B\":14726640,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1838337,\"allocs/op\":8390.625,\"cancellation-p50-us\":357.62,\"cancellation-p95-us\":396.642,\"cancellation-p99-us\":396.642,\"elapsed_ns\":105271773,\"event-jitter-p50-us\":13.371,\"event-jitter-p95-us\":89.141,\"event-jitter-p99-us\":136.592,\"event-rtt-p50-us\":173.114,\"event-rtt-p95-us\":238.742,\"event-rtt-p99-us\":301.193,\"latency-p50-us\":11778.98,\"latency-p95-us\":14226.651,\"latency-p99-us\":14226.651,\"ns/op\":13158971.625,\"process-cpu-ns/op\":14374000,\"sampled-heap-growth-B\":14706696,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1840895,\"allocs/op\":8393.625,\"cancellation-p50-us\":287.1,\"cancellation-p95-us\":329.519,\"cancellation-p99-us\":329.519,\"elapsed_ns\":89601776,\"event-jitter-p50-us\":12.928,\"event-jitter-p95-us\":118.88,\"event-jitter-p99-us\":338.569,\"event-rtt-p50-us\":134.949,\"event-rtt-p95-us\":263.349,\"event-rtt-p99-us\":442.203,\"latency-p50-us\":9340.354,\"latency-p95-us\":13829.502,\"latency-p99-us\":13829.502,\"ns/op\":11200222,\"process-cpu-ns/op\":11681125,\"sampled-heap-growth-B\":14727160,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1999131,\"allocs/op\":9095.125,\"cancellation-p50-us\":384.57,\"cancellation-p95-us\":488.156,\"cancellation-p99-us\":488.156,\"elapsed_ns\":79009391,\"event-jitter-p50-us\":8.324,\"event-jitter-p95-us\":45.046,\"event-jitter-p99-us\":67.951,\"event-rtt-p50-us\":114.834,\"event-rtt-p95-us\":175.415,\"event-rtt-p99-us\":204.459,\"latency-p50-us\":8193.965,\"latency-p95-us\":11932.725,\"latency-p99-us\":11932.725,\"ns/op\":9876173.875,\"process-cpu-ns/op\":11076250,\"sampled-heap-growth-B\":15993048,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1996198,\"allocs/op\":9082.125,\"cancellation-p50-us\":323.993,\"cancellation-p95-us\":345.188,\"cancellation-p99-us\":345.188,\"elapsed_ns\":73241987,\"event-jitter-p50-us\":9.149,\"event-jitter-p95-us\":65.026,\"event-jitter-p99-us\":97.674,\"event-rtt-p50-us\":110.418,\"event-rtt-p95-us\":173.95,\"event-rtt-p99-us\":209.059,\"latency-p50-us\":7987.72,\"latency-p95-us\":10553.922,\"latency-p99-us\":10553.922,\"ns/op\":9155248.375,\"process-cpu-ns/op\":10632875,\"sampled-heap-growth-B\":15969584,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c1/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1994995,\"allocs/op\":9080.875,\"cancellation-p50-us\":325.87,\"cancellation-p95-us\":411.43,\"cancellation-p99-us\":411.43,\"elapsed_ns\":87544894,\"event-jitter-p50-us\":10.061,\"event-jitter-p95-us\":63.472,\"event-jitter-p99-us\":102.161,\"event-rtt-p50-us\":141.564,\"event-rtt-p95-us\":188.814,\"event-rtt-p99-us\":220.136,\"latency-p50-us\":10678.687,\"latency-p95-us\":11603.017,\"latency-p99-us\":11603.017,\"ns/op\":10943111.75,\"process-cpu-ns/op\":12910500,\"sampled-heap-growth-B\":15959960,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/relay\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1845158,\"allocs/op\":8398.375,\"cancellation-p50-us\":150.245,\"cancellation-p95-us\":288.183,\"cancellation-p99-us\":288.183,\"elapsed_ns\":25279213,\"event-jitter-p50-us\":38.748,\"event-jitter-p95-us\":159.648,\"event-jitter-p99-us\":543.043,\"event-rtt-p50-us\":150.117,\"event-rtt-p95-us\":270.167,\"event-rtt-p99-us\":323.501,\"latency-p50-us\":12010.921,\"latency-p95-us\":12814.123,\"latency-p99-us\":12814.123,\"ns/op\":3159901.625,\"process-cpu-ns/op\":11150875,\"sampled-heap-growth-B\":14761264,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/relay\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1839446,\"allocs/op\":8394,\"cancellation-p50-us\":133.687,\"cancellation-p95-us\":156.205,\"cancellation-p99-us\":156.205,\"elapsed_ns\":22661617,\"event-jitter-p50-us\":37.31,\"event-jitter-p95-us\":132.799,\"event-jitter-p99-us\":165.501,\"event-rtt-p50-us\":146.168,\"event-rtt-p95-us\":259.02,\"event-rtt-p99-us\":298.723,\"latency-p50-us\":10924.484,\"latency-p95-us\":11282.282,\"latency-p99-us\":11282.282,\"ns/op\":2832702.125,\"process-cpu-ns/op\":10529750,\"sampled-heap-growth-B\":14715568,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/relay\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1838159,\"allocs/op\":8390.875,\"cancellation-p50-us\":196.765,\"cancellation-p95-us\":222.175,\"cancellation-p99-us\":222.175,\"elapsed_ns\":25802576,\"event-jitter-p50-us\":41.722,\"event-jitter-p95-us\":188.928,\"event-jitter-p99-us\":376.908,\"event-rtt-p50-us\":161.084,\"event-rtt-p95-us\":320.844,\"event-rtt-p99-us\":416.216,\"latency-p50-us\":12086.723,\"latency-p95-us\":13349.94,\"latency-p99-us\":13349.94,\"ns/op\":3225322,\"process-cpu-ns/op\":11627875,\"sampled-heap-growth-B\":14705272,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/gateway\",\"repetition\":0,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":2001829,\"allocs/op\":9106,\"cancellation-p50-us\":264.172,\"cancellation-p95-us\":440.77,\"cancellation-p99-us\":440.77,\"elapsed_ns\":29615519,\"event-jitter-p50-us\":50.248,\"event-jitter-p95-us\":156.544,\"event-jitter-p99-us\":212.266,\"event-rtt-p50-us\":186.918,\"event-rtt-p95-us\":307.57,\"event-rtt-p99-us\":359.694,\"latency-p50-us\":13889.142,\"latency-p95-us\":14925.692,\"latency-p99-us\":14925.692,\"ns/op\":3701939.875,\"process-cpu-ns/op\":13639375,\"sampled-heap-growth-B\":16014632,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/gateway\",\"repetition\":1,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1997737,\"allocs/op\":9086,\"cancellation-p50-us\":269.765,\"cancellation-p95-us\":465.514,\"cancellation-p99-us\":465.514,\"elapsed_ns\":28478905,\"event-jitter-p50-us\":44.443,\"event-jitter-p95-us\":185.504,\"event-jitter-p99-us\":257.153,\"event-rtt-p50-us\":169.17,\"event-rtt-p95-us\":318.627,\"event-rtt-p99-us\":369.671,\"latency-p50-us\":13647.889,\"latency-p95-us\":13750.123,\"latency-p99-us\":13750.123,\"ns/op\":3559863.125,\"process-cpu-ns/op\":12934000,\"sampled-heap-growth-B\":15981896,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:313: LIFECYCLE_STRESS_V2_MEASUREMENT {\"name\":\"duplex_jitter_64/c4/gateway\",\"repetition\":2,\"samples\":8,\"succeeded\":8,\"rejected\":0,\"incomplete\":0,\"ambiguous\":0,\"dispatches\":8,\"accepted\":0,\"partial\":0,\"retrieved\":0,\"content\":0,\"events\":512,\"rtt_observations\":512,\"jitter_observations\":504,\"uploaded_bytes\":0,\"downloaded_bytes\":0,\"metrics\":{\"B/op\":1997349,\"allocs/op\":9097.875,\"cancellation-p50-us\":245.173,\"cancellation-p95-us\":512.632,\"cancellation-p99-us\":512.632,\"elapsed_ns\":26952162,\"event-jitter-p50-us\":41.022,\"event-jitter-p95-us\":149.186,\"event-jitter-p99-us\":192.628,\"event-rtt-p50-us\":161.504,\"event-rtt-p95-us\":283.452,\"event-rtt-p99-us\":324.165,\"latency-p50-us\":12687.369,\"latency-p95-us\":12785.399,\"latency-p99-us\":12785.399,\"ns/op\":3369020.25,\"process-cpu-ns/op\":12328750,\"sampled-heap-growth-B\":15978792,\"sampled-spool-peak-B\":0,\"spool-final-B\":0}}\n    lifecycle_stress_v2_performance_test.go:318: LIFECYCLE_STRESS_NEGATIVE {\"name\":\"oversize_upload\",\"path\":\"gateway\",\"admitted\":0,\"rejected\":1,\"provider_dispatches\":0,\"spool_final_bytes\":0}\n    lifecycle_stress_v2_performance_test.go:318: LIFECYCLE_STRESS_NEGATIVE {\"name\":\"cancelled_upload\",\"path\":\"gateway\",\"admitted\":0,\"rejected\":1,\"provider_dispatches\":0,\"spool_final_bytes\":0}\n    lifecycle_stress_v2_performance_test.go:318: LIFECYCLE_STRESS_NEGATIVE {\"name\":\"parser_contention\",\"path\":\"gateway\",\"admitted\":0,\"rejected\":1,\"provider_dispatches\":0,\"spool_final_bytes\":0}\n--- PASS: TestLifecycleStressV2Performance (23.07s)\nPASS\nok  \tgithub.com/tyk-swe/olp/tests/integration\t23.118s\n"
+}

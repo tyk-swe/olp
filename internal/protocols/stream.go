@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"maps"
 	"slices"
@@ -19,6 +20,15 @@ var streamDone = errors.New("terminal native event")
 // Native streams retain extensions. Translators retain at most maxEvent bytes
 // of text/tool state needed for the destination's terminal envelope.
 func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit) (*openai.Completion, error) {
+	return StreamWithEvents(wire, target, r, maxEvent, route, includeUsage, emit, nil)
+}
+
+// StreamWithEvents exposes immutable native events before projection. The
+// observer executes synchronously under the existing backpressure/cancellation
+// contract; ordinary native streams retain no event history.
+// It observes structurally valid JSON before dialect state-grammar validation.
+// Actionability still requires the admitted projection and durable-state barrier.
+func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	native := wire == target || wire == openai.FamilyGemini && target == openai.FamilyGeminiStream
 	var finish func(*openai.Completion) error
 	upstreamEmit := emit
@@ -36,7 +46,7 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 	var err error
 	switch wire {
 	case openai.FamilyChat, openai.FamilyResponses:
-		c, err = openai.StreamMetadata(wire, r, maxEvent, route, true, func(frame []byte) error {
+		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, true, func(frame []byte) error {
 			if native && wire == openai.FamilyChat && !includeUsage {
 				var f Object
 				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
@@ -49,13 +59,13 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 				}
 			}
 			return upstreamEmit(frame)
-		})
+		}, observe)
 	case openai.FamilyAnthropic:
-		c, err = streamAnthropic(r, maxEvent, route, upstreamEmit)
+		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case openai.FamilyGemini:
-		c, err = streamGemini(r, maxEvent, route, upstreamEmit)
+		c, err = streamGeminiEvents(r, maxEvent, route, upstreamEmit, observe)
 	case "bedrock":
-		c, err = streamBedrock(r, maxEvent, route, upstreamEmit)
+		c, err = streamBedrockEvents(r, maxEvent, route, upstreamEmit, observe, native)
 	default:
 		err = protocolError("unknown stream family")
 	}
@@ -87,15 +97,29 @@ func streamError(err error) error {
 type contentBlock struct{ kind, args string }
 
 func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
+	return streamAnthropicEvents(r, limit, route, emit, nil)
+}
+func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	started, finished, done := false, false, false
 	blocks := map[int64]*contentBlock{}
 	next := int64(0)
 	usage := Object{}
 	retained := 0
+	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) error {
-		f, e := object([]byte(frame.Data))
+		event, e := openai.LiftSSE(openai.FamilyAnthropic, frame, sequence, limit)
 		if e != nil {
+			return e
+		}
+		sequence++
+		if observe != nil {
+			if e := observe(event); e != nil {
+				return e
+			}
+		}
+		f := event.Source().Fields()
+		if f == nil {
 			return protocolError("invalid Anthropic event")
 		}
 		kind := str(f["type"])
@@ -260,12 +284,26 @@ func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*o
 	return c, nil
 }
 func streamGemini(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
+	return streamGeminiEvents(r, limit, route, emit, nil)
+}
+func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	finished := map[int64]bool{}
 	hasTools := false
 	seen := false
+	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) error {
-		part, e := decodeGemini([]byte(frame.Data), route, true)
+		event, e := openai.LiftSSE(openai.FamilyGemini, frame, sequence, limit)
+		if e != nil {
+			return e
+		}
+		sequence++
+		if observe != nil {
+			if e := observe(event); e != nil {
+				return e
+			}
+		}
+		part, e := decodeGemini(event.Source().Bytes(), route, true)
 		if e != nil {
 			return e
 		}

@@ -5,10 +5,52 @@ export type PlaygroundTemplate = {
   label: string;
   operation: PlaygroundOperation;
   surface?: 'openai' | 'anthropic' | 'gemini';
+  nativeDialect?: string;
   request: Record<string, unknown>;
 };
 
 export const playgroundTemplates: PlaygroundTemplate[] = [
+  {
+    key: 'generation-negotiated-tools',
+    label: 'Generation · negotiated two-tool workflow',
+    operation: 'generation',
+    surface: 'openai',
+    request: {
+      model: '',
+      messages: [
+        {
+          role: 'user',
+          content: 'Weather and time in Paris?'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'weather',
+            description: 'Weather in a city',
+            parameters: {
+              type: 'object',
+              properties: { city: { type: 'string' } },
+              required: ['city']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'clock',
+            description: 'Time in a zone',
+            parameters: {
+              type: 'object',
+              properties: { zone: { type: 'string' } },
+              required: ['zone']
+            }
+          }
+        }
+      ]
+    }
+  },
   {
     key: 'generation-multiturn',
     label: 'Generation · multi-turn',
@@ -121,6 +163,39 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'voyage-packed-embeddings',
+    label: 'Embeddings · Voyage packed binary',
+    operation: 'embeddings',
+    nativeDialect: 'voyage-embeddings',
+    request: {
+      model: '',
+      input: ['First document', 'Second document'],
+      output_dtype: 'ubinary',
+      output_dimension: 16,
+      encoding_format: 'base64'
+    }
+  },
+  {
+    key: 'cohere-typed-embeddings',
+    label: 'Embeddings · Cohere native v2 typed storage',
+    operation: 'embeddings',
+    nativeDialect: 'cohere-embed-v2',
+    request: {
+      model: '',
+      input_type: 'search_document',
+      texts: ['First document', 'Second document'],
+      embedding_types: ['float', 'int8', 'ubinary'],
+      truncate: 'NONE'
+    }
+  },
+  {
+    key: 'tei-sparse-embeddings',
+    label: 'Embeddings · TEI sparse',
+    operation: 'embeddings',
+    nativeDialect: 'tei-sparse-embeddings',
+    request: { inputs: 'A document to embed' }
+  },
+  {
     key: 'moderation',
     label: 'Moderation',
     operation: 'moderation',
@@ -142,6 +217,62 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
         'Reconciliation refreshes job progress.'
       ]
     }
+  },
+  {
+    key: 'cohere-rerank-v2',
+    label: 'Rerank · Cohere native v2',
+    operation: 'rerank',
+    nativeDialect: 'cohere-rerank-v2',
+    request: {
+      model: '',
+      query: 'asynchronous media lifecycle',
+      documents: [
+        'A media job tracks generation.',
+        'Static assets are cached.'
+      ],
+      top_n: 2,
+      max_tokens_per_doc: 128
+    }
+  },
+  {
+    key: 'tei-rerank',
+    label: 'Rerank · TEI raw scores',
+    operation: 'rerank',
+    nativeDialect: 'tei-rerank',
+    request: {
+      query: 'media lifecycle',
+      texts: [
+        'A media job tracks generation state.',
+        'A static asset is cached.'
+      ],
+      raw_scores: true
+    }
+  },
+  {
+    key: 'tei-classification',
+    label: 'Classification · TEI predict',
+    operation: 'classification',
+    nativeDialect: 'tei-classification',
+    request: { inputs: ['A neutral classification example.'], raw_scores: true }
+  },
+  {
+    key: 'tei-scoring',
+    label: 'Scoring · TEI similarity',
+    operation: 'scoring',
+    nativeDialect: 'tei-scoring',
+    request: {
+      inputs: {
+        source_sentence: 'A media job',
+        sentences: ['Async task', 'Static file']
+      }
+    }
+  },
+  {
+    key: 'tei-tokenize',
+    label: 'Token count · TEI tokenize',
+    operation: 'token_count',
+    nativeDialect: 'tei-tokenize',
+    request: { inputs: 'Count native tokens.', add_special_tokens: true }
   },
   {
     key: 'token-count',

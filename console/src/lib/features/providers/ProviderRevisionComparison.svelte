@@ -28,6 +28,16 @@
         </li>{/if}{#if revisionDiff.credential_changed}<li>
           Credential version changed (secret remains redacted)
         </li>{/if}
+      {#if revisionDiff.profile_changed}<li>Provider profile changed</li>{/if}
+      {#if revisionDiff.serving_binding_changed}<li>
+          Model serving identity or binding changed
+        </li>{/if}
+      {#if revisionDiff.semantic_configuration_changed}<li>
+          Semantic headers, query settings, or defaults changed
+        </li>{/if}
+      {#if revisionDiff.network_configuration_changed}<li>
+          Network transport configuration changed
+        </li>{/if}
     </ul>
     <div class="diff-columns">
       <div>

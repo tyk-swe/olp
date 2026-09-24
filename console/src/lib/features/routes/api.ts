@@ -66,6 +66,26 @@ export async function createRouteDraft(
   return result(response.data, response.error, response.response);
 }
 
+export async function createRouteMigrationDraft(
+  route: Pick<ActiveRoute, 'id' | 'etag'>,
+  slug: string
+): Promise<RouteDraft> {
+  const response = await apiClient.POST(
+    '/api/v3/routes/{route_id}/migration-draft',
+    {
+      params: {
+        path: { route_id: route.id },
+        header: {
+          'If-Match': route.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      },
+      body: { slug, fidelity: { mode: 'strict' } }
+    }
+  );
+  return result(response.data, response.error, response.response);
+}
+
 export async function replaceRouteDraft(
   id: string,
   etag: string,

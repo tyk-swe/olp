@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
   import { ApiProblem, errorMessage } from '$lib/api/http';
   import { copyText } from '$lib/clipboard';
   import {
@@ -16,7 +17,7 @@
   let exportedJSON = $state('');
   let copied = $state(false);
   let artifact = $state('');
-  let artifactDocument = $state<ConfigurationDocument | null>(null);
+  let artifactDocument = $state.raw<ConfigurationDocument | null>(null);
   let plan = $state<ConfigurationPlan | null>(null);
   let secrets = $state<Record<string, string>>({});
   let applyResult = $state<'staged' | ''>('');
@@ -30,7 +31,7 @@
     try {
       const result = await exportConfiguration();
       exportDigest = result.digest;
-      exportedJSON = JSON.stringify(result.document, null, 2);
+      exportedJSON = stringifyNativeJSON(result.document, 2);
     } catch (problem) {
       error = errorMessage(problem);
     } finally {
@@ -56,8 +57,9 @@
   function parseArtifact() {
     error = '';
     applyResult = '';
+    plan = null;
     try {
-      artifactDocument = JSON.parse(artifact) as ConfigurationDocument;
+      artifactDocument = parseNativeJSON(artifact) as ConfigurationDocument;
     } catch {
       artifactDocument = null;
       plan = null;

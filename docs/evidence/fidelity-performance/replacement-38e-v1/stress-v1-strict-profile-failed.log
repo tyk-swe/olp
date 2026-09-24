@@ -1,0 +1,7 @@
+=== RUN   TestLifecycleStressPerformance
+    lifecycle_stress_performance_test.go:611: LIFECYCLE_STRESS_SETUP {"postgresql_server_version":"180006","postgresql_tls":false}
+    lifecycle_stress_performance_test.go:615: POST /api/v3/route-drafts/01a0cbca-ad86-7ebf-879d-673c7cd517fd/activate: status 422, want 200; problem: Strict media requires a registered versioned profile.
+--- FAIL: TestLifecycleStressPerformance (1.26s)
+FAIL
+FAIL	github.com/tyk-swe/olp/tests/integration	1.319s
+FAIL

@@ -8,17 +8,20 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/mediacontract"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // MediaDeps wires the bounded media substrate into the public surface. A nil
@@ -46,6 +49,7 @@ func (s *Server) registerMedia(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/images/variations", s.mediaFormHandler(media.DefaultImageUploadLimit, 1, media.DecodeImageVariation))
 	mux.HandleFunc("POST /v1/audio/speech", s.mediaJSONHandler(media.DecodeSpeech))
 	mux.HandleFunc("POST /v1/audio/transcriptions", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranscription))
+	mux.HandleFunc("POST /v1/audio/translations", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranslation))
 	mux.HandleFunc("POST /v1/videos", s.videoCreate)
 	mux.HandleFunc("GET /v1/videos", s.videoList)
 	mux.HandleFunc("GET /v1/videos/{video_id}", s.videoGet)
@@ -139,6 +143,9 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 // and the routing header every route-planned media operation shares.
 func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution, access.Authority, bool) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyChat, actor: "api_key"}
+	x.semanticHeaders = r.Header.Clone()
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 	if !s.admit(r.Context()) {
 		s.mediaFail(x, w, overloaded)
 		return x, access.Authority{}, true
@@ -178,7 +185,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	switch request.Op {
 	case media.OpImageEdit, media.OpImageVariation:
 		x.estimate = mediaMultipartTokens
-	case media.OpTranscription:
+	case media.OpTranscription, media.OpTranslation:
 		x.estimate = 1500
 	}
 	defer s.cleanupUploads(request)
@@ -243,10 +250,19 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
+	if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+		if e := strictMediaContext(x); e != nil {
+			return e
+		}
+	}
 	if request.Op == media.OpVideoCreate && !videoLifecycleRoute(route.Operations) {
 		return invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
 	}
 	var semantic error
+	// Candidate defaults are part of the actual provider request. Inspect each
+	// encoded call for the metadata check so require_parameters cannot overlook
+	// a default or an explicit native null.
+	candidates := make(map[string][]string, len(route.Targets))
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
 		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
@@ -257,11 +273,47 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 			if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
-			if _, e := media.Encode(request, p.Kind, p.Connector().Model(t.ProviderModel)); e != nil {
+			encode := media.EncodeConfigured
+			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+				encode = media.EncodeStrictConfigured
+			}
+			call, effective, e := encode(request, p.Connector(), t.ProviderModel)
+			if e != nil {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
+			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+				template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
+				if !ok {
+					semantic = errors.New("compiled strict media contract unavailable")
+					return semantic
+				}
+				if _, err := bindMediaContract(template, request, call, effective); err != nil {
+					semantic = err
+					return err
+				}
+			}
+			if p.ProfileID != "" {
+				parameters, err := mediaOutboundParameterNames(call, effective)
+				if err != nil {
+					semantic = err
+					return err
+				}
+				candidates[t.ID] = parameters
+			}
 			return nil
+		},
+		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+			if p.ProfileID == "" {
+				// Legacy codecs have their historical null/default wire behavior;
+				// only explicit profiles define an exact effective native source.
+				return mediaParameterNames(request), nil
+			}
+			parameters, ok := candidates[t.ID]
+			if !ok {
+				return nil, nil
+			}
+			return parameters, nil
 		}})
 	if err != nil {
 		var se *runtime.SelectionError
@@ -283,10 +335,120 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	return nil
 }
 
+// Media has no qualified caller semantic-header or query mapping. SDK
+// transport metadata is harmless, but provider settings and idempotency
+// promises must be refused before an effectful strict dispatch.
+func strictMediaContext(x *execution) *Error {
+	if x.semanticQueryInvalid || len(x.semanticQuery) != 0 {
+		return invalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
+	}
+	return strictMediaHeaders(x)
+}
+
+func strictMediaHeaders(x *execution) *Error {
+	for name := range x.semanticHeaders {
+		canonical := http.CanonicalHeaderKey(name)
+		lower := strings.ToLower(canonical)
+		if canonical == "Idempotency-Key" || canonical == "X-Idempotency-Key" || canonical == "X-Olp-Client-Contract" || canonical == "X-Olp-Route" ||
+			strings.HasPrefix(lower, "openai-") || strings.HasPrefix(lower, "x-openai-") || strings.HasPrefix(lower, "anthropic-") || strings.HasPrefix(lower, "x-goog-") || strings.HasPrefix(lower, "x-amzn-") || canonical == "Api-Version" {
+			param := "/headers/" + canonical
+			return invalidRequest("target_capability", "This native media route does not qualify the caller's semantic header.", &param)
+		}
+	}
+	return nil
+}
+
+// bindMediaContract lifts only staged parts already owned by this inference
+// request. The media transport remains the sole authority that opens handles.
+func bindMediaContract(template *mediacontract.Template, request *media.Request, call *media.UpstreamCall, effective *media.Request) (mediacontract.Bound, error) {
+	input := mediacontract.Input{Route: request.Route, Mode: effective.Mode(), Source: request.SourceDocument(), JSON: call.JSON}
+	owned := map[media.Handle]bool{}
+	for _, handle := range request.Uploads() {
+		owned[handle] = true
+	}
+	convert := func(field media.Field) (mediacontract.Part, error) {
+		part := mediacontract.Part{Name: field.Name, Text: field.Text, Raw: field.Raw}
+		if field.File != nil {
+			if !owned[field.File.Handle] {
+				return mediacontract.Part{}, errors.New("media part is not owned by this request")
+			}
+			blob, err := field.File.BlobReference()
+			if err != nil {
+				return mediacontract.Part{}, err
+			}
+			part.Blob = blob
+			part.Filename = field.File.Filename
+			part.ContentType = field.File.ContentType
+		}
+		return part, nil
+	}
+	for _, field := range call.Fields {
+		part, err := convert(field)
+		if err != nil {
+			return mediacontract.Bound{}, err
+		}
+		input.Parts = append(input.Parts, part)
+	}
+	for _, field := range request.SourceParts {
+		part, err := convert(field)
+		if err != nil {
+			return mediacontract.Bound{}, err
+		}
+		input.CallerParts = append(input.CallerParts, part)
+	}
+	return template.Bind(input)
+}
+
+// mediaOutboundParameterNames inspects the same encoded body/field list sent
+// upstream, including native null and absent-only defaults. Route identity and
+// delivery controls are not model capability parameters.
+func mediaOutboundParameterNames(call *media.UpstreamCall, request *media.Request) ([]string, error) {
+	if call == nil {
+		return mediaParameterNames(request), nil
+	}
+	if call.Native != "" {
+		// Cloud image envelopes use qualified wrapper fields; the caller's
+		// effective controls, not instances/parameters, are capabilities.
+		return mediaParameterNames(request), nil
+	}
+	names := map[string]struct{}{}
+	add := func(name string) {
+		name = strings.TrimSuffix(name, "[]")
+		if name == "" || name == "model" || name == "stream" || name == "stream_format" || strings.HasPrefix(name, "__olp_") {
+			return
+		}
+		names[name] = struct{}{}
+	}
+	if call.JSON != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(call.JSON, &fields); err != nil || fields == nil {
+			return nil, errors.New("configured media body is not a JSON object")
+		}
+		for name := range fields {
+			add(name)
+		}
+	} else if len(call.Fields) != 0 {
+		for _, field := range call.Fields {
+			if field.File != nil && field.Name != "mask" && field.Name != "input_reference" {
+				continue
+			}
+			add(field.Name)
+		}
+	} else {
+		return mediaParameterNames(request), nil
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // connectorsSupports mirrors the connector capability check against the
 // matrix in connectors.
 func connectorsSupports(p runtime.Provider, op, mode string) bool {
-	return connectors.Supports(p.Kind, p.VendorID, op, "openai", mode)
+	return p.Connector().Supports(op, "openai", mode)
 }
 
 func videoLifecycleRoute(operations []string) bool {
@@ -413,6 +575,21 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
+		if fact.Interaction != nil {
+			switch {
+			case f.dispatched && f.status != 0:
+				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+			case f.dispatched && fact.Status == http.StatusOK:
+				fact.Interaction.UpstreamState = usage.UpstreamAccepted
+			case f.dispatched:
+				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			default:
+				fact.Interaction.UpstreamState = usage.UpstreamNotSent
+			}
+			if f.committed {
+				fact.Interaction.ClientState = usage.ClientPartial
+			}
+		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
 			retry := f.retryAfter
@@ -423,9 +600,27 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		return fact, nil, f
 	}
 	cfg := provider.Connector()
-	call, mErr := media.Encode(x.media, cfg.Kind, cfg.Model(a.UpstreamModel))
+	encode := media.EncodeConfigured
+	if x.strict() {
+		encode = media.EncodeStrictConfigured
+	}
+	call, effective, mErr := encode(x.media, cfg, a.UpstreamModel)
 	if mErr != nil {
 		return fail(classProtocol, nil)
+	}
+	var strictTemplate *mediacontract.Template
+	var bound mediacontract.Bound
+	if x.strict() {
+		strictTemplate, _ = x.request.release.Snapshot.MediaTemplate(x.route.Slug, a.TargetID, x.media.Op)
+		if strictTemplate == nil {
+			return fail(classProtocol, nil)
+		}
+		var err error
+		bound, err = bindMediaContract(strictTemplate, x.media, call, effective)
+		if err != nil {
+			return fail(classProtocol, nil)
+		}
+		call.Strict = true
 	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
@@ -444,8 +639,12 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		call.Inject = http.Header{}
 		atr.InjectUpstream(call.Inject, true)
 	}
-	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret}
-	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, x.media)
+	networkSecret, err := s.providerNetworkSecret(actx, x.request.release, provider)
+	if err != nil {
+		return fail(classCredential, nil)
+	}
+	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
+	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, effective)
 	if failure != nil {
 		fact.Status = failure.Status
 		return fail(mediaClass(failure), &attemptFailure{
@@ -456,19 +655,52 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		})
 	}
 	fact.Status = result.Status
+	if strictTemplate != nil && result.Artifact != nil {
+		blob, err := result.Artifact.BlobReference()
+		if err != nil {
+			return fail(classProtocol, &attemptFailure{dispatched: true})
+		}
+		envelope, err := oif.NewBlobResult(bound.Descriptor, blob, oif.Complete)
+		if err != nil {
+			return fail(classProtocol, &attemptFailure{dispatched: true})
+		}
+		result.BlobSource = &envelope
+	}
+	if strictTemplate != nil && result.Source.Valid() {
+		if _, err := strictTemplate.JSONResult(bound.Descriptor, result.Source); err != nil {
+			if result.Images != nil {
+				for _, image := range result.Images.Images {
+					if image.Handle != nil {
+						_ = s.transport().Spool.Remove(*image.Handle)
+					}
+				}
+			}
+			class := classProtocol
+			if call.Ambiguous {
+				class = classAmbiguous
+			}
+			return fail(class, &attemptFailure{dispatched: true})
+		}
+	}
 	fb := result.FirstByte
 	fact.FirstByte = &fb
 	fact.Class = "success"
-	fact.Usage = mediaUsage(x.media, result)
+	fact.Usage = mediaUsage(effective, result)
 	fact.Committed = true
+	if fact.Interaction != nil {
+		fact.Interaction.UpstreamState = usage.UpstreamTerminal
+	}
 	if result.Kind == media.ResponseSSE {
 		var streamFailure *attemptFailure
-		fact.Usage, fact.Committed, streamFailure = s.streamMediaEvents(actx, w, x, result)
+		fact.Usage, fact.Committed, streamFailure = s.streamMediaEvents(actx, w, x, result, strictTemplate, bound)
 		if streamFailure != nil {
 			if call.Ambiguous && !streamFailure.committed && streamFailure.class == classTimeout {
 				streamFailure.class = classAmbiguous
 			}
 			return fail(streamFailure.class, streamFailure)
+		}
+		if fact.Interaction != nil {
+			fact.Interaction.ClientState = usage.ClientTerminal
 		}
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
@@ -539,6 +771,17 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *medi
 	result := out.result
 	switch result.Kind {
 	case media.ResponseImages:
+		if x.strict() && result.Source.Valid() {
+			defer func() {
+				for _, image := range result.Images.Images {
+					if image.Handle != nil {
+						_ = s.transport().Spool.Remove(*image.Handle)
+					}
+				}
+			}()
+			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
+			return
+		}
 		s.writeImageResult(w, x, out)
 	case media.ResponseBinary, media.ResponseVideoContent:
 		s.streamArtifact(w, x, out)
@@ -560,6 +803,10 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *medi
 			})
 			return
 		}
+		if x.strict() && result.Source.Valid() {
+			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
+			return
+		}
 		body, failure := media.EncodeTranscriptionJSON(result.Transcription)
 		if failure != nil {
 			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
@@ -569,9 +816,15 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *execution, out *medi
 		}
 		s.deliverMediaJSON(w, x, out, body)
 	case media.ResponseVideoJob:
-		out.committed = true
-		// Video create responses render the local identity.
-		body, failure := media.EncodeVideoObject(result.Video, outJobID(out), x.media.Route)
+		// Video create responses bind the owned durable identity. Strict
+		// responses retain every other native member and numeric token.
+		var body []byte
+		var failure *media.Error
+		if x.strict() {
+			body, failure = media.EncodeStrictVideoObject(result.Source, result.Video.ID, outJobID(out), x.media.Route)
+		} else {
+			body, failure = media.EncodeVideoObject(result.Video, outJobID(out), x.media.Route)
+		}
 		if failure != nil {
 			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
 			out.status, out.committed = out.err.Status, false
@@ -603,9 +856,15 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *execution, out *mediaOut
 	if err != nil {
 		out.err = (&attemptFailure{class: classCancelled}).toError()
 		out.cancelled, out.status = true, 0
+		if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
+			x.facts[n-1].Interaction.ClientState = usage.ClientPartial
+		}
 		return
 	}
 	x.delivered(s.now())
+	if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
+		x.facts[n-1].Interaction.ClientState = usage.ClientTerminal
+	}
 }
 
 func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *execution, out *mediaOutcome, body []byte) {
@@ -712,10 +971,11 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaO
 
 // streamMediaEvents drains a stream inside its attempt's deadline and quota
 // reservation. Only a terminal event proves that the response completed.
-func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result) (*openai.Usage, bool, *attemptFailure) {
+func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*openai.Usage, bool, *attemptFailure) {
 	defer result.Body.Close()
 	sw := &streamWriter{w: w, family: x.family}
 	var usage *openai.Usage
+	var sequence uint64
 	terminal := errors.New("media stream completed")
 	decodeErr := sse.Decode(result.Body, int(s.cfg.MaxEventBytes), func(frame sse.Frame) error {
 		var payload struct {
@@ -724,6 +984,16 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		}
 		event := "done"
 		if frame.Data != "[DONE]" {
+			if contract != nil {
+				frameName := ""
+				if frame.Event != nil {
+					frameName = *frame.Event
+				}
+				if _, err := contract.Event(bound.Descriptor, frame.Data, frameName, sequence); err != nil {
+					return err
+				}
+				sequence++
+			}
 			if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
 				return err
 			}
@@ -736,6 +1006,12 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 			return errors.New("provider media stream failed")
 		}
 		var buf bytes.Buffer
+		if contract != nil && frame.ID != nil {
+			buf.WriteString("id: " + *frame.ID + "\n")
+		}
+		if contract != nil && frame.RetryMS != nil {
+			buf.WriteString("retry: " + strconv.FormatUint(*frame.RetryMS, 10) + "\n")
+		}
 		if frame.Event != nil && *frame.Event != "" {
 			buf.WriteString("event: " + *frame.Event + "\n")
 		}

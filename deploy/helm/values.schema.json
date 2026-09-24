@@ -18,6 +18,7 @@
     "control": { "$ref": "#/definitions/serverComponent" },
     "ingress": {
       "type": "object",
+      "description": "Same-origin routing for control UI/API and the versioned gateway inference prefixes, including registered /native operations.",
       "required": ["enabled", "className", "annotations", "host", "tls"],
       "properties": {
         "enabled": { "type": "boolean" },

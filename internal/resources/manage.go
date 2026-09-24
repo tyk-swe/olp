@@ -85,9 +85,9 @@ func (m *Management) list(r *http.Request) (access.Reply, error) {
 	filters := manageFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {
 		switch raw {
-		case KindFile, KindBatch, KindResponse:
+		case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse:
 		default:
-			return access.Reply{}, access.Invalid("kind", "Kind must be file, batch, or response.")
+			return access.Reply{}, access.Invalid("kind", "Use file, batch, response, continuation, or strict_response.")
 		}
 		filters.kind = &raw
 	}

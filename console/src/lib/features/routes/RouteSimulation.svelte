@@ -11,7 +11,7 @@
   >
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Deterministic dry run</p>
+        <p class="eyebrow">Plan only · no provider request</p>
         <h2 id="simulation-heading">Attempt explanation</h2>
       </div>
       <code

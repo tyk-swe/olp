@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -39,7 +40,7 @@ const (
 
 var supportedOperations = []string{
 	"generation", "token_count", "embeddings", "moderation", "rerank",
-	"image_generation", "image_edit", "image_variation", "speech", "transcription",
+	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete",
 	"batch", "realtime", "bedrock_invoke",
 }
@@ -53,6 +54,7 @@ type draft struct {
 	MaxAttempts      int
 	Targets          []runtime.PublishedTarget
 	ContentPolicy    []byte
+	Fidelity         []byte
 	BasedOnRevision  *string
 	ETag             string
 	CreatedBy        string
@@ -63,13 +65,13 @@ type draft struct {
 	ProjectName      *string
 }
 
-const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name"
+const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity"
 const draftFrom = " FROM olp_go.route_drafts d JOIN olp_go.users u ON u.id=d.created_by LEFT JOIN olp_go.projects pr ON pr.id=d.project_id"
 
 func scanDraft(row pgx.Row) (*draft, error) {
 	var d draft
 	var operations, targets []byte
-	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName); err != nil {
+	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName, &d.Fidelity); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &d.Operations); err != nil {
@@ -179,11 +181,11 @@ func targetsJSON(targets []runtime.PublishedTarget, live map[string]*resolved) [
 }
 
 func (d *draft) summary() map[string]any {
-	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "etag": d.ETag, "project_id": d.ProjectID, "project_name": d.ProjectName}
+	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "etag": d.ETag, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}
 }
 
 func (d *draft) detail(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName}
+	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}
 }
 
 func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (access.Reply, error) {
@@ -210,6 +212,7 @@ type DraftInput struct {
 	MaxAttempts      int             `json:"max_attempts"`
 	Targets          []TargetInput   `json:"targets"`
 	ContentPolicy    json.RawMessage `json:"content_policy"`
+	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
 	ProjectID        *string         `json:"project_id"`
 }
 
@@ -228,7 +231,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		in.Operations = []string{"generation"}
 	}
 	for _, op := range in.Operations {
-		if !slices.Contains(supportedOperations, op) {
+		if !slices.Contains(supportedOperations, op) && !registeredOperation(op) {
 			return nil, access.Fail(422, "operation_unavailable", "The "+op+" operation is not available in this release.")
 		}
 	}
@@ -248,6 +251,11 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		in.ContentPolicy, _ = json.Marshal(policy)
 	} else {
 		in.ContentPolicy = nil
+	}
+	var fidelityErr error
+	in.Fidelity, fidelityErr = normalizedFidelity(in.Fidelity)
+	if fidelityErr != nil {
+		return nil, fidelityErr
 	}
 	if len(in.Targets) == 0 || len(in.Targets) > maxTargets {
 		return nil, access.Invalid("targets", "Use 1–64 targets.")
@@ -368,7 +376,7 @@ func (s *Server) draft(r *http.Request) (access.Reply, error) {
 func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	a := s.Access
 	var input DraftInput
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -390,6 +398,12 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
+	if len(input.Fidelity) == 0 {
+		input.Fidelity, err = PublishedFidelity(r.Context(), tx, input.Slug, input.ProjectID)
+		if err != nil {
+			return access.Reply{}, err
+		}
+	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
 	if err != nil {
 		return access.Reply{}, err
@@ -397,13 +411,13 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	id, etag := access.NewID(), access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.create", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v3/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID}}
+	result := access.Reply{Status: 201, Location: "/api/v3/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -417,7 +431,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input DraftInput
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -442,6 +456,9 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
 		return access.Reply{}, access.Invalid("project_id", "The draft's project is set at creation and cannot change.")
 	}
+	if len(input.Fidelity) == 0 {
+		input.Fidelity = bytes.Clone(current.Fidelity)
+	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
@@ -449,7 +466,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	etag := access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.update", "route_draft", id, "success"); err != nil {
@@ -498,4 +515,13 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: 204})
+}
+
+func registeredOperation(operation string) bool {
+	for _, d := range operationregistry.Default.Dialects() {
+		if d.Operation.ID == operation {
+			return true
+		}
+	}
+	return false
 }

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -24,17 +26,21 @@ type Emit func(frame []byte) error
 // includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
 func Stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, true, emit)
+	return stream(family, r, maxEventBytes, route, includeUsage, true, emit, nil)
 }
 
 // StreamMetadata forwards the same validated frames as Stream, but retains only
 // completion metadata. The gateway must not accumulate output or tool arguments
 // for the lifetime of a stream; the unary response cap does not bound streams.
 func StreamMetadata(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit) (*Completion, error) {
-	return stream(family, r, maxEventBytes, route, includeUsage, false, emit)
+	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, nil)
 }
 
-func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit) (*Completion, error) {
+func StreamMetadataEvents(family Family, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
+	return stream(family, r, maxEventBytes, route, includeUsage, false, emit, observe)
+}
+
+func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
 	var s streamer
 	switch family {
 	case FamilyChat:
@@ -45,7 +51,25 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 	default:
 		return nil, errors.New("unknown request family")
 	}
-	err := sse.Decode(r, maxEventBytes, s.frame)
+	sequence := uint64(0)
+	err := sse.Decode(r, maxEventBytes, func(frame sse.Frame) error {
+		event, err := LiftSSE(family, frame, sequence, maxEventBytes)
+		if err != nil {
+			return err
+		}
+		sequence++
+		if observe != nil {
+			if err := observe(event); err != nil {
+				return err
+			}
+		}
+		if event.Source().Valid() {
+			frame.Data = event.Source().Raw()
+		} else {
+			frame.Data = event.Control()
+		}
+		return s.frame(frame, event)
+	})
 	completion, finishErr := s.finish()
 	if err != nil && !errors.Is(err, errStreamComplete) {
 		if errors.Is(err, sse.ErrEventTooLarge) {
@@ -60,7 +84,7 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 }
 
 type streamer interface {
-	frame(sse.Frame) error
+	frame(sse.Frame, oif.Event) error
 	finish() (*Completion, error)
 }
 
@@ -79,7 +103,7 @@ type chatStream struct {
 	c            Completion
 }
 
-func (s *chatStream) frame(f sse.Frame) error {
+func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Data == "[DONE]" {
 		if !s.finished[0] {
 			return &ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
@@ -95,8 +119,8 @@ func (s *chatStream) frame(f sse.Frame) error {
 		}
 		return errStreamComplete
 	}
-	fields, err := object([]byte(f.Data))
-	if err != nil {
+	fields := event.Source().Fields()
+	if fields == nil {
 		return &ProtocolError{Detail: "chunk is not a JSON object"}
 	}
 	if raw, present := fields["error"]; present && !isNull(raw) {
@@ -226,32 +250,37 @@ func (s *chatStream) finish() (*Completion, error) {
 }
 
 type responsesStream struct {
-	collect bool
-	route   string
-	emit    Emit
-	done    bool
-	c       *Completion
+	collect     bool
+	route       string
+	emit        Emit
+	done        bool
+	terminalErr error
+	c           *Completion
 }
 
-func (s *responsesStream) frame(f sse.Frame) error {
-	fields, err := object([]byte(f.Data))
-	if err != nil {
+func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
+	source := event.Source()
+	fields := source.Fields()
+	if fields == nil {
 		return &ProtocolError{Detail: "event is not a JSON object"}
 	}
 	kind, ok := stringField(fields, "type")
 	if !ok || kind == "" || strings.ContainsAny(kind, "\r\n\x00") {
 		return &ProtocolError{Detail: "event has an invalid type"}
 	}
+	if f.Event != nil && *f.Event != kind {
+		return &ProtocolError{Detail: "event name disagrees with type"}
+	}
 	terminal := kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed"
 	if raw := fields["response"]; terminal && (len(raw) == 0 || isNull(raw)) {
 		return &ProtocolError{Detail: "terminal event has no response"}
 	}
 	if kind == "error" {
-		upstream := errorObject([]byte(f.Data))
+		upstream := errorObject(fields["error"])
 		if upstream == nil {
 			upstream = &UpstreamError{Message: "upstream reported an error"}
 		}
-		return upstream
+		s.terminalErr, s.done = upstream, true
 	}
 	if raw, present := fields["response"]; present && !isNull(raw) {
 		response, err := object(raw)
@@ -266,29 +295,42 @@ func (s *responsesStream) frame(f sse.Frame) error {
 			if !s.collect {
 				s.c.OutputText, s.c.Refusal, s.c.ToolCalls = "", "", nil
 			}
-			if err := terminalResponseError(response); err != nil {
-				return err
+			terminalErr := terminalResponseError(response)
+			if terminalErr != nil && kind != "response.failed" {
+				return terminalErr
 			}
-			if kind == "response.failed" {
-				return &UpstreamError{Message: "upstream reported a failed response"}
+			if kind == "response.failed" && terminalErr == nil {
+				terminalErr = &UpstreamError{Message: "upstream reported a failed response"}
 			}
 			if status, present := stringField(response, "status"); present && status != strings.TrimPrefix(kind, "response.") {
 				return &ProtocolError{Detail: "terminal event disagrees with response status"}
 			}
+			s.terminalErr = terminalErr
 			s.done = true
 		}
-		if err = rewriteModel(response, s.route); err != nil {
-			return err
-		}
-		if fields["response"], err = json.Marshal(response); err != nil {
-			return err
+		if _, present := source.Lookup("/response/model"); present {
+			bound, marshalErr := json.Marshal(s.route)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			source, err = oif.Apply(source, []oif.Change{{Pointer: "/response/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published response model"}})
+			if err != nil {
+				return err
+			}
 		}
 	}
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return err
+	encoded := source.Bytes()
+	frame := make([]byte, 0, len(kind)+len(encoded)+48)
+	if f.ID != nil {
+		frame = append(frame, "id: "...)
+		frame = append(frame, *f.ID...)
+		frame = append(frame, '\n')
 	}
-	frame := make([]byte, 0, len(kind)+len(encoded)+16)
+	if f.RetryMS != nil {
+		frame = append(frame, "retry: "...)
+		frame = strconv.AppendUint(frame, *f.RetryMS, 10)
+		frame = append(frame, '\n')
+	}
 	frame = append(frame, "event: "...)
 	frame = append(frame, kind...)
 	frame = append(frame, "\ndata: "...)
@@ -303,8 +345,11 @@ func (s *responsesStream) frame(f sse.Frame) error {
 }
 
 func (s *responsesStream) finish() (*Completion, error) {
+	if s.done && s.terminalErr != nil {
+		return s.c, s.terminalErr
+	}
 	if !s.done || s.c == nil {
 		return s.c, &ProtocolError{Detail: "stream ended before the terminal response event", Truncated: true}
 	}
-	return s.c, nil
+	return s.c, s.terminalErr
 }

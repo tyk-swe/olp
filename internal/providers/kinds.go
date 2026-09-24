@@ -175,6 +175,7 @@ func init() {
 		{"huggingface", "Hugging Face", "https://router.huggingface.co/v1", "https://huggingface.co/docs/inference-providers", true, []string{"generation"}},
 		{"perplexity", "Perplexity", "https://api.perplexity.ai", "https://docs.perplexity.ai", false, []string{"generation"}},
 		{"cohere", "Cohere", "https://api.cohere.ai/compatibility/v1", "https://docs.cohere.com", false, []string{"generation", "embeddings", "rerank"}},
+		{"cohere-native-v2", "Cohere native v2", "https://api.cohere.ai/v2", "https://docs.cohere.com/reference/embed", false, []string{"embeddings", "rerank"}},
 		{"voyage", "Voyage AI", "https://api.voyageai.com/v1", "https://docs.voyageai.com", false, []string{"embeddings", "rerank"}},
 	} {
 		kinds[1].Presets = append(kinds[1].Presets, preset{ID: entry.id, Label: entry.name, Description: entry.name + " compatible API.", Endpoint: entry.endpoint, AuthMode: AuthAPIKey, Maintainer: entry.name, DocumentationLabel: entry.name + " API", DocumentationURL: entry.docs})
@@ -215,6 +216,8 @@ func init() {
 			vendors[i].Operations = []string{"generation", "embeddings", "token_count", "image_generation"}
 		case "cohere":
 			vendors[i].Parameters = []string{"temperature", "max_output_tokens", "top_p", "stop", "seed", "tools", "response_format", "encoding_format"}
+		case "cohere-native-v2":
+			vendors[i].Parameters = []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority"}
 		case "voyage":
 			vendors[i].Parameters = []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"}
 		}
@@ -228,7 +231,7 @@ func init() {
 		}
 		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "token_count", Surface: surface, Mode: "unary"})
 	}
-	for _, operation := range []string{"embeddings", "moderation", "rerank"} {
+	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation"} {
 		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 	}
 	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
@@ -242,6 +245,7 @@ func init() {
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "video_create", Surface: "openai", Mode: "async"})
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "batch", Surface: "openai", Mode: "unary"})
 	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "realtime"})
+	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "realtime", Surface: "gemini", Mode: "realtime"})
 	for _, operation := range []string{"generation", "bedrock_invoke"} {
 		for _, mode := range []string{"unary", "streaming"} {
 			CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "bedrock", Mode: mode})

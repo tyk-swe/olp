@@ -19,6 +19,7 @@
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { formatDate, stateLabel } from '$lib/format';
+  import MediaTimeline from './MediaTimeline.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     mediaJobFilters,
@@ -287,6 +288,7 @@
           <dd>{formatDate(detail.data.updated_at)}</dd>
         </div>
       </dl>
+      <MediaTimeline job={detail.data} />
       {#if detail.data.error_class || detail.data.reconciliation_error}<div
           class="inline-problem"
           role="alert"

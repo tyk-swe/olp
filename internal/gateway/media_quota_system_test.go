@@ -109,6 +109,9 @@ func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 				if resp.StatusCode != 201 {
 					t.Fatalf("create: %d %v", resp.StatusCode, created)
 				}
+				// Reading a response body does not guarantee that the server's
+				// deferred quota settlement has run yet.
+				f.awaitCompleted(t, 1)
 				id := created["id"].(string)
 				var pinnedSlot string
 				if err := f.pool.QueryRow(t.Context(), "SELECT slot_id::text FROM olp_go.media_jobs WHERE id=$1", id).Scan(&pinnedSlot); err != nil || pinnedSlot != f.slotID {
@@ -150,12 +153,14 @@ func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 				}
 				call := func(want int) {
 					t.Helper()
+					completed := f.completed.Load()
 					resp := f.call(t, method, path, "", nil)
 					body, err := io.ReadAll(resp.Body)
 					resp.Body.Close()
 					if err != nil || resp.StatusCode != want {
 						t.Fatalf("%s %s: status=%d want=%d body=%s err=%v", method, path, resp.StatusCode, want, body, err)
 					}
+					f.awaitCompleted(t, completed+1)
 				}
 				call(429)
 				if f.upstream.getCalls.Load() != 0 || f.upstream.contentCalls.Load() != 0 || f.upstream.deleteCalls.Load() != 0 {
@@ -190,6 +195,21 @@ func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 					free.Refund(t.Context())
 				}
 			})
+		}
+	}
+}
+
+func (f *mediaFixture) awaitCompleted(t *testing.T, minimum int64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for f.completed.Load() < minimum {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("media handler did not finish quota settlement: %v", ctx.Err())
+		case <-ticker.C:
 		}
 	}
 }

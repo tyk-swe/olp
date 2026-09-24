@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import OpenAI from 'openai';
+
+const base = process.env.OLP_OPERATION_BASE;
+const route = process.env.OLP_OPERATION_FLOAT_ROUTE;
+const packedRoute = process.env.OLP_OPERATION_PACKED_ROUTE;
+const client = new OpenAI({ baseURL: `${base}/v1`, apiKey: process.env.OLP_OPERATION_FLOAT_KEY, maxRetries: 0 });
+const implicit = await client.embeddings.create({ model: route, input: 'native SDK input' });
+assert.deepEqual(implicit.data[0].embedding, [1, -2]);
+const explicit = await client.embeddings.create({ model: route, input: 'native SDK input', encoding_format: 'base64' });
+assert.equal(explicit.data[0].embedding, 'AACAPwAAAMA=');
+const raw = new OpenAI({ baseURL: base, apiKey: process.env.OLP_OPERATION_PACKED_KEY, maxRetries: 0 });
+const path = `/native/voyage-embeddings/models/${packedRoute}`;
+const body = { model: packedRoute, input: 'native bytes', output_dtype: 'uint8', encoding_format: 'base64', input_type: null };
+await assert.rejects(raw.post(path, { body }), error => error.status === 400 && error.code === 'state_carrier');
+const native = await raw.post(path, { body, headers: { 'X-OLP-Client-Contract': 'raw-vector-storage/1' } });
+assert.equal(native.data[0].embedding, 'AP8=');
+assert.deepEqual([...Buffer.from(native.data[0].embedding, 'base64')], [0, 255]);
+const unsafe = new OpenAI({ baseURL: `${base}/v1`, apiKey: process.env.OLP_OPERATION_PACKED_KEY, maxRetries: 0 });
+await assert.rejects(unsafe.embeddings.create({ model: packedRoute, input: 'no dtype proof from SDK encoding' }), error => error.status === 400 && error.code === 'target_capability');
+console.log('Pinned JavaScript operation storage contracts passed.');

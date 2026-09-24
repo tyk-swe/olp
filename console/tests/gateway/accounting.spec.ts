@@ -144,6 +144,8 @@ async function provisionRoute(page: Page): Promise<void> {
   await expect(
     page.getByLabel('Provider model').first().locator('option:checked')
   ).toContainText(upstream.model);
+  // This journey intentionally qualifies the historical compatibility route.
+  await page.getByLabel('Fidelity mode').selectOption('legacy');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await page
@@ -482,7 +484,9 @@ test('retained media records expose metadata, filters, and accessible details', 
   // by the gateway service suites; every read here uses the real Go API.
   const database = new URL(process.env.OLP_DATABASE_URL!);
   database.pathname =
-    info.project.name === 'go-packaged' ? '/olp_go_packaged' : '/olp_go_vite';
+    '/' +
+    (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') +
+    (info.project.name === 'go-packaged' ? 'olp_go_packaged' : 'olp_go_vite');
   const succeeded = randomUUID();
   const failed = randomUUID();
   const seed = await promisify(execFile)('psql', [
@@ -525,6 +529,10 @@ test('retained media records expose metadata, filters, and accessible details', 
   await expect(page.locator('.job-detail')).toContainText(succeeded);
   await expect(page.locator('.job-detail')).toContainText('Deleted');
   await expect(page.locator('.job-detail')).toContainText('Not available');
+  await expect(
+    page.getByRole('heading', { name: 'Recorded media lifecycle' })
+  ).toBeVisible();
+  await expect(page.getByText('Terminal state recorded')).toBeVisible();
   await expect(
     page.locator('.job-detail audio, .job-detail video, .job-detail img')
   ).toHaveCount(0);

@@ -3,6 +3,7 @@ package runtime
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"math"
 	"slices"
 	"time"
@@ -26,8 +27,10 @@ type SelectionOptions struct {
 	CheckSlots        bool
 	CredentialRevoked func(string) bool
 	Accept            func(Provider, Target) error
+	Effective         func(Provider, Target) ([]string, *TokenDemand)
 }
 type Decision struct {
+	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
 	TargetID              string              `json:"target_id"`
 	ProviderID            string              `json:"provider_id"`
 	UpstreamModel         string              `json:"upstream_model"`
@@ -45,6 +48,19 @@ type Decision struct {
 	RequestedOutputTokens *int64              `json:"requested_output_tokens"`
 	ContextLength         *int64              `json:"context_length"`
 	MaxOutputTokens       *int64              `json:"max_output_tokens"`
+}
+
+// Incompatibility describes an unsatisfied semantic obligation without retaining
+// request values, native opaque material, or provider credentials.
+type Incompatibility struct {
+	Code        string `json:"code"`
+	Field       string `json:"field,omitempty"`
+	Requirement string `json:"requirement"`
+	Message     string `json:"message"`
+}
+
+type incompatibilityError interface {
+	Incompatibility() (code, field, requirement, message string)
 }
 type Plan struct {
 	Attempts  []Attempt
@@ -130,6 +146,11 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			reason = "outside_preferred_order"
 		}
 		if reason == "" && options.CheckSlots {
+			if provider.Network != nil && provider.Network.CredentialID != "" && options.CredentialRevoked != nil && options.CredentialRevoked(provider.Network.CredentialID) {
+				reason = "network_credential_revoked"
+			}
+		}
+		if reason == "" && options.CheckSlots {
 			row.slots = SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity)
 			if options.CredentialRevoked != nil {
 				row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool { return slot.CredentialID != nil && options.CredentialRevoked(*slot.CredentialID) })
@@ -142,6 +163,24 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		if reason == "" && options.Accept != nil {
 			if e := options.Accept(provider, target); e != nil {
 				reason = "unsupported_request_semantics"
+				var detail incompatibilityError
+				if errors.As(e, &detail) {
+					code, field, requirement, message := detail.Incompatibility()
+					row.decision.Incompatibility = &Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
+					reason = code
+				}
+			}
+		}
+		if reason == "" && options.Effective != nil {
+			parameters, demand := options.Effective(provider, target)
+			reason = capacityReason(metadata, demand)
+			if reason == "" {
+				reason = constraintReason(policy, provider, metadata, row.decision.Price, parameters)
+			}
+			if demand != nil {
+				input := demand.EstimatedInputTokens
+				row.decision.EstimatedInputTokens = &input
+				row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 			}
 		}
 		targetID, e := uuid.Parse(target.RoutingID)

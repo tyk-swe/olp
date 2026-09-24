@@ -12,10 +12,11 @@ import (
 )
 
 type Server struct {
-	Access          *access.Server
-	Egress          *egress.Policy
-	VendorKind      func(vendor string) (string, bool)
-	StoreCredential func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
+	Access                 *access.Server
+	Egress                 *egress.Policy
+	VendorKind             func(vendor string) (string, bool)
+	StoreNetworkCredential func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
+	StoreCredential        func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -59,7 +60,7 @@ type promotionInput struct {
 
 func (s *Server) planEndpoint(r *http.Request) (access.Reply, error) {
 	var input promotionInput
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Document == nil {
@@ -77,7 +78,7 @@ func (s *Server) planEndpoint(r *http.Request) (access.Reply, error) {
 
 func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 	var input promotionInput
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Document == nil {

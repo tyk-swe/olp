@@ -12,21 +12,102 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AttemptInteractionMetadataClientState.
+const (
+	AttemptInteractionMetadataClientStateActionable        AttemptInteractionMetadataClientState = "actionable"
+	AttemptInteractionMetadataClientStatePartiallyObserved AttemptInteractionMetadataClientState = "partially-observed"
+	AttemptInteractionMetadataClientStateTerminal          AttemptInteractionMetadataClientState = "terminal"
+	AttemptInteractionMetadataClientStateUnobserved        AttemptInteractionMetadataClientState = "unobserved"
+)
+
+// Valid indicates whether the value is a known member of the AttemptInteractionMetadataClientState enum.
+func (e AttemptInteractionMetadataClientState) Valid() bool {
+	switch e {
+	case AttemptInteractionMetadataClientStateActionable:
+		return true
+	case AttemptInteractionMetadataClientStatePartiallyObserved:
+		return true
+	case AttemptInteractionMetadataClientStateTerminal:
+		return true
+	case AttemptInteractionMetadataClientStateUnobserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttemptInteractionMetadataFidelity.
+const (
+	AttemptInteractionMetadataFidelityStrict AttemptInteractionMetadataFidelity = "strict"
+)
+
+// Valid indicates whether the value is a known member of the AttemptInteractionMetadataFidelity enum.
+func (e AttemptInteractionMetadataFidelity) Valid() bool {
+	switch e {
+	case AttemptInteractionMetadataFidelityStrict:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttemptInteractionMetadataPlanClass.
+const (
+	NativeIdentity       AttemptInteractionMetadataPlanClass = "native_identity"
+	QualifiedInteraction AttemptInteractionMetadataPlanClass = "qualified_interaction"
+)
+
+// Valid indicates whether the value is a known member of the AttemptInteractionMetadataPlanClass enum.
+func (e AttemptInteractionMetadataPlanClass) Valid() bool {
+	switch e {
+	case NativeIdentity:
+		return true
+	case QualifiedInteraction:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttemptInteractionMetadataUpstreamState.
+const (
+	AttemptInteractionMetadataUpstreamStateAccepted       AttemptInteractionMetadataUpstreamState = "accepted"
+	AttemptInteractionMetadataUpstreamStateNotSent        AttemptInteractionMetadataUpstreamState = "not-sent"
+	AttemptInteractionMetadataUpstreamStateOutcomeUnknown AttemptInteractionMetadataUpstreamState = "outcome-unknown"
+	AttemptInteractionMetadataUpstreamStateTerminal       AttemptInteractionMetadataUpstreamState = "terminal"
+)
+
+// Valid indicates whether the value is a known member of the AttemptInteractionMetadataUpstreamState enum.
+func (e AttemptInteractionMetadataUpstreamState) Valid() bool {
+	switch e {
+	case AttemptInteractionMetadataUpstreamStateAccepted:
+		return true
+	case AttemptInteractionMetadataUpstreamStateNotSent:
+		return true
+	case AttemptInteractionMetadataUpstreamStateOutcomeUnknown:
+		return true
+	case AttemptInteractionMetadataUpstreamStateTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEventResponseActorType.
 const (
-	ManagementToken AuditEventResponseActorType = "management_token"
-	System          AuditEventResponseActorType = "system"
-	User            AuditEventResponseActorType = "user"
+	AuditEventResponseActorTypeManagementToken AuditEventResponseActorType = "management_token"
+	AuditEventResponseActorTypeSystem          AuditEventResponseActorType = "system"
+	AuditEventResponseActorTypeUser            AuditEventResponseActorType = "user"
 )
 
 // Valid indicates whether the value is a known member of the AuditEventResponseActorType enum.
 func (e AuditEventResponseActorType) Valid() bool {
 	switch e {
-	case ManagementToken:
+	case AuditEventResponseActorTypeManagementToken:
 		return true
-	case System:
+	case AuditEventResponseActorTypeSystem:
 		return true
-	case User:
+	case AuditEventResponseActorTypeUser:
 		return true
 	default:
 		return false
@@ -143,16 +224,16 @@ func (e ContentPolicyRuleAction) Valid() bool {
 
 // Defines values for ContentPolicyRulePhase.
 const (
-	Input  ContentPolicyRulePhase = "input"
-	Output ContentPolicyRulePhase = "output"
+	ContentPolicyRulePhaseInput  ContentPolicyRulePhase = "input"
+	ContentPolicyRulePhaseOutput ContentPolicyRulePhase = "output"
 )
 
 // Valid indicates whether the value is a known member of the ContentPolicyRulePhase enum.
 func (e ContentPolicyRulePhase) Valid() bool {
 	switch e {
-	case Input:
+	case ContentPolicyRulePhaseInput:
 		return true
-	case Output:
+	case ContentPolicyRulePhaseOutput:
 		return true
 	default:
 		return false
@@ -249,6 +330,225 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for InspectedPartKind.
+const (
+	InspectedPartKindAudio      InspectedPartKind = "audio"
+	InspectedPartKindDocument   InspectedPartKind = "document"
+	InspectedPartKindImage      InspectedPartKind = "image"
+	InspectedPartKindMedia      InspectedPartKind = "media"
+	InspectedPartKindNull       InspectedPartKind = "null"
+	InspectedPartKindOpaque     InspectedPartKind = "opaque"
+	InspectedPartKindReasoning  InspectedPartKind = "reasoning"
+	InspectedPartKindRefusal    InspectedPartKind = "refusal"
+	InspectedPartKindText       InspectedPartKind = "text"
+	InspectedPartKindToolCall   InspectedPartKind = "tool_call"
+	InspectedPartKindToolResult InspectedPartKind = "tool_result"
+	InspectedPartKindVideo      InspectedPartKind = "video"
+)
+
+// Valid indicates whether the value is a known member of the InspectedPartKind enum.
+func (e InspectedPartKind) Valid() bool {
+	switch e {
+	case InspectedPartKindAudio:
+		return true
+	case InspectedPartKindDocument:
+		return true
+	case InspectedPartKindImage:
+		return true
+	case InspectedPartKindMedia:
+		return true
+	case InspectedPartKindNull:
+		return true
+	case InspectedPartKindOpaque:
+		return true
+	case InspectedPartKindReasoning:
+		return true
+	case InspectedPartKindRefusal:
+		return true
+	case InspectedPartKindText:
+		return true
+	case InspectedPartKindToolCall:
+		return true
+	case InspectedPartKindToolResult:
+		return true
+	case InspectedPartKindVideo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InspectedRequestFieldKind.
+const (
+	InspectedRequestFieldKindAbsent  InspectedRequestFieldKind = "absent"
+	InspectedRequestFieldKindArray   InspectedRequestFieldKind = "array"
+	InspectedRequestFieldKindBoolean InspectedRequestFieldKind = "boolean"
+	InspectedRequestFieldKindNull    InspectedRequestFieldKind = "null"
+	InspectedRequestFieldKindNumber  InspectedRequestFieldKind = "number"
+	InspectedRequestFieldKindObject  InspectedRequestFieldKind = "object"
+	InspectedRequestFieldKindString  InspectedRequestFieldKind = "string"
+)
+
+// Valid indicates whether the value is a known member of the InspectedRequestFieldKind enum.
+func (e InspectedRequestFieldKind) Valid() bool {
+	switch e {
+	case InspectedRequestFieldKindAbsent:
+		return true
+	case InspectedRequestFieldKindArray:
+		return true
+	case InspectedRequestFieldKindBoolean:
+		return true
+	case InspectedRequestFieldKindNull:
+		return true
+	case InspectedRequestFieldKindNumber:
+		return true
+	case InspectedRequestFieldKindObject:
+		return true
+	case InspectedRequestFieldKindString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InspectedTurnRole.
+const (
+	InspectedTurnRoleAssistant   InspectedTurnRole = "assistant"
+	InspectedTurnRoleDeveloper   InspectedTurnRole = "developer"
+	InspectedTurnRoleFunction    InspectedTurnRole = "function"
+	InspectedTurnRoleInstruction InspectedTurnRole = "instruction"
+	InspectedTurnRoleModel       InspectedTurnRole = "model"
+	InspectedTurnRoleOther       InspectedTurnRole = "other"
+	InspectedTurnRoleSystem      InspectedTurnRole = "system"
+	InspectedTurnRoleTool        InspectedTurnRole = "tool"
+	InspectedTurnRoleUnspecified InspectedTurnRole = "unspecified"
+	InspectedTurnRoleUser        InspectedTurnRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the InspectedTurnRole enum.
+func (e InspectedTurnRole) Valid() bool {
+	switch e {
+	case InspectedTurnRoleAssistant:
+		return true
+	case InspectedTurnRoleDeveloper:
+		return true
+	case InspectedTurnRoleFunction:
+		return true
+	case InspectedTurnRoleInstruction:
+		return true
+	case InspectedTurnRoleModel:
+		return true
+	case InspectedTurnRoleOther:
+		return true
+	case InspectedTurnRoleSystem:
+		return true
+	case InspectedTurnRoleTool:
+		return true
+	case InspectedTurnRoleUnspecified:
+		return true
+	case InspectedTurnRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InspectedTurnScope.
+const (
+	InspectedTurnScopeContents          InspectedTurnScope = "contents"
+	InspectedTurnScopeInput             InspectedTurnScope = "input"
+	InspectedTurnScopeInstructions      InspectedTurnScope = "instructions"
+	InspectedTurnScopeMessages          InspectedTurnScope = "messages"
+	InspectedTurnScopeSystem            InspectedTurnScope = "system"
+	InspectedTurnScopeSystemInstruction InspectedTurnScope = "system_instruction"
+)
+
+// Valid indicates whether the value is a known member of the InspectedTurnScope enum.
+func (e InspectedTurnScope) Valid() bool {
+	switch e {
+	case InspectedTurnScopeContents:
+		return true
+	case InspectedTurnScopeInput:
+		return true
+	case InspectedTurnScopeInstructions:
+		return true
+	case InspectedTurnScopeMessages:
+		return true
+	case InspectedTurnScopeSystem:
+		return true
+	case InspectedTurnScopeSystemInstruction:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InteractionInspectionFidelity.
+const (
+	InteractionInspectionFidelityLegacy      InteractionInspectionFidelity = "legacy"
+	InteractionInspectionFidelityStrict      InteractionInspectionFidelity = "strict"
+	InteractionInspectionFidelityTransformed InteractionInspectionFidelity = "transformed"
+)
+
+// Valid indicates whether the value is a known member of the InteractionInspectionFidelity enum.
+func (e InteractionInspectionFidelity) Valid() bool {
+	switch e {
+	case InteractionInspectionFidelityLegacy:
+		return true
+	case InteractionInspectionFidelityStrict:
+		return true
+	case InteractionInspectionFidelityTransformed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InteractionInspectionRepresentation.
+const (
+	Oif InteractionInspectionRepresentation = "oif"
+)
+
+// Valid indicates whether the value is a known member of the InteractionInspectionRepresentation enum.
+func (e InteractionInspectionRepresentation) Valid() bool {
+	switch e {
+	case Oif:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InteractionInspectionStatus.
+const (
+	InteractionInspectionStatusAdmitted     InteractionInspectionStatus = "admitted"
+	InteractionInspectionStatusBlocked      InteractionInspectionStatus = "blocked"
+	InteractionInspectionStatusIncompatible InteractionInspectionStatus = "incompatible"
+	InteractionInspectionStatusLegacy       InteractionInspectionStatus = "legacy"
+	InteractionInspectionStatusNotEvaluated InteractionInspectionStatus = "not_evaluated"
+	InteractionInspectionStatusNotInspected InteractionInspectionStatus = "not_inspected"
+)
+
+// Valid indicates whether the value is a known member of the InteractionInspectionStatus enum.
+func (e InteractionInspectionStatus) Valid() bool {
+	switch e {
+	case InteractionInspectionStatusAdmitted:
+		return true
+	case InteractionInspectionStatusBlocked:
+		return true
+	case InteractionInspectionStatusIncompatible:
+		return true
+	case InteractionInspectionStatusLegacy:
+		return true
+	case InteractionInspectionStatusNotEvaluated:
+		return true
+	case InteractionInspectionStatusNotInspected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlaygroundRequestOperation.
 const (
 	PlaygroundRequestOperationEmbeddings PlaygroundRequestOperation = "embeddings"
@@ -278,13 +578,13 @@ func (e PlaygroundRequestOperation) Valid() bool {
 
 // Defines values for PlaygroundResponseFormat0Type.
 const (
-	Text PlaygroundResponseFormat0Type = "text"
+	PlaygroundResponseFormat0TypeText PlaygroundResponseFormat0Type = "text"
 )
 
 // Valid indicates whether the value is a known member of the PlaygroundResponseFormat0Type enum.
 func (e PlaygroundResponseFormat0Type) Valid() bool {
 	switch e {
-	case Text:
+	case PlaygroundResponseFormat0TypeText:
 		return true
 	default:
 		return false
@@ -315,78 +615,6 @@ const (
 func (e PlaygroundResponseFormat2Type) Valid() bool {
 	switch e {
 	case JsonSchema:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for PriceOperation.
-const (
-	PriceOperationBatch           PriceOperation = "batch"
-	PriceOperationBedrockInvoke   PriceOperation = "bedrock_invoke"
-	PriceOperationEmbeddings      PriceOperation = "embeddings"
-	PriceOperationGeneration      PriceOperation = "generation"
-	PriceOperationImageEdit       PriceOperation = "image_edit"
-	PriceOperationImageGeneration PriceOperation = "image_generation"
-	PriceOperationImageVariation  PriceOperation = "image_variation"
-	PriceOperationModelGet        PriceOperation = "model_get"
-	PriceOperationModelList       PriceOperation = "model_list"
-	PriceOperationModeration      PriceOperation = "moderation"
-	PriceOperationRealtime        PriceOperation = "realtime"
-	PriceOperationRerank          PriceOperation = "rerank"
-	PriceOperationSpeech          PriceOperation = "speech"
-	PriceOperationTokenCount      PriceOperation = "token_count"
-	PriceOperationTranscription   PriceOperation = "transcription"
-	PriceOperationVideoContent    PriceOperation = "video_content"
-	PriceOperationVideoCreate     PriceOperation = "video_create"
-	PriceOperationVideoDelete     PriceOperation = "video_delete"
-	PriceOperationVideoGet        PriceOperation = "video_get"
-	PriceOperationVideoList       PriceOperation = "video_list"
-)
-
-// Valid indicates whether the value is a known member of the PriceOperation enum.
-func (e PriceOperation) Valid() bool {
-	switch e {
-	case PriceOperationBatch:
-		return true
-	case PriceOperationBedrockInvoke:
-		return true
-	case PriceOperationEmbeddings:
-		return true
-	case PriceOperationGeneration:
-		return true
-	case PriceOperationImageEdit:
-		return true
-	case PriceOperationImageGeneration:
-		return true
-	case PriceOperationImageVariation:
-		return true
-	case PriceOperationModelGet:
-		return true
-	case PriceOperationModelList:
-		return true
-	case PriceOperationModeration:
-		return true
-	case PriceOperationRealtime:
-		return true
-	case PriceOperationRerank:
-		return true
-	case PriceOperationSpeech:
-		return true
-	case PriceOperationTokenCount:
-		return true
-	case PriceOperationTranscription:
-		return true
-	case PriceOperationVideoContent:
-		return true
-	case PriceOperationVideoCreate:
-		return true
-	case PriceOperationVideoDelete:
-		return true
-	case PriceOperationVideoGet:
-		return true
-	case PriceOperationVideoList:
 		return true
 	default:
 		return false
@@ -470,28 +698,28 @@ func (e ProviderAuthMode) Valid() bool {
 
 // Defines values for ProviderConfigurationField.
 const (
-	ApiVersion   ProviderConfigurationField = "api_version"
-	CloudProject ProviderConfigurationField = "cloud_project"
-	CloudRegion  ProviderConfigurationField = "cloud_region"
-	Deployment   ProviderConfigurationField = "deployment"
-	Endpoint     ProviderConfigurationField = "endpoint"
-	Model        ProviderConfigurationField = "model"
+	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
+	ProviderConfigurationFieldCloudProject ProviderConfigurationField = "cloud_project"
+	ProviderConfigurationFieldCloudRegion  ProviderConfigurationField = "cloud_region"
+	ProviderConfigurationFieldDeployment   ProviderConfigurationField = "deployment"
+	ProviderConfigurationFieldEndpoint     ProviderConfigurationField = "endpoint"
+	ProviderConfigurationFieldModel        ProviderConfigurationField = "model"
 )
 
 // Valid indicates whether the value is a known member of the ProviderConfigurationField enum.
 func (e ProviderConfigurationField) Valid() bool {
 	switch e {
-	case ApiVersion:
+	case ProviderConfigurationFieldApiVersion:
 		return true
-	case CloudProject:
+	case ProviderConfigurationFieldCloudProject:
 		return true
-	case CloudRegion:
+	case ProviderConfigurationFieldCloudRegion:
 		return true
-	case Deployment:
+	case ProviderConfigurationFieldDeployment:
 		return true
-	case Endpoint:
+	case ProviderConfigurationFieldEndpoint:
 		return true
-	case Model:
+	case ProviderConfigurationFieldModel:
 		return true
 	default:
 		return false
@@ -533,9 +761,11 @@ func (e ProviderKind) Valid() bool {
 
 // Defines values for ProviderResourceItemKind.
 const (
-	ProviderResourceItemKindBatch    ProviderResourceItemKind = "batch"
-	ProviderResourceItemKindFile     ProviderResourceItemKind = "file"
-	ProviderResourceItemKindResponse ProviderResourceItemKind = "response"
+	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
+	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
+	ProviderResourceItemKindStrictResponse ProviderResourceItemKind = "strict_response"
 )
 
 // Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
@@ -543,9 +773,13 @@ func (e ProviderResourceItemKind) Valid() bool {
 	switch e {
 	case ProviderResourceItemKindBatch:
 		return true
+	case ProviderResourceItemKindContinuation:
+		return true
 	case ProviderResourceItemKindFile:
 		return true
 	case ProviderResourceItemKindResponse:
+		return true
+	case ProviderResourceItemKindStrictResponse:
 		return true
 	default:
 		return false
@@ -612,6 +846,27 @@ func (e RouteDetailResponseState) Valid() bool {
 	}
 }
 
+// Defines values for RouteFidelityMode.
+const (
+	RouteFidelityModeLegacy      RouteFidelityMode = "legacy"
+	RouteFidelityModeStrict      RouteFidelityMode = "strict"
+	RouteFidelityModeTransformed RouteFidelityMode = "transformed"
+)
+
+// Valid indicates whether the value is a known member of the RouteFidelityMode enum.
+func (e RouteFidelityMode) Valid() bool {
+	switch e {
+	case RouteFidelityModeLegacy:
+		return true
+	case RouteFidelityModeStrict:
+		return true
+	case RouteFidelityModeTransformed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
 	Latency    RoutingStrategy = "latency"
@@ -636,11 +891,96 @@ func (e RoutingStrategy) Valid() bool {
 	}
 }
 
+// Defines values for SimulationDialect.
+const (
+	SimulationDialectAnthropicCountTokens     SimulationDialect = "anthropic-count-tokens"
+	SimulationDialectAnthropicMessages        SimulationDialect = "anthropic-messages"
+	SimulationDialectBedrockCountTokens       SimulationDialect = "bedrock-count-tokens"
+	SimulationDialectBedrockEmbeddings        SimulationDialect = "bedrock-embeddings"
+	SimulationDialectGeminiBatchEmbeddings    SimulationDialect = "gemini-batch-embeddings"
+	SimulationDialectGeminiCountTokens        SimulationDialect = "gemini-count-tokens"
+	SimulationDialectGeminiEmbeddings         SimulationDialect = "gemini-embeddings"
+	SimulationDialectGeminiGenerateContent    SimulationDialect = "gemini-generate-content"
+	SimulationDialectOpenaiChat               SimulationDialect = "openai-chat"
+	SimulationDialectOpenaiEmbeddings         SimulationDialect = "openai-embeddings"
+	SimulationDialectOpenaiInputTokens        SimulationDialect = "openai-input-tokens"
+	SimulationDialectOpenaiModeration         SimulationDialect = "openai-moderation"
+	SimulationDialectOpenaiResponses          SimulationDialect = "openai-responses"
+	SimulationDialectRerank                   SimulationDialect = "rerank"
+	SimulationDialectTeiClassification        SimulationDialect = "tei-classification"
+	SimulationDialectTeiEmbeddings            SimulationDialect = "tei-embeddings"
+	SimulationDialectTeiMultivectorEmbeddings SimulationDialect = "tei-multivector-embeddings"
+	SimulationDialectTeiRerank                SimulationDialect = "tei-rerank"
+	SimulationDialectTeiScoring               SimulationDialect = "tei-scoring"
+	SimulationDialectTeiSparseEmbeddings      SimulationDialect = "tei-sparse-embeddings"
+	SimulationDialectTeiTokenize              SimulationDialect = "tei-tokenize"
+	SimulationDialectVertexEmbeddings         SimulationDialect = "vertex-embeddings"
+	SimulationDialectVoyageEmbeddings         SimulationDialect = "voyage-embeddings"
+	SimulationDialectVoyageRerank             SimulationDialect = "voyage-rerank"
+)
+
+// Valid indicates whether the value is a known member of the SimulationDialect enum.
+func (e SimulationDialect) Valid() bool {
+	switch e {
+	case SimulationDialectAnthropicCountTokens:
+		return true
+	case SimulationDialectAnthropicMessages:
+		return true
+	case SimulationDialectBedrockCountTokens:
+		return true
+	case SimulationDialectBedrockEmbeddings:
+		return true
+	case SimulationDialectGeminiBatchEmbeddings:
+		return true
+	case SimulationDialectGeminiCountTokens:
+		return true
+	case SimulationDialectGeminiEmbeddings:
+		return true
+	case SimulationDialectGeminiGenerateContent:
+		return true
+	case SimulationDialectOpenaiChat:
+		return true
+	case SimulationDialectOpenaiEmbeddings:
+		return true
+	case SimulationDialectOpenaiInputTokens:
+		return true
+	case SimulationDialectOpenaiModeration:
+		return true
+	case SimulationDialectOpenaiResponses:
+		return true
+	case SimulationDialectRerank:
+		return true
+	case SimulationDialectTeiClassification:
+		return true
+	case SimulationDialectTeiEmbeddings:
+		return true
+	case SimulationDialectTeiMultivectorEmbeddings:
+		return true
+	case SimulationDialectTeiRerank:
+		return true
+	case SimulationDialectTeiScoring:
+		return true
+	case SimulationDialectTeiSparseEmbeddings:
+		return true
+	case SimulationDialectTeiTokenize:
+		return true
+	case SimulationDialectVertexEmbeddings:
+		return true
+	case SimulationDialectVoyageEmbeddings:
+		return true
+	case SimulationDialectVoyageRerank:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Surface.
 const (
 	SurfaceAnthropic Surface = "anthropic"
 	SurfaceBedrock   Surface = "bedrock"
 	SurfaceGemini    Surface = "gemini"
+	SurfaceNative    Surface = "native"
 	SurfaceOpenai    Surface = "openai"
 )
 
@@ -652,6 +992,8 @@ func (e Surface) Valid() bool {
 	case SurfaceBedrock:
 		return true
 	case SurfaceGemini:
+		return true
+	case SurfaceNative:
 		return true
 	case SurfaceOpenai:
 		return true
@@ -776,19 +1118,19 @@ func (e UserResponseAccessScope) Valid() bool {
 
 // Defines values for DownloadMediaJobContentParamsVariant.
 const (
-	Spritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
-	Thumbnail   DownloadMediaJobContentParamsVariant = "thumbnail"
-	Video       DownloadMediaJobContentParamsVariant = "video"
+	DownloadMediaJobContentParamsVariantSpritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
+	DownloadMediaJobContentParamsVariantThumbnail   DownloadMediaJobContentParamsVariant = "thumbnail"
+	DownloadMediaJobContentParamsVariantVideo       DownloadMediaJobContentParamsVariant = "video"
 )
 
 // Valid indicates whether the value is a known member of the DownloadMediaJobContentParamsVariant enum.
 func (e DownloadMediaJobContentParamsVariant) Valid() bool {
 	switch e {
-	case Spritesheet:
+	case DownloadMediaJobContentParamsVariantSpritesheet:
 		return true
-	case Thumbnail:
+	case DownloadMediaJobContentParamsVariantThumbnail:
 		return true
-	case Video:
+	case DownloadMediaJobContentParamsVariantVideo:
 		return true
 	default:
 		return false
@@ -818,9 +1160,11 @@ func (e ListBudgetAlertDeliveriesParamsStatus) Valid() bool {
 
 // Defines values for ListProviderResourcesParamsKind.
 const (
-	ListProviderResourcesParamsKindBatch    ListProviderResourcesParamsKind = "batch"
-	ListProviderResourcesParamsKindFile     ListProviderResourcesParamsKind = "file"
-	ListProviderResourcesParamsKindResponse ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
+	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindStrictResponse ListProviderResourcesParamsKind = "strict_response"
 )
 
 // Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
@@ -828,9 +1172,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	switch e {
 	case ListProviderResourcesParamsKindBatch:
 		return true
+	case ListProviderResourcesParamsKindContinuation:
+		return true
 	case ListProviderResourcesParamsKindFile:
 		return true
 	case ListProviderResourcesParamsKindResponse:
+		return true
+	case ListProviderResourcesParamsKindStrictResponse:
 		return true
 	default:
 		return false
@@ -918,6 +1266,26 @@ type AppliedRoutingPolicy struct {
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
+// AttemptInteractionMetadata Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
+type AttemptInteractionMetadata struct {
+	ClientState   AttemptInteractionMetadataClientState   `json:"client_state"`
+	Fidelity      AttemptInteractionMetadataFidelity      `json:"fidelity"`
+	PlanClass     AttemptInteractionMetadataPlanClass     `json:"plan_class"`
+	UpstreamState AttemptInteractionMetadataUpstreamState `json:"upstream_state"`
+}
+
+// AttemptInteractionMetadataClientState defines model for AttemptInteractionMetadata.ClientState.
+type AttemptInteractionMetadataClientState string
+
+// AttemptInteractionMetadataFidelity defines model for AttemptInteractionMetadata.Fidelity.
+type AttemptInteractionMetadataFidelity string
+
+// AttemptInteractionMetadataPlanClass defines model for AttemptInteractionMetadata.PlanClass.
+type AttemptInteractionMetadataPlanClass string
+
+// AttemptInteractionMetadataUpstreamState defines model for AttemptInteractionMetadata.UpstreamState.
+type AttemptInteractionMetadataUpstreamState string
+
 // AttemptResponse defines model for AttemptResponse.
 type AttemptResponse struct {
 	CacheWrite1hInputTokens nullable.Nullable[int64]                  `json:"cache_write_1h_input_tokens,omitempty"`
@@ -951,9 +1319,12 @@ type AttemptResponse struct {
 
 // AttemptRoutingMetadata defines model for AttemptRoutingMetadata.
 type AttemptRoutingMetadata struct {
-	CredentialSlotId     nullable.Nullable[openapi_types.UUID]   `json:"credential_slot_id,omitempty"`
-	CredentialVersionId  nullable.Nullable[openapi_types.UUID]   `json:"credential_version_id,omitempty"`
-	FirstOutputMs        nullable.Nullable[int64]                `json:"first_output_ms,omitempty"`
+	CredentialSlotId    nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
+	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
+	FirstOutputMs       nullable.Nullable[int64]              `json:"first_output_ms,omitempty"`
+
+	// Interaction Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
+	Interaction          *AttemptInteractionMetadata             `json:"interaction,omitempty"`
 	Mode                 nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
 	Policy               nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
 	PricingRevisionId    nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
@@ -1278,6 +1649,9 @@ type ConfigurationProviderEntry struct {
 	Models        []ConfigurationModelEntry `json:"models"`
 	Name          string                    `json:"name"`
 
+	// NetworkCredentialRef Portable secret binding name, conventionally provider name followed by /network. Export omits runtime network credential UUIDs; supply this reference through secret_bindings when applying the artifact.
+	NetworkCredentialRef *string `json:"network_credential_ref,omitempty"`
+
 	// Project Project name, or null for an installation-wide provider
 	Project nullable.Nullable[string] `json:"project"`
 	Slots   []ConfigurationSlotEntry  `json:"slots"`
@@ -1285,10 +1659,13 @@ type ConfigurationProviderEntry struct {
 
 // ConfigurationRouteEntry defines model for ConfigurationRouteEntry.
 type ConfigurationRouteEntry struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
+	MaxAttempts      int32          `json:"max_attempts"`
+	Operations       []string       `json:"operations"`
+	OverallTimeoutMs int32          `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
 	Project       nullable.Nullable[string]        `json:"project"`
@@ -1346,12 +1723,27 @@ type ConnectionLimits struct {
 
 // ConnectionOptions defines model for ConnectionOptions.
 type ConnectionOptions struct {
+	// Bindings Serving bindings keyed by configured upstream model.
+	Bindings *map[string]ProviderServingBinding `json:"bindings,omitempty"`
+
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
 	Limits            nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
 	Models            *map[string]ModelMetadata           `json:"models,omitempty"`
-	ParameterDefaults *map[string]interface{}             `json:"parameter_defaults,omitempty"`
-	VendorId          nullable.Nullable[string]           `json:"vendor_id,omitempty"`
+
+	// Network Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
+	Network *ProviderNetworkOptions `json:"network,omitempty"`
+
+	// OperationDefaults Defaults keyed by operation; each set names its owning profile dialect.
+	OperationDefaults *map[string]ProviderOperationDefaults `json:"operation_defaults,omitempty"`
+	ParameterDefaults *map[string]interface{}               `json:"parameter_defaults,omitempty"`
+
+	// QuerySettings Profile-allowlisted semantic query settings; cannot replace operation addressing or authentication.
+	QuerySettings *map[string]string `json:"query_settings,omitempty"`
+
+	// SemanticHeaders Profile-allowlisted semantic and version headers, separate from encrypted credential headers.
+	SemanticHeaders *map[string]string        `json:"semantic_headers,omitempty"`
+	VendorId        nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // ContentPolicy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
@@ -1501,6 +1893,12 @@ type CreateManagementTokenResponse struct {
 	Secret string `json:"secret"`
 }
 
+// CreateNetworkCredentialRequest defines model for CreateNetworkCredentialRequest.
+type CreateNetworkCredentialRequest struct {
+	// Credential UTF-8 JSON containing proxy_username/proxy_password and/or client_certificate_pem/client_key_pem. Stored encrypted; both client certificate and private key must be supplied together.
+	Credential *string `json:"credential,omitempty"`
+}
+
 // CreateNotificationDestinationRequest defines model for CreateNotificationDestinationRequest.
 type CreateNotificationDestinationRequest struct {
 	// Enabled Defaults to true.
@@ -1550,15 +1948,27 @@ type CreateProviderRequest struct {
 
 // CreateRouteDraftRequest defines model for CreateRouteDraftRequest.
 type CreateRouteDraftRequest struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       *[]string                        `json:"operations,omitempty"`
-	OverallTimeoutMs int64                            `json:"overall_timeout_ms"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
+	MaxAttempts      int32          `json:"max_attempts"`
+	Operations       *[]string      `json:"operations,omitempty"`
+	OverallTimeoutMs int64          `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	Slug      string                                `json:"slug"`
 	Targets   []RouteTargetRequest                  `json:"targets"`
+}
+
+// CreateRouteMigrationDraftRequest defines model for CreateRouteMigrationDraftRequest.
+type CreateRouteMigrationDraftRequest struct {
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity *RouteFidelity `json:"fidelity,omitempty"`
+
+	// Slug Previously unpublished route identity; retired slugs cannot be reused.
+	Slug string `json:"slug"`
 }
 
 // CredentialListResponse defines model for CredentialListResponse.
@@ -1667,6 +2077,140 @@ type HealthResponse struct {
 	Status                                          string                       `json:"status"`
 	WorkerTasksStale                                int64                        `json:"worker_tasks_stale"`
 	WorkerTasksUnknown                              int64                        `json:"worker_tasks_unknown"`
+}
+
+// InspectedEffectiveRequest defines model for InspectedEffectiveRequest.
+type InspectedEffectiveRequest struct {
+	Fields               []InspectedRequestField `json:"fields"`
+	OmittedTurns         int                     `json:"omitted_turns"`
+	RedactedNativeFields int                     `json:"redacted_native_fields"`
+
+	// Structure Ordered role/scope and block kinds from the prepared request. No content, tool names, IDs, schema keys or opaque state.
+	Structure []InspectedTurn `json:"structure"`
+}
+
+// InspectedPart defines model for InspectedPart.
+type InspectedPart struct {
+	// CallOrdinal Content-free ordinal linking a result to a preceding call ID when that relationship is explicit.
+	CallOrdinal *int              `json:"call_ordinal,omitempty"`
+	Kind        InspectedPartKind `json:"kind"`
+}
+
+// InspectedPartKind defines model for InspectedPart.Kind.
+type InspectedPartKind string
+
+// InspectedRequestField Only allowlisted scalar controls expose values. Content, tools/schemas, identifiers and opaque state remain redacted; unknown property names are not returned.
+type InspectedRequestField struct {
+	// Empty For present strings/arrays/objects only; distinguishes an empty value without exposing its contents.
+	Empty    *bool                     `json:"empty,omitempty"`
+	Field    string                    `json:"field"`
+	Kind     InspectedRequestFieldKind `json:"kind"`
+	Origin   string                    `json:"origin"`
+	Redacted bool                      `json:"redacted"`
+
+	// ValueJson Exact original JSON spelling of an allowlisted scalar setting. Kept as text so JSON clients cannot round integers or erase numeric precision. Omitted for redacted content.
+	ValueJson *string `json:"value_json,omitempty"`
+}
+
+// InspectedRequestFieldKind defines model for InspectedRequestField.Kind.
+type InspectedRequestFieldKind string
+
+// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+type InspectedServingIdentity struct {
+	Model                 string             `json:"model"`
+	PrincipalDeclared     bool               `json:"principal_declared"`
+	ProviderRevisionId    openapi_types.UUID `json:"provider_revision_id"`
+	RegionDeclared        bool               `json:"region_declared"`
+	ResourceScopeDeclared bool               `json:"resource_scope_declared"`
+	SnapshotDeclared      bool               `json:"snapshot_declared"`
+}
+
+// InspectedTurn defines model for InspectedTurn.
+type InspectedTurn struct {
+	Index        int                `json:"index"`
+	OmittedParts int                `json:"omitted_parts"`
+	Parts        []InspectedPart    `json:"parts"`
+	Role         InspectedTurnRole  `json:"role"`
+	Scope        InspectedTurnScope `json:"scope"`
+}
+
+// InspectedTurnRole defines model for InspectedTurn.Role.
+type InspectedTurnRole string
+
+// InspectedTurnScope defines model for InspectedTurn.Scope.
+type InspectedTurnScope string
+
+// InteractionDisposition defines model for InteractionDisposition.
+type InteractionDisposition struct {
+	Disposition string `json:"disposition"`
+	Evidence    string `json:"evidence"`
+	Field       string `json:"field"`
+	Rule        string `json:"rule"`
+}
+
+// InteractionIncompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
+type InteractionIncompatibility struct {
+	Code        string  `json:"code"`
+	Field       *string `json:"field,omitempty"`
+	Message     string  `json:"message"`
+	Requirement string  `json:"requirement"`
+}
+
+// InteractionInspection Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification.
+type InteractionInspection struct {
+	Class            *string                       `json:"class,omitempty"`
+	Dispositions     *[]InteractionDisposition     `json:"dispositions,omitempty"`
+	EffectiveRequest *InspectedEffectiveRequest    `json:"effective_request,omitempty"`
+	EgressDialect    *string                       `json:"egress_dialect,omitempty"`
+	Evidence         []string                      `json:"evidence"`
+	Fidelity         InteractionInspectionFidelity `json:"fidelity"`
+	IngressDialect   *string                       `json:"ingress_dialect,omitempty"`
+
+	// Obligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
+	Obligations *InteractionObligations `json:"obligations,omitempty"`
+
+	// OmittedDispositions Count collapsed by safe-pointer redaction or omitted by the 64-entry display bound. The execution planner retains its complete receipt.
+	OmittedDispositions *int                                 `json:"omitted_dispositions,omitempty"`
+	Operation           *string                              `json:"operation,omitempty"`
+	ProfileId           *string                              `json:"profile_id,omitempty"`
+	ProfileRevision     *string                              `json:"profile_revision,omitempty"`
+	Representation      *InteractionInspectionRepresentation `json:"representation,omitempty"`
+	ReturnDialect       *string                              `json:"return_dialect,omitempty"`
+	SemanticContext     *[]InspectedRequestField             `json:"semantic_context,omitempty"`
+
+	// Serving Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+	Serving *InspectedServingIdentity   `json:"serving,omitempty"`
+	Status  InteractionInspectionStatus `json:"status"`
+}
+
+// InteractionInspectionFidelity defines model for InteractionInspection.Fidelity.
+type InteractionInspectionFidelity string
+
+// InteractionInspectionRepresentation defines model for InteractionInspection.Representation.
+type InteractionInspectionRepresentation string
+
+// InteractionInspectionStatus defines model for InteractionInspection.Status.
+type InteractionInspectionStatus string
+
+// InteractionObligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
+type InteractionObligations struct {
+	// Actionability Declared dependency barrier before ordinary actionable client tool bytes.
+	Actionability *string `json:"actionability,omitempty"`
+	Continuation  string  `json:"continuation"`
+	Delivery      string  `json:"delivery"`
+
+	// Effects Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection.
+	Effects      []string `json:"effects"`
+	GuardResults bool     `json:"guard_results"`
+	Lifetime     string   `json:"lifetime"`
+	MaxBodyBytes int      `json:"max_body_bytes"`
+
+	// MaxContinuationBytes Planner upper bound for retained native dependency and projected delivery; deployment limits may be tighter.
+	MaxContinuationBytes    *int   `json:"max_continuation_bytes,omitempty"`
+	MaxEventBytes           int    `json:"max_event_bytes"`
+	RejectAmbiguousFailover bool   `json:"reject_ambiguous_failover"`
+	Retry                   string `json:"retry"`
+	Submission              string `json:"submission"`
 }
 
 // InvitationListResponse defines model for InvitationListResponse.
@@ -1790,6 +2334,27 @@ type ModelMetadata struct {
 	ZeroDataRetention   nullable.Nullable[bool]     `json:"zero_data_retention,omitempty"`
 }
 
+// NetworkCredentialListResponse defines model for NetworkCredentialListResponse.
+type NetworkCredentialListResponse struct {
+	Items      []NetworkCredentialResponse `json:"items"`
+	NextCursor nullable.Nullable[string]   `json:"next_cursor,omitempty"`
+}
+
+// NetworkCredentialMutationResponse defines model for NetworkCredentialMutationResponse.
+type NetworkCredentialMutationResponse struct {
+	CredentialId openapi_types.UUID `json:"credential_id"`
+	Etag         openapi_types.UUID `json:"etag"`
+	ProviderId   openapi_types.UUID `json:"provider_id"`
+}
+
+// NetworkCredentialResponse Network credential metadata only; plaintext is never returned.
+type NetworkCredentialResponse struct {
+	CreatedAt time.Time                    `json:"created_at"`
+	Id        openapi_types.UUID           `json:"id"`
+	RevokedAt nullable.Nullable[time.Time] `json:"revoked_at"`
+	Version   int32                        `json:"version"`
+}
+
 // NotificationDestination defines model for NotificationDestination.
 type NotificationDestination struct {
 	CreatedAt      time.Time                             `json:"created_at"`
@@ -1901,6 +2466,26 @@ type OidcRoleMappingResponse struct {
 	Role       string `json:"role"`
 }
 
+// OperationDialect defines model for OperationDialect.
+type OperationDialect struct {
+	Documentation     string                 `json:"documentation"`
+	Evidence          string                 `json:"evidence"`
+	Id                string                 `json:"id"`
+	Label             string                 `json:"label"`
+	Mode              string                 `json:"mode"`
+	Operation         string                 `json:"operation"`
+	OperationRevision string                 `json:"operation_revision"`
+	RequestSchema     map[string]interface{} `json:"request_schema"`
+	ResultSchema      map[string]interface{} `json:"result_schema"`
+	Revision          string                 `json:"revision"`
+	Surface           string                 `json:"surface"`
+}
+
+// OperationDialectList defines model for OperationDialectList.
+type OperationDialectList struct {
+	Items []OperationDialect `json:"items"`
+}
+
 // OverviewResponse Aggregate counts the console overview needs; one round-trip instead of paginating every collection.
 type OverviewResponse struct {
 	// ActiveProviders Providers with a published active revision.
@@ -1947,7 +2532,10 @@ type PlaygroundResponse struct {
 	Refusal       nullable.Nullable[string] `json:"refusal,omitempty"`
 
 	// Response Parsed non-generation operation result (embeddings, moderation, rerank, token count).
-	Response         interface{}                        `json:"response,omitempty"`
+	Response interface{} `json:"response,omitempty"`
+
+	// ResponseRaw Original native JSON response bytes for an ephemeral non-generation playground result. Exact number tokens, ordering and storage representation remain available beside the interpreted view.
+	ResponseRaw      *string                            `json:"response_raw,omitempty"`
 	Routing          []RoutingDecision                  `json:"routing"`
 	StructuredOutput interface{}                        `json:"structured_output,omitempty"`
 	ToolCalls        []PlaygroundToolCall               `json:"tool_calls"`
@@ -2031,8 +2619,8 @@ type PriceCeiling struct {
 	UnitPrice        nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
-// PriceOperation defines model for PriceOperation.
-type PriceOperation string
+// PriceOperation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+type PriceOperation = string
 
 // PriceRequest defines model for PriceRequest.
 type PriceRequest struct {
@@ -2050,16 +2638,18 @@ type PriceRequest struct {
 
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
-	CachedInputPerMillion nullable.Nullable[string]             `json:"cached_input_per_million,omitempty"`
-	Currency              string                                `json:"currency"`
-	InputPerMillion       nullable.Nullable[string]             `json:"input_per_million,omitempty"`
-	Model                 string                                `json:"model"`
-	Operation             PriceOperation                        `json:"operation"`
-	OutputPerMillion      nullable.Nullable[string]             `json:"output_per_million,omitempty"`
-	ProviderId            nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind          ProviderKind                          `json:"provider_kind"`
-	UnitPrice             nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
+	Currency              string                    `json:"currency"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                 string                    `json:"model"`
+
+	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+	Operation        PriceOperation                        `json:"operation"`
+	OutputPerMillion nullable.Nullable[string]             `json:"output_per_million,omitempty"`
+	ProviderId       nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+	ProviderKind     ProviderKind                          `json:"provider_kind"`
+	UnitPrice        nullable.Nullable[string]             `json:"unit_price,omitempty"`
+	VendorId         nullable.Nullable[string]             `json:"vendor_id,omitempty"`
 }
 
 // PriceResponse defines model for PriceResponse.
@@ -2292,6 +2882,12 @@ type ProviderConfiguration struct {
 	Endpoint     nullable.Nullable[string] `json:"endpoint,omitempty"`
 	Kind         ProviderKind              `json:"kind"`
 	Options      *ConnectionOptions        `json:"options,omitempty"`
+
+	// ProfileId Versioned provider profile identity. Omit together with profile_revision to retain legacy configuration semantics.
+	ProfileId *string `json:"profile_id,omitempty"`
+
+	// ProfileRevision Immutable provider profile composition revision selected with profile_id.
+	ProfileRevision *string `json:"profile_revision,omitempty"`
 }
 
 // ProviderConfigurationField defines model for ProviderConfigurationField.
@@ -2431,6 +3027,38 @@ type ProviderMutationResponse struct {
 	RuntimeGeneration nullable.Nullable[RuntimeGenerationResponse] `json:"runtime_generation,omitempty"`
 }
 
+// ProviderNetworkOptions Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
+type ProviderNetworkOptions struct {
+	ConnectTimeoutMs *int64 `json:"connect_timeout_ms,omitempty"`
+
+	// CredentialId Unrevoked network credential owned by this provider. Secret proxy authentication and client certificate/key material remain encrypted and are never returned here.
+	CredentialId        *openapi_types.UUID `json:"credential_id,omitempty"`
+	IdleConnTimeoutMs   *int64              `json:"idle_conn_timeout_ms,omitempty"`
+	MaxConnsPerHost     *int32              `json:"max_conns_per_host,omitempty"`
+	MaxIdleConns        *int32              `json:"max_idle_conns,omitempty"`
+	MaxIdleConnsPerHost *int32              `json:"max_idle_conns_per_host,omitempty"`
+
+	// ProxyUrl HTTP, HTTPS or SOCKS5 proxy origin without credentials, query, fragment or path. Both proxy and destination resolve locally under the egress policy; remote proxy DNS is unsupported.
+	ProxyUrl                *string `json:"proxy_url,omitempty"`
+	ResponseHeaderTimeoutMs *int64  `json:"response_header_timeout_ms,omitempty"`
+	TlsHandshakeTimeoutMs   *int64  `json:"tls_handshake_timeout_ms,omitempty"`
+
+	// TrustRootsPem Public PEM certificates augmenting system trust. Private keys and other PEM blocks are forbidden.
+	TrustRootsPem *string `json:"trust_roots_pem,omitempty"`
+}
+
+// ProviderOperationDefaults Typed defaults for one operation and dialect. At most 64 total values and native_options; client-supplied members always take precedence.
+type ProviderOperationDefaults struct {
+	// Dialect Dialect owned by the selected profile for this operation.
+	Dialect string `json:"dialect"`
+
+	// NativeOptions Explicit dialect-native extension defaults. May not collide with values or reserved routing, identity, resource or authentication fields.
+	NativeOptions *map[string]interface{} `json:"native_options,omitempty"`
+
+	// Values Omission fillers validated against the operation default schema. Each value, including null, arrays and objects, is atomic.
+	Values *map[string]interface{} `json:"values,omitempty"`
+}
+
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
 	AuthMode           ProviderAuthMode `json:"auth_mode"`
@@ -2447,6 +3075,34 @@ type ProviderPresetResponse struct {
 
 	// Maintainer Organization maintaining the official documentation used for review.
 	Maintainer string `json:"maintainer"`
+}
+
+// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.
+type ProviderProfile struct {
+	Authentication []string `json:"authentication"`
+
+	// DefaultSchemas Operation-owned JSON Schema objects for supported default controls.
+	DefaultSchemas  map[string]map[string]interface{} `json:"default_schemas"`
+	Dialect         string                            `json:"dialect"`
+	DialectRevision string                            `json:"dialect_revision"`
+	Documentation   string                            `json:"documentation"`
+	Hosting         string                            `json:"hosting"`
+	Id              string                            `json:"id"`
+	Kind            string                            `json:"kind"`
+	Label           string                            `json:"label"`
+
+	// OperationDialects Dialect identity for each supported operation.
+	OperationDialects map[string]string `json:"operation_dialects"`
+	Operations        []string          `json:"operations"`
+	QuerySettings     []string          `json:"query_settings"`
+	Revision          string            `json:"revision"`
+	SemanticHeaders   []string          `json:"semantic_headers"`
+	Transport         string            `json:"transport"`
+}
+
+// ProviderProfileListResponse defines model for ProviderProfileListResponse.
+type ProviderProfileListResponse struct {
+	Items []ProviderProfile `json:"items"`
 }
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
@@ -2496,20 +3152,24 @@ type ProviderResponse struct {
 
 // ProviderRevisionDiffResponse defines model for ProviderRevisionDiffResponse.
 type ProviderRevisionDiffResponse struct {
-	ApiVersionChanged   bool     `json:"api_version_changed"`
-	CapabilitiesAdded   []string `json:"capabilities_added"`
-	CapabilitiesRemoved []string `json:"capabilities_removed"`
-	CloudContextChanged bool     `json:"cloud_context_changed"`
-	ConnectorChanged    bool     `json:"connector_changed"`
-	CredentialChanged   bool     `json:"credential_changed"`
-	DeploymentChanged   bool     `json:"deployment_changed"`
-	EndpointChanged     bool     `json:"endpoint_changed"`
-	FromRevision        int32    `json:"from_revision"`
-	ModelsAdded         []string `json:"models_added"`
-	ModelsChanged       []string `json:"models_changed"`
-	ModelsRemoved       []string `json:"models_removed"`
-	NameChanged         bool     `json:"name_changed"`
-	ToRevision          int32    `json:"to_revision"`
+	ApiVersionChanged            bool     `json:"api_version_changed"`
+	CapabilitiesAdded            []string `json:"capabilities_added"`
+	CapabilitiesRemoved          []string `json:"capabilities_removed"`
+	CloudContextChanged          bool     `json:"cloud_context_changed"`
+	ConnectorChanged             bool     `json:"connector_changed"`
+	CredentialChanged            bool     `json:"credential_changed"`
+	DeploymentChanged            bool     `json:"deployment_changed"`
+	EndpointChanged              bool     `json:"endpoint_changed"`
+	FromRevision                 int32    `json:"from_revision"`
+	ModelsAdded                  []string `json:"models_added"`
+	ModelsChanged                []string `json:"models_changed"`
+	ModelsRemoved                []string `json:"models_removed"`
+	NameChanged                  bool     `json:"name_changed"`
+	NetworkConfigurationChanged  bool     `json:"network_configuration_changed"`
+	ProfileChanged               bool     `json:"profile_changed"`
+	SemanticConfigurationChanged bool     `json:"semantic_configuration_changed"`
+	ServingBindingChanged        bool     `json:"serving_binding_changed"`
+	ToRevision                   int32    `json:"to_revision"`
 }
 
 // ProviderRevisionListResponse defines model for ProviderRevisionListResponse.
@@ -2568,6 +3228,18 @@ type ProviderRevisionSummaryResponse struct {
 	Name                        string                   `json:"name"`
 	ProviderId                  openapi_types.UUID       `json:"provider_id"`
 	Revision                    int32                    `json:"revision"`
+}
+
+// ProviderServingBinding Serving environment identity independent of credentials. A binding may select a model or Azure deployment, never both. Region must match the provider connection.
+type ProviderServingBinding struct {
+	// Defaults Operation defaults overriding the provider defaults by whole member.
+	Defaults      *map[string]ProviderOperationDefaults `json:"defaults,omitempty"`
+	Deployment    *string                               `json:"deployment,omitempty"`
+	Model         *string                               `json:"model,omitempty"`
+	PrincipalId   *string                               `json:"principal_id,omitempty"`
+	Region        *string                               `json:"region,omitempty"`
+	ResourceScope *string                               `json:"resource_scope,omitempty"`
+	Snapshot      *string                               `json:"snapshot,omitempty"`
 }
 
 // ProviderSummaryResponse defines model for ProviderSummaryResponse.
@@ -2637,12 +3309,15 @@ type RecentAuthenticationRequest struct {
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
-	Slug             string                           `json:"slug"`
-	Targets          []ReplaceRouteTargetRequest      `json:"targets"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+	Fidelity         *RouteFidelity              `json:"fidelity,omitempty"`
+	MaxAttempts      int32                       `json:"max_attempts"`
+	Operations       []string                    `json:"operations"`
+	OverallTimeoutMs int32                       `json:"overall_timeout_ms"`
+	Slug             string                      `json:"slug"`
+	Targets          []ReplaceRouteTargetRequest `json:"targets"`
 }
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
@@ -2773,6 +3448,14 @@ type RequestSummary struct {
 	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
 }
 
+// RevokeNetworkCredentialResponse defines model for RevokeNetworkCredentialResponse.
+type RevokeNetworkCredentialResponse struct {
+	CredentialId      openapi_types.UUID        `json:"credential_id"`
+	Etag              openapi_types.UUID        `json:"etag"`
+	ProviderId        openapi_types.UUID        `json:"provider_id"`
+	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
+}
+
 // RotateApiKeyRequest defines model for RotateApiKeyRequest.
 type RotateApiKeyRequest struct {
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
@@ -2842,12 +3525,15 @@ type RouteDraftDetailResponse struct {
 	CreatedAt         time.Time                             `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
-	CreatedByEmail   nullable.Nullable[string] `json:"created_by_email,omitempty"`
-	Etag             openapi_types.UUID        `json:"etag"`
-	Id               openapi_types.UUID        `json:"id"`
-	MaxAttempts      int32                     `json:"max_attempts"`
-	Operations       []string                  `json:"operations"`
-	OverallTimeoutMs int32                     `json:"overall_timeout_ms"`
+	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
+	Etag           openapi_types.UUID        `json:"etag"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	Id               openapi_types.UUID               `json:"id"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -2867,13 +3553,25 @@ type RouteDraftListResponse struct {
 // RouteDraftResponse defines model for RouteDraftResponse.
 type RouteDraftResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
-	Id   openapi_types.UUID `json:"id"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	Id       openapi_types.UUID               `json:"id"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	Slug      string                                `json:"slug"`
 	State     string                                `json:"state"`
 }
+
+// RouteFidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+type RouteFidelity struct {
+	// Mode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+	Mode *RouteFidelityMode `json:"mode,omitempty"`
+}
+
+// RouteFidelityMode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+type RouteFidelityMode string
 
 // RouteListResponse defines model for RouteListResponse.
 type RouteListResponse struct {
@@ -2890,20 +3588,27 @@ type RouteRetireResponse struct {
 
 // RouteRevisionDiffResponse defines model for RouteRevisionDiffResponse.
 type RouteRevisionDiffResponse struct {
-	ContentPolicyChanged bool          `json:"content_policy_changed"`
-	FromRevision         int32         `json:"from_revision"`
-	MaxAttemptsChanged   bool          `json:"max_attempts_changed"`
-	OperationsAdded      []string      `json:"operations_added"`
-	OperationsRemoved    []string      `json:"operations_removed"`
-	RoutingPolicyAfter   RoutingPolicy `json:"routing_policy_after"`
-	RoutingPolicyBefore  RoutingPolicy `json:"routing_policy_before"`
-	RoutingPolicyChanged bool          `json:"routing_policy_changed"`
-	SlugChanged          bool          `json:"slug_changed"`
-	TargetsAdded         []string      `json:"targets_added"`
-	TargetsChanged       []string      `json:"targets_changed"`
-	TargetsRemoved       []string      `json:"targets_removed"`
-	TimeoutChanged       bool          `json:"timeout_changed"`
-	ToRevision           int32         `json:"to_revision"`
+	ContentPolicyChanged bool `json:"content_policy_changed"`
+
+	// FidelityAfter Null means the route retains its historical legacy contract.
+	FidelityAfter nullable.Nullable[RouteFidelity] `json:"fidelity_after,omitempty"`
+
+	// FidelityBefore Null means the route retains its historical legacy contract.
+	FidelityBefore       nullable.Nullable[RouteFidelity] `json:"fidelity_before,omitempty"`
+	FidelityChanged      *bool                            `json:"fidelity_changed,omitempty"`
+	FromRevision         int32                            `json:"from_revision"`
+	MaxAttemptsChanged   bool                             `json:"max_attempts_changed"`
+	OperationsAdded      []string                         `json:"operations_added"`
+	OperationsRemoved    []string                         `json:"operations_removed"`
+	RoutingPolicyAfter   RoutingPolicy                    `json:"routing_policy_after"`
+	RoutingPolicyBefore  RoutingPolicy                    `json:"routing_policy_before"`
+	RoutingPolicyChanged bool                             `json:"routing_policy_changed"`
+	SlugChanged          bool                             `json:"slug_changed"`
+	TargetsAdded         []string                         `json:"targets_added"`
+	TargetsChanged       []string                         `json:"targets_changed"`
+	TargetsRemoved       []string                         `json:"targets_removed"`
+	TimeoutChanged       bool                             `json:"timeout_changed"`
+	ToRevision           int32                            `json:"to_revision"`
 }
 
 // RouteRevisionListResponse defines model for RouteRevisionListResponse.
@@ -2914,9 +3619,12 @@ type RouteRevisionListResponse struct {
 
 // RouteRevisionResponse defines model for RouteRevisionResponse.
 type RouteRevisionResponse struct {
-	ActivatedAt      time.Time                        `json:"activated_at"`
-	ActivatedBy      openapi_types.UUID               `json:"activated_by"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	ActivatedAt   time.Time                        `json:"activated_at"`
+	ActivatedBy   openapi_types.UUID               `json:"activated_by"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// Fidelity Null means the route retains its historical legacy contract.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
 	Id               openapi_types.UUID               `json:"id"`
 	MaxAttempts      int32                            `json:"max_attempts"`
 	Operations       []string                         `json:"operations"`
@@ -2990,23 +3698,29 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt               nullable.Nullable[int]                `json:"attempt,omitempty"`
-	ContextLength         nullable.Nullable[int64]              `json:"context_length,omitempty"`
-	CredentialSlotId      nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
-	Eligible              bool                                  `json:"eligible"`
-	EstimatedInputTokens  nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
-	MaxOutputTokens       nullable.Nullable[int64]              `json:"max_output_tokens,omitempty"`
-	MetadataObservedAt    nullable.Nullable[time.Time]          `json:"metadata_observed_at,omitempty"`
-	Performance           nullable.Nullable[Measurement]        `json:"performance,omitempty"`
-	Price                 nullable.Nullable[RoutingPrice]       `json:"price,omitempty"`
-	Priority              int32                                 `json:"priority"`
-	ProviderId            openapi_types.UUID                    `json:"provider_id"`
-	Reason                nullable.Nullable[string]             `json:"reason,omitempty"`
-	RequestedOutputTokens nullable.Nullable[int64]              `json:"requested_output_tokens,omitempty"`
-	Strategy              RoutingStrategy                       `json:"strategy"`
-	TargetId              openapi_types.UUID                    `json:"target_id"`
-	UpstreamModel         string                                `json:"upstream_model"`
-	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	Attempt              nullable.Nullable[int]                `json:"attempt,omitempty"`
+	ContextLength        nullable.Nullable[int64]              `json:"context_length,omitempty"`
+	CredentialSlotId     nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
+	Eligible             bool                                  `json:"eligible"`
+	EstimatedInputTokens nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
+
+	// Incompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
+	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
+
+	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification.
+	Interaction           *InteractionInspection          `json:"interaction,omitempty"`
+	MaxOutputTokens       nullable.Nullable[int64]        `json:"max_output_tokens,omitempty"`
+	MetadataObservedAt    nullable.Nullable[time.Time]    `json:"metadata_observed_at,omitempty"`
+	Performance           nullable.Nullable[Measurement]  `json:"performance,omitempty"`
+	Price                 nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
+	Priority              int32                           `json:"priority"`
+	ProviderId            openapi_types.UUID              `json:"provider_id"`
+	Reason                nullable.Nullable[string]       `json:"reason,omitempty"`
+	RequestedOutputTokens nullable.Nullable[int64]        `json:"requested_output_tokens,omitempty"`
+	Strategy              RoutingStrategy                 `json:"strategy"`
+	TargetId              openapi_types.UUID              `json:"target_id"`
+	UpstreamModel         string                          `json:"upstream_model"`
+	VendorId              nullable.Nullable[string]       `json:"vendor_id,omitempty"`
 }
 
 // RoutingPolicy defines model for RoutingPolicy.
@@ -3157,26 +3871,75 @@ type SetupStatus struct {
 
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
+	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
+	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+
+	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
+	ClientContract *string `json:"client_contract,omitempty"`
+
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
+	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
 	Mode                 string                   `json:"mode"`
 	Operation            string                   `json:"operation"`
 	Preferences          *RoutingPreferences      `json:"preferences,omitempty"`
-	Seed                 string                   `json:"seed"`
-	Surface              string                   `json:"surface"`
+
+	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
+	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
+
+	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated.
+	Request *map[string]interface{} `json:"request,omitempty"`
+	Seed    string                  `json:"seed"`
+
+	// SemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
+	SemanticHeaders *SimulationSemanticHeaders `json:"semantic_headers,omitempty"`
+	Surface         string                     `json:"surface"`
 }
+
+// SimulationDialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
+type SimulationDialect string
+
+// SimulationOperation defines model for SimulationOperation.
+type SimulationOperation struct {
+	Operation *string `json:"operation,omitempty"`
+
+	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract.
+	Request *map[string]interface{} `json:"request,omitempty"`
+
+	// Route Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported.
+	Route *string `json:"route,omitempty"`
+}
+
+// SimulationQuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
+type SimulationQuerySettings map[string]string
 
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
-	ApiKeyId             nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
-	EstimatedInputTokens nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
-	MaxOutputTokens      nullable.Nullable[int64]              `json:"max_output_tokens,omitempty"`
-	Mode                 TransportMode                         `json:"mode"`
-	Operation            map[string]interface{}                `json:"operation"`
-	Preferences          *RoutingPreferences                   `json:"preferences,omitempty"`
-	Seed                 *string                               `json:"seed,omitempty"`
-	Surface              Surface                               `json:"surface"`
+	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+
+	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
+	ClientContract *string `json:"client_contract,omitempty"`
+
+	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
+	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
+	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
+	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
+	Mode                 TransportMode            `json:"mode"`
+	Operation            SimulationOperation      `json:"operation"`
+	Preferences          *RoutingPreferences      `json:"preferences,omitempty"`
+
+	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
+	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
+	Seed          *string                  `json:"seed,omitempty"`
+
+	// SemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
+	SemanticHeaders *SimulationSemanticHeaders `json:"semantic_headers,omitempty"`
+	Surface         Surface                    `json:"surface"`
 }
+
+// SimulationSemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
+type SimulationSemanticHeaders map[string]string
 
 // SlotHealth defines model for SlotHealth.
 type SlotHealth struct {
@@ -3927,6 +4690,27 @@ type CertifyProviderModelParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListProviderNetworkCredentialsParams defines parameters for ListProviderNetworkCredentials.
+type ListProviderNetworkCredentialsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateProviderNetworkCredentialParams defines parameters for CreateProviderNetworkCredential.
+type CreateProviderNetworkCredentialParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RevokeProviderNetworkCredentialParams defines parameters for RevokeProviderNetworkCredential.
+type RevokeProviderNetworkCredentialParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ProbeProviderParams defines parameters for ProbeProvider.
 type ProbeProviderParams struct {
 	// IfMatch Exact provider draft ETag being probed
@@ -4050,6 +4834,14 @@ type ListRoutesParams struct {
 
 	// Limit Page size, from 1 to 200. Defaults to 50.
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateRouteMigrationDraftParams defines parameters for CreateRouteMigrationDraft.
+type CreateRouteMigrationDraftParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+
+	// IfMatch Current published route ETag
+	IfMatch string `json:"If-Match"`
 }
 
 // RetireRouteParams defines parameters for RetireRoute.
@@ -4305,6 +5097,9 @@ type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
 // SetProviderModelJSONRequestBody defines body for SetProviderModel for application/json ContentType.
 type SetProviderModelJSONRequestBody = SetModelRequest
 
+// CreateProviderNetworkCredentialJSONRequestBody defines body for CreateProviderNetworkCredential for application/json ContentType.
+type CreateProviderNetworkCredentialJSONRequestBody = CreateNetworkCredentialRequest
+
 // ProvisionUserJSONRequestBody defines body for ProvisionUser for application/json ContentType.
 type ProvisionUserJSONRequestBody = ProvisionUserRequest
 
@@ -4316,6 +5111,9 @@ type ReplaceRouteDraftJSONRequestBody = ReplaceRouteDraftRequest
 
 // SimulateRouteDraftJSONRequestBody defines body for SimulateRouteDraft for application/json ContentType.
 type SimulateRouteDraftJSONRequestBody = SimulateRouteRequest
+
+// CreateRouteMigrationDraftJSONRequestBody defines body for CreateRouteMigrationDraft for application/json ContentType.
+type CreateRouteMigrationDraftJSONRequestBody = CreateRouteMigrationDraftRequest
 
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy

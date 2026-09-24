@@ -16,6 +16,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/durablecontract"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/mediacontract"
+	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/realtimecontract"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -75,23 +81,30 @@ type Limits struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
-	ID                string                     `json:"id"`
-	Name              string                     `json:"name"`
-	Kind              string                     `json:"kind"`
-	Enabled           bool                       `json:"enabled"`
-	DefaultSlotID     string                     `json:"default_slot_id,omitempty"`
-	ActiveCredential  *string                    `json:"active_credential"`
-	Capabilities      []Capability               `json:"capabilities"`
-	RevisionID        string                     `json:"revision_id"`
-	Endpoint          string                     `json:"endpoint,omitempty"`
-	AuthMode          string                     `json:"auth_mode,omitempty"`
-	CredentialHeaders []string                   `json:"credential_headers,omitempty"`
-	ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults,omitempty"`
-	CloudRegion       string                     `json:"cloud_region,omitempty"`
-	CloudProject      string                     `json:"cloud_project,omitempty"`
-	Deployment        string                     `json:"deployment,omitempty"`
-	APIVersion        string                     `json:"api_version,omitempty"`
-	Models            map[string]json.RawMessage `json:"models,omitempty"`
+	Network           *egress.ConnectionOptions        `json:"network,omitempty"`
+	ProfileID         string                           `json:"profile_id,omitempty"`
+	ProfileRevision   string                           `json:"profile_revision,omitempty"`
+	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
+	QuerySettings     map[string]string                `json:"query_settings,omitempty"`
+	OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+	Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
+	ID                string                           `json:"id"`
+	Name              string                           `json:"name"`
+	Kind              string                           `json:"kind"`
+	Enabled           bool                             `json:"enabled"`
+	DefaultSlotID     string                           `json:"default_slot_id,omitempty"`
+	ActiveCredential  *string                          `json:"active_credential"`
+	Capabilities      []Capability                     `json:"capabilities"`
+	RevisionID        string                           `json:"revision_id"`
+	Endpoint          string                           `json:"endpoint,omitempty"`
+	AuthMode          string                           `json:"auth_mode,omitempty"`
+	CredentialHeaders []string                         `json:"credential_headers,omitempty"`
+	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults,omitempty"`
+	CloudRegion       string                           `json:"cloud_region,omitempty"`
+	CloudProject      string                           `json:"cloud_project,omitempty"`
+	Deployment        string                           `json:"deployment,omitempty"`
+	APIVersion        string                           `json:"api_version,omitempty"`
+	Models            map[string]json.RawMessage       `json:"models,omitempty"`
 	// VendorID is the upstream vendor this connection speaks to. It groups
 	// connections that share one upstream account for accounting and limits.
 	VendorID  string  `json:"vendor_id,omitempty"`
@@ -114,24 +127,31 @@ type Target struct {
 
 // Route is the latest published revision of one slug.
 type Route struct {
-	ID             string    `json:"id"`
-	Slug           string    `json:"slug"`
-	Operations     []string  `json:"operations"`
-	OverallTimeout int64     `json:"overall_timeout"`
-	MaxAttempts    int       `json:"max_attempts"`
-	Targets        []Target  `json:"targets"`
-	RoutingID      string    `json:"routing_id"`
-	RevisionID     string    `json:"revision_id,omitempty"`
-	Revision       int       `json:"revision,omitempty"`
-	PublishedAt    time.Time `json:"published_at,omitempty"`
-	Policy         *Policy   `json:"policy,omitempty"`
-	ProjectID      *string   `json:"project_id,omitempty"`
+	compiledContentPolicy *contentpolicy.Compiled
+	ID                    string    `json:"id"`
+	Slug                  string    `json:"slug"`
+	Operations            []string  `json:"operations"`
+	OverallTimeout        int64     `json:"overall_timeout"`
+	MaxAttempts           int       `json:"max_attempts"`
+	Targets               []Target  `json:"targets"`
+	RoutingID             string    `json:"routing_id"`
+	RevisionID            string    `json:"revision_id,omitempty"`
+	Revision              int       `json:"revision,omitempty"`
+	PublishedAt           time.Time `json:"published_at,omitempty"`
+	Policy                *Policy   `json:"policy,omitempty"`
+	ProjectID             *string   `json:"project_id,omitempty"`
 
 	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
+	Fidelity      *RouteFidelity        `json:"fidelity,omitempty"`
 }
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
+	interactions       map[string]map[string]*interaction.Template
+	operations         map[string]map[string]*operationplan.Template
+	media              map[string]map[string]*mediacontract.Template
+	durable            map[string]map[string]*durablecontract.Template
+	realtime           map[string]map[string]*realtimecontract.Template
 	Generation         Generation          `json:"generation"`
 	Providers          map[string]Provider `json:"providers"`
 	Routes             map[string]Route    `json:"routes"`
@@ -169,12 +189,23 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // Validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) Validate() error {
+	s.interactions = make(map[string]map[string]*interaction.Template)
+	s.operations = make(map[string]map[string]*operationplan.Template)
+	s.media = make(map[string]map[string]*mediacontract.Template)
+	s.durable = make(map[string]map[string]*durablecontract.Template)
+	s.realtime = make(map[string]map[string]*realtimecontract.Template)
 	if _, err := uuid.Parse(s.Generation.ID); err != nil || s.Generation.Ordinal < 0 {
 		return errors.New("generation identity is malformed")
 	}
 	for id, p := range s.Providers {
 		if id != p.ID || !validUUID(p.ID) || p.RevisionID == "" || p.Name == "" || p.Kind == "" {
 			return fmt.Errorf("provider %q is malformed", id)
+		}
+		if err := p.Connector().ValidateProfile(); err != nil {
+			return fmt.Errorf("provider %q profile: %w", id, err)
+		}
+		if p.Network != nil && p.Network.CredentialID != "" && !validUUID(p.Network.CredentialID) {
+			return fmt.Errorf("provider %q network credential reference is malformed", id)
 		}
 		if p.ActiveCredential != nil && !validUUID(*p.ActiveCredential) {
 			return fmt.Errorf("provider %q credential reference is malformed", id)
@@ -197,6 +228,9 @@ func (s *Snapshot) Validate() error {
 		if r.OverallTimeout < 1 || r.MaxAttempts < 1 || len(r.Operations) == 0 || len(r.Targets) == 0 {
 			return fmt.Errorf("route %q has no serving budget or targets", slug)
 		}
+		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
+			return fmt.Errorf("route %q fidelity: %w", slug, err)
+		}
 		seen := map[string]bool{}
 		for _, t := range r.Targets {
 			if !validUUID(t.ID) || !validUUID(t.RoutingID) || seen[t.ID] || t.Weight < 1 || t.Timeout < 1 || t.ProviderModel == "" {
@@ -207,6 +241,33 @@ func (s *Snapshot) Validate() error {
 				return fmt.Errorf("route %q references unknown provider %s", slug, t.ProviderID)
 			}
 		}
+		templates, policy, err := s.compileRouteExecution(r)
+		if err != nil {
+			return fmt.Errorf("route %q interaction: %w", slug, err)
+		}
+		s.interactions[slug] = templates
+		unary, err := s.compileOperations(r)
+		if err != nil {
+			return err
+		}
+		s.operations[slug] = unary
+		media, err := s.compileMedia(r)
+		if err != nil {
+			return fmt.Errorf("route %q media: %w", slug, err)
+		}
+		s.media[slug] = media
+		durable, err := s.compileDurable(r)
+		if err != nil {
+			return fmt.Errorf("route %q durable: %w", slug, err)
+		}
+		s.durable[slug] = durable
+		duplex, err := s.compileRealtime(r)
+		if err != nil {
+			return fmt.Errorf("route %q realtime: %w", slug, err)
+		}
+		s.realtime[slug] = duplex
+		r.compiledContentPolicy = policy
+		s.Routes[slug] = r
 	}
 	return nil
 }
@@ -221,5 +282,5 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

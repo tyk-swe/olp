@@ -1,4 +1,5 @@
 tests/fixtures/streams/*.sse whitespace=-blank-at-eof
+tests/fixtures/fidelity/*/*.sse whitespace=-blank-at-eof
 
 # Generated files: keep them out of review noise. AGENTS.md's Style section
 # names the ones that must never be hand-edited ("Never hand-edit generated

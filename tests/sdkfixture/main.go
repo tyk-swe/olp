@@ -66,14 +66,29 @@ func run() error {
 	if path == "" {
 		return fmt.Errorf("OLP_SDK_SMOKE_METADATA is required")
 	}
+	workflow, err := newNativeToolWorkflow()
+	if err != nil {
+		return err
+	}
 	upstream, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
 	}
 	defer upstream.Close()
-	upstreamServer := &http.Server{Handler: mockUpstream(), ReadHeaderTimeout: 5 * time.Second}
+	upstreamMux := http.NewServeMux()
+	upstreamMux.Handle("/native-tools/v1/messages", workflow)
+	upstreamMux.Handle("/", mockUpstream())
+	upstreamServer := &http.Server{Handler: upstreamMux, ReadHeaderTimeout: 5 * time.Second}
 	go upstreamServer.Serve(upstream)
 	defer upstreamServer.Close()
+	verification, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	defer verification.Close()
+	verificationServer := &http.Server{Handler: workflow.verification(), ReadHeaderTimeout: 5 * time.Second}
+	go verificationServer.Serve(verification)
+	defer verificationServer.Close()
 
 	release, err := fixtureRelease("http://" + upstream.Addr().String() + "/v1")
 	if err != nil {
@@ -101,7 +116,10 @@ func run() error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(listener) }()
 	defer server.Close()
-	metadata, err := json.Marshal(map[string]string{"origin": "http://" + listener.Addr().String(), "api_key": apiKey, "conflict_api_key": conflictKey, "route_slug": routeSlug})
+	metadata, err := json.Marshal(map[string]string{
+		"origin": "http://" + listener.Addr().String(), "api_key": apiKey, "conflict_api_key": conflictKey, "route_slug": routeSlug,
+		"native_tool_route": nativeToolRoute, "verification_origin": "http://" + verification.Addr().String(),
+	})
 	if err != nil {
 		return err
 	}
@@ -125,7 +143,8 @@ func run() error {
 	return server.Shutdown(shutdown)
 }
 
-// fixtureRelease publishes one active provider and one route to it.
+// fixtureRelease pins the existing multi-surface smoke route and an isolated
+// native tool route so the scripted provider can count that complete workflow.
 func fixtureRelease(endpoint string) (*runtime.Release, error) {
 	providerID, credentialID, slotID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	routeID, targetID := uuid.NewString(), uuid.NewString()
@@ -178,6 +197,28 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 		target := uuid.NewString()
 		route.Targets = append(route.Targets, runtime.Target{ID: target, ProviderID: id, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: target})
 		snapshot.Routes[routeSlug] = route
+		if kind == "anthropic" {
+			// A dedicated provider path lets the independent script count every
+			// workflow dispatch without mixing the existing native smoke calls.
+			toolProviderID := uuid.NewString()
+			toolCredentialID, toolSlotID := uuid.NewString(), uuid.NewString()
+			toolProvider := p
+			toolProvider.ID = toolProviderID
+			toolProvider.RevisionID = uuid.NewString()
+			toolProvider.Name = "native tool workflow"
+			toolProvider.Endpoint = strings.TrimSuffix(endpoint, "/v1") + "/native-tools/v1"
+			toolProvider.ActiveCredential = &toolCredentialID
+			toolProvider.Slots = []runtime.Slot{{ID: toolSlotID, Name: "default", Enabled: true, Weight: 1, CredentialID: &toolCredentialID, CredentialVersion: &version}}
+			snapshot.Providers[toolProviderID] = toolProvider
+			secrets[toolCredentialID] = []byte(credential)
+			toolRoute := route
+			toolRoute.ID, toolRoute.RoutingID, toolRoute.RevisionID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+			toolRoute.Slug, toolRoute.MaxAttempts = nativeToolRoute, 1
+			toolRoute.Operations = []string{"generation"}
+			toolTarget := uuid.NewString()
+			toolRoute.Targets = []runtime.Target{{ID: toolTarget, ProviderID: toolProviderID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: toolTarget}}
+			snapshot.Routes[nativeToolRoute] = toolRoute
+		}
 	}
 	return runtime.NewRelease(uuid.NewString(), 1, snapshot, secrets)
 }

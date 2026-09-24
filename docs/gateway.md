@@ -43,6 +43,12 @@ only when it validates and every referenced credential can be decrypted; a
 release that fails either check is skipped and the previous one stays active.
 Repeated publication is harmless.
 
+Route revisions carry an optional [fidelity declaration](qualification/fidelity/route-contracts.md).
+Historical omission remains legacy and retains its original snapshot encoding.
+Explicit transformed routes declare their intentional policy changes. Strict
+drafts reject redaction, and strict publication remains unavailable until the
+complete interaction planner can admit their obligations.
+
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older
 than 60 seconds, measured from the start of the last successful read, is stale:
@@ -189,7 +195,8 @@ fields a provider interprets outside the inspected surfaces.
 ## Media and durable video jobs
 
 The media endpoints — `/v1/images/generations`, `/v1/images/edits`,
-`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`, and the
+`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`,
+`/v1/audio/translations`, and the
 `/v1/videos` family — share the same authentication, route-slug, limits, and
 accounting contracts as generation. Multipart and raw uploads reserve capacity
 inside `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and per-endpoint fractions of the spool;
@@ -210,7 +217,8 @@ explicit revocation guards, and finishes accounting. `GET /v1/videos`,
 `/api/v3/media-jobs` reads mirror for operators. The console provides
 metadata-only list/detail views, filters, and manual refresh. It has no
 automatic polling, content download/delete controls, video cancellation
-workflow, or media playground controls. Content and deletion remain
+workflow, or video playground controls. The Advanced playground provides a
+separate public audio translation upload form. Content and deletion remain
 API-key-owned inference operations; request cancellation and backend job
 reconciliation are separate from these console controls.
 

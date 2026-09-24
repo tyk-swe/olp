@@ -121,6 +121,29 @@ func TestUnaryDeliveryDeterminesTerminalOutcome(t *testing.T) {
 	}
 }
 
+func TestMalformedNativeRequestKeepsDialectTelemetry(t *testing.T) {
+	for _, tc := range []struct{ dialect, operation string }{
+		{"cohere-embed-v2", "embeddings"},
+		{"cohere-rerank-v2", "rerank"},
+		{"tei-tokenize", "token_count"},
+		{"openai-moderation", "moderation"},
+	} {
+		t.Run(tc.dialect, func(t *testing.T) {
+			h := strictHarness(t, nil)
+			resp := h.do(t.Context(), http.MethodPost, "/native/"+tc.dialect+"/models/"+routeSlug, fullKey, []byte(`{"model":`), nil)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status %d body %s", resp.StatusCode, raw)
+			}
+			env := h.sink.last(t)
+			if env.Operation != tc.operation || env.Surface != "native" || env.Mode != "unary" || env.Outcome != "failure" {
+				t.Fatalf("malformed native request lost its dialect identity: %+v", env)
+			}
+		})
+	}
+}
+
 func TestUnreadUnaryResponseReleasesAdmission(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 16 << 20, MaxEventBytes: 4096})

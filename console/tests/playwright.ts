@@ -36,9 +36,16 @@ export const test = base.extend({
       const url = new URL(response.url());
       if (
         url.origin === new URL(baseURL ?? page.url()).origin &&
-        ['/api/', '/v1/', '/openai/', '/anthropic/', '/gemini/'].some(
-          (prefix) => url.pathname.startsWith(prefix)
-        ) &&
+        [
+          '/api/',
+          '/v1/',
+          '/native/',
+          '/openai/',
+          '/anthropic/',
+          '/gemini/'
+        ].some((prefix) => url.pathname.startsWith(prefix)) &&
+        // The public, static contract is intentionally served with no-cache.
+        url.pathname !== '/api/v3/openapi.json' &&
         response.headers()['cache-control'] !== 'no-store'
       ) {
         runtimeFailures.push(

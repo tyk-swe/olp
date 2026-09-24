@@ -20,6 +20,7 @@ type Error struct {
 	Message    string
 	Param      *string
 	RetryAfter time.Duration
+	NoRetry    bool
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -70,6 +71,12 @@ func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
+	if e.NoRetry {
+		h.Set("X-Should-Retry", "false")
+	}
+	if surface == "bedrock" {
+		h.Set("X-Amzn-Errortype", e.Code)
+	}
 	if e.RetryAfter > 0 {
 		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.RetryAfter.Seconds())), 10))
 	}
@@ -124,7 +131,7 @@ func (e *Error) surfaceBody(surface string) []byte {
 		case 503:
 			kind = "overloaded_error"
 		}
-		b, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": kind, "message": e.Message}})
+		b, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": kind, "message": e.Message, "code": e.Code, "param": e.Param}})
 		return b
 	}
 	if surface == "gemini" {
@@ -145,7 +152,11 @@ func (e *Error) surfaceBody(surface string) []byte {
 		case 504:
 			status = "DEADLINE_EXCEEDED"
 		}
-		b, _ := json.Marshal(map[string]any{"error": map[string]any{"code": e.Status, "message": e.Message, "status": status}})
+		b, _ := json.Marshal(map[string]any{"error": map[string]any{"code": e.Status, "message": e.Message, "status": status, "details": []any{map[string]any{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": e.Code, "domain": "openllmproxy", "metadata": map[string]any{"field": e.Param}}}}})
+		return b
+	}
+	if surface == "bedrock" {
+		b, _ := json.Marshal(map[string]any{"message": e.Message, "code": e.Code, "param": e.Param})
 		return b
 	}
 	return e.body()

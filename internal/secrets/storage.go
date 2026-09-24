@@ -10,9 +10,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// RowQuerier is the read-only part of a database handle needed to load a
+// secret. It permits callers that do not write to avoid opening a transaction.
+type RowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id, purpose string, data []byte, expires *time.Time) error {
 	var active int
-	if err := tx.QueryRow(ctx, "SELECT active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE").Scan(&active); err != nil {
+	// Shared writers may seal independent records concurrently. Rotation takes
+	// FOR UPDATE on this row, so it still waits for every in-flight write and
+	// fences the active version before changing key material.
+	if err := tx.QueryRow(ctx, "SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE").Scan(&active); err != nil {
 		return err
 	}
 	if active != k.Active {
@@ -26,10 +35,10 @@ func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id, purpos
         ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,ciphertext=excluded.ciphertext,expires_at=excluded.expires_at`, id, purpose, k.Active, ciphertext, expires)
 	return err
 }
-func (k *KeyRing) Read(ctx context.Context, tx pgx.Tx, installation, id, purpose string) ([]byte, error) {
+func (k *KeyRing) Read(ctx context.Context, query RowQuerier, installation, id, purpose string) ([]byte, error) {
 	var version int
 	var encrypted []byte
-	err := tx.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp_go.secrets WHERE id=$1 AND purpose=$2 AND (expires_at IS NULL OR expires_at>now())", id, purpose).Scan(&version, &encrypted)
+	err := query.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp_go.secrets WHERE id=$1 AND purpose=$2 AND (expires_at IS NULL OR expires_at>now())", id, purpose).Scan(&version, &encrypted)
 	if err != nil {
 		return nil, err
 	}

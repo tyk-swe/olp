@@ -63,12 +63,12 @@ func (s *Server) reconcileResponse(ctx context.Context, localID string, body []b
 		return nil
 	}
 	tokens := responseUsage(body)
-	if tokens == nil {
-		return nil
+	evidence := usage.AttemptUsage{Observed: false, Complete: false, BillingUncertain: true}
+	if tokens != nil {
+		evidence = usage.AttemptUsage{Observed: true, Complete: true,
+			InputTokens: &tokens.InputTokens, OutputTokens: &tokens.OutputTokens,
+			CachedInputTokens: tokens.CachedInputTokens}
 	}
-	evidence := usage.AttemptUsage{Observed: true, Complete: true,
-		InputTokens: &tokens.InputTokens, OutputTokens: &tokens.OutputTokens,
-		CachedInputTokens: tokens.CachedInputTokens}
 	result, err := s.Resources.ReconcileResponseUsage(ctx, localID, evidence, s.now())
 	if err != nil {
 		return serverError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")

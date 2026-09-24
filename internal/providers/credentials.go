@@ -65,7 +65,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input rotateRequest
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if err = ValidCredential(input.Credential); err != nil {
@@ -430,7 +430,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input slotWrite
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if err = validSlot(&input.Slot, slotID); err != nil {

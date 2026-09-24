@@ -75,9 +75,15 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				if err = s.bindChangedCredentials(ctx, tx, providerID, entry, existing, bindings); err != nil {
 					return err
 				}
+				if err := s.bindNetwork(ctx, tx, providerID, entry, existing, bindings); err != nil {
+					return err
+				}
 				providerIDs[strings.ToLower(entry.Name)] = providerID
 				continue
 			}
+		}
+		if err := s.bindNetwork(ctx, tx, providerID, entry, existing, bindings); err != nil {
+			return err
 		}
 		resolved, err := s.resolveSlots(ctx, tx, providerID, entry, existing, ok, bindings)
 		if err != nil {
@@ -89,7 +95,8 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		providerIDs[strings.ToLower(entry.Name)] = providerID
 	}
 	for i := range doc.Routes {
-		route := &doc.Routes[i]
+		desired := doc.Routes[i]
+		route := &desired
 		var projectID *string
 		if route.Project != nil {
 			id := projectIDs[strings.ToLower(*route.Project)]
@@ -101,11 +108,25 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			if err != nil {
 				return err
 			}
+			if len(route.Fidelity) == 0 {
+				route.Fidelity = current.Fidelity
+			}
 			if canonicalEqualRoute(route, current) {
 				continue
 			}
 		}
-		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy}
+		if !staged && len(route.Fidelity) == 0 {
+			if existing, ok := state.routes[route.Slug]; ok && lower(state.projectOf(existing.ProjectID)) == lower(route.Project) {
+				route.Fidelity = existing.Fidelity
+			}
+		}
+		if err := routes.ValidateFidelityPolicy(route.Fidelity, route.ContentPolicy); err != nil {
+			return err
+		}
+		if err := routes.ValidateFidelityMigration(ctx, tx, route.Slug, route.Fidelity); err != nil {
+			return err
+		}
+		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]
 			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS})
@@ -119,12 +140,12 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		var draftID string
 		if staged {
 			draftID = draft.ID
-			if _, err = tx.Exec(ctx, "UPDATE olp_go.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID()); err != nil {
+			if _, err = tx.Exec(ctx, "UPDATE olp_go.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity); err != nil {
 				return err
 			}
 		} else {
 			draftID = access.NewID()
-			if _, err = tx.Exec(ctx, "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity); err != nil {
 				return err
 			}
 		}

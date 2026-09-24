@@ -3,11 +3,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 // RevisionModel is the published shape of one enabled model inside a provider
@@ -36,19 +41,26 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	Kind         string `json:"kind"`
-	AuthMode     string `json:"auth_mode"`
-	Endpoint     string `json:"endpoint"`
-	CloudRegion  string `json:"cloud_region"`
-	CloudProject string `json:"cloud_project"`
-	Deployment   string `json:"deployment"`
-	APIVersion   string `json:"api_version"`
-	Options      struct {
-		Models            map[string]json.RawMessage `json:"models"`
-		CredentialHeaders []string                   `json:"credential_headers"`
-		Limits            *Limits                    `json:"limits"`
-		ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults"`
-		VendorID          string                     `json:"vendor_id"`
+	ProfileID       string `json:"profile_id,omitempty"`
+	ProfileRevision string `json:"profile_revision,omitempty"`
+	Kind            string `json:"kind"`
+	AuthMode        string `json:"auth_mode"`
+	Endpoint        string `json:"endpoint"`
+	CloudRegion     string `json:"cloud_region"`
+	CloudProject    string `json:"cloud_project"`
+	Deployment      string `json:"deployment"`
+	APIVersion      string `json:"api_version"`
+	Options         struct {
+		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
+		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
+		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
+		OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+		Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
+		Models            map[string]json.RawMessage       `json:"models"`
+		CredentialHeaders []string                         `json:"credential_headers"`
+		Limits            *Limits                          `json:"limits"`
+		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
+		VendorID          string                           `json:"vendor_id"`
 	} `json:"options"`
 }
 
@@ -76,6 +88,11 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	now := time.Now().UTC()
 	snapshot.Generation = Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
 	if err = snapshot.Validate(); err != nil {
+		var incompatible incompatibilityError
+		if errors.As(err, &incompatible) {
+			code, _, _, message := incompatible.Incompatibility()
+			return Published{}, access.Fail(422, code, message)
+		}
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
 	digest, err := snapshot.Digest()
@@ -122,6 +139,10 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			return nil, fmt.Errorf("provider %s revision: %w", provider.ID, err)
 		}
 		provider.Enabled = state == "active"
+		provider.Network = cfg.Options.Network
+		provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
+		provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
+		provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings
 		provider.Kind = cfg.Kind
 		provider.AuthMode = cfg.AuthMode
 		provider.Endpoint = cfg.Endpoint
@@ -151,15 +172,15 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var operations, targets, policy, contentPolicy []byte
+		var operations, targets, policy, contentPolicy, fidelity []byte
 		route := Route{}
-		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy); err != nil {
+		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy, &fidelity); err != nil {
 			return nil, err
 		}
 		var published []PublishedTarget
@@ -178,6 +199,10 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
 				return nil, fmt.Errorf("route %s content policy: %w", route.Slug, err)
 			}
+		}
+		route.Fidelity, err = DecodeFidelity(fidelity)
+		if err != nil {
+			return nil, fmt.Errorf("route %s fidelity: %w", route.Slug, err)
 		}
 		route.RoutingID = route.ID
 		route.PublishedAt = route.PublishedAt.UTC()

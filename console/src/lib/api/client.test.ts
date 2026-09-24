@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
 import {
+  ApiProblem,
+  ensureSuccess,
+  fieldIssues,
+  isEtagMismatch
+} from '$lib/api/http';
+import { stringifyNativeJSON } from '$lib/json/nativeJson';
+import {
   clearCsrfToken,
   getCsrfToken,
   setCsrfToken
@@ -129,5 +136,85 @@ describe('generated API request boundary', () => {
     });
 
     expect(getCsrfToken()).toBe('csrf-rotated-by-response');
+  });
+});
+
+it('retains native configuration through the generated client without Content-Length', async () => {
+  const source =
+    '{"configuration":{"kind":"openai","auth_mode":"none","options":{"parameter_defaults":{"seed":9007199254740993,"tiny":1e-1000,"schema":{"10":{},"2":{},"__proto__":{"inert":true}}}}}}';
+  captureRequests(
+    () =>
+      new Response(source, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked'
+        }
+      })
+  );
+  const response = await apiClient.GET('/api/v3/providers/{provider_id}', {
+    params: { path: { provider_id: 'provider' } }
+  });
+  expect(stringifyNativeJSON(response.data)).toBe(source);
+  expect(response.response.headers.has('content-length')).toBe(false);
+});
+
+describe('generated API error boundary', () => {
+  it('decodes problem documents on unsuccessful responses', async () => {
+    const problem = {
+      type: 'https://openllmproxy.dev/problems/etag_mismatch',
+      title: 'Precondition failed',
+      status: 412,
+      detail: 'The stored revision no longer matches the supplied ETag.',
+      errors: {
+        display_name: [{ code: 'required', message: 'Provide a display name.' }]
+      }
+    };
+    captureRequests(() => jsonResponse(problem, { status: 412 }));
+    authLifecycle.establishSession(session);
+
+    const response = await apiClient.PATCH('/api/v3/profile', {
+      params: { header: { 'If-Match': 'stale-etag' } },
+      body: { display_name: 'Operator' }
+    });
+
+    expect(response.data).toBeUndefined();
+    expect(response.error).toEqual(problem);
+    let caught: unknown;
+    try {
+      ensureSuccess(response.error, response.response);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiProblem);
+    expect(isEtagMismatch(caught)).toBe(true);
+    expect(fieldIssues(caught)).toEqual([
+      {
+        field: 'display_name',
+        code: 'required',
+        message: 'Provide a display name.'
+      }
+    ]);
+  });
+
+  it('keeps unstructured error bodies raw for the generic fallback', async () => {
+    captureRequests(
+      () =>
+        new Response('<html>upstream unavailable</html>', {
+          status: 502,
+          headers: { 'content-type': 'text/html' }
+        })
+    );
+
+    const response = await apiClient.GET('/api/v3/setup/status');
+
+    expect(response.error).toBe('<html>upstream unavailable</html>');
+    let caught: unknown;
+    try {
+      ensureSuccess(response.error, response.response);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiProblem);
+    expect((caught as ApiProblem).problem.title).toBe('Request failed (502)');
   });
 });

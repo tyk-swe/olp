@@ -3,6 +3,8 @@ package media
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"strings"
@@ -35,6 +37,14 @@ func TestSpoolPutOpenRemoveLifecycle(t *testing.T) {
 	if artifact.Handle == "" || artifact.ContentLength != int64(len(payload)) {
 		t.Fatalf("artifact: %+v", artifact)
 	}
+	expected := sha256.Sum256([]byte(payload))
+	if artifact.Digest != hex.EncodeToString(expected[:]) {
+		t.Fatal("spool did not retain the original byte digest")
+	}
+	ref, err := artifact.BlobReference()
+	if err != nil || ref.ID() != string(artifact.Handle) || ref.Digest() != artifact.Digest || ref.Size() != artifact.ContentLength || ref.MediaType() != "application/octet-stream" {
+		t.Fatal("staged artifact has no complete OIF byte identity", err)
+	}
 	if err := ValidateHandle(string(artifact.Handle)); err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +57,37 @@ func TestSpoolPutOpenRemoveLifecycle(t *testing.T) {
 	if err != nil || string(data) != payload {
 		t.Fatalf("readback mismatch: %v", err)
 	}
+	if opened.Artifact.Digest != artifact.Digest {
+		t.Fatal("spool reopened with a different byte identity")
+	}
 	if err := spool.Remove(artifact.Handle); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := spool.Open(artifact.Handle); err == nil {
 		t.Fatal("removed handle still opens")
+	}
+}
+
+func TestSpoolDigestCoversEveryChunkAndPreservesMissingContentType(t *testing.T) {
+	spool := testSpool(t, MinCapacityBytes)
+	payload := strings.Repeat("three-byte-chunks", 16385)
+	artifact, err := spool.Put(t.Context(), Upload{
+		Filename: "unknown.bin", MaximumLength: int64(len(payload)),
+		Body: strings.NewReader(payload),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := sha256.Sum256([]byte(payload))
+	if artifact.Digest != hex.EncodeToString(expected[:]) || artifact.ContentType != "" {
+		t.Fatal("multi-chunk bytes or caller MIME presence changed")
+	}
+	ref, err := artifact.BlobReference()
+	if err != nil || ref.MediaType() != "application/octet-stream" || ref.Digest() != artifact.Digest {
+		t.Fatal("missing MIME could not use a neutral storage byte type", err)
+	}
+	if err := spool.Remove(artifact.Handle); err != nil {
+		t.Fatal(err)
 	}
 }
 

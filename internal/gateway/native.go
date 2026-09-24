@@ -10,15 +10,23 @@ import (
 )
 
 func requestSurface(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/bedrock/") {
+		return "bedrock"
+	}
 	if strings.HasPrefix(r.URL.Path, "/anthropic/") {
 		return "anthropic"
 	}
 	if strings.HasPrefix(r.URL.Path, "/gemini/") {
 		return "gemini"
 	}
+	if strings.HasPrefix(r.URL.Path, "/ws/google.ai.generativelanguage.") {
+		return "gemini"
+	}
 	return "openai"
 }
 func (s *Server) registerNative(mux *http.ServeMux) {
+	mux.HandleFunc("POST /native/{dialect}/models/{model}", func(w http.ResponseWriter, r *http.Request) { s.inferenceOperation("", r.PathValue("dialect"))(w, r) })
+	mux.HandleFunc("OPTIONS /native/", s.preflight)
 	mux.HandleFunc("POST /v1/responses/input_tokens", s.inference(openai.FamilyInputTokens))
 	mux.HandleFunc("POST /v1/embeddings", s.inference(openai.FamilyEmbeddings))
 	mux.HandleFunc("POST /v1/rerank", s.inference(openai.FamilyRerank))
@@ -49,6 +57,10 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 					family = openai.FamilyGeminiStream
 				case "countTokens":
 					family = openai.FamilyGeminiCount
+				case "embedContent":
+					family = openai.FamilyGeminiEmbeddings
+				case "batchEmbedContents":
+					family = openai.FamilyGeminiEmbeddingsBatch
 				default:
 					s.begin(w, r)
 					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")

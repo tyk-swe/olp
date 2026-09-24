@@ -19,6 +19,7 @@ export const operationKinds = [
   'image_variation',
   'speech',
   'transcription',
+  'translation',
   'video_create',
   'video_list',
   'video_get',

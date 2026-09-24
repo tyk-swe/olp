@@ -2,15 +2,12 @@
   import RoutingPreferencesForm from '$lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '$lib/features/routes/routingExplanation';
+  import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
   let routing = $state('{}');
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { createMutation, createQuery } from '@tanstack/svelte-query';
-  import {
-    listRoutes,
-    simulateRouting,
-    type RoutingSimulationInput
-  } from '$lib/features/routes/api';
+  import { listRoutes, simulateRouting } from '$lib/features/routes/api';
   import { hasOutputRules } from '$lib/features/routes/routeEditor';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
@@ -21,6 +18,21 @@
     type PlaygroundRequest,
     type PlaygroundStreamDone
   } from '$lib/features/inference/playground/api';
+  import {
+    inspectRouting,
+    type InspectRoutingInput
+  } from '$lib/features/inference/playground/inspection';
+  import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+  import RealtimeTrace from './RealtimeTrace.svelte';
+  import OperationResult from './OperationResult.svelte';
+  import StrictToolPlayground from './StrictToolPlayground.svelte';
+  import NativeOperationPlayground from './NativeOperationPlayground.svelte';
+  import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
+  import {
+    nativeDialects,
+    nativeOperationRequest,
+    type NativeOperation
+  } from './nativeOperation';
   import {
     playgroundTemplates,
     templateFor
@@ -46,6 +58,7 @@
   let input = $state('');
   let rawJson = $state(JSON.stringify(playgroundTemplates[0].request, null, 2));
   let templateKey = $state(playgroundTemplates[0].key);
+  let nativeDialect = $state('');
   let streamEnabled = $state(false);
   let streamCheck = $state<
     'idle' | 'checking' | 'ok' | 'unsupported' | 'unknown'
@@ -65,6 +78,7 @@
     '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}'
   );
   let validationError = $state('');
+  let completedRequest = $state<PlaygroundRequest | null>(null);
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
@@ -76,6 +90,9 @@
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
   const selectedRoute = $derived(
     (routes.data ?? []).find((route) => route.slug === model.trim())
+  );
+  const strictSelected = $derived(
+    selectedRoute?.latest_revision?.fidelity?.mode === 'strict'
   );
   const outputPolicyActive = $derived(
     hasOutputRules(selectedRoute?.latest_revision?.content_policy?.rules ?? [])
@@ -95,7 +112,11 @@
     { value: 'token_count', label: 'Token count' },
     { value: 'embeddings', label: 'Embeddings' },
     { value: 'moderation', label: 'Moderation' },
-    { value: 'rerank', label: 'Rerank' }
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'classification', label: 'Classification' },
+    { value: 'scoring', label: 'Scoring' },
+    { value: 'translation', label: 'Audio translation' },
+    { value: 'realtime', label: 'Realtime event trace' }
   ];
   const composerModes = [
     { value: 'basic', label: 'Basic' },
@@ -126,6 +147,7 @@
     if (!template) return;
     operation = template.operation;
     if (template.surface) surface = template.surface;
+    nativeDialect = template.nativeDialect ?? '';
     rawJson = JSON.stringify(template.request, null, 2);
   }
 
@@ -178,6 +200,7 @@
     streamDone = null;
     streamProblem = null;
     mutation.reset();
+    completedRequest = null;
   }
 
   onDestroy(() => {
@@ -185,22 +208,53 @@
   });
   const simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
-    mutationFn: (input: RoutingSimulationInput) => simulateRouting(input)
+    mutationFn: (input: InspectRoutingInput) => inspectRouting(input)
   }));
 
   let simulateKeyId = $state('');
   let simulateSeed = $state('');
+  let inspectDialect = $state('');
+  let inspectedInputs = $state('');
   let simulationError = $state('');
 
   // A dry run is always the most recent action when it has data, because
   // submitting a real test resets it.
   const explanation = $derived(
-    simulation.data?.length
+    simulation.data?.length && inspectedInputs === inspectionInputs()
       ? { dryRun: true, decisions: simulation.data }
       : mutation.data?.routing?.length
         ? { dryRun: false, decisions: mutation.data.routing }
         : null
   );
+
+  function inspectionInputs() {
+    return JSON.stringify([
+      model,
+      surface,
+      operation,
+      composer,
+      rawJson,
+      streamEnabled,
+      routing,
+      simulateKeyId,
+      simulateSeed,
+      inspectDialect,
+      nativeDialect
+    ]);
+  }
+
+  function currentNativeDialect(): string {
+    const options = nativeDialects(operation);
+    return options.includes(nativeDialect) ? nativeDialect : (options[0] ?? '');
+  }
+
+  function advancedRequest(): Record<string, unknown> {
+    if (operation === 'translation') return { model: model.trim() };
+    const raw = parseNativeJSON(rawJson);
+    if (!nativeObject(raw))
+      throw new Error('The request document must be a JSON object.');
+    return raw;
+  }
 
   function requestControls() {
     return {
@@ -219,16 +273,49 @@
       return;
     }
     try {
-      await simulation.mutateAsync({
+      const version = inspectionInputs();
+      const registeredNative =
+        strictSelected &&
+        composer === 'advanced' &&
+        nativeDialects(operation).length > 0;
+      const selectedDialect = registeredNative
+        ? currentNativeDialect()
+        : inspectDialect || undefined;
+      const input: InspectRoutingInput = {
         route: model.trim(),
-        surface,
-        // Match the unary operation used by the playground endpoint.
-        mode: 'unary',
+        operation: composer === 'advanced' ? operation : 'generation',
+        surface: registeredNative ? 'native' : surface,
+        mode:
+          operation === 'realtime'
+            ? 'realtime'
+            : registeredNative
+              ? 'unary'
+              : streamEnabled
+                ? 'streaming'
+                : 'unary',
         preferences: JSON.parse(routing),
-        ...requestControls(),
         apiKeyId: simulateKeyId || null,
-        seed: simulateSeed
-      });
+        seed: simulateSeed,
+        clientContract:
+          registeredNative && operation === 'embeddings'
+            ? 'raw-vector-storage/1'
+            : undefined,
+        ...(composer === 'advanced' && operation !== 'realtime'
+          ? {
+              request: registeredNative
+                ? nativeOperationRequest(
+                    rawJson,
+                    model.trim(),
+                    selectedDialect!
+                  )
+                : advancedRequest(),
+              dialect: selectedDialect as
+                InspectRoutingInput['dialect'] | undefined
+            }
+          : {})
+      };
+      await simulation.mutateAsync(input);
+      inspectedInputs = version;
     } catch (error) {
       simulationError = errorMessage(
         error,
@@ -248,6 +335,7 @@
     streamFrames = [];
     streamDone = null;
     streamProblem = null;
+    completedRequest = request;
     try {
       await streamPlayground(
         request,
@@ -293,20 +381,34 @@
         'Streaming has not been verified as available for this route.';
       return;
     }
+    if (strictSelected) {
+      validationError =
+        'Use the qualified public client below for this strict route.';
+      return;
+    }
+    if (operation === 'translation') {
+      validationError = 'Use the audio upload form below.';
+      return;
+    }
+    if (operation === 'realtime') {
+      validationError =
+        'Use the local realtime event viewer below; it does not open a provider session.';
+      return;
+    }
+    if (operation === 'classification' || operation === 'scoring') {
+      validationError =
+        'This operation requires a strict registered native route and the public client below.';
+      return;
+    }
     let request: PlaygroundRequest;
     try {
       if (composer === 'advanced') {
-        const raw: unknown = JSON.parse(rawJson);
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-          validationError = 'The request document must be a JSON object.';
-          return;
-        }
         request = {
           routing: JSON.parse(routing),
           model: model.trim(),
           surface,
           operation,
-          request: raw as Record<string, unknown>,
+          request: advancedRequest(),
           stream: streamEnabled ? true : undefined
         };
       } else {
@@ -330,6 +432,7 @@
     streamFrames = [];
     streamDone = null;
     streamProblem = null;
+    completedRequest = request;
     if (streamEnabled) {
       await runStream(request);
       return;
@@ -402,19 +505,26 @@
               entered — the route enforces the final decision.</small
             >{/if}
         </div>
-        <div class="form-field">
-          <label for="playground-template">Template</label><select
-            id="playground-template"
-            value={templateKey}
-            onchange={(event) => applyTemplate(event.currentTarget.value)}
-          >
-            {#each playgroundTemplates as template (template.key)}<option
-                value={template.key}>{template.label}</option
-              >{/each}
-          </select><small
-            >Loads a request document; tools are never executed.</small
-          >
-        </div>
+        {#if operation === 'realtime'}
+          <p class="policy-note">
+            The local trace viewer below does not use a route or request
+            template and starts no session.
+          </p>
+        {:else}
+          <div class="form-field">
+            <label for="playground-template">Template</label><select
+              id="playground-template"
+              value={templateKey}
+              onchange={(event) => applyTemplate(event.currentTarget.value)}
+            >
+              {#each playgroundTemplates as template (template.key)}<option
+                  value={template.key}>{template.label}</option
+                >{/each}
+            </select><small
+              >Loads a request document; tools are never executed.</small
+            >
+          </div>
+        {/if}
       </div>
     {:else}
       <SegmentedRadioGroup
@@ -536,7 +646,7 @@
             class="mono"
             spellcheck="false"></textarea>
         </div>{/if}
-    {:else}
+    {:else if operation !== 'realtime' && operation !== 'translation'}
       <div class="form-field">
         <label for="playground-raw">Request JSON</label><textarea
           id="playground-raw"
@@ -576,13 +686,47 @@
     {#if validationError}<p class="field-error" role="alert">
         {validationError}
       </p>{/if}
+    {#if strictSelected && operation !== 'realtime'}<p
+        class="policy-note"
+        role="status"
+      >
+        This route requires a client that retains its native observation and
+        continuation contract. Use the public strict client below with an
+        authorized inference key.
+      </p>{/if}
     <details class="dry-run">
-      <summary>Explain routing without running</summary>
+      <summary>Inspect effective plan without running</summary>
       <p class="dry-run-help">
-        Ranks the attempts the published runtime would make for a generation on
-        this route, honouring circuit-breaker state, without sending a request
-        to any provider. Nothing is billed and no prompt is needed.
+        Shows current target eligibility and, in Advanced mode, the native
+        request the interaction planner would prepare. Basic mode checks target
+        eligibility only. No provider inference, job, or tool is started, and
+        nothing is billed.
       </p>
+      {#if composer === 'advanced'}
+        <div class="form-field">
+          <label for="playground-inspect-dialect">Native request dialect</label>
+          <select
+            id="playground-inspect-dialect"
+            value={strictSelected && nativeDialects(operation).length
+              ? currentNativeDialect()
+              : inspectDialect}
+            onchange={(event) => {
+              if (strictSelected && nativeDialects(operation).length)
+                nativeDialect = event.currentTarget.value;
+              else inspectDialect = event.currentTarget.value;
+            }}
+          >
+            <option value="">Default for operation and surface</option>
+            {#each strictSelected && nativeDialects(operation).length ? nativeDialects(operation) : inspectionDialects(operation, surface) as dialect (dialect)}
+              <option value={dialect}>{dialect}</option>
+            {/each}
+          </select>
+          <small
+            >The request JSON above must name this route when its native dialect
+            carries a model field.</small
+          >
+        </div>
+      {/if}
       <div class="route-grid">
         <div class="form-field">
           <label for="playground-simulate-key">Evaluate as API key</label
@@ -591,7 +735,7 @@
             bind:value={simulateKeyId}
             aria-describedby="simulate-key-help"
           >
-            <option value="">No key restriction</option>
+            <option value="">No API key authority</option>
             {#each apiKeys.data ?? [] as key (key.id)}
               {#if !key.revoked_at}<option value={key.id}>{key.name}</option
                 >{/if}
@@ -621,7 +765,7 @@
         type="button"
         disabled={simulation.isPending}
         onclick={explain}
-        >{simulation.isPending ? 'Explaining…' : 'Explain routing'}</button
+        >{simulation.isPending ? 'Inspecting…' : 'Inspect plan'}</button
       >
     </details>
     <div class="run-actions">
@@ -630,6 +774,9 @@
         type="submit"
         disabled={mutation.isPending ||
           streaming ||
+          strictSelected ||
+          operation === 'realtime' ||
+          operation === 'translation' ||
           (composer === 'advanced' && !operationKnown)}
         >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
       >
@@ -716,8 +863,12 @@
           </div>
         </div>{/if}
       {#if mutation.data.response !== undefined}<div class="output">
-          <h3>Operation result</h3>
-          <pre>{JSON.stringify(mutation.data.response, null, 2)}</pre>
+          <OperationResult
+            operation={completedRequest?.operation ?? 'generation'}
+            response={mutation.data.response}
+            responseRaw={mutation.data.response_raw}
+            request={completedRequest?.request}
+          />
         </div>{/if}
       {#if mutation.data.output_text}<div class="output">
           <h3>Text</h3>
@@ -783,6 +934,37 @@
   </section>
 </div>
 
+{#if strictSelected && operation !== 'translation'}
+  {#if composer === 'advanced' && operation === 'generation' && surface === 'openai'}
+    {#key model.trim()}
+      <StrictToolPlayground route={model.trim()} requestText={rawJson} />
+    {/key}
+  {:else if composer === 'advanced' && nativeDialects(operation).length}
+    {#key `${model.trim()}:${operation}:${templateKey}`}
+      <NativeOperationPlayground
+        route={model.trim()}
+        operation={operation as NativeOperation}
+        requestText={rawJson}
+        bind:dialect={nativeDialect}
+      />
+    {/key}
+  {:else if operation !== 'realtime'}
+    <section class="card strict-client-unavailable" role="status">
+      This route needs a native or negotiated public client. Choose Advanced,
+      Generation, OpenAI and the negotiated tool template for the currently
+      qualified tool workflow.
+    </section>
+  {/if}
+{/if}
+
+{#if composer === 'advanced' && operation === 'translation'}
+  {#key model.trim()}<AudioTranslationPlayground route={model.trim()} />{/key}
+{/if}
+
+{#if composer === 'advanced' && operation === 'realtime'}
+  <RealtimeTrace />
+{/if}
+
 {#if explanation}<section class="card composer">
     <h2>Routing explanation</h2>
     <p class="explanation-source">
@@ -794,6 +976,10 @@
   </section>{/if}
 
 <style>
+  .strict-client-unavailable {
+    padding: 1.25rem;
+    margin-top: 1rem;
+  }
   .explanation-source {
     margin: 0 0 1rem;
     color: var(--foreground-muted);

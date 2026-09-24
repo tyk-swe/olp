@@ -26,7 +26,7 @@ api: ## Generate Go and TypeScript contracts without compiling the gateway
 	./scripts/api.sh
 
 check: api ## Check formatting, vet, console types/lint, and all local tests
-	@test -z "$$(gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/integration tests/sdkfixture)" || { gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/integration tests/sdkfixture; exit 1; }
+	@test -z "$$(gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture)" || { gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture; exit 1; }
 	go vet ./...
 	pnpm --dir console format:check
 	pnpm --dir console check
@@ -55,5 +55,5 @@ build: api ## Build the native Go binary and static console
 	pnpm --dir console build
 
 fmt: ## Format Go and console source
-	gofmt -w cmd internal openapi/*.go tests/fixtures/*.go tests/integration tests/sdkfixture
+	gofmt -w cmd internal openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture
 	pnpm --dir console format

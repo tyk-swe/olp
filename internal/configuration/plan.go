@@ -14,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -78,18 +80,20 @@ type existingSlot struct {
 }
 
 type existingProvider struct {
-	ID        string
-	Name      string
-	Kind      string
-	State     string
-	ProjectID *string
-	Slots     map[string]existingSlot
+	NetworkCredentialID *string
+	ID                  string
+	Name                string
+	Kind                string
+	State               string
+	ProjectID           *string
+	Slots               map[string]existingSlot
 }
 
 type existingRoute struct {
 	ID        string
 	ProjectID *string
 	State     string
+	Fidelity  json.RawMessage
 }
 
 type existingDraft struct {
@@ -137,14 +141,14 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	providers, err := q.Query(ctx, "SELECT id::text,name,kind,state,project_id::text FROM olp_go.providers")
+	providers, err := q.Query(ctx, "SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,(SELECT c.id::text FROM olp_go.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL) FROM olp_go.providers p")
 	if err != nil {
 		return nil, err
 	}
 	defer providers.Close()
 	for providers.Next() {
 		var p existingProvider
-		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID); err != nil {
+		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID, &p.NetworkCredentialID); err != nil {
 			return nil, err
 		}
 		p.Slots = map[string]existingSlot{}
@@ -176,7 +180,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = slots.Err(); err != nil {
 		return nil, err
 	}
-	routes, err := q.Query(ctx, "SELECT id::text,slug,project_id::text,state FROM olp_go.routes")
+	routes, err := q.Query(ctx, "SELECT r.id::text,r.slug,r.project_id::text,r.state,v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id")
 	if err != nil {
 		return nil, err
 	}
@@ -184,15 +188,16 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	for routes.Next() {
 		var id, slug, state string
 		var projectID *string
-		if err = routes.Scan(&id, &slug, &projectID, &state); err != nil {
+		var fidelity []byte
+		if err = routes.Scan(&id, &slug, &projectID, &state, &fidelity); err != nil {
 			return nil, err
 		}
-		v.routes[slug] = &existingRoute{ID: id, ProjectID: projectID, State: state}
+		v.routes[slug] = &existingRoute{ID: id, ProjectID: projectID, State: state, Fidelity: fidelity}
 	}
 	if err = routes.Err(); err != nil {
 		return nil, err
 	}
-	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp_go.route_drafts WHERE state='draft' AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
+	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp_go.route_drafts WHERE state IN ('draft','validated') AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +232,7 @@ func normalizeDocument(doc *Document) {
 			m.UpstreamModel = strings.TrimSpace(m.UpstreamModel)
 			m.DisplayName = strings.TrimSpace(m.DisplayName)
 		}
+
 		for j := range p.Slots {
 			slot := &p.Slots[j]
 			slot.Name = strings.TrimSpace(slot.Name)
@@ -300,6 +306,18 @@ func (s *Server) validateDocument(doc *Document) error {
 			}
 		}
 		p.Configuration.Normalize()
+		if p.Configuration.Options.Network != nil && p.Configuration.Options.Network.CredentialID != "" {
+			return access.Invalid(prefix+".configuration.options.network.credential_id", "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
+		}
+		if p.NetworkCredentialRef != nil && (p.Configuration.Options.Network == nil || *p.NetworkCredentialRef != networkRef(p.Name) || len(*p.NetworkCredentialRef) > maxCredentialRef) {
+			return access.Invalid(prefix+".network_credential_ref", "Use the provider name followed by /network and configure network options.")
+		}
+		if p.NetworkCredentialRef != nil {
+			if refs[*p.NetworkCredentialRef] {
+				return access.Invalid(prefix+".network_credential_ref", "Credential references must be distinct.")
+			}
+			refs[*p.NetworkCredentialRef] = true
+		}
 		if err := p.Configuration.Validate(s.Egress); err != nil {
 			return err
 		}
@@ -420,6 +438,9 @@ func (s *Server) validateDocument(doc *Document) error {
 	}
 	for i, rt := range doc.Routes {
 		prefix := "routes." + strconv.Itoa(i)
+		if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
+			return err
+		}
 		if routeSeen[rt.Slug] {
 			return access.Invalid(prefix+".slug", "Route slugs must be unique.")
 		}
@@ -472,6 +493,9 @@ func (s *Server) validateDocument(doc *Document) error {
 func validateBindings(doc *Document, bindings map[string]string) error {
 	refs := map[string]bool{}
 	for _, p := range doc.Providers {
+		if p.NetworkCredentialRef != nil {
+			refs[*p.NetworkCredentialRef] = true
+		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
 				refs[*slot.CredentialRef] = true
@@ -479,6 +503,13 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		}
 	}
 	for name, secret := range bindings {
+		for _, provider := range doc.Providers {
+			if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
+				if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
+					return access.Invalid("secret_bindings."+name, err.Error())
+				}
+			}
+		}
 		if !refs[name] {
 			return access.Invalid("secret_bindings", "Secret binding "+name+" is not referenced by the document.")
 		}
@@ -565,6 +596,16 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 				result.item("provider", p.Name, "replace", "draft")
 			}
 		}
+		if p.NetworkCredentialRef != nil {
+			ref := *p.NetworkCredentialRef
+			if _, supplied := bindings[ref]; supplied {
+				result.item("network_credential", ref, "bind", "")
+			} else if ok && existing.NetworkCredentialID != nil {
+				result.item("network_credential", ref, "reuse", "")
+			} else {
+				result.blocker("network_credential", ref, "secret_binding_required")
+			}
+		}
 		for j := range p.Slots {
 			slot := &p.Slots[j]
 			if slot.CredentialRef == nil {
@@ -591,7 +632,8 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		}
 	}
 	for i := range doc.Routes {
-		rt := &doc.Routes[i]
+		desired := doc.Routes[i]
+		rt := &desired
 		if rt.Project != nil && !projectNames[strings.ToLower(*rt.Project)] {
 			result.blocker("route", rt.Slug, "project_unknown")
 		}
@@ -607,6 +649,25 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			}
 		}
 		draft, staged := state.drafts[routeKey(rt.Slug, rt.Project)]
+		if !staged && len(rt.Fidelity) == 0 {
+			if existing, ok := state.routes[rt.Slug]; ok && lower(state.projectOf(existing.ProjectID)) == lower(rt.Project) {
+				rt.Fidelity = existing.Fidelity
+			}
+		}
+		if !staged {
+			if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
+				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
+				continue
+			}
+			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
+				var failure *access.Problem
+				if !errors.As(err, &failure) {
+					return nil, err
+				}
+				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
+				continue
+			}
+		}
 		switch {
 		case !staged:
 			result.item("route", rt.Slug, "stage", "route_draft")
@@ -614,6 +675,21 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			current, err := s.currentRouteEntry(ctx, q, draft.ID, rt, state)
 			if err != nil {
 				return nil, err
+			}
+			if len(rt.Fidelity) == 0 {
+				rt.Fidelity = current.Fidelity
+			}
+			if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
+				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
+				continue
+			}
+			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
+				var failure *access.Problem
+				if !errors.As(err, &failure) {
+					return nil, err
+				}
+				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
+				continue
 			}
 			if canonicalEqualRoute(rt, current) {
 				result.item("route", rt.Slug, "noop", "")
@@ -740,13 +816,14 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 	}
 	entry.Models = models
 	entry.Slots = slots
+	portableNetwork(entry)
 	return entry, nil
 }
 
 func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftID string, desired *RouteEntry, state *stateView) (*RouteEntry, error) {
 	entry := &RouteEntry{Slug: desired.Slug, Project: desired.Project}
 	var operations, targets []byte
-	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy FROM olp_go.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy); err != nil {
+	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity FROM olp_go.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &entry.Operations); err != nil {

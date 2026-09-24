@@ -264,6 +264,12 @@ credential authority export a stable `credential_ref` of
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
+Routes may carry a [fidelity declaration](qualification/fidelity/route-contracts.md).
+Historical legacy omission stays omitted in exports. Importing an old artifact
+without this field preserves an existing staged or published contract; explicit
+mode changes remain visible in revision history. Configuration staging never
+activates a strict route or bypasses its policy checks.
+
 `POST /api/v3/configuration/plan` validates an artifact and reports
 `{digest, actions, conflicts, blockers}` without mutating. Validation rejects
 unknown fields, oversized collections, duplicate natural identities
@@ -309,3 +315,13 @@ principal, so assigned users and project-scoped machine tokens receive 403;
 all-project machine tokens with `read` and `configure` scopes can automate
 export, plan, and apply. The console exposes the workflow to global
 owner/operator sessions under **Settings → Configuration promotion**.
+
+### Versioned provider profiles and per-connection networking
+
+Provider drafts can select explicit API/hosting profiles, operation/dialect defaults,
+semantic headers, serving bindings and secure per-connection proxy/TLS settings.
+Network secrets use provider-owned encrypted references, independently from API
+credential slots. See [provider profiles](provider-profiles.md) for the public
+configuration shape, cloud endpoint differences, inheritance rules, network bounds,
+credential lifecycle and qualification scope. Omitting the new configuration fields
+preserves existing published legacy behavior and snapshot digests.

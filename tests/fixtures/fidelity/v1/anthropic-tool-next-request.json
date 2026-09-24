@@ -1,0 +1,23 @@
+{
+  "model": "fixture-model",
+  "max_tokens": 2048,
+  "thinking": { "type": "enabled", "budget_tokens": 1024 },
+  "tools": [
+    { "name": "weather", "description": "Weather in a city", "input_schema": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] } },
+    { "name": "clock", "description": "Time in a zone", "input_schema": { "type": "object", "properties": { "zone": { "type": "string" } }, "required": ["zone"] } }
+  ],
+  "messages": [
+    { "role": "user", "content": "Weather and time in Paris?" },
+    { "role": "assistant", "content": [
+      { "type": "thinking", "thinking": "fixture reasoning", "signature": "opaque-fixture-signature-do-not-log" },
+      { "type": "text", "text": "before" },
+      { "type": "tool_use", "id": "call-weather", "name": "weather", "input": { "city": "Paris" } },
+      { "type": "tool_use", "id": "call-clock", "name": "clock", "input": { "zone": "Europe/Paris" } },
+      { "type": "text", "text": "after" }
+    ] },
+    { "role": "user", "content": [
+      { "type": "tool_result", "tool_use_id": "call-weather", "content": "sunny" },
+      { "type": "tool_result", "tool_use_id": "call-clock", "content": "14:00" }
+    ] }
+  ]
+}

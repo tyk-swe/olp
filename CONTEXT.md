@@ -30,3 +30,63 @@ skipped because they are revoked, cooled or unmeterable do not consume it.
 Another attempt to serve the same inference request after an eligible failure,
 permitted only before response commitment and when the upstream outcome is not
 classified as ambiguous.
+
+**OIF (OpenLLMProxy Internal Format)**:
+The source-preserving representation of an operation's request, result, or event,
+including its native meaning and the obligations required to preserve it.
+
+**Dialect**:
+A versioned API language defining an operation's requests, results, events, and
+continuation rules, independently of the environment that hosts it.
+
+**Provider profile**:
+A versioned, compatible combination of dialect, hosting, authentication, and
+transport for a provider-model binding.
+
+**Serving identity**:
+The selected model and its serving environment, including the API profile,
+upstream principal, region, resource scope, and observable revisions.
+
+**Interaction contract**:
+The scoped promise that execution, client observation, permitted continuation,
+and effects are preserved for a particular operation and client behavior.
+
+**Continuation**:
+A permitted next interaction whose retained native dependencies correspond to
+the client's visible history and selected branch.
+
+**Continuation handle**:
+An opaque reference to the complete native dependencies for a permitted next
+interaction; possession does not replace authorization.
+
+**Submission identity**:
+A caller's identity for one inference request whose retries refer to the same
+accepted work and delivery, rather than another inference request.
+
+**Delivery replay**:
+Delivering already-recorded output from the same accepted work without
+performing inference again.
+
+**Route fidelity**:
+A route's declared legacy, strict, or transformed treatment of invocation
+semantics; native identity and qualified interaction describe individual plans.
+
+**Strict route**:
+A route whose admitted interactions preserve execution, observation, permitted
+continuation, and effects relative to the selected target's native invocation.
+
+**Published route identity**:
+The client address of a published route, carrying its strict or non-strict
+promise across revisions. Crossing that boundary creates a distinct identity.
+
+**Upstream acceptance**:
+What is known about provider work: not sent, outcome unknown, accepted, or
+terminal. Absence of client-visible bytes does not establish absence of work.
+
+**Client observation**:
+What the caller may have received: unobserved, partially observed, actionable,
+or terminal. This is independent of upstream acceptance and response commitment.
+
+**Transformed route**:
+A route declaring intentional model-significant changes to an invocation or
+its observed result.

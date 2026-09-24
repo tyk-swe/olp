@@ -83,12 +83,26 @@ func (s *Service) checkpoint(ctx context.Context, outcome usage.Outcome, progres
 	}
 }
 
-// AttachWithRetry persists the upstream identity with bounded retry; the
-// create path must not abandon the reservation on a transient write failure.
-func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string, update JobUpdate) (JobRecord, error) {
+// MaxNativeVideoSourceBytes bounds exact video metadata retained for recovery.
+// Asset bytes never enter this secret: they remain in the request-owned spool.
+const MaxNativeVideoSourceBytes = 1 << 20
+
+// AttachWithRetry persists the upstream identity with bounded retry. Strict
+// native metadata is sealed under the job UUID and committed in the same
+// transaction as activation, so no active strict job lacks recoverable source.
+func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string, update JobUpdate, nativeSource ...[]byte) (JobRecord, error) {
+	if len(nativeSource) > 1 || len(nativeSource) == 1 && (len(nativeSource[0]) == 0 || len(nativeSource[0]) > MaxNativeVideoSourceBytes) {
+		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "native video source exceeds its durable bound"}
+	}
 	const attempts = 3
 	for attempt := 0; ; attempt++ {
-		record, err := AttachUpstream(ctx, s.Pool, id, upstreamJobID, update)
+		var record JobRecord
+		var err error
+		if len(nativeSource) == 0 {
+			record, err = AttachUpstream(ctx, s.Pool, id, upstreamJobID, update)
+		} else {
+			record, err = s.attachWithSource(ctx, id, upstreamJobID, update, nativeSource[0])
+		}
 		if err == nil {
 			return record, nil
 		}
@@ -104,12 +118,83 @@ func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string,
 	}
 }
 
+func (s *Service) attachWithSource(ctx context.Context, id, upstreamJobID string, update JobUpdate, source []byte) (JobRecord, error) {
+	if s.Keys == nil || s.Installation == "" {
+		return JobRecord{}, &JobError{Kind: JobErrorDatabase, Message: "media secret authority unavailable"}
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	defer tx.Rollback(ctx)
+	expires := s.now().Add(30 * 24 * time.Hour)
+	if update.ExpiresAt != nil && update.ExpiresAt.Before(expires) {
+		expires = *update.ExpiresAt
+	}
+	if err := s.Keys.Store(ctx, tx, s.Installation, id, "media_job_source", source, &expires); err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	record, err := AttachUpstream(ctx, tx, id, upstreamJobID, update, id)
+	if err != nil {
+		return JobRecord{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	return record, nil
+}
+
+// ReadNativeVideoSource is only for the job owner while the current pinned
+// provider authority remains usable. A missing/expired/tampered secret fails
+// closed; possession of a job UUID alone never authorizes this read.
+func (s *Service) ReadNativeVideoSource(ctx context.Context, record JobRecord, apiKeyID string) ([]byte, error) {
+	fresh, err := Job(ctx, s.Pool, record.ID)
+	if err != nil {
+		return nil, err
+	}
+	record = fresh
+	if !record.StrictContract || record.APIKeyID != apiKeyID || record.NativeSourceID == nil ||
+		*record.NativeSourceID != record.ID || record.Lifecycle == LifecycleDeleted ||
+		record.ExpiresAt != nil && !record.ExpiresAt.After(s.now()) {
+		return nil, &JobError{Kind: JobErrorNotFound, Message: "native video source unavailable"}
+	}
+	if target, _, _ := s.JobTarget(ctx, &record); target == nil {
+		return nil, &JobError{Kind: JobErrorPrecondition, Message: "pinned video authority is unavailable"}
+	}
+	if s.Keys == nil {
+		return nil, &JobError{Kind: JobErrorDatabase, Message: "media secret authority unavailable"}
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, dbError(err)
+	}
+	defer tx.Rollback(ctx)
+	source, err := s.Keys.Read(ctx, tx, s.Installation, record.ID, "media_job_source")
+	if err != nil {
+		return nil, &JobError{Kind: JobErrorNotFound, Message: "native video source unavailable"}
+	}
+	return source, nil
+}
+
 // FinalizeDeletion applies the tombstone and confirms the row landed in the
 // deleted lifecycle.
 func (s *Service) FinalizeDeletion(ctx context.Context, id string) (bool, error) {
-	finalized, err := FinalizeDeletion(ctx, s.Pool, id)
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return false, dbError(err)
+	}
+	defer tx.Rollback(ctx)
+	finalized, err := FinalizeDeletion(ctx, tx, id)
 	if err != nil {
 		return false, err
+	}
+	if finalized {
+		if _, err := tx.Exec(ctx, "DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", id); err != nil {
+			return false, dbError(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, dbError(err)
 	}
 	if finalized {
 		return true, nil
@@ -208,7 +293,32 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	} else if record.CredentialVersionID != nil && s.Revoked != nil && s.Revoked(*record.CredentialVersionID) {
 		return nil, 0, "media_job_credential_revoked"
 	}
-	return &JobTarget{Target: Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret}, Provider: provider, Slot: *selected}, routeTimeout, ""
+	var networkSecret []byte
+	if config.Network != nil && config.Network.CredentialID != "" {
+		id := config.Network.CredentialID
+		if s.Revoked == nil || s.Revoked(id) || s.Keys == nil {
+			return nil, 0, "media_job_network_credential_unavailable"
+		}
+		tx, err := s.Pool.Begin(ctx)
+		if err != nil {
+			return nil, 0, "media_job_network_credential_unavailable"
+		}
+		defer tx.Rollback(ctx)
+		var valid bool
+		if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp_go.provider_network_credentials WHERE id=$1 AND provider_id=$2", id, provider.ID).Scan(&valid); err != nil || !valid {
+			return nil, 0, "media_job_network_credential_unavailable"
+		}
+		networkSecret, err = s.Keys.Read(ctx, tx, s.Installation, id, "provider_credential")
+		if err != nil {
+			return nil, 0, "media_job_network_credential_unavailable"
+		}
+	}
+	credentialID := "none"
+	if selected.CredentialID != nil {
+		credentialID = *selected.CredentialID
+	}
+	scope := provider.ID + "/" + provider.RevisionID + "/" + selected.ID + "/" + credentialID
+	return &JobTarget{Target: Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: scope}, Provider: provider, Slot: *selected}, routeTimeout, ""
 }
 
 // credentialReferenced reports whether the pinned provider entry still names
@@ -421,6 +531,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	if failure != nil {
 		return reconciliationError("media_job_operation_invalid")
 	}
+	call.Strict = record.StrictContract
 	result, transportFailure := s.Transport.Do(callCtx, target.Target, call, nil)
 	if transportFailure != nil {
 		if isDelete && transportFailure.Status == 404 {
@@ -430,6 +541,9 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	}
 	if !isDelete {
 		if result.Video == nil {
+			return reconciliationError("provider_protocol_error")
+		}
+		if record.StrictContract && !ValidStrictVideoJobSource(result.Source, upstreamID, record.UpstreamModel) {
 			return reconciliationError("provider_protocol_error")
 		}
 		state, ok := VideoState(result.Video.Status)
@@ -457,8 +571,19 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 }
 
 func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimID string) error {
-	if err := finalizeDeletionClaimed(ctx, s.Pool, record.ID, claimID); err != nil {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return mutationFailure(dbError(err))
+	}
+	defer tx.Rollback(ctx)
+	if err := finalizeDeletionClaimed(ctx, tx, record.ID, claimID); err != nil {
 		return mutationFailure(err)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", record.ID); err != nil {
+		return mutationFailure(dbError(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return mutationFailure(dbError(err))
 	}
 	record.Lifecycle = LifecycleDeleted
 	return nil

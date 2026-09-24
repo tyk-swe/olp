@@ -60,11 +60,12 @@ type SlotEntry struct {
 }
 
 type ProviderEntry struct {
-	Name          string                  `json:"name"`
-	Project       *string                 `json:"project"`
-	Configuration providers.Configuration `json:"configuration"`
-	Models        []ModelEntry            `json:"models"`
-	Slots         []SlotEntry             `json:"slots"`
+	NetworkCredentialRef *string                 `json:"network_credential_ref,omitempty"`
+	Name                 string                  `json:"name"`
+	Project              *string                 `json:"project"`
+	Configuration        providers.Configuration `json:"configuration"`
+	Models               []ModelEntry            `json:"models"`
+	Slots                []SlotEntry             `json:"slots"`
 }
 
 type TargetEntry struct {
@@ -84,6 +85,7 @@ type RouteEntry struct {
 	Targets          []TargetEntry   `json:"targets"`
 	RoutingPolicy    *runtime.Policy `json:"routing_policy"`
 	ContentPolicy    json.RawMessage `json:"content_policy"`
+	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
 	Retired          bool            `json:"retired"`
 }
 
@@ -146,6 +148,11 @@ func canonicalProvider(p *ProviderEntry) {
 }
 
 func canonicalRoute(r *RouteEntry) {
+	if len(r.Fidelity) > 0 {
+		if fidelity, err := runtime.DecodeFidelity(r.Fidelity); err == nil {
+			r.Fidelity, _ = json.Marshal(fidelity)
+		}
+	}
 	if r.Operations == nil {
 		r.Operations = []string{}
 	}

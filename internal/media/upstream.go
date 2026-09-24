@@ -8,17 +8,20 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptrace"
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -50,17 +53,21 @@ type Failure struct {
 
 // Target is one resolved upstream destination for a media call.
 type Target struct {
-	Config connectors.Config
-	Model  string // upstream model identifier
-	Secret []byte
+	ConnectionScope string
+	NetworkSecret   []byte
+	Config          connectors.Config
+	Model           string // upstream model identifier
+	Secret          []byte
 }
 
 // Transport executes media calls against provider endpoints.
 type Transport struct {
-	Client *http.Client
-	Auth   *connectors.Auth
-	Egress *egress.Policy
-	Spool  *Spool
+	connectionsOnce sync.Once
+	connections     *egress.ConnectionClientCache
+	Client          *http.Client
+	Auth            *connectors.Auth
+	Egress          *egress.Policy
+	Spool           *Spool
 	// MaxResponseBytes bounds every collected JSON body and every staged
 	// binary response.
 	MaxResponseBytes int64
@@ -82,6 +89,8 @@ type Result struct {
 	Artifact      *Artifact     // staged binary response
 	Body          io.ReadCloser // SSE response body; the caller drains it
 	ContentType   string
+	Source        oif.Document    // bounded immutable native JSON result for strict media
+	BlobSource    *oif.BlobResult // existing spool owns the bytes and lifecycle
 }
 
 const errorBodyLimit = 64 * 1024
@@ -168,7 +177,20 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	}
 
 	started := t.now()
-	resp, err := t.Client.Do(req)
+	client := t.Client
+	if target.Config.Network != nil || target.Config.ProfileID != "" {
+		t.connectionsOnce.Do(func() { t.connections = egress.NewConnectionClientCache(128) })
+		var err error
+		client, err = t.connections.ClientScoped(target.ConnectionScope, *t.Egress, target.Config.Network, target.NetworkSecret, 5*time.Minute)
+		if err != nil {
+			if pipe != nil {
+				pipe.CloseWithError(err)
+				<-multipartDone
+			}
+			return nil, &Failure{Class: ClassCredential, Detail: "provider network connection unavailable"}
+		}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		if pipe != nil {
 			pipe.Close()
@@ -180,7 +202,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Ambiguous: call.Ambiguous && sent, Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) {
 		// A provider can reject headers before reading the upload. Stop the
 		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {
@@ -288,6 +310,20 @@ var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n"
 
 func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration) (*Result, *Failure) {
 	result := &Result{Kind: call.Kind, Status: resp.StatusCode, FirstByte: firstByte}
+	retainJSON := func(body []byte) *Failure {
+		if !call.Strict {
+			return nil
+		}
+		if (call.Kind == ResponseVideoJob || call.Kind == ResponseVideoList || call.Kind == ResponseVideoDelete) && len(body) > MaxNativeVideoSourceBytes {
+			return &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "native video metadata exceeds its durable bound"}
+		}
+		doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(t.MaxResponseBytes)})
+		if err != nil || doc.Root().Kind() != oif.Object {
+			return &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "native media result is malformed or ambiguous"}
+		}
+		result.Source = doc
+		return nil
+	}
 	switch call.Kind {
 	case ResponseSSE:
 		if !requireContentType(resp, "text/event-stream") {
@@ -298,6 +334,14 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	case ResponseBinary:
 		contentType := binaryContentType(resp, "audio/")
+		if call.Strict {
+			original := resp.Header.Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(original)
+			if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "audio/") {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "native audio codec metadata is invalid"}
+			}
+			contentType = original
+		}
 		artifact, failure := t.stageResponse(ctx, resp, contentType, request)
 		if failure != nil {
 			return nil, stageFailure(failure)
@@ -307,7 +351,15 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	case ResponseVideoContent:
 		base := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
-		if !strings.HasPrefix(base, "video/") && !strings.HasPrefix(base, "image/") {
+		if call.Strict {
+			original := resp.Header.Get("Content-Type")
+			mediaType, _, err := mime.ParseMediaType(original)
+			if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "video/") && !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "native video codec metadata is invalid"}
+			}
+			base = original
+		}
+		if !strings.HasPrefix(strings.ToLower(base), "video/") && !strings.HasPrefix(strings.ToLower(base), "image/") {
 			base = "application/octet-stream"
 		}
 		artifact, failure := t.stageResponse(ctx, resp, base, request)
@@ -342,6 +394,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure != nil {
 			return nil, failure
 		}
+		if failure := retainJSON(body); failure != nil {
+			return nil, failure
+		}
 		decoded, mErr := DecodeTranscriptionJSON(body)
 		if mErr != nil {
 			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
@@ -354,6 +409,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		body, failure := t.collect(resp)
 		if failure != nil {
+			return nil, failure
+		}
+		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
 		var stagedHandles []Handle
@@ -399,6 +457,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		body, failure := t.collect(resp)
 		if failure != nil {
+			return nil, failure
+		}
+		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
 		var mErr *Error

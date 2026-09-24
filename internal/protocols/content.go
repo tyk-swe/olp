@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/oif"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -50,9 +51,38 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 			w.geminiFields(fields)
 		}
 	}
-	out := openai.NewEnvelope(r.Family, r.Route, r.Stream, fields)
-	out.IncludeUsage = r.IncludeUsage
-	return out
+	// Configured tool/schema text is part of the effective invocation too. Arrays
+	// remain ordered and atomic; the explicit mutation policy controls text values.
+	for _, name := range []string{"tools", "functions", "toolConfig", "response_format"} {
+		w.field(fields, name, w.stringValues)
+	}
+	return r.WithFields(fields, oif.ExplicitTransform)
+}
+
+func (w *inspector) stringValues(raw json.RawMessage) json.RawMessage {
+	if w.stop || w.depth >= inspectMaxDepth {
+		return raw
+	}
+	if _, ok := rawString(raw); ok {
+		return w.text(raw)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return raw
+	}
+	w.depth++
+	defer func() { w.depth-- }()
+	switch trimmed[0] {
+	case '[':
+		return w.list(raw, func(value *json.RawMessage) { *value = w.stringValues(*value) })
+	case '{':
+		return w.object(raw, func(fields map[string]json.RawMessage) {
+			for name, value := range fields {
+				fields[name] = w.stringValues(value)
+			}
+		})
+	}
+	return raw
 }
 
 func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, error) {

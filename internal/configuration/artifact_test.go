@@ -177,6 +177,9 @@ func TestDigestDeterministicAndExcludesExportedAt(t *testing.T) {
 		t.Fatalf("unexpected digest %q", first)
 	}
 	reversed := testDocument()
+	// The fixtures must differ only in ordering, not in a pricing activation
+	// time that can cross a wall-clock second between construction calls.
+	reversed.Pricing.EffectiveAt = doc.Pricing.EffectiveAt
 	reversed.Providers[0].Models[0].Capabilities = slices.Clone(reversed.Providers[0].Models[0].Capabilities)
 	slices.Reverse(reversed.Providers[0].Models[0].Capabilities)
 	third, err := Digest(reversed)
@@ -185,6 +188,18 @@ func TestDigestDeterministicAndExcludesExportedAt(t *testing.T) {
 	}
 	if third != first {
 		t.Fatalf("canonical ordering changed digest: %s != %s", third, first)
+	}
+	activation, err := time.Parse(time.RFC3339, reversed.Pricing.EffectiveAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed.Pricing.EffectiveAt = activation.Add(time.Second).Format(time.RFC3339)
+	changed, err := Digest(reversed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("pricing activation time must remain part of the digest")
 	}
 }
 
@@ -264,7 +279,7 @@ func TestPlanProviderKindConflict(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil, nil}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
 	if err != nil {
@@ -282,7 +297,7 @@ func TestPlanProviderProjectMismatch(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id"}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil}}},
 		{match: "FROM olp_go.projects", rows: [][]any{{"other-id", "Core"}, {"edge-id", "Edge"}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
@@ -389,11 +404,11 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	})
 	stubs := []queryStub{
 		{match: "FROM olp_go.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id"}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp_go.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil}},
+		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, nil}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
 		{match: "FROM olp_go.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
 		{match: "FROM olp_go.projects", rows: [][]any{{"edge-id", "Edge"}}},

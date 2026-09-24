@@ -109,6 +109,13 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	if err != nil {
 		t.Fatal(err)
 	}
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation)
+}
+
+// Migration tests may serve an explicitly installed historical schema prefix
+// before upgrading it. Ordinary harnesses always migrate and verify first.
+func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation string) *accessHarness {
+	t.Helper()
 	key := strings.Repeat("ab", 32)
 	ringJSON := `{"active_version":1,"keys":[{"version":1,"key":"` + key + `"}]}`
 	ring, err := secrets.ParseRing([]byte(ringJSON))
@@ -146,7 +153,7 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 		Jobs:      mediaJobs,
 		Admission: media.NewAdmissionState(media.MinCapacityBytes),
 	}
-	gw.Resources = resources.New(pool)
+	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool, installation, ring)
 	catalogue := providers.New(server, &policy)
 	mux := http.NewServeMux()
@@ -159,6 +166,7 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	routes.New(server).Register(mux)
 	(&configuration.Server{
 		Access: server, Egress: &policy, VendorKind: providers.VendorKind,
+		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
 			return id, err
