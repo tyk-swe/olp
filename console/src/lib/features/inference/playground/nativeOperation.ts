@@ -11,6 +11,7 @@ export const nativeOperationDialects = {
   embeddings: [
     'openai-embeddings',
     'voyage-embeddings',
+    'cohere-embed-v2',
     'tei-embeddings',
     'tei-sparse-embeddings',
     'tei-multivector-embeddings',
@@ -19,7 +20,7 @@ export const nativeOperationDialects = {
     'vertex-embeddings',
     'bedrock-embeddings'
   ],
-  rerank: ['rerank', 'voyage-rerank', 'tei-rerank'],
+  rerank: ['rerank', 'voyage-rerank', 'tei-rerank', 'cohere-rerank-v2'],
   moderation: ['openai-moderation'],
   classification: ['tei-classification'],
   scoring: ['tei-scoring'],
@@ -36,8 +37,10 @@ export type NativeOperation = keyof typeof nativeOperationDialects;
 const bodyModelDialects = new Set([
   'openai-embeddings',
   'voyage-embeddings',
+  'cohere-embed-v2',
   'rerank',
   'voyage-rerank',
+  'cohere-rerank-v2',
   'openai-moderation',
   'openai-input-tokens',
   'anthropic-count-tokens'

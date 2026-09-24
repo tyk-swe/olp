@@ -176,6 +176,19 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
     }
   },
   {
+    key: 'cohere-typed-embeddings',
+    label: 'Embeddings · Cohere native v2 typed storage',
+    operation: 'embeddings',
+    nativeDialect: 'cohere-embed-v2',
+    request: {
+      model: '',
+      input_type: 'search_document',
+      texts: ['First document', 'Second document'],
+      embedding_types: ['float', 'int8', 'ubinary'],
+      truncate: 'NONE'
+    }
+  },
+  {
     key: 'tei-sparse-embeddings',
     label: 'Embeddings · TEI sparse',
     operation: 'embeddings',
@@ -203,6 +216,22 @@ export const playgroundTemplates: PlaygroundTemplate[] = [
         'Static assets are served from the edge.',
         'Reconciliation refreshes job progress.'
       ]
+    }
+  },
+  {
+    key: 'cohere-rerank-v2',
+    label: 'Rerank · Cohere native v2',
+    operation: 'rerank',
+    nativeDialect: 'cohere-rerank-v2',
+    request: {
+      model: '',
+      query: 'asynchronous media lifecycle',
+      documents: [
+        'A media job tracks generation.',
+        'Static assets are cached.'
+      ],
+      top_n: 2,
+      max_tokens_per_doc: 128
     }
   },
   {

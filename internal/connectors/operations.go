@@ -18,12 +18,17 @@ func registerUnaryProfiles() {
 		switch d.Identity.ID {
 		case "openai-embeddings", "openai-moderation", "openai-input-tokens":
 			kind, hosting = "openai", "direct-openai"
+		case "cohere-embed-v2", "cohere-rerank-v2":
+			auth = []string{"api_key"}
 		case "anthropic-count-tokens", "gemini-count-tokens", "bedrock-count-tokens", "gemini-embeddings", "vertex-embeddings", "bedrock-embeddings":
 			continue // established cloud/native compositions
 		case "gemini-batch-embeddings":
 			kind, hosting = "gemini", "direct-gemini"
 		}
 		profile := Profile{ID: d.Identity.ID, Revision: ProfileRevision, Label: d.Label, Kind: kind, Dialect: d.Identity.ID, DialectRevision: d.Identity.Revision, Hosting: hosting, Authentication: auth, Transport: "http", Operations: []string{d.Operation.ID}, OperationDialects: map[string]string{d.Operation.ID: d.Identity.ID}, SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: d.Documentation}
+		if d.Identity.ID == "cohere-embed-v2" || d.Identity.ID == "cohere-rerank-v2" {
+			profile.DialectRevision = "v2"
+		}
 		completeProfileMetadata(&profile)
 		profileRegistry = append(profileRegistry, profile)
 	}

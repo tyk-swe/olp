@@ -186,8 +186,8 @@ func legacyAccountingUsage(value *operations.Usage) *openai.Usage {
 	} else {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}
-	if value.SearchUnits != nil {
-		out.MediaUnits = value.SearchUnits
+	if value.MediaUnits != nil {
+		out.MediaUnits = value.MediaUnits
 	}
 	return out
 }

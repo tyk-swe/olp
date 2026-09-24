@@ -44,13 +44,17 @@ func (r Result) Rows() []Ranked       { return slices.Clone(r.rows) }
 
 func Definitions() []operations.Dialect {
 	out := []operations.Dialect{}
-	for _, id := range []string{"rerank", "voyage-rerank", "tei-rerank"} {
+	for _, id := range []string{"rerank", "voyage-rerank", "tei-rerank", "cohere-rerank-v2"} {
 		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: "openai", Label: id, Evidence: "native-rerank-identity-scores/1", Address: operations.Address{LegacyPath: "rerank"}}
-		if id == "voyage-rerank" || id == "tei-rerank" {
+		if id == "voyage-rerank" || id == "tei-rerank" || id == "cohere-rerank-v2" {
 			d.Surface = "native"
 		}
 		if id == "tei-rerank" {
 			d.Address = operations.Address{RelativePath: "rerank"}
+		}
+		if id == "cohere-rerank-v2" {
+			d.Address = operations.Address{RelativePath: "rerank"}
+			d.Documentation = "https://docs.cohere.com/reference/rerank"
 		}
 		d.Request = func(source oif.Request) (oif.View, error) { return liftRequest(source, id) }
 		d.Result = func(source oif.Request, result oif.Result) (oif.View, error) { return liftResult(source, result, id) }
@@ -65,6 +69,8 @@ func Definitions() []operations.Dialect {
 		}
 		if id != "tei-rerank" {
 			d.BindModel = operations.ModelChanges
+		}
+		if id != "tei-rerank" && id != "cohere-rerank-v2" {
 			d.BindResultModel = operations.ModelChanges
 		}
 		d.Probe = func(model string) []byte {
@@ -90,6 +96,23 @@ func Definitions() []operations.Dialect {
 func liftRequest(source oif.Request, id string) (Request, error) {
 	r := Request{source: source, dialect: id, estimate: 1}
 	root := source.Document().Root()
+	if id == "cohere-rerank-v2" {
+		// The native identity contract may forward new provider-owned fields.
+		// Refuse only known foreign aliases that would change the v2 request.
+		for _, name := range []string{"top_k", "return_documents", "truncation", "truncate", "raw_scores", "return_text"} {
+			if _, present := root.Lookup(name); present {
+				return r, operations.Invalid(name, "This foreign rerank control has no Cohere native v2 meaning.")
+			}
+		}
+		for _, name := range []string{"max_tokens_per_doc", "priority"} {
+			if value, present := root.Lookup(name); present {
+				n, ok := operations.Int(value)
+				if !ok || n < 0 || name == "max_tokens_per_doc" && n == 0 || name == "priority" && n > 999 {
+					return r, operations.Invalid(name, "Use a supported native Cohere rerank v2 integer control.")
+				}
+			}
+		}
+	}
 	if id != "tei-rerank" && operations.Member(root, "model").Kind() != oif.String {
 		return r, operations.Invalid("model", "Use the native model identity.")
 	}
@@ -163,7 +186,7 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	items := root
 	scoreName := "relevance_score"
 	documentName := "document"
-	if id == "rerank" {
+	if id == "rerank" || id == "cohere-rerank-v2" {
 		items = operations.Member(root, "results")
 	}
 	if id == "voyage-rerank" {
@@ -226,12 +249,12 @@ func liftResult(source oif.Request, native oif.Result, id string) (Result, error
 	}
 	if billed := operations.Member(operations.Member(root, "meta"), "billed_units"); billed.Kind() == oif.Object {
 		units := operations.Member(billed, "search_units")
-		if units.Kind() != oif.Absent {
+		if units.Kind() != oif.Absent && units.Kind() != oif.Null {
 			if !operations.Number(units) || strings.HasPrefix(units.Raw(), "-") {
 				return out, operations.Violation("/meta/billed_units", "native_usage")
 			}
 			raw := units.Raw()
-			out.usage = &operations.Usage{SearchUnits: &raw}
+			out.usage = &operations.Usage{MediaUnits: &raw}
 		}
 	}
 	return out, nil
@@ -252,6 +275,18 @@ func defaults(id string) map[string]operations.Field {
 		fields["truncation_direction"] = operations.FieldSchema(map[string]any{"enum": []string{"left", "right", "Left", "Right"}}, func(v oif.Value) error {
 			if !slices.Contains([]string{"left", "right", "Left", "Right"}, operations.String(v)) {
 				return operations.Invalid("truncation_direction", "Use a native direction.")
+			}
+			return nil
+		})
+		return fields
+	}
+	if id == "cohere-rerank-v2" {
+		fields["top_n"] = operations.FieldSchema(map[string]any{"type": "integer", "minimum": 1}, operations.PositiveInt)
+		fields["max_tokens_per_doc"] = operations.FieldSchema(map[string]any{"type": "integer", "minimum": 1}, operations.PositiveInt)
+		fields["priority"] = operations.FieldSchema(map[string]any{"type": "integer", "minimum": 0, "maximum": 999}, func(v oif.Value) error {
+			n, ok := operations.Int(v)
+			if !ok || n < 0 || n > 999 {
+				return operations.Invalid("priority", "Use a native priority between 0 and 999.")
 			}
 			return nil
 		})

@@ -65,6 +65,7 @@ func Definitions() []operations.Dialect {
 		{"gemini-batch-embeddings", "gemini", "gemini_embeddings_batch", ""},
 		{"vertex-embeddings", "native", "vertex_embeddings", ""},
 		{"bedrock-embeddings", "bedrock", "bedrock_embeddings", ""},
+		{"cohere-embed-v2", "native", "", "embed"},
 		{"tei-embeddings", "native", "", "embed"},
 		{"tei-sparse-embeddings", "native", "", "embed_sparse"},
 		{"tei-multivector-embeddings", "native", "", "embed_all"},
@@ -73,8 +74,18 @@ func Definitions() []operations.Dialect {
 	for _, definition := range definitions {
 		id := definition.id
 		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: definition.surface, Label: id, Address: operations.Address{LegacyPath: definition.path, RelativePath: definition.relative}, Evidence: "native-embedding-storage/1"}
-		d.Request = func(source oif.Request) (oif.View, error) { return liftRequest(source, id) }
-		d.Result = func(request oif.Request, result oif.Result) (oif.View, error) { return liftResult(request, result, id) }
+		d.Request = func(source oif.Request) (oif.View, error) {
+			if id == "cohere-embed-v2" {
+				return liftCohereRequest(source)
+			}
+			return liftRequest(source, id)
+		}
+		d.Result = func(request oif.Request, result oif.Result) (oif.View, error) {
+			if id == "cohere-embed-v2" {
+				return liftCohereResult(request, result)
+			}
+			return liftResult(request, result, id)
+		}
 		d.Estimate = func(view oif.View) int64 { return view.(Request).estimate }
 		d.Usage = func(view oif.View) *operations.Usage { return cloneUsage(view.(Result).usage) }
 		d.RequiredClient = func(view oif.View) string {
@@ -85,10 +96,17 @@ func Definitions() []operations.Dialect {
 			return ""
 		}
 		d.Probe = func(model string) []byte { return probe(id, model) }
-		d.InputText = func(request oif.Request) ([]operations.Text, error) { return inputText(request, id) }
-		if id == "openai-embeddings" || id == "voyage-embeddings" {
+		d.InputText = func(request oif.Request) ([]operations.Text, error) {
+			if id == "cohere-embed-v2" {
+				return cohereInputText(request)
+			}
+			return inputText(request, id)
+		}
+		if id == "openai-embeddings" || id == "voyage-embeddings" || id == "cohere-embed-v2" {
 			d.BindModel = operations.ModelChanges
-			d.BindResultModel = operations.ModelChanges
+			if id != "cohere-embed-v2" {
+				d.BindResultModel = operations.ModelChanges
+			}
 		}
 		if id == "gemini-embeddings" || id == "gemini-batch-embeddings" {
 			d.BindModel = googleModels
@@ -96,10 +114,17 @@ func Definitions() []operations.Dialect {
 		}
 		d.Defaults = defaults(id)
 		d.RequestSchema = operations.ObjectSchema(map[string]any{"model": map[string]any{"type": "string"}}, inputField(id))
+		if id == "cohere-embed-v2" {
+			d.Defaults = cohereDefaults()
+			d.RequestSchema = cohereRequestSchema()
+		}
 		d.ResultSchema = operations.Raw(map[string]any{"description": "Native vector records and representation, without conversion."})
 		d.Documentation = "https://developers.openai.com/api/reference/resources/embeddings/methods/create"
 		if id == "voyage-embeddings" {
 			d.Documentation = "https://docs.voyageai.com/reference/embeddings-api"
+		}
+		if id == "cohere-embed-v2" {
+			d.Documentation = "https://docs.cohere.com/reference/embed"
 		}
 		if strings.HasPrefix(id, "tei-") {
 			d.Documentation = "https://github.com/huggingface/text-embeddings-inference/blob/29ccc53ba56c9b4f4de8f19a14858d527fab680d/router/src/http/types.rs"
@@ -593,6 +618,8 @@ func probe(id, model string) []byte {
 	switch id {
 	case "openai-embeddings", "voyage-embeddings":
 		body = map[string]any{"model": model, "input": "embedding probe"}
+	case "cohere-embed-v2":
+		body = map[string]any{"model": model, "input_type": "search_document", "texts": []string{"embedding probe"}, "embedding_types": []string{"float"}}
 	case "gemini-embeddings":
 		body = map[string]any{"content": map[string]any{"parts": []any{map[string]string{"text": "embedding probe"}}}}
 	case "gemini-batch-embeddings":

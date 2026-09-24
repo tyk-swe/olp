@@ -48,6 +48,29 @@ after the final URL, body and semantic headers have been constructed. Anthropic
 Invoke streaming unwraps bounded AWS event envelopes into native Anthropic events;
 it does not decode the stream as Converse or manufacture terminal events.
 
+The `cohere-embed-v2` and `cohere-rerank-v2` profiles compose the existing
+`openai_compatible` direct HTTP hosting and API-key authentication with distinct
+[Cohere Embed v2](https://docs.cohere.com/reference/embed) and
+[Rerank v2](https://docs.cohere.com/reference/rerank) operation codecs. Choose the
+`cohere-native-v2` preset at `https://api.cohere.ai/v2`, or a trusted custom
+v2-compatible base; native requests use `/native/cohere-embed-v2/models/{route}`
+or `/native/cohere-rerank-v2/models/{route}`. The older `cohere` preset stays at
+`/compatibility/v1` for existing routes. Selecting either native profile with
+that official compatibility endpoint fails configuration validation instead of
+silently calling `/compatibility/v1/embed` or `/rerank`.
+
+Embed v2 retains original `texts`, image data URIs or ordered multimodal
+`inputs`, task type, `truncate`, dimension and requested float/int8/uint8/
+binary/ubinary/base64 storage. Multi-type or non-float storage requires the
+explicit `raw-vector-storage/1` client contract. Rerank v2 retains original
+query/documents, `top_n`, per-document token cap, priority, returned indices,
+native score spelling/order/ties and provider search-unit billing. Unknown
+native extensions remain source-exact where policy coverage permits them;
+foreign aliases and uninspectable content under restrictive policy refuse
+before dispatch. Cohere's v2 API does not define sparse or token-multivector
+output; TEI remains the scoped native contract for those layouts. No
+cross-dialect mapping or live-model quality claim is implied.
+
 ## Defaults, bindings and semantic configuration
 
 An example configuration fragment for native Anthropic generation:

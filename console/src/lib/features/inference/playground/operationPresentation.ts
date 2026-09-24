@@ -57,6 +57,48 @@ export function vectorRows(response: unknown, request?: unknown): VectorRow[] {
   const fromData = field(response, 'data');
   const fromPredictions = field(response, 'predictions');
   const fromEmbeddings = field(response, 'embeddings');
+  if (nativeObject(fromEmbeddings)) {
+    const typed = Object.entries(fromEmbeddings).filter(([type]) =>
+      ['float', 'int8', 'uint8', 'binary', 'ubinary', 'base64'].includes(type)
+    );
+    if (typed.length) {
+      const rows: VectorRow[] = [];
+      const declared = dimension(request);
+      for (const [dtype, group] of typed) {
+        if (!Array.isArray(group)) continue;
+        for (const [index, storage] of group.entries()) {
+          if (rows.length === 128) return rows;
+          const packed = dtype === 'binary' || dtype === 'ubinary';
+          const bytes =
+            typeof storage === 'string' ? base64Bytes(storage) : null;
+          const stored = Array.isArray(storage) ? storage.length : null;
+          const logical =
+            declared ??
+            (stored !== null ? String(stored * (packed ? 8 : 1)) : 'Unknown');
+          rows.push({
+            position: rows.length,
+            inputIndex: String(index),
+            layout: packed
+              ? 'Packed binary'
+              : dtype === 'base64'
+                ? 'Base64 storage'
+                : 'Dense array',
+            dtype,
+            logicalShape: logical,
+            storageShape:
+              stored !== null
+                ? packed
+                  ? `${stored} stored byte${stored === 1 ? '' : 's'}`
+                  : `${stored} stored values`
+                : bytes !== null
+                  ? `${bytes} stored bytes`
+                  : 'Opaque encoded value'
+          });
+        }
+      }
+      return rows;
+    }
+  }
   const items = Array.isArray(fromData)
     ? fromData
     : Array.isArray(fromPredictions)

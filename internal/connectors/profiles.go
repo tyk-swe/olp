@@ -410,6 +410,10 @@ func (c Config) profileBase() string {
 }
 
 func (c Config) validateProfileEndpoint(u *url.URL) error {
+	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2") &&
+		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {
+		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
+	}
 	switch c.Hosting() {
 	case "direct-gemini-interactions", "direct-gemini-live":
 		if u.Path != "/v1beta" {
