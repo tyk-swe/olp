@@ -281,8 +281,8 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 	root := document.Root()
 	background, _ := root.Lookup("background")
 	queued := background.Raw() == "true"
-	if queued && (wire != openai.FamilyResponses || obligations.Delivery != "unary" || member(root, "store").Raw() == "false") {
-		return incompatible("state_carrier", "/background", "durable_lifecycle", "Only retained unary Responses have a qualified background lifecycle.")
+	if queued && (wire != openai.FamilyResponses || member(root, "store").Raw() == "false") {
+		return incompatible("state_carrier", "/background", "durable_lifecycle", "Background Responses require retained native state.")
 	}
 	retained := member(root, "store").Raw() == "true"
 	if wire == openai.FamilyResponses {

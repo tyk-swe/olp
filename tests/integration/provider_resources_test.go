@@ -79,6 +79,11 @@ type openaiFixture struct {
 	lastPath       atomic.Value
 	content        atomic.Value
 	respID         atomic.Value
+	respCreates    atomic.Int64
+	respPostStream atomic.Value
+	respGetStream  atomic.Value
+	lastRespQuery  atomic.Value
+	holdCreated    atomic.Bool
 	dials          atomic.Int64
 }
 
@@ -244,6 +249,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	// the deployment path above remains the older compatibility fixture.
 	mux.HandleFunc("POST /openai/responses", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		f.respCreates.Add(1)
 		body := decodeBody(t, r)
 		f.lastReq.Store(body)
 		out := map[string]any{}
@@ -253,6 +259,22 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		out["id"] = f.respID.Load().(string)
 		if stream, _ := body["stream"].(bool); stream {
 			w.Header().Set("Content-Type", "text/event-stream")
+			if custom := f.respPostStream.Load(); custom != nil {
+				wire := custom.(string)
+				if f.holdCreated.Load() {
+					end := strings.Index(wire, "\n\n")
+					if end < 0 {
+						t.Error("fixture stream has no first event")
+						return
+					}
+					_, _ = io.WriteString(w, wire[:end+2])
+					_ = http.NewResponseController(w).Flush()
+					<-r.Context().Done()
+					return
+				}
+				_, _ = io.WriteString(w, wire)
+				return
+			}
 			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": out})
 			fmt.Fprintf(w, "event: response.created\ndata: %s\n\n", created)
 			return
@@ -261,12 +283,38 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("GET /openai/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		f.lastRespQuery.Store(r.URL.RawQuery)
 		res, ok := f.resps[r.PathValue("id")]
 		if !ok {
 			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
 			return
 		}
+		if r.URL.Query().Get("stream") == "true" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			if custom := f.respGetStream.Load(); custom != nil {
+				_, _ = io.WriteString(w, custom.(string))
+				return
+			}
+			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": res})
+			completed, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": res})
+			fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, completed)
+			return
+		}
 		writeJSON(w, res)
+	})
+	mux.HandleFunc("POST /openai/responses/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		res, ok := f.resps[r.PathValue("id")]
+		if !ok {
+			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
+			return
+		}
+		out := map[string]any{}
+		for name, value := range res {
+			out[name] = value
+		}
+		out["status"] = "cancelled"
+		writeJSON(w, out)
 	})
 	mux.HandleFunc("GET /openai/deployments/{dep}/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)

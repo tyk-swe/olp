@@ -290,7 +290,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
-	if x.family == openai.FamilyGeminiInteractions && x.mode == "streaming" {
+	if x.mode == "streaming" && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyResponses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()

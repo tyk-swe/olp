@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -257,13 +258,17 @@ type responsesStream struct {
 }
 
 func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
-	fields := event.Source().Fields()
+	source := event.Source()
+	fields := source.Fields()
 	if fields == nil {
 		return &ProtocolError{Detail: "event is not a JSON object"}
 	}
 	kind, ok := stringField(fields, "type")
 	if !ok || kind == "" || strings.ContainsAny(kind, "\r\n\x00") {
 		return &ProtocolError{Detail: "event has an invalid type"}
+	}
+	if f.Event != nil && *f.Event != kind {
+		return &ProtocolError{Detail: "event name disagrees with type"}
 	}
 	terminal := kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed"
 	if raw := fields["response"]; terminal && (len(raw) == 0 || isNull(raw)) {
@@ -300,18 +305,29 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 			}
 			s.done = true
 		}
-		if err = rewriteModel(response, s.route); err != nil {
-			return err
-		}
-		if fields["response"], err = json.Marshal(response); err != nil {
-			return err
+		if _, present := source.Lookup("/response/model"); present {
+			bound, marshalErr := json.Marshal(s.route)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			source, err = oif.Apply(source, []oif.Change{{Pointer: "/response/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published response model"}})
+			if err != nil {
+				return err
+			}
 		}
 	}
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return err
+	encoded := source.Bytes()
+	frame := make([]byte, 0, len(kind)+len(encoded)+48)
+	if f.ID != nil {
+		frame = append(frame, "id: "...)
+		frame = append(frame, *f.ID...)
+		frame = append(frame, '\n')
 	}
-	frame := make([]byte, 0, len(kind)+len(encoded)+16)
+	if f.RetryMS != nil {
+		frame = append(frame, "retry: "...)
+		frame = strconv.AppendUint(frame, *f.RetryMS, 10)
+		frame = append(frame, '\n')
+	}
 	frame = append(frame, "event: "...)
 	frame = append(frame, kind...)
 	frame = append(frame, "\ndata: "...)

@@ -12,7 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -232,11 +232,19 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 				return nil, e
 			}
 		}
-		out, err := strictIdentityProjection(body, upstreamID, res.ID)
-		if err != nil {
-			return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
+		doc, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
+		if parseErr != nil {
+			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed response object.")
 		}
-		return out, nil
+		projection := responseProjection{upstreamID: upstreamID, localID: res.ID, route: x.route.Slug}
+		if x.pin != nil {
+			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		}
+		mapped, err := projection.project(doc, "")
+		if err != nil {
+			return nil, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unbound response identity.")
+		}
+		return mapped.Bytes(), nil
 	}
 	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
@@ -321,6 +329,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 			s.stateFail(x, w, e, x.family)
 			return
 		}
+		x.responseContract = contract
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation")
 	if e != nil {
@@ -346,8 +355,8 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 	}
 }
 
-func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter) *Error {
-	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), suffix), nil)
+func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resources.Resource, p *pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *Error {
+	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), suffix), query)
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -364,24 +373,36 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
+	var strictResultBody []byte
 	if res.Kind == resources.KindStrictResponse {
-		native, decodeErr := protocols.DecodeRequest(openai.FamilyResponses, openai.FamilyResponses, result, x.route.Slug, "", nil)
-		if decodeErr != nil {
+		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: len(result)})
+		if parseErr != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
 		}
-		result = native.Body
+		projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
+		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.responseContract)
+		if err != nil {
+			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
+		}
+		mapped, mapErr := projection.project(doc, "")
+		if mapErr != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an unbound response identity.")
+		}
+		strictResultBody = mapped.Bytes()
 	}
-	if e := s.reconcileResponse(ctx, res.ID, result); e != nil {
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	if e := s.reconcileResponse(commitCtx, res.ID, result); e != nil {
 		return e
 	}
 	if status, ok := upstreamString(result, "status"); ok {
-		if err := s.Resources.Update(ctx, res.ID, status, nil, nil); err != nil {
+		if err := s.Resources.Update(commitCtx, res.ID, status, nil, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The response status could not be committed.")
 		}
 	}
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
-		out, err = strictIdentityProjection(result, res.UpstreamID, res.ID)
+		out = strictResultBody
 	} else {
 		out, err = rewriteID(result, "id", res.ID)
 	}
@@ -394,13 +415,20 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 
 func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
-		return s.responseUpstream(ctx, x, res, p, http.MethodGet, "/"+url.PathEscape(res.UpstreamID), nil, w)
+		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
+		if e != nil {
+			return e
+		}
+		if stream {
+			return s.streamStoredResponse(ctx, w, x, res, p, query)
+		}
+		return s.responseUpstream(ctx, x, res, p, http.MethodGet, "/"+url.PathEscape(res.UpstreamID), nil, w, query)
 	})
 }
 
 func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
-		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w)
+		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
@@ -484,32 +512,41 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	if len(payload) == 0 || payload[0] != '{' {
 		return frame, nil
 	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(payload, &fields) != nil {
+	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.cfg.MaxEventBytes)})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return nil, errResponseMapping
+	}
+	response, present := doc.Root().Lookup("response")
+	if !present || response.Kind() == oif.Null {
+		if x.strict() {
+			if kind, found := doc.Root().Lookup("type"); found {
+				if name, valid := kind.Text(); valid && (name == "response.created" || name == "response.in_progress" || name == "response.queued") {
+					return nil, errResponseMapping
+				}
+			}
+		}
 		return frame, nil
 	}
-	raw, ok := fields["response"]
-	if !ok {
-		return frame, nil
+	if response.Kind() != oif.Object {
+		return nil, errResponseMapping
 	}
-	var response map[string]json.RawMessage
-	if json.Unmarshal(raw, &response) != nil || len(response) == 0 {
-		return frame, nil
-	}
-	var upstreamID string
-	if json.Unmarshal(response["id"], &upstreamID) != nil || upstreamID == "" || len(upstreamID) > 512 ||
-		strings.HasPrefix(upstreamID, resources.KindResponse+"_") {
-		return frame, nil
+	id, present := response.Lookup("id")
+	upstreamID, valid := id.Text()
+	if !present || !valid || upstreamID == "" || len(upstreamID) > 512 ||
+		strings.HasPrefix(upstreamID, resources.KindResponse+"_") || strings.HasPrefix(upstreamID, resources.KindStrictResponse+"_") {
+		return nil, errResponseMapping
 	}
 	if x.responseMap == nil {
 		x.responseMap = map[string]string{}
 	}
 	local, ok := x.responseMap[upstreamID]
 	if !ok {
-		res, err := s.Resources.GetByUpstream(ctx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		res, err := s.Resources.GetByUpstream(commitCtx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
 		if errors.Is(err, resources.ErrNotFound) {
-			res, err = s.putStreamResponse(ctx, x, fact, upstreamID, response)
+			res, err = s.putStreamResponse(commitCtx, x, fact, upstreamID, response)
 		}
+		stopCommit()
 		if err != nil {
 			return nil, errResponseMapping
 		}
@@ -518,7 +555,10 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		x.responseMap[upstreamID] = local
 	}
 	if fact.ResponseUsageDeferred {
-		if e := s.reconcileResponse(ctx, local, raw); e != nil {
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		e := s.reconcileResponse(commitCtx, local, response.Bytes())
+		stopCommit()
+		if e != nil {
 			return nil, errResponseMapping
 		}
 	}
@@ -526,15 +566,20 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	if err != nil {
 		return nil, errResponseMapping
 	}
-	response["id"] = encoded
-	fields["response"], err = json.Marshal(response)
+	var mapped oif.Document
+	if x.strict() {
+		projection := responseProjection{upstreamID: upstreamID, localID: local, route: x.route.Slug}
+		if x.pin != nil {
+			projection.previousUpstream, projection.previousLocal = x.pin.UpstreamID, x.pin.ID
+		}
+		mapped, err = projection.project(doc, "/response")
+	} else {
+		mapped, err = oif.Apply(doc, []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}})
+	}
 	if err != nil {
 		return nil, errResponseMapping
 	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		return nil, errResponseMapping
-	}
+	body := mapped.Bytes()
 	out := make([]byte, 0, i+7+len(body)+2)
 	out = append(out, frame[:i+7]...)
 	out = append(out, body...)
@@ -542,11 +587,11 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	return out, nil
 }
 
-func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID string, response map[string]json.RawMessage) (*resources.Resource, error) {
+func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
-		if raw, present := response[name]; present {
-			metadata[name] = raw
+		if value, present := response.Lookup(name); present {
+			metadata[name] = value.Bytes()
 		}
 	}
 	if fact.UpstreamModel != "" {
@@ -554,16 +599,16 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		metadata["upstream_model"] = encoded
 	}
 	state := "created"
-	if raw, present := response["status"]; present {
+	if value, present := response.Lookup("status"); present {
 		var status string
-		if json.Unmarshal(raw, &status) == nil && status != "" {
+		if json.Unmarshal(value.Bytes(), &status) == nil && status != "" {
 			state = status
 		}
 	}
 	var expires *time.Time
-	if raw, present := response["expires_at"]; present {
+	if value, present := response.Lookup("expires_at"); present {
 		var seconds int64
-		if json.Unmarshal(raw, &seconds) == nil && seconds > 0 {
+		if json.Unmarshal(value.Bytes(), &seconds) == nil && seconds > 0 {
 			at := time.Unix(seconds, 0).UTC()
 			expires = &at
 		}

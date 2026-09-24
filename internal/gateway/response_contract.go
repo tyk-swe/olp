@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -19,6 +21,80 @@ type storedResponseContract struct {
 	Receipt interaction.Receipt `json:"receipt"`
 	Binding string              `json:"binding"`
 	Source  json.RawMessage     `json:"source"`
+}
+
+type responseProjection struct {
+	upstreamID, localID, route      string
+	previousUpstream, previousLocal string
+}
+
+func (p responseProjection) project(source oif.Document, pointer string) (oif.Document, error) {
+	value, present := source.Lookup(pointer)
+	if !present || value.Kind() != oif.Object {
+		return oif.Document{}, resources.ErrContract
+	}
+	id, present := value.Lookup("id")
+	upstream, valid := id.Text()
+	if !present || !valid || upstream == "" || upstream != p.upstreamID {
+		return oif.Document{}, resources.ErrContract
+	}
+	if object, present := value.Lookup("object"); present {
+		kind, valid := object.Text()
+		if !valid || kind != "response" {
+			return oif.Document{}, resources.ErrContract
+		}
+	}
+	if state, present := value.Lookup("status"); present {
+		status, valid := state.Text()
+		if !valid || !slices.Contains([]string{"queued", "in_progress", "completed", "failed", "incomplete", "cancelled", "cancelling"}, status) {
+			return oif.Document{}, resources.ErrContract
+		}
+		if status == "completed" {
+			output, present := value.Lookup("output")
+			if !present || output.Kind() != oif.Array {
+				return oif.Document{}, resources.ErrContract
+			}
+		}
+	}
+	if output, present := value.Lookup("output"); present && output.Kind() != oif.Array {
+		return oif.Document{}, resources.ErrContract
+	}
+	changes := []oif.Change{{Pointer: pointer + "/id", Value: quotedResponseID(p.localID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
+	if _, present := value.Lookup("model"); present {
+		changes = append(changes, oif.Change{Pointer: pointer + "/model", Value: quotedResponseID(p.route), Origin: oif.IdentityBinding, Reason: "published response model"})
+	}
+	if previous, present := value.Lookup("previous_response_id"); present && previous.Kind() != oif.Null {
+		upstream, valid := previous.Text()
+		if !valid || p.previousLocal == "" || upstream != p.previousUpstream {
+			return oif.Document{}, resources.ErrContract
+		}
+		changes = append(changes, oif.Change{Pointer: pointer + "/previous_response_id", Value: quotedResponseID(p.previousLocal), Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
+	}
+	return oif.Apply(source, changes)
+}
+
+func quotedResponseID(value string) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
+}
+
+func responseParentProjection(res *resources.Resource, contract *storedResponseContract) (string, string, error) {
+	if res.ParentID == nil {
+		return "", "", nil
+	}
+	if contract == nil {
+		return "", "", resources.ErrContract
+	}
+	doc, err := oif.ParseJSON(contract.Source, oif.Limits{MaxBytes: resources.MaxContinuationBytes})
+	if err != nil {
+		return "", "", resources.ErrContract
+	}
+	previous, present := doc.Lookup("/previous_response_id")
+	upstream, valid := previous.Text()
+	if !present || !valid || upstream == "" {
+		return "", "", resources.ErrContract
+	}
+	return upstream, resources.LocalID(resources.KindStrictResponse, *res.ParentID), nil
 }
 
 func responseResourceKind(x *execution) string {

@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -663,11 +664,19 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 			return err
 		}
+		strictResponseIncomplete := false
 		var observe func(oif.Event) error
 		if contract != nil {
 			observe = func(event oif.Event) error {
 				if err := contract.ValidateEvent(event); err != nil {
 					return err
+				}
+				if x.strict() && x.family == openai.FamilyResponses {
+					if kind, present := event.Source().Root().Lookup("type"); present {
+						if text, ok := kind.Text(); ok && text == "response.incomplete" {
+							strictResponseIncomplete = true
+						}
+					}
 				}
 				actionable = actionable || eventActionable(event)
 				return nil
@@ -720,6 +729,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		} else {
 			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
 		}
+		if err == nil && strictResponseIncomplete {
+			st.upstream.Store(3)
+			err = &openai.ProtocolError{Detail: "strict Responses stream ended incomplete"}
+		}
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)
@@ -753,6 +766,16 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 				if err == nil && wire == x.family {
 					completion = native
+					if x.strict() && x.family == openai.FamilyResponses {
+						source := native.Native.Source()
+						if _, present := source.Lookup("/model"); present {
+							model, _ := json.Marshal(x.route.Slug)
+							source, err = oif.Apply(source, []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published response model"}})
+						}
+						if err == nil {
+							completion.Body = source.Bytes()
+						}
+					}
 				}
 			}
 			if err == nil && completion == nil {
