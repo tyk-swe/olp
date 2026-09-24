@@ -1,5 +1,9 @@
 # Fidelity qualification baseline
 
+Current release requirements are in [release validation](release-validation.md).
+All features and functional gates remain required; long quality/performance
+studies are optional and cannot be used to claim unmeasured parity.
+
 This versioned baseline supports [#210](https://github.com/tyk-swe/olp/issues/210)
 and the [implementation specification](../../../OLP-implementation-spec.md).
 It was authored against source `8580b39905dc4da9278de8e53ceac7d2412ad6a5` before

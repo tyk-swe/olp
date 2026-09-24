@@ -2,6 +2,14 @@
 
 The authoritative specification is [OLP-implementation-spec.md](../../OLP-implementation-spec.md), tracked by [#209](https://github.com/tyk-swe/olp/issues/209). Baseline: `8580b39905dc4da9278de8e53ceac7d2412ad6a5`.
 
+The September 24, 2026 [release-criteria amendment](../qualification/fidelity/release-validation.md)
+retains all 66 stories and product decisions. Bounded performance smoke and
+resource/overflow correctness are required; long statistical studies are
+optional. Earlier G6 descriptions below are historical checkpoints under the
+original criteria, not a requirement to repeat those studies. Failed/invalid
+captures and unknown live quality remain visible. All functional, security,
+recovery, SDK, browser, inventory and code-quality gates still apply.
+
 ## Dependency graph
 
 ```mermaid

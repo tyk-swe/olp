@@ -1,5 +1,13 @@
 # Qualification status receipt, version 1
 
+This is a historical receipt. The September 24, 2026
+[release-criteria amendment](release-validation.md) requires bounded performance
+smoke and resource correctness instead of completion of long statistical
+studies. Every feature and functional gate remains required. The historical G6
+disposition below uses the earlier criteria; no failed/invalid study is now a
+pass, and live empirical quality remains unknown. Current candidate validation
+must be recorded separately.
+
 This status belongs to the [compatibility matrix](compatibility-matrix-v1.json)
 for locked product source `bc325da50c575803c771531dc4e3aab1ac203a53`.
 It keeps three units separate: matrix rows, scripted request outcomes, and
