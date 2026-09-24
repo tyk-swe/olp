@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -130,8 +130,8 @@ test('C9 is the only reservable output and any existing journal blocks retry', (
   assert.match(CLI.stderr, /Usage: fidelity-paired-r9/);
 });
 
-test('real E8 provenance and C8-failure ancestry lock C9 to prior evidence and product', () => {
-  const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+test('recorded C8-failure revision locks C9 to prior evidence and product', () => {
+  const revision = manifest.C8_failed_evidence_head;
   const path = join(process.cwd(), manifest.B_only_evidence_path);
   const p = resolvePairedProvenance(process.cwd(), path, revision, manifest);
   assert.equal(p.evidence_commit, manifest.reused_B8.evidence_revision);
