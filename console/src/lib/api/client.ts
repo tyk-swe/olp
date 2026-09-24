@@ -54,12 +54,22 @@ for (const method of methods) {
       if (options.parseAs && options.parseAs !== 'json')
         return operation(path, options);
       const result = await operation(path, { ...options, parseAs: 'text' });
-      return result.data === undefined
-        ? result
-        : {
-            ...result,
-            data: result.data ? parseManagementJSON(result.data) : undefined
-          };
+      // Non-2xx bodies arrive in the error arm as the same source text.
+      // Decode problem documents so apiProblem keeps their type, detail, and
+      // field errors; a body that is not JSON stays raw for that fallback.
+      let error = result.error;
+      if (typeof error === 'string' && error) {
+        try {
+          error = parseManagementJSON(error);
+        } catch {
+          // Keep the unstructured body.
+        }
+      }
+      return {
+        ...result,
+        data: result.data ? parseManagementJSON(result.data) : undefined,
+        error
+      };
     }
   });
 }

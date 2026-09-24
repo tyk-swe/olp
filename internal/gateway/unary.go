@@ -66,16 +66,19 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	if !ok {
 		return true, operations.Error("target_capability", "/dialect", "registered_dialect", "The native dialect is not registered.")
 	}
-	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
-	if err != nil {
-		return true, err
-	}
 	surface := family.Surface()
 	if explicit {
 		surface = "native"
 	}
-	x.unary = &unaryExecution{source: source, dialect: codec, route: model, surface: surface, plans: map[string]*operationplan.Plan{}}
+	// Classify before the body can fail to parse: a malformed request is still
+	// this dialect's operation on its native surface in the terminal envelope.
+	x.unary = &unaryExecution{dialect: codec, route: model, surface: surface, plans: map[string]*operationplan.Plan{}}
 	x.mode = "unary"
+	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
+	if err != nil {
+		return true, err
+	}
+	x.unary.source = source
 	return true, nil
 }
 func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan.Plan, error) {
