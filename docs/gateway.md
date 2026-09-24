@@ -195,7 +195,8 @@ fields a provider interprets outside the inspected surfaces.
 ## Media and durable video jobs
 
 The media endpoints — `/v1/images/generations`, `/v1/images/edits`,
-`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`, and the
+`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`,
+`/v1/audio/translations`, and the
 `/v1/videos` family — share the same authentication, route-slug, limits, and
 accounting contracts as generation. Multipart and raw uploads reserve capacity
 inside `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and per-endpoint fractions of the spool;
@@ -216,7 +217,8 @@ explicit revocation guards, and finishes accounting. `GET /v1/videos`,
 `/api/v3/media-jobs` reads mirror for operators. The console provides
 metadata-only list/detail views, filters, and manual refresh. It has no
 automatic polling, content download/delete controls, video cancellation
-workflow, or media playground controls. Content and deletion remain
+workflow, or video playground controls. The Advanced playground provides a
+separate public audio translation upload form. Content and deletion remain
 API-key-owned inference operations; request cancellation and backend job
 reconciliation are separate from these console controls.
 

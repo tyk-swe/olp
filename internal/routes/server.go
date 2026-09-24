@@ -40,7 +40,7 @@ const (
 
 var supportedOperations = []string{
 	"generation", "token_count", "embeddings", "moderation", "rerank",
-	"image_generation", "image_edit", "image_variation", "speech", "transcription",
+	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 	"video_create", "video_list", "video_get", "video_content", "video_delete",
 	"batch", "realtime", "bedrock_invoke",
 }

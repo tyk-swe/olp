@@ -77,6 +77,8 @@ func defaultFields(dialect, operation string) []string {
 		return strings.Fields("size quality n response_format style output_format output_compression background moderation")
 	case "speech":
 		return strings.Fields("voice response_format speed instructions stream_format")
+	case "translation":
+		return strings.Fields("prompt response_format temperature")
 	case "transcription":
 		return strings.Fields("language response_format temperature timestamp_granularities chunking_strategy")
 	case "video_create":
@@ -161,10 +163,19 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
+	if operation == "translation" && name == "prompt" {
+		var prompt string
+		if json.Unmarshal(raw, &prompt) != nil {
+			return errors.New("audio translation prompt must be a string")
+		}
+	}
 	if name == "response_format" && operation != "generation" {
 		var format string
 		if json.Unmarshal(raw, &format) != nil {
 			return errors.New("media response_format must be a string or native null")
+		}
+		if operation == "translation" && !slices.Contains([]string{"json", "text", "srt", "vtt", "verbose_json"}, format) {
+			return errors.New("audio translation response_format is not supported")
 		}
 		return nil
 	}
@@ -174,6 +185,12 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 		first := bytes.TrimSpace(raw)[0]
 		if (first < '0' || first > '9') && first != '-' || json.Unmarshal(raw, &number) != nil {
 			return fmt.Errorf("default %s must be a number or native null", name)
+		}
+		if operation == "translation" && name == "temperature" {
+			value, err := number.Float64()
+			if err != nil || value < 0 || value > 1 {
+				return errors.New("audio translation temperature must be between 0 and 1")
+			}
 		}
 	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
 		var number int64

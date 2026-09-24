@@ -32,7 +32,8 @@
     operation.startsWith('image_') ||
       operation.startsWith('video_') ||
       operation === 'speech' ||
-      operation === 'transcription'
+      operation === 'transcription' ||
+      operation === 'translation'
   );
   const realtime = $derived(operation === 'realtime');
 

@@ -264,6 +264,12 @@ func applyConfiguredField(r *Request, name string, raw json.RawMessage) *Error {
 		target = &r.Size
 	case "response_format":
 		target = &r.Format
+	case "prompt":
+		if r.Op == OpTranslation {
+			target = &r.TextPrompt
+		} else {
+			target = &r.Prompt
+		}
 	case "quality":
 		target = &r.Quality
 	case "style":
@@ -348,15 +354,18 @@ func configuredMultipartFields(name string, raw json.RawMessage) ([]Field, *Erro
 }
 
 func validateConfiguredResponse(r *Request) *Error {
+	if r.Op == OpTranslation && (r.Stream || r.Language != nil || len(r.Include) > 0 || len(r.TimestampGranularities) > 0 || len(r.ChunkingStrategy) > 0 || len(r.KnownSpeakerNames) > 0 || len(r.KnownSpeakerReferences) > 0) {
+		return configuredFailure("translation", "does not support transcription controls")
+	}
 	if r.Op == OpSpeech && r.Speed != nil && (*r.Speed < 0.25 || *r.Speed > 4) {
 		return configuredFailure("speed", "must be between 0.25 and 4")
 	}
-	if r.Op == OpTranscription {
+	if r.Op == OpTranscription || r.Op == OpTranslation {
 		format := "json"
 		if r.Format != nil {
 			format = *r.Format
 		}
-		if !slices.Contains([]string{"json", "text", "srt", "verbose_json", "vtt", "diarized_json"}, format) {
+		if !slices.Contains([]string{"json", "text", "srt", "verbose_json", "vtt", "diarized_json"}, format) || r.Op == OpTranslation && format == "diarized_json" {
 			return configuredFailure("response_format", "is not supported")
 		}
 		if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 1) {

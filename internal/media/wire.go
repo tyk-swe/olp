@@ -22,6 +22,7 @@ const (
 	OpImageVariation  = "image_variation"
 	OpSpeech          = "speech"
 	OpTranscription   = "transcription"
+	OpTranslation     = "translation"
 	OpVideoCreate     = "video_create"
 	OpVideoList       = "video_list"
 	OpVideoGet        = "video_get"
@@ -850,6 +851,8 @@ func Encode(r *Request, kind, upstreamModel string) (*UpstreamCall, *Error) {
 		return encodeSpeech(r, upstreamModel)
 	case OpTranscription:
 		return encodeTranscription(r, upstreamModel)
+	case OpTranslation:
+		return encodeTranslation(r, upstreamModel)
 	case OpVideoCreate:
 		return encodeVideoCreate(r, upstreamModel)
 	case OpVideoList:

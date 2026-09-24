@@ -59,7 +59,7 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		return surface == "openai" && mode == "unary" && (openaiFamily || nativeEmbeddings)
 	case "rerank":
 		return surface == "openai" && mode == "unary" && kind == "openai_compatible" && (vendor == "cohere" || vendor == "voyage")
-	case "moderation", "image_variation":
+	case "moderation", "image_variation", "translation":
 		return surface == "openai" && mode == "unary" && openaiFamily
 	case "image_generation":
 		if surface != "openai" {

@@ -50,6 +50,7 @@ const (
 	FamilyImageVariation  Family = "image_variation"
 	FamilySpeech          Family = "speech"
 	FamilyTranscription   Family = "transcription"
+	FamilyTranslation     Family = "translation"
 	FamilyVideoCreate     Family = "video_create"
 	FamilyVideoList       Family = "video_list"
 	FamilyVideoGet        Family = "video_get"
@@ -75,7 +76,7 @@ func (f Family) Operation() string {
 	case FamilyRerank:
 		return "rerank"
 	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
-		FamilyTranscription, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
+		FamilyTranscription, FamilyTranslation, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
 		FamilyVideoContent, FamilyVideoDelete, FamilyFile, FamilyBatch,
 		FamilyRealtime, FamilyGeminiLive, FamilyBedrockInvoke:
 		if f == FamilyGeminiLive {

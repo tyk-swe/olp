@@ -22,7 +22,7 @@ const maxDocumentBytes = 64 << 20
 // service, including resource operations that cannot yet claim strict identity.
 func IsMediaOperation(op string) bool {
 	return slices.Contains([]string{
-		"image_generation", "image_edit", "image_variation", "speech", "transcription",
+		"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
 		"video_create", "video_list", "video_get", "video_content", "video_delete",
 	}, op)
 }
@@ -54,7 +54,7 @@ func Compile(c Config) (*Template, error) {
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, reject("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
 	}
-	if !slices.Contains([]string{"image_generation", "image_edit", "image_variation", "speech", "transcription", "video_create", "video_get", "video_content", "video_delete"}, c.Operation) ||
+	if !slices.Contains([]string{"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_get", "video_content", "video_delete"}, c.Operation) ||
 		!slices.Contains(p.Operations, c.Operation) ||
 		!slices.Contains([]string{"direct-openai", "direct-compatible", "azure-v1", "azure-deployment"}, p.Hosting) {
 		return nil, reject("target_capability", "/operation", "native_media_contract", "This media operation and hosting combination has no strict native contract.")
@@ -341,9 +341,9 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 					return Bound{}, reject("target_capability", "/request", "image_input", "Image variation file field is not qualified.")
 				}
 				imageCount++
-			case "transcription":
+			case "transcription", "translation":
 				if part.Name != "file" {
-					return Bound{}, reject("target_capability", "/request", "audio_input", "Transcription file field is not qualified.")
+					return Bound{}, reject("target_capability", "/request", "audio_input", "Audio file field is not qualified.")
 				}
 			case "video_create":
 				if part.Name != "input_reference" || !strings.HasPrefix(part.ContentType, "image/") {

@@ -1,6 +1,8 @@
 # Fidelity qualification baseline
 
 Current release requirements are in [release validation](release-validation.md).
+The additive [audio translation](audio-translation.md) receipt covers the native
+multipart operation introduced after the historical matrix snapshot.
 All features and functional gates remain required; long quality/performance
 studies are optional and cannot be used to claim unmeasured parity.
 

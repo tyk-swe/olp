@@ -228,7 +228,7 @@ func init() {
 		}
 		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "token_count", Surface: surface, Mode: "unary"})
 	}
-	for _, operation := range []string{"embeddings", "moderation", "rerank"} {
+	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation"} {
 		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 	}
 	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {

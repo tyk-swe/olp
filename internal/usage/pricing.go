@@ -33,7 +33,7 @@ var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedr
 // priceOperations are the operations a price may be scoped to, and the
 // operations a usage filter may name.
 var priceOperations = []string{"generation", "embeddings", "token_count", "image_generation",
-	"image_edit", "image_variation", "speech", "transcription", "video_create", "video_list",
+	"image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list",
 	"video_get", "video_content", "video_delete", "moderation", "model_list", "model_get", "rerank",
 	"batch", "realtime", "bedrock_invoke"}
 

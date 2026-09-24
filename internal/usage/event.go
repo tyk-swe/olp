@@ -248,7 +248,7 @@ type wireRouting struct {
 // acknowledged, so it is rejected here instead.
 var knownOperations = map[string]struct{}{
 	"generation": {}, "embeddings": {}, "token_count": {}, "image_generation": {},
-	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {},
+	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
 	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
 	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {},

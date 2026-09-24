@@ -82,6 +82,7 @@ export const operationOptions = [
   ['image_variation', 'Image variations'],
   ['speech', 'Speech'],
   ['transcription', 'Transcription'],
+  ['translation', 'Audio translation'],
   ['video_create', 'Create video'],
   ['video_list', 'List videos'],
   ['video_get', 'Video status'],

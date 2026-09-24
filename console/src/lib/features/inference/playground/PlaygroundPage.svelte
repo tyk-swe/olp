@@ -27,6 +27,7 @@
   import OperationResult from './OperationResult.svelte';
   import StrictToolPlayground from './StrictToolPlayground.svelte';
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
+  import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
   import {
     nativeDialects,
     nativeOperationRequest,
@@ -114,6 +115,7 @@
     { value: 'rerank', label: 'Rerank' },
     { value: 'classification', label: 'Classification' },
     { value: 'scoring', label: 'Scoring' },
+    { value: 'translation', label: 'Audio translation' },
     { value: 'realtime', label: 'Realtime event trace' }
   ];
   const composerModes = [
@@ -247,6 +249,7 @@
   }
 
   function advancedRequest(): Record<string, unknown> {
+    if (operation === 'translation') return { model: model.trim() };
     const raw = parseNativeJSON(rawJson);
     if (!nativeObject(raw))
       throw new Error('The request document must be a JSON object.');
@@ -381,6 +384,10 @@
     if (strictSelected) {
       validationError =
         'Use the qualified public client below for this strict route.';
+      return;
+    }
+    if (operation === 'translation') {
+      validationError = 'Use the audio upload form below.';
       return;
     }
     if (operation === 'realtime') {
@@ -639,7 +646,7 @@
             class="mono"
             spellcheck="false"></textarea>
         </div>{/if}
-    {:else if operation !== 'realtime'}
+    {:else if operation !== 'realtime' && operation !== 'translation'}
       <div class="form-field">
         <label for="playground-raw">Request JSON</label><textarea
           id="playground-raw"
@@ -769,6 +776,7 @@
           streaming ||
           strictSelected ||
           operation === 'realtime' ||
+          operation === 'translation' ||
           (composer === 'advanced' && !operationKnown)}
         >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
       >
@@ -926,7 +934,7 @@
   </section>
 </div>
 
-{#if strictSelected}
+{#if strictSelected && operation !== 'translation'}
   {#if composer === 'advanced' && operation === 'generation' && surface === 'openai'}
     {#key model.trim()}
       <StrictToolPlayground route={model.trim()} requestText={rawJson} />
@@ -947,6 +955,10 @@
       qualified tool workflow.
     </section>
   {/if}
+{/if}
+
+{#if composer === 'advanced' && operation === 'translation'}
+  {#key model.trim()}<AudioTranslationPlayground route={model.trim()} />{/key}
 {/if}
 
 {#if composer === 'advanced' && operation === 'realtime'}

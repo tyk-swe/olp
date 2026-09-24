@@ -18,6 +18,7 @@ export type PlaygroundOperation =
   | 'rerank'
   | 'classification'
   | 'scoring'
+  | 'translation'
   | 'realtime';
 
 export type PlaygroundStreamDone = {

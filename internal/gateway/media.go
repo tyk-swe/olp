@@ -49,6 +49,7 @@ func (s *Server) registerMedia(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/images/variations", s.mediaFormHandler(media.DefaultImageUploadLimit, 1, media.DecodeImageVariation))
 	mux.HandleFunc("POST /v1/audio/speech", s.mediaJSONHandler(media.DecodeSpeech))
 	mux.HandleFunc("POST /v1/audio/transcriptions", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranscription))
+	mux.HandleFunc("POST /v1/audio/translations", s.mediaFormHandler(media.DefaultAudioUploadLimit, 1, media.DecodeTranslation))
 	mux.HandleFunc("POST /v1/videos", s.videoCreate)
 	mux.HandleFunc("GET /v1/videos", s.videoList)
 	mux.HandleFunc("GET /v1/videos/{video_id}", s.videoGet)
@@ -184,7 +185,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	switch request.Op {
 	case media.OpImageEdit, media.OpImageVariation:
 		x.estimate = mediaMultipartTokens
-	case media.OpTranscription:
+	case media.OpTranscription, media.OpTranslation:
 		x.estimate = 1500
 	}
 	defer s.cleanupUploads(request)

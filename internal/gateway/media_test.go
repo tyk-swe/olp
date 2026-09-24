@@ -20,7 +20,7 @@ func newMediaHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t, Config{})
 	ops := []string{media.OpImageGeneration, media.OpImageEdit, media.OpImageVariation,
-		media.OpSpeech, media.OpTranscription, media.OpVideoCreate, media.OpVideoList,
+		media.OpSpeech, media.OpTranscription, media.OpTranslation, media.OpVideoCreate, media.OpVideoList,
 		media.OpVideoGet, media.OpVideoContent, media.OpVideoDelete}
 	snapshot := h.rt.release.Snapshot
 	for id, p := range snapshot.Providers {

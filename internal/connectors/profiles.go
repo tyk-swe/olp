@@ -78,7 +78,7 @@ func init() {
 		}
 		switch p.Kind {
 		case "openai", "openai_compatible", "azure_openai":
-			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "video_create", "video_list", "video_get", "video_content", "video_delete"}
+			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list", "video_get", "video_content", "video_delete"}
 			p.SemanticHeaders = []string{"Openai-Beta"}
 			p.Documentation = "https://developers.openai.com/api/docs/guides/migrate-to-responses"
 			if p.Kind == "openai_compatible" {
@@ -608,6 +608,14 @@ func defaultControlSchema(operation, name string) map[string]any {
 		kind = "string"
 	}
 	schema := map[string]any{"title": name, "type": []string{kind, "null"}}
+	if operation == "translation" {
+		if name == "response_format" {
+			schema["enum"] = []any{"json", "text", "srt", "vtt", "verbose_json", nil}
+		}
+		if name == "temperature" {
+			schema["minimum"], schema["maximum"] = 0, 1
+		}
+	}
 	if kind == "array" || kind == "object" {
 		schema["description"] = "Replaced atomically; never recursively merged."
 	}
