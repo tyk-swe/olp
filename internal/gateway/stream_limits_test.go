@@ -48,13 +48,15 @@ func TestStreamsUsePerEventLimitNotUnaryResponseLimit(t *testing.T) {
 				if w.Code != http.StatusOK || strings.Count(w.Body.String(), "piece") != chunks {
 					t.Fatalf("valid events were lost: %d %s", w.Code, w.Body.String())
 				}
-				if strings.Contains(w.Body.String(), marker) == oversizedEvent || strings.Contains(w.Body.String(), `"code":"proxy_resource_exhausted"`) != oversizedEvent {
+				if strings.Contains(w.Body.String(), marker) == oversizedEvent || strings.Contains(w.Body.String(), `"code":"resource_exhausted"`) != oversizedEvent {
 					t.Fatalf("incorrect terminal frame: %s", w.Body.String())
 				}
 				env := h.sink.last(t)
 				wantOutcome, wantClass := "success", classSuccess
 				if oversizedEvent {
-					wantOutcome, wantClass = "failure", classProtocol
+					// A per-event byte ceiling is a bounded local resource,
+					// not provider ill health.
+					wantOutcome, wantClass = "failure", classResourceExhausted
 				}
 				if env.Outcome != wantOutcome || !env.Committed || len(env.Attempts) != 1 || env.Attempts[0].Class != wantClass || h.mock.count("b") != 0 {
 					t.Fatalf("incorrect terminal accounting: %+v", env)

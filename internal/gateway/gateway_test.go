@@ -492,7 +492,7 @@ func TestOversizedEventFailsBeforeCommit(t *testing.T) {
 	resp, body := h.chat(fullKey, nil, `,"stream":true`)
 	// The gateway's own event bound names itself rather than blaming the
 	// provider for malformed data.
-	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, body) != "proxy_resource_exhausted" {
+	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
@@ -501,7 +501,7 @@ func TestOversizedUnaryResponseRejected(t *testing.T) {
 	h := newHarness(t, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 512, MaxEventBytes: 256})
 	h.mock.set("a", completion(modelA, strings.Repeat("y", 1000)))
 	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, body) != "proxy_resource_exhausted" {
+	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
@@ -892,8 +892,8 @@ func TestClassifyFaultAttribution(t *testing.T) {
 		{name: "caller deadline after dispatch", parent: deadline, dispatched: true, err: context.DeadlineExceeded, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
 		{name: "first byte deadline", parent: context.Background(), reason: 1, dispatched: true, err: context.Canceled, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
 		{name: "idle deadline", parent: context.Background(), reason: 2, dispatched: true, err: context.Canceled, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
-		{name: "stream lifetime cap", parent: context.Background(), reason: 3, dispatched: true, err: context.Canceled, committed: true, class: classTimeout, origin: faultProxyCapacity, scope: scopeRequest},
-		{name: "event byte ceiling", parent: context.Background(), err: openai.ErrEventTooLarge, committed: true, class: classProtocol, origin: faultProxyCapacity, scope: scopeRequest},
+		{name: "stream lifetime cap", parent: context.Background(), reason: 3, dispatched: true, err: context.Canceled, committed: true, class: classResourceExhausted, origin: faultProxyCapacity, scope: scopeRequest},
+		{name: "event byte ceiling", parent: context.Background(), err: openai.ErrEventTooLarge, committed: true, class: classResourceExhausted, origin: faultProxyCapacity, scope: scopeRequest},
 		{name: "frame projection defect", parent: context.Background(), err: fmt.Errorf("%w: id remap", errFrameProjection), committed: true, class: classProtocol, origin: faultContract, scope: scopeContract},
 		{name: "committed transport cut", parent: context.Background(), err: errors.New("unexpected EOF"), committed: true, class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint},
 		{name: "truncated provider stream", parent: context.Background(), err: &openai.ProtocolError{Detail: "ended", Truncated: true}, class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint},

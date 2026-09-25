@@ -49,6 +49,13 @@ const (
 	classAmbiguous         = "ambiguous"
 	classLimitsUnavailable = "limits_unavailable"
 	classContextWindow     = "context_window"
+	// classResourceExhausted marks a bounded gateway-local resource reaching
+	// its ceiling: retained dependency bytes, projected delivery bytes,
+	// transient event memory, aggregate admitted event work, the stream
+	// lifetime, or a durable persistence bound. The provider produced work
+	// this proxy could not afford to keep — never provider ill health, so
+	// the class feeds no circuit or credential cooldown.
+	classResourceExhausted = "resource_exhausted"
 )
 
 // Fault origins attribute one failed attempt to the component that owns the
@@ -113,7 +120,7 @@ func defaultFault(class string) (origin, scope string) {
 		return faultClientDelivery, scopeRequest
 	case classPolicy:
 		return faultProxyPolicy, scopeRequest
-	case classLimitsUnavailable:
+	case classLimitsUnavailable, classResourceExhausted:
 		return faultProxyCapacity, scopeRequest
 	}
 	return "", ""
@@ -245,20 +252,21 @@ type attemptFailure struct {
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *openai.UpstreamError
-	overall      bool   // the route deadline, not the attempt deadline, expired
-	dispatched   bool   // the request reached the upstream before the failure
-	quota        string // a quota this gateway enforces rejected the attempt
-	contractCode string // safe runtime interaction guard violation
-	policyCode   string // local output policy refusal after upstream completion
-	noRetry      bool   // strict outcome uncertainty must not suggest client retries
-	origin       string // fault origin; empty falls back to the class default
-	scope        string // affected scope; empty falls back to the class default
-	resource     string // the constrained gateway resource a capacity fault names
+	overall      bool                    // the route deadline, not the attempt deadline, expired
+	dispatched   bool                    // the request reached the upstream before the failure
+	quota        string                  // a quota this gateway enforces rejected the attempt
+	contractCode string                  // safe runtime interaction guard violation
+	policyCode   string                  // local output policy refusal after upstream completion
+	noRetry      bool                    // strict outcome uncertainty must not suggest client retries
+	origin       string                  // fault origin; empty falls back to the class default
+	scope        string                  // affected scope; empty falls back to the class default
+	resource     string                  // the constrained gateway resource a capacity fault names
+	exhausted    *interaction.Exhaustion // the bounded local resource that ran out
 }
 
 // attribute fills in fault origin and scope from the resolved class when the
 // failure site did not attribute them, then copies the fault evidence onto
-// the fact.
+// the fact. A bounded-resource exhaustion names the budget that ran out.
 func (f *attemptFailure) attribute(fact *AttemptFact) {
 	if f.origin == "" || f.scope == "" {
 		origin, scope := defaultFault(f.class)
@@ -269,7 +277,11 @@ func (f *attemptFailure) attribute(fact *AttemptFact) {
 			f.scope = scope
 		}
 	}
-	fact.FaultOrigin, fact.FaultScope, fact.FaultResource = f.origin, f.scope, f.resource
+	resource := f.resource
+	if resource == "" && f.exhausted != nil {
+		resource = f.exhausted.Resource
+	}
+	fact.FaultOrigin, fact.FaultScope, fact.FaultResource = f.origin, f.scope, resource
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -311,6 +323,19 @@ func (f *attemptFailure) toError() (result *Error) {
 	case quotaSlot:
 		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
 	}
+	// A bounded local resource names itself and its budget category rather
+	// than claiming the provider malfunctioned; exhaustion is explicit and
+	// never provider ill health.
+	if f.class == classResourceExhausted {
+		resource, category := "stream_work_bytes", string(interaction.LimitEventWork)
+		if f.exhausted != nil {
+			resource, category = f.exhausted.Resource, string(f.exhausted.Category)
+		}
+		return serverError(http.StatusBadGateway, "resource_exhausted", "The provider result exceeded the gateway's bounded "+category+" budget: "+resource+".")
+	}
+	if f.contractCode != "" {
+		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
 	// A proxy-local fault names the actual constrained resource or the
 	// durability step that failed; it never claims the provider returned
 	// malformed data.
@@ -327,9 +352,6 @@ func (f *attemptFailure) toError() (result *Error) {
 		if f.class == classProtocol && f.contractCode == "" {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider exchange could not be projected under the admitted contract.")
 		}
-	}
-	if f.contractCode != "" {
-		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
 	}
 	if f.policyCode != "" {
 		message := "The provider result was blocked by the route's content policy."
@@ -480,8 +502,9 @@ func (st *attemptState) trace() *httptrace.ClientTrace {
 
 // classify attributes an in-flight attempt error before the retry taxonomy is
 // consulted. A deadline or refusal that never reached the provider is
-// request-local; the gateway's own event byte ceiling is proxy capacity; a
-// truncated or malformed provider stream remains a provider transport fault.
+// request-local; the gateway's own byte, work and lifetime ceilings are
+// resource exhaustion, never provider ill health; a truncated or malformed
+// provider stream remains a provider transport fault.
 func (st *attemptState) classify(err error, committed bool) *attemptFailure {
 	switch {
 	case st.parent.Err() != nil:
@@ -491,18 +514,38 @@ func (st *attemptState) classify(err error, committed bool) *attemptFailure {
 		return &attemptFailure{class: classCancelled, origin: faultClientDelivery, scope: scopeRequest}
 	case st.reason.Load() != 0:
 		if st.reason.Load() == 3 {
-			// The gateway's own stream lifetime bound expired while the
-			// provider was still working; that is bounded-work policy, not
-			// evidence of provider ill health.
-			return &attemptFailure{class: classTimeout, origin: faultProxyCapacity, scope: scopeRequest, resource: "stream lifetime"}
+			// The stream lifetime cap is a proxy-local bound: the provider
+			// delivered for a full hour, which is exhausted lifetime, not
+			// ill health.
+			return &attemptFailure{
+				class:  classResourceExhausted,
+				origin: faultProxyCapacity,
+				scope:  scopeRequest,
+				exhausted: &interaction.Exhaustion{
+					Resource: "stream_lifetime_seconds", Category: interaction.LimitTime, Limit: int(maxStreamDuration / time.Second),
+				},
+			}
 		}
 		// First-byte and idle deadlines measure an exchange this gateway
 		// already opened against the endpoint; both are endpoint evidence.
 		return &attemptFailure{class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint}
 	case errors.Is(err, errClientWrite):
 		return &attemptFailure{class: classCancelled, origin: faultClientDelivery, scope: scopeRequest}
+	}
+	var pe *openai.ProtocolError
+	var exhaustion *interaction.Exhaustion
+	switch {
+	case errors.As(err, &exhaustion):
+		// A bounded byte/work budget is exhausted the same whether or not
+		// earlier frames were committed.
+		return &attemptFailure{class: classResourceExhausted, origin: faultProxyCapacity, scope: scopeRequest, exhausted: exhaustion}
 	case errors.Is(err, openai.ErrEventTooLarge):
-		return &attemptFailure{class: classProtocol, origin: faultProxyCapacity, scope: scopeRequest, resource: "event byte"}
+		return &attemptFailure{
+			class:     classResourceExhausted,
+			origin:    faultProxyCapacity,
+			scope:     scopeRequest,
+			exhausted: &interaction.Exhaustion{Resource: "event_bytes", Category: interaction.LimitBytes},
+		}
 	case errors.Is(err, errResponsePersistence):
 		// Retained-state durability failed locally; the provider exchange
 		// itself produced no fault evidence.
@@ -515,11 +558,9 @@ func (st *attemptState) classify(err error, committed bool) *attemptFailure {
 		// The gateway's own projection of a provider frame failed; that is
 		// contract evidence, never provider transport evidence.
 		return &attemptFailure{class: classProtocol, origin: faultContract, scope: scopeContract}
-	case committed:
+	case errors.As(err, &pe):
 		return &attemptFailure{class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint}
-	}
-	var pe *openai.ProtocolError
-	if errors.As(err, &pe) {
+	case committed:
 		return &attemptFailure{class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint}
 	}
 	return &attemptFailure{class: classConnect, origin: faultProviderTransport, scope: scopeEndpoint}
@@ -756,11 +797,20 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	if contract != nil && contract.ToolContinuation() {
 		if err := s.claimToolWork(actx, x, contract, a, slot); err != nil {
-			f := &attemptFailure{noRetry: true, origin: faultProxyPersistence, scope: scopeRequest}
 			if errors.Is(err, resources.ErrPayloadTooLarge) {
-				f.origin, f.resource = faultProxyCapacity, "continuation state"
+				// The continuation payload itself overflowed its durable
+				// bound: a named local resource ceiling, not provider
+				// evidence.
+				return fail(classResourceExhausted, &attemptFailure{
+					noRetry: true,
+					origin:  faultProxyCapacity,
+					scope:   scopeRequest,
+					exhausted: &interaction.Exhaustion{
+						Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes,
+					},
+				})
 			}
-			return fail(classProtocol, f)
+			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true, origin: faultProxyPersistence, scope: scopeRequest})
 		}
 	}
 	resp, err := client.Do(req)
@@ -1011,16 +1061,26 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
 		var ue *openai.UpstreamError
 		var violation *interaction.Error
+		var exhausted *interaction.Exhaustion
 		switch {
+		case errors.As(err, &exhausted):
+			f.exhausted = exhausted
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, resources.ErrPayloadTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes}
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, errResponseTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "response_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxResponseBytes)}
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, openai.ErrEventTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "event_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxEventBytes)}
+			return fail(classResourceExhausted, f)
 		case errors.As(err, &violation):
 			// The provider's exchange completed; the projection of its
 			// result broke the admitted contract, which is a defect of
 			// this gateway's contract layer, not provider evidence.
 			f.contractCode = "fidelity_protocol_violation"
 			f.origin, f.scope = faultContract, scopeContract
-			return fail(classProtocol, f)
-		case errors.Is(err, errResponseTooLarge):
-			f.origin, f.scope, f.resource = faultProxyCapacity, scopeRequest, "response bytes"
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = ue

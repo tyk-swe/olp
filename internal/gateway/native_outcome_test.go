@@ -124,7 +124,7 @@ func TestProxyLocalFailuresDoNotOpenTheSharedProviderCircuit(t *testing.T) {
 		resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"hi"}],"stream":true}`), nil)
 		raw, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), "proxy_resource_exhausted") {
+		if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), "resource_exhausted") {
 			t.Fatalf("proxy-local fault was not reported as gateway capacity: %d %v %s", resp.StatusCode, err, raw)
 		}
 	}
@@ -132,7 +132,7 @@ func TestProxyLocalFailuresDoNotOpenTheSharedProviderCircuit(t *testing.T) {
 		t.Fatalf("provider a called %d times", h.mock.count("a"))
 	}
 	env := h.sink.last(t)
-	if len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || env.Attempts[0].FaultOrigin != faultProxyCapacity || env.Attempts[0].FaultScope != scopeRequest {
+	if len(env.Attempts) != 1 || env.Attempts[0].Class != classResourceExhausted || env.Attempts[0].FaultOrigin != faultProxyCapacity || env.Attempts[0].FaultScope != scopeRequest {
 		t.Fatalf("proxy capacity fault was not attributed to the gateway: %+v", env.Attempts)
 	}
 	providerID := env.Attempts[0].ProviderID
