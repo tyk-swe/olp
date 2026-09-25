@@ -224,6 +224,14 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 	for _, id := range []string{providerB["id"].(string), globalProvider["id"].(string)} {
 		h.want(op, "GET", "/api/v3/providers/"+id, nil, nil, 404)
 		h.want(op, "GET", "/api/v3/providers/"+id+"/models", nil, nil, 404)
+		// Upstream checks must not reveal a foreign provider through its
+		// precondition state before the project boundary is applied.
+		model := h.want(owner, "GET", "/api/v3/providers/"+id+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
+		for _, headers := range []map[string]string{nil, {"If-Match": `"stale"`}} {
+			h.want(op, "POST", "/api/v3/providers/"+id+"/probe", nil, headers, 404)
+			h.want(op, "POST", "/api/v3/providers/"+id+"/discovery", map[string]any{"models": []any{}}, headers, 404)
+			h.want(op, "POST", "/api/v3/providers/"+id+"/models/"+model+"/certify", nil, headers, 404)
+		}
 	}
 	h.want(op, "GET", "/api/v3/providers/"+providerAID+"/models", nil, nil, 200)
 
@@ -314,6 +322,22 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 		if item.(map[string]any)["provider_id"] != providerAID {
 			t.Fatal("provider health must be narrowed to accessible projects", health)
 		}
+	}
+	inventory := h.want(op, "GET", "/api/v3/provider-models", nil, nil, 200)
+	if len(inventory["items"].([]any)) == 0 {
+		t.Fatal("the model inventory must list accessible project models", inventory)
+	}
+	for _, item := range inventory["items"].([]any) {
+		if item.(map[string]any)["provider_id"] != providerAID {
+			t.Fatal("the model inventory must be narrowed to accessible projects", inventory)
+		}
+	}
+	ownerInventory := map[any]bool{}
+	for _, item := range h.want(owner, "GET", "/api/v3/provider-models", nil, nil, 200)["items"].([]any) {
+		ownerInventory[item.(map[string]any)["provider_id"]] = true
+	}
+	if !ownerInventory[providerAID] || !ownerInventory[providerB["id"]] || !ownerInventory[globalProvider["id"]] {
+		t.Fatal("the global model inventory must list every project", ownerInventory)
 	}
 
 	usageHTTP := usageMuxFor(h)

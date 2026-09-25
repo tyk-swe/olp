@@ -140,7 +140,7 @@ func TestAWSStaticProcessAndSSOCredentialsSignOnce(t *testing.T) {
 	if _, e := a.Apply(context.Background(), req, cfg, secret, []byte("{}")); e != nil || !strings.Contains(req.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || req.Header.Get("X-Amz-Security-Token") != "fixture-session" {
 		t.Fatalf("static signing: %v", e)
 	}
-	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"} {
+	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_CA_BUNDLE"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")

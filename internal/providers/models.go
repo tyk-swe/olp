@@ -34,8 +34,9 @@ func ValidModelName(field, value string) error {
 }
 
 // prepare reads what an upstream call needs without holding the installation
-// lock: the provider, its etag precondition, and the enabled probe credential.
-func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
+// lock: the provider within the caller's project scope, its etag precondition,
+// and the enabled probe credential.
+func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, []byte, error) {
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, nil, err
@@ -43,6 +44,9 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return nil, nil, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -82,11 +86,8 @@ func (s *Server) probe(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
@@ -165,11 +166,8 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 			models = append(models, declared{m.UpstreamModel, m.DisplayName, nil})
 		}
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	upstream := len(models) == 0
@@ -424,11 +422,8 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	m, err := loadModel(r.Context(), a.Pool, id, modelID, false)

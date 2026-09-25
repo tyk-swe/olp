@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 type stubAzureCredential struct {
@@ -129,5 +132,27 @@ func TestAzureIdentityHostBoundary(t *testing.T) {
 	}
 	if azureIdentityHost("identity.other") {
 		t.Fatal("identity host broadened beyond the declared endpoint")
+	}
+}
+
+func TestAzureDeploymentAddressesRequireAConfiguredDeployment(t *testing.T) {
+	c := Config{Kind: "azure_openai", Endpoint: "https://resource.example", Deployment: "prod", APIVersion: "2025-01-01-preview",
+		Bindings: map[string]Binding{"logical": {Deployment: "bound"}},
+		Models:   map[string]json.RawMessage{"declared": json.RawMessage(`{"deployment":"mapped"}`), "facts": json.RawMessage(`{"region":"eastus"}`)}}
+	for model, deployment := range map[string]string{"prod": "prod", "logical": "bound", "declared": "mapped", "mapped": "mapped"} {
+		if u, err := c.URL(openai.FamilyChat, model, false); err != nil || !strings.Contains(u, "/openai/deployments/"+deployment+"/") {
+			t.Errorf("URL %s: %s %v", model, u, err)
+		}
+		if u, err := c.MediaURL("images/generations", model, nil); err != nil || !strings.Contains(u, "/openai/deployments/"+deployment+"/") {
+			t.Errorf("MediaURL %s: %s %v", model, u, err)
+		}
+	}
+	for _, model := range []string{"unknown", "facts"} {
+		if u, err := c.URL(openai.FamilyChat, model, false); err == nil {
+			t.Errorf("URL %s addressed an unconfigured deployment: %s", model, u)
+		}
+		if u, err := c.MediaURL("images/generations", model, nil); err == nil {
+			t.Errorf("MediaURL %s addressed an unconfigured deployment: %s", model, u)
+		}
 	}
 }

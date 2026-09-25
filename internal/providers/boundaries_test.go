@@ -1,9 +1,14 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -27,15 +32,27 @@ func TestConfigurationRejectsInvalidDefaults(t *testing.T) {
 }
 
 func TestModelDiscoveryRequiresAModelList(t *testing.T) {
+	var listing atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(listing.Load().(string)))
+	}))
+	defer upstream.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{Kind: KindOpenAICompatible, AuthMode: AuthNone, Endpoint: new(upstream.URL + "/v1")}
+	cfg.Normalize()
+	discover := func(raw string) ([]string, error) {
+		listing.Store(raw)
+		return New(nil, policy).listModels(context.Background(), &cfg, nil)
+	}
 	for _, raw := range []string{`null`, `{}`, `{"error":{"message":"unauthorized"}}`, `{"data":null}`, `{"data":{}}`} {
-		if _, err := decodeModels([]byte(raw)); err == nil {
+		if _, err := discover(raw); err == nil {
 			t.Errorf("accepted model response %s", raw)
 		}
 	}
-	if models, err := decodeModels([]byte(`{"data":[]}`)); err != nil || len(models) != 0 {
+	if models, err := discover(`{"data":[]}`); err != nil || len(models) != 0 {
 		t.Fatalf("valid empty list: %v %v", models, err)
 	}
-	models, err := decodeModels([]byte(`{"data":[{"id":"good"},{"id":"bad\u0000model"},{"id":"bad\nmodel"},{"id":"good"}]}`))
+	models, err := discover(`{"data":[{"id":"good"},{"id":"bad\u0000model"},{"id":"bad\nmodel"},{"id":"good"}]}`)
 	if err != nil || !reflect.DeepEqual(models, []string{"good"}) {
 		t.Fatalf("model identifiers: %q %v", models, err)
 	}
