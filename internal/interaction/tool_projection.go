@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -18,20 +19,19 @@ type Delivery struct {
 	Body   json.RawMessage   `json:"body,omitempty"`
 }
 type ToolProjection struct {
-	plan              *Plan
-	limit, retained   int
-	blocks            []json.RawMessage
-	active            map[int]*toolBlock
-	frames            []json.RawMessage
-	observations      []json.RawMessage
-	nativeUsage       map[string]json.RawMessage
-	blocked           bool
-	started, terminal bool
-	finish            string
-	id, model         string
-	toolCount         int
-	content           strings.Builder
-	calls             []map[string]any
+	plan            *Plan
+	trace           *protocols.AnthropicTrace
+	limit, retained int
+	blocks          []json.RawMessage
+	active          map[int]*toolBlock
+	frames          []json.RawMessage
+	observations    []json.RawMessage
+	nativeUsage     map[string]json.RawMessage
+	blocked         bool
+	id, model       string
+	toolCount       int
+	content         strings.Builder
+	calls           []map[string]any
 }
 type toolBlock struct {
 	fields                map[string]json.RawMessage
@@ -46,7 +46,7 @@ func (p *Plan) NewToolProjection(limit int) (*ToolProjection, error) {
 	if !p.ToolContinuation() || limit < 1 || limit > 4<<20 {
 		return nil, continuationFailure("/client_contract", "bounded_tool_projection")
 	}
-	return &ToolProjection{plan: p, limit: limit, active: map[int]*toolBlock{}}, nil
+	return &ToolProjection{plan: p, trace: protocols.NewAnthropicTrace(limit), limit: limit, active: map[int]*toolBlock{}}, nil
 }
 func (p *ToolProjection) retain(n int) error {
 	if n < 0 || n > p.limit-p.retained {
@@ -101,39 +101,46 @@ func (p *ToolProjection) recordNativeUsage(usage oif.Value) error {
 	return nil
 }
 
-// Observe processes one native event synchronously. Before a tool starts,
-// non-actionable text/reasoning observations are incremental. A tool turn's
-// complete assistant history (including later blocks/signatures) is required to
-// reconstruct the next native request, so that dependency gates its tool bytes.
+// Observe consumes one reducer-admitted native event synchronously. Event
+// identity, ordering, block lifecycle and cumulative usage come from the
+// dialect-owned AnthropicTrace; this type only applies the qualified
+// projection contract on top. Before a tool starts, non-actionable
+// text/reasoning observations are incremental. A tool turn's complete
+// assistant history (including later blocks/signatures) is required to
+// reconstruct the next native request, so that dependency gates its tool
+// bytes.
 func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 	if err := p.plan.ValidateEvent(event); err != nil {
 		return nil, err
 	}
-	root := event.Source().Root()
-	kind := valueText(member(root, "type"))
+	tr, err := p.trace.Accept(event)
+	if err != nil {
+		return nil, err
+	}
 	if err := p.retain(event.Source().Len()); err != nil {
 		return nil, err
 	}
+	root := event.Source().Root()
 	var frame []byte
-	var err error
-	switch kind {
-	case "ping":
+	switch tr.Kind {
+	case protocols.AnthropicPing, protocols.AnthropicError:
+		// Admitted transport traffic with no projected output; the stream
+		// codec reports a native error event's upstream detail itself.
 		return nil, nil
-	case "message_start":
-		message := member(root, "message")
-		if p.started || !onlyMembers(root, "type message") || !onlyMembers(message, "id type role model content stop_reason stop_sequence usage") || len(member(message, "content").Elements()) != 0 {
+	case protocols.AnthropicMessageStart:
+		message := tr.Message
+		if !onlyMembers(root, "type message") || !onlyMembers(message, "id type role model content stop_reason stop_sequence usage") || len(member(message, "content").Elements()) != 0 {
 			return nil, guardFailure("/events", "message_start_contract")
 		}
-		p.started = true
 		p.id = valueText(member(message, "id"))
 		p.model = valueText(member(message, "model"))
-		if usage, present := message.Lookup("usage"); present {
+		if usage := tr.Usage; usage.Kind() == oif.Object {
 			if err := p.recordNativeUsage(usage); err != nil {
 				return nil, err
 			}
 		}
-	case "content_block_start":
-		if !p.started || p.terminal || !onlyMembers(root, "type index content_block") {
+	case protocols.AnthropicBlockStart:
+		if !onlyMembers(root, "type index content_block") {
 			return nil, guardFailure("/events", "block_start_contract")
 		}
 		index, e := toolIndex(member(root, "index"))
@@ -143,7 +150,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		if index != len(p.blocks) {
 			return nil, guardFailure("/events/index", "ordered_block_start")
 		}
-		block := member(root, "content_block")
+		block := tr.Block
 		b := &toolBlock{fields: map[string]json.RawMessage{}, kind: valueText(member(block, "type"))}
 		for _, f := range block.Members() {
 			b.fields[f.Name] = f.Value.Bytes()
@@ -188,7 +195,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 			}
 		}
 		frame, err = p.chunk(change, observation)
-	case "content_block_delta":
+	case protocols.AnthropicBlockDelta:
 		if !onlyMembers(root, "type index delta") {
 			return nil, guardFailure("/events", "delta_contract")
 		}
@@ -200,7 +207,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		if b == nil {
 			return nil, guardFailure("/events", "active_block")
 		}
-		delta := member(root, "delta")
+		delta := tr.Delta
 		deltaKind := valueText(member(delta, "type"))
 		switch deltaKind {
 		case "text_delta", "thinking_delta":
@@ -232,7 +239,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		default:
 			return nil, guardFailure("/events/delta", "qualified_native_delta")
 		}
-	case "content_block_stop":
+	case protocols.AnthropicBlockStop:
 		if !onlyMembers(root, "type index") {
 			return nil, guardFailure("/events", "block_stop_contract")
 		}
@@ -291,31 +298,32 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 		}
 		delete(p.active, index)
 		frame, err = p.chunk(delta, observation)
-	case "message_delta":
+	case protocols.AnthropicMessageDelta:
 		if !onlyMembers(root, "type delta usage") || len(p.active) > 0 {
 			return nil, guardFailure("/events", "message_delta_contract")
 		}
-		if usage, present := root.Lookup("usage"); present {
+		if usage := tr.Usage; usage.Kind() == oif.Object {
 			if err := p.recordNativeUsage(usage); err != nil {
 				return nil, err
 			}
 		}
-		delta := member(root, "delta")
-		if !onlyMembers(delta, "stop_reason stop_sequence") {
+		if delta := tr.Delta; delta.Kind() == oif.Object && !onlyMembers(delta, "stop_reason stop_sequence") {
 			return nil, guardFailure("/events", "terminal_metadata")
 		}
-		p.finish = valueText(member(delta, "stop_reason"))
-		if p.finish != "end_turn" && p.finish != "tool_use" && p.finish != "max_tokens" && p.finish != "stop_sequence" {
-			return nil, guardFailure("/events/stop_reason", "known_terminal")
+		// Interim updates may carry no terminal declaration; once declared,
+		// the same native fact is revalidated on every later update.
+		if reason, declared := p.trace.StopReason(); declared {
+			if reason != "end_turn" && reason != "tool_use" && reason != "max_tokens" && reason != "stop_sequence" {
+				return nil, guardFailure("/events/stop_reason", "known_terminal")
+			}
+			if (reason == "tool_use") != (p.toolCount > 0) {
+				return nil, guardFailure("/events/stop_reason", "tool_terminal_correspondence")
+			}
 		}
-		if p.finish == "tool_use" && p.toolCount == 0 || p.finish != "tool_use" && p.toolCount > 0 {
-			return nil, guardFailure("/events/stop_reason", "tool_terminal_correspondence")
-		}
-	case "message_stop":
-		if !onlyMembers(root, "type") || p.finish == "" || len(p.active) > 0 {
+	case protocols.AnthropicMessageStop:
+		if _, declared := p.trace.StopReason(); !onlyMembers(root, "type") || !declared || len(p.active) > 0 {
 			return nil, guardFailure("/events", "complete_native_terminal")
 		}
-		p.terminal = true
 	default:
 		return nil, guardFailure("/events", "qualified_native_event")
 	}
@@ -341,11 +349,11 @@ func (p *Plan) declaresTool(name string) bool {
 	return false
 }
 
-// Complete runs only after the existing native stream grammar has accepted a
-// terminal result. It builds a bounded delivery; the caller still must commit
+// Complete runs only after the authoritative native reducer has accepted the
+// terminal boundary. It builds a bounded delivery; the caller still must commit
 // it and its dependency state before emitting the queued frames or handle.
 func (p *ToolProjection) Complete(completion *openai.Completion, handle string) (*Continuation, Delivery, error) {
-	if !p.terminal || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" {
+	if !p.trace.Terminal() || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" {
 		return nil, Delivery{}, guardFailure("/result", "complete_recoverable_result")
 	}
 	assistant := map[string]any{"role": "assistant", "content": p.content.String()}
@@ -361,7 +369,7 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 	}
 	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage}
 	finish := completion.FinishReason
-	if p.finish == "tool_use" {
+	if reason, _ := p.trace.StopReason(); reason == "tool_use" {
 		finish = "tool_calls"
 	}
 	terminal, _ := json.Marshal(map[string]any{"id": p.id, "object": "chat.completion.chunk", "created": 0, "model": p.plan.route, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}, "usage": usage, "olp": extension})
@@ -393,7 +401,8 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 	if !onlyMembers(root, "id type role model content stop_reason stop_sequence usage") {
 		return nil, Delivery{}, guardFailure("/result", "qualified_native_result")
 	}
-	// Reuse the incremental block guards without passing through a legacy codec.
+	// The synthesized events are admitted through the same authoritative
+	// reducer as wire traffic — no parallel grammar runs for unary results.
 	projection.plan = &Plan{template: p.template, config: p.config, prepared: p.prepared, effective: p.effective, sourceFamily: p.sourceFamily, stream: true, route: p.route, receipt: p.receipt}
 	seq := uint64(0)
 	observe := func(name string, body any) error {

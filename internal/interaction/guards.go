@@ -109,7 +109,8 @@ func nonnegativeInteger(value oif.Value) bool {
 
 // ValidateEvent validates individual native event envelopes synchronously before
 // any projection. Ordering, terminal state, bounded accumulation and completion
-// remain enforced by StreamWithEvents' dialect state machine, not mutable Plan.
+// remain enforced by the dialect-owned reducer behind StreamWithEvents and the
+// projection (AnthropicTrace for the Anthropic wire), not mutable Plan.
 func (p *Plan) ValidateEvent(event oif.Event) error {
 	if !p.stream || p.receipt.Class != NativeIdentity && !p.ToolContinuation() {
 		return guardFailure("/events", "admitted_event_contract")
@@ -152,7 +153,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 				return guardFailure("/events/index", "block_stop")
 			}
 		case "message_delta":
-			if member(root, "delta").Kind() != oif.Object {
+			if d := member(root, "delta"); d.Kind() != oif.Object && d.Kind() != oif.Absent && d.Kind() != oif.Null {
 				return guardFailure("/events/delta", "message_delta")
 			}
 		}
