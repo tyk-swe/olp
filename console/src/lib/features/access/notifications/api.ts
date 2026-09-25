@@ -109,15 +109,14 @@ export async function updateBudgetAlertRule(
   return result(response.data, response.error, response.response);
 }
 
-export async function listNotificationDeliveries(
+export async function listNotificationDeliveryPage(
+  cursor?: string,
   ruleId?: string,
   signal?: AbortSignal
-): Promise<BudgetAlertDelivery[]> {
-  return collectCursorPages(async (cursor) => {
-    const response = await apiClient.GET('/api/v3/notifications/deliveries', {
-      params: { query: { limit: 50, cursor, rule_id: ruleId } },
-      signal
-    });
-    return pageResult(result(response.data, response.error, response.response));
+): Promise<CursorPage<BudgetAlertDelivery>> {
+  const response = await apiClient.GET('/api/v3/notifications/deliveries', {
+    params: { query: { limit: 50, cursor, rule_id: ruleId } },
+    signal
   });
+  return pageResult(result(response.data, response.error, response.response));
 }

@@ -190,3 +190,32 @@ it('surfaces project list failures', async () => {
     'Projects are unavailable'
   );
 });
+
+it('pages projects forward and back to the first page', async () => {
+  const later: Project = {
+    ...project,
+    id: '66666666-6666-6666-6666-666666666666',
+    name: 'Research'
+  };
+  vi.mocked(listProjectPage).mockImplementation(async (cursor) =>
+    cursor === 'projects-2'
+      ? { items: [later], nextCursor: null }
+      : { items: [project], nextCursor: 'projects-2' }
+  );
+  render();
+  await settle();
+  const control = (label: string) =>
+    [
+      ...host.querySelectorAll<HTMLButtonElement>(
+        'nav[aria-label="Project pages"] button'
+      )
+    ].find((button) => button.textContent === label)!;
+  control('Next').click();
+  await settle();
+  expect(host.textContent).toContain('Research');
+  expect(host.textContent).not.toContain('Platform');
+  control('Previous').click();
+  await settle();
+  expect(host.textContent).toContain('Platform');
+  expect(host.textContent).not.toContain('Research');
+});

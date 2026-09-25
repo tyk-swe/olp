@@ -176,6 +176,10 @@ export async function listProjectPage(
   return pageResult(result(response.data, response.error, response.response));
 }
 
+export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
+  return collectCursorPages((cursor) => listProjectPage(cursor, signal));
+}
+
 export async function listProjectMemberships(
   signal?: AbortSignal
 ): Promise<ProjectMembership[]> {

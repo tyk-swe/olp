@@ -16,13 +16,19 @@
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { formatDate } from '$lib/format';
+  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import {
+    cursorPaginationProps,
+    emptyCursorHistory,
+    resetCursor
+  } from '$lib/lists/pagination';
 
   const queryClient = useQueryClient();
 
-  let cursor = $state<string | undefined>();
+  const pagination = $state(emptyCursorHistory());
   const projects = createQuery(() => ({
-    queryKey: projectKeys.page(cursor),
-    queryFn: ({ signal }) => listProjectPage(cursor, signal)
+    queryKey: projectKeys.page(pagination.cursor),
+    queryFn: ({ signal }) => listProjectPage(pagination.cursor, signal)
   }));
   const items = $derived(projects.data?.items ?? []);
 
@@ -54,12 +60,12 @@
 
   let selectedId = $state('');
   const selected = $derived(items.find((project) => project.id === selectedId));
-  let memberCursor = $state<string | undefined>();
+  const memberPagination = $state(emptyCursorHistory());
   const members = createQuery(() => ({
-    queryKey: projectKeys.members(selectedId, memberCursor),
+    queryKey: projectKeys.members(selectedId, memberPagination.cursor),
     enabled: Boolean(selectedId),
     queryFn: ({ signal }) =>
-      listProjectMemberPage(selectedId, memberCursor, signal)
+      listProjectMemberPage(selectedId, memberPagination.cursor, signal)
   }));
   const memberItems = $derived(members.data?.items ?? []);
   const candidates = $derived(
@@ -77,7 +83,7 @@
 
   function select(project: Project) {
     selectedId = selectedId === project.id ? '' : project.id;
-    memberCursor = undefined;
+    resetCursor(memberPagination);
     memberError = '';
     memberNotice = '';
     renameValue = project.name;
@@ -242,12 +248,12 @@
         </tbody>
       </table>
     </div>
-    {#if projects.data?.nextCursor}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => (cursor = projects.data?.nextCursor ?? undefined)}
-        >Load more</button
-      >{/if}
+    {#if pagination.history.length > 0 || projects.data?.nextCursor}
+      <CursorPagination
+        {...cursorPaginationProps(pagination, projects.data?.nextCursor)}
+        label="Project pages"
+      />
+    {/if}
   {/if}
 
   {#if selected}
@@ -338,13 +344,15 @@
             </tbody>
           </table>
         </div>
-        {#if members.data?.nextCursor}<button
-            class="button button-secondary"
-            type="button"
-            onclick={() =>
-              (memberCursor = members.data?.nextCursor ?? undefined)}
-            >Load more members</button
-          >{/if}
+        {#if memberPagination.history.length > 0 || members.data?.nextCursor}
+          <CursorPagination
+            {...cursorPaginationProps(
+              memberPagination,
+              members.data?.nextCursor
+            )}
+            label="Project member pages"
+          />
+        {/if}
 
         <form class="create-form" onsubmit={submitAddMember}>
           <div class="form-field">

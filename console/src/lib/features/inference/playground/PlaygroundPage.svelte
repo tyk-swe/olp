@@ -52,7 +52,12 @@
   type Composer = 'basic' | 'advanced';
   let mode = $state<Mode>('text');
   let composer = $state<Composer>('basic');
-  let operation = $state<PlaygroundOperation>('generation');
+  let advancedOperation = $state<PlaygroundOperation>('generation');
+  // Basic mode always runs generation; the advanced choice is kept for when
+  // the operator switches back.
+  const operation = $derived<PlaygroundOperation>(
+    composer === 'advanced' ? advancedOperation : 'generation'
+  );
   let surface = $state<'openai' | 'anthropic' | 'gemini'>('openai');
   let model = $state('');
   let input = $state('');
@@ -123,10 +128,15 @@
     { value: 'advanced', label: 'Advanced' }
   ];
 
+  // Identifies the latest eligibility check; a reply for an earlier route,
+  // surface, or operation must not mark the current one as verified.
+  let streamCheckVersion = 0;
+
   $effect(() => {
     void model;
     void surface;
     void operation;
+    streamCheckVersion += 1;
     streamEnabled = false;
     streamCheck = 'idle';
     streamCheckMessage = '';
@@ -145,13 +155,14 @@
     templateKey = key;
     const template = templateFor(key);
     if (!template) return;
-    operation = template.operation;
+    advancedOperation = template.operation;
     if (template.surface) surface = template.surface;
     nativeDialect = template.nativeDialect ?? '';
     rawJson = JSON.stringify(template.request, null, 2);
   }
 
   async function checkStreamCapability() {
+    const version = ++streamCheckVersion;
     streamCheckMessage = '';
     if (!selectedRoute) {
       streamCheck = 'unknown';
@@ -167,6 +178,7 @@
         mode: 'streaming',
         preferences: JSON.parse(routing || '{}')
       });
+      if (version !== streamCheckVersion) return;
       if (decisions.some((decision) => decision.eligible)) {
         streamCheck = 'ok';
       } else {
@@ -175,6 +187,7 @@
           'No published target reports streaming eligibility for this route and surface.';
       }
     } catch {
+      if (version !== streamCheckVersion) return;
       streamCheck = 'unknown';
       streamCheckMessage =
         'Streaming capability could not be verified; the route may reject the stream.';
@@ -185,6 +198,7 @@
     streamEnabled = enabled;
     if (enabled) void checkStreamCapability();
     else {
+      streamCheckVersion += 1;
       streamCheck = 'idle';
       streamCheckMessage = '';
     }
@@ -490,7 +504,7 @@
         <div class="form-field">
           <label for="playground-operation">Operation</label><select
             id="playground-operation"
-            bind:value={operation}
+            bind:value={advancedOperation}
           >
             {#each operations as option (option.value)}<option
                 value={option.value}>{option.label}</option

@@ -1,10 +1,8 @@
 export const providerKeys = {
-  /** Every provider summary: the full list and each cursor page. */
+  /** Every provider summary cursor page. */
   summaries: ['providers', 'summary'] as const,
-  all: () => ['providers', 'summary', 'all'] as const,
   page: (cursor?: string) =>
     ['providers', 'summary', 'page', cursor ?? 'first'] as const,
-  detail: (id: string) => ['providers', 'detail', id] as const,
   kinds: () => ['providers', 'kinds'] as const,
   capabilityOptions: (kind: string) =>
     ['providers', 'capability-options', kind] as const,

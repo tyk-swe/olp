@@ -5,7 +5,7 @@ import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import {
   createBudgetAlertRule,
   createNotificationDestination,
-  listNotificationDeliveries,
+  listNotificationDeliveryPage,
   updateNotificationDestination,
   type NotificationDestination
 } from '$lib/features/access/notifications/api';
@@ -112,10 +112,11 @@ describe('notification deliveries', () => {
       jsonResponse({ items: [], next_cursor: null })
     );
 
-    await listNotificationDeliveries(destination.id);
+    await listNotificationDeliveryPage('page-2', destination.id);
 
     const url = new URL(requests[0]!.url);
     expect(url.pathname).toBe('/api/v3/notifications/deliveries');
     expect(url.searchParams.get('rule_id')).toBe(destination.id);
+    expect(url.searchParams.get('cursor')).toBe('page-2');
   });
 });

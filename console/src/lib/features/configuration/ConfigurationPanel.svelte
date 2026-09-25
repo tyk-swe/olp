@@ -2,6 +2,7 @@
   import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
   import { ApiProblem, errorMessage } from '$lib/api/http';
   import { copyText } from '$lib/clipboard';
+  import { downloadBlob } from '$lib/download';
   import {
     applyConfiguration,
     exportConfiguration,
@@ -41,12 +42,10 @@
 
   function downloadExport() {
     if (!exportedJSON) return;
-    const blob = new Blob([exportedJSON], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'openllmproxy-configuration.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
+    downloadBlob(
+      new Blob([exportedJSON], { type: 'application/json' }),
+      'openllmproxy-configuration.json'
+    );
   }
 
   async function copyExport() {

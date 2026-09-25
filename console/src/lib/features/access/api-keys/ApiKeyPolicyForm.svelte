@@ -130,7 +130,7 @@
       await focusFormError(root);
       return;
     }
-    const input = buildApiKeyPolicyInput(form);
+    const input = buildApiKeyPolicyInput(form, editing);
     if (editing) delete input.project_id;
     const saved = await onSubmit(input, form.allowedRoutes[0]);
     if (saved) dirty = false;

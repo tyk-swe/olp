@@ -453,4 +453,81 @@ describe('streaming', () => {
     await settle();
     expect(host.textContent).toContain('cannot be verified');
   });
+
+  it('ignores an eligibility check that finishes after the route changed', async () => {
+    const other: ActiveRoute = { ...route, id: 'route-b', slug: 'other-route' };
+    vi.mocked(listRoutes).mockImplementation(() => deferred([route, other]));
+    vi.mocked(listApiKeys).mockImplementation(() => deferred([]));
+    vi.mocked(simulateRouting).mockImplementation((input) =>
+      input.route === 'chat-route'
+        ? deferred([eligibleDecision], 100)
+        : deferred([{ ...eligibleDecision, eligible: false }], 400)
+    );
+    vi.mocked(streamPlayground).mockResolvedValue();
+    component = mount(PlaygroundProbe, { target: host, props: { client } });
+    flushSync();
+    await settle();
+    fill('#playground-model', 'chat-route');
+    streamToggle().click();
+    flushSync();
+    fill('#playground-model', 'other-route');
+    streamToggle().click();
+    flushSync();
+    await settle(150);
+    fill('#playground-input', 'hello');
+    submit();
+    await settle(0);
+    expect(streamPlayground).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Streaming has not been verified');
+  });
+});
+
+describe('composer operation', () => {
+  function chooseComposer(value: 'basic' | 'advanced') {
+    [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+      .find((radio) => radio.value === value)!
+      .click();
+    flushSync();
+  }
+
+  function choose(selector: string, value: string) {
+    const select = host.querySelector<HTMLSelectElement>(selector)!;
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  }
+
+  function runButton() {
+    return [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Run test'
+    )!;
+  }
+
+  it('runs basic generation after another advanced operation was chosen', async () => {
+    vi.mocked(runPlayground).mockResolvedValue(unaryReply);
+    await establish();
+    chooseComposer('advanced');
+    choose('#playground-operation', 'translation');
+    chooseComposer('basic');
+    expect(runButton().disabled).toBe(false);
+    expect(streamToggle()).not.toBeNull();
+
+    chooseComposer('advanced');
+    choose('#playground-operation', 'classification');
+    chooseComposer('basic');
+    choose('#playground-surface', 'anthropic');
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    submit();
+    await settle(0);
+    expect(host.querySelector('.field-error')).toBeNull();
+    expect(runPlayground).toHaveBeenCalledWith(
+      expect.objectContaining({ input: 'hello', surface: 'anthropic' }),
+      expect.anything()
+    );
+    chooseComposer('advanced');
+    expect(
+      host.querySelector<HTMLSelectElement>('#playground-operation')!.value
+    ).toBe('classification');
+  });
 });
