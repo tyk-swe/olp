@@ -109,12 +109,24 @@ func TestFailedStreamsRetainObservedUsage(t *testing.T) {
 				r.Header.Set("Content-Type", "application/json")
 				w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}
 				h.gateway.inference(family)(w, r)
-				if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "[DONE]") || strings.Contains(w.Body.String(), "response.completed") || !strings.Contains(w.Body.String(), `"code":"provider_protocol_error"`) {
+				if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "[DONE]") || strings.Contains(w.Body.String(), "response.completed") {
 					t.Fatalf("failed stream was not terminated with an error: %d %s", w.Code, w.Body.String())
+				}
+				if family == openai.FamilyResponses {
+					// The native response.failed event is itself the terminal;
+					// no contradictory proxy error may follow it.
+					if !strings.Contains(w.Body.String(), "event: response.failed") || strings.Contains(w.Body.String(), "event: error") {
+						t.Fatalf("native terminal gained a synthetic proxy error: %s", w.Body.String())
+					}
+				} else if !strings.Contains(w.Body.String(), `"code":"provider_protocol_error"`) {
+					t.Fatalf("committed failure must be signalled in-band: %s", w.Body.String())
 				}
 				env := h.sink.last(t)
 				if env.Outcome != "failure" || !env.Committed || len(env.Attempts) != 1 || env.Attempts[0].Class != classProtocol || h.mock.count("b") != 0 {
 					t.Fatalf("failed stream outcome changed: %+v", env)
+				}
+				if family == openai.FamilyResponses && (env.Attempts[0].NativeStatus != "failed" || env.Attempts[0].FaultOrigin != faultProviderDeclared || env.Attempts[0].FaultScope != scopeEndpoint) {
+					t.Fatalf("provider-declared terminal lost its attribution: %+v", env.Attempts[0])
 				}
 				if !reflect.DeepEqual(env.Usage, usage.want) || !reflect.DeepEqual(env.Attempts[0].Usage, usage.want) {
 					t.Fatalf("observed usage lost: request=%+v attempt=%+v want=%+v", env.Usage, env.Attempts[0].Usage, usage.want)

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -855,6 +856,10 @@ type streamWriter struct {
 	w         http.ResponseWriter
 	family    openai.Family
 	committed bool
+	// terminal records that the stream's own terminal event reached the
+	// client; the exchange then stands on its native outcome and finish
+	// must not append a contradictory proxy error after it.
+	terminal bool
 }
 
 // responseWriteTimeout bounds unary delivery and each streamed frame.
@@ -883,7 +888,25 @@ func (sw *streamWriter) emit(frame []byte) error {
 	if err := rc.Flush(); err != nil {
 		return fmt.Errorf("%w: %v", errClientWrite, err)
 	}
+	if terminalEvent(sw.family, frame) {
+		sw.terminal = true
+	}
 	return nil
+}
+
+// terminalEvent reports whether a client-facing frame carries the surface's
+// native terminal event. Anything after it is trailer evidence the client
+// has already resolved.
+func terminalEvent(family openai.Family, frame []byte) bool {
+	switch family {
+	case openai.FamilyResponses:
+		return responsesTerminalStatus(frame) != "" || bytes.Contains(frame, []byte("event: error\n"))
+	case openai.FamilyAnthropic:
+		return bytes.Contains(frame, []byte("event: message_stop\n")) || bytes.Contains(frame, []byte("event: error\n"))
+	case openai.FamilyChat:
+		return bytes.Contains(frame, []byte("data: [DONE]"))
+	}
+	return false
 }
 
 // finish completes the client response and returns the status it carried.
@@ -899,6 +922,11 @@ func (sw *streamWriter) finish(out *outcome) int {
 			writeSurfaceError(sw.w, out.err, sw.family.Surface())
 		}
 		return out.err.Status
+	}
+	if sw.terminal {
+		// A native terminal already reached the client: the provider's own
+		// outcome stands, and a trailing proxy error would contradict it.
+		return http.StatusOK
 	}
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion

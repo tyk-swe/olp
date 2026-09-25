@@ -415,9 +415,10 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	target, timeout, e := s.jobTarget(ctx, record)
 	if e != nil {
 		fact.Class = classConnect
+		fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(false)
-		return nil, &attemptFailure{class: classConnect}, fact
+		return nil, &attemptFailure{class: classConnect, origin: faultContract, scope: scopeContract}, fact
 	}
 	// Connection and credential authority stay pinned; quota changes in the
 	// current release still apply to subsequent requests for the retained job.
@@ -432,9 +433,10 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		})
 		if err != nil {
 			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
 			fact.Duration = s.now().Sub(fact.StartedAt)
 			fact.recordEvidence(false)
-			return nil, &attemptFailure{class: classProtocol}, fact
+			return nil, &attemptFailure{class: classProtocol, origin: faultContract, scope: scopeContract}, fact
 		}
 		call.Strict = true
 	}
@@ -456,6 +458,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	}
 	if rejection != nil {
 		fact.Class = rejection.class
+		rejection.attribute(&fact)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(false)
 		return nil, rejection, fact
@@ -465,9 +468,10 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	if request.Op == media.OpVideoDelete {
 		if _, err := media.BeginDeletion(ctx, s.Media.Jobs.Pool, record.ID); err != nil {
 			fact.Class = classConnect
+			fact.FaultOrigin, fact.FaultScope = faultProxyPersistence, scopeRequest
 			fact.Duration = s.now().Sub(fact.StartedAt)
 			fact.recordEvidence(false)
-			return nil, &attemptFailure{class: classConnect}, fact
+			return nil, &attemptFailure{class: classConnect, origin: faultProxyPersistence, scope: scopeRequest}, fact
 		}
 	}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)
@@ -494,6 +498,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 			upstream:   failure.Upstream,
 			dispatched: failure.Dispatched,
 		}
+		f.attribute(&fact)
 		fact.recordEvidence(f.billingUncertain())
 		s.health.record(record.ProviderID, fact)
 		atr.Finish(fact.Class, fact.Status)
@@ -535,10 +540,11 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 				_ = s.Media.Jobs.Transport.Spool.Remove(result.Artifact.Handle)
 			}
 			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
 			fact.Duration = s.now().Sub(fact.StartedAt)
 			fact.recordEvidence(true)
 			atr.Finish(fact.Class, result.Status)
-			return nil, &attemptFailure{class: classProtocol, status: result.Status, dispatched: true}, fact
+			return nil, &attemptFailure{class: classProtocol, status: result.Status, dispatched: true, origin: faultContract, scope: scopeContract}, fact
 		}
 	}
 	fact.Class = "success"
@@ -742,7 +748,9 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		LastPolledAt:     s.now(),
 	})
 	if err != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
+		// RefreshJob is this gateway's own durable store; its failure is
+		// proxy persistence, never provider evidence.
+		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect, origin: faultProxyPersistence, scope: scopeRequest})
 		return
 	}
 	result.Video.ID = updated.ID
@@ -755,7 +763,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		body, renderFailure = media.EncodeVideoObject(result.Video, updated.ID, updated.RouteSlug)
 	}
 	if renderFailure != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol, origin: faultContract, scope: scopeContract})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
@@ -898,7 +906,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if !finalized {
 		s.Media.Jobs.RecordGap()
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
+		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect, origin: faultProxyPersistence, scope: scopeRequest})
 		return
 	}
 	if record.StrictContract && result == nil {
@@ -921,7 +929,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		body, renderFailure = media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
 	}
 	if renderFailure != nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
+		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol, origin: faultContract, scope: scopeContract})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}

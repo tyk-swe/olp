@@ -339,7 +339,9 @@ func (a *Admission) reserveTarget(ctx context.Context, provider *runtime.Provide
 		// is abandoned: the attempt never happened.
 		settleTargetRefund(ctx, reservation)
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			return nil, &attemptFailure{class: classRateLimit, quota: step.quota, retryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
+			// A quota this gateway enforces rejected the attempt before
+			// dispatch; it is proxy capacity, never provider evidence.
+			return nil, &attemptFailure{class: classRateLimit, quota: step.quota, retryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter), origin: faultProxyCapacity, scope: scopeRequest, resource: step.quota + " quota"}, false
 		}
 		a.logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID, "error", err.Error())
 		return nil, nil, true

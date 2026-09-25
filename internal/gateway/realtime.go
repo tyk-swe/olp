@@ -657,6 +657,14 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		}
 		if relayErr != nil {
 			fact.Class = class
+			switch {
+			case errors.Is(relayErr, errRealtimeAuthorityRevoked), errors.Is(relayErr, errRealtimeProviderCredentialRevoked):
+				fact.FaultOrigin, fact.FaultScope = faultProxyPolicy, scopeCredential
+			case errors.Is(relayErr, errRealtimeClientClosed), errors.Is(relayErr, context.Canceled):
+				fact.FaultOrigin, fact.FaultScope = faultClientDelivery, scopeRequest
+			default:
+				fact.FaultOrigin, fact.FaultScope = faultProviderTransport, scopeEndpoint
+			}
 		}
 	}
 	if relayErr != nil {
@@ -743,6 +751,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	fact.Mode = "realtime"
 	finish := func(class string, e *Error) *Error {
 		fact.Class = class
+		if fact.FaultOrigin == "" && fact.FaultScope == "" {
+			fact.FaultOrigin, fact.FaultScope = defaultFault(class)
+		}
 		if fact.Interaction != nil && fact.Status > 0 {
 			fact.Interaction.UpstreamState = usage.UpstreamTerminal
 		}
@@ -753,6 +764,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	}
 	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
+		fact.FaultOrigin, fact.FaultScope = faultContract, scopeRequest
 		return nil, finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
 	var secret []byte
@@ -760,6 +772,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
 	}
 	if _, err := s.auth.Apply(ctx, probe, p.provider.Connector(), secret, nil); err != nil {
+		// Applying the configured credential is local machinery; it never
+		// reached the provider.
+		fact.FaultOrigin, fact.FaultScope = faultContract, scopeCredential
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	headers := http.Header{}
@@ -768,6 +783,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	}
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
+		fact.FaultOrigin, fact.FaultScope = faultContract, scopeCredential
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
