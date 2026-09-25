@@ -122,6 +122,23 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	}
 	b.attempts++
 	b.latency += fact.Duration
+	// Fault attribution decides whether this attempt is evidence about the
+	// provider at all. Facts that carry none fall back to the class default
+	// so dispatchers that never attributed a fault keep their behavior.
+	origin, scope := fact.FaultOrigin, fact.FaultScope
+	if fact.Class != classSuccess && origin == "" && scope == "" {
+		origin, scope = defaultFault(fact.Class)
+	}
+	// Proxy-local and request-local faults — capacity bounds, persistence
+	// failures, contract defects, the client's own connection — say nothing
+	// about the provider endpoint and must not charge its shared circuit.
+	switch origin {
+	case faultProxyCapacity, faultProxyPersistence, faultProxyPolicy, faultClientDelivery, faultContract:
+		return
+	}
+	if scope == scopeRequest || scope == scopeContract {
+		return
+	}
 	switch fact.Class {
 	case "success":
 		b.successes++

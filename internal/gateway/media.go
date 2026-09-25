@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -574,6 +575,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Committed = f.committed
 		if fact.Interaction != nil {
 			switch {
@@ -606,26 +608,26 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	}
 	call, effective, mErr := encode(x.media, cfg, a.UpstreamModel)
 	if mErr != nil {
-		return fail(classProtocol, nil)
+		return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	var strictTemplate *mediacontract.Template
 	var bound mediacontract.Bound
 	if x.strict() {
 		strictTemplate, _ = x.request.release.Snapshot.MediaTemplate(x.route.Slug, a.TargetID, x.media.Op)
 		if strictTemplate == nil {
-			return fail(classProtocol, nil)
+			return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 		}
 		var err error
 		bound, err = bindMediaContract(strictTemplate, x.media, call, effective)
 		if err != nil {
-			return fail(classProtocol, nil)
+			return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 		}
 		call.Strict = true
 	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(classTimeout, &attemptFailure{overall: true, origin: faultProxyCapacity, scope: scopeRequest, resource: "request deadline"})
 	}
 	timeout := min(a.Timeout, remaining)
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
@@ -658,11 +660,11 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	if strictTemplate != nil && result.Artifact != nil {
 		blob, err := result.Artifact.BlobReference()
 		if err != nil {
-			return fail(classProtocol, &attemptFailure{dispatched: true})
+			return fail(classProtocol, &attemptFailure{dispatched: true, origin: faultContract, scope: scopeContract})
 		}
 		envelope, err := oif.NewBlobResult(bound.Descriptor, blob, oif.Complete)
 		if err != nil {
-			return fail(classProtocol, &attemptFailure{dispatched: true})
+			return fail(classProtocol, &attemptFailure{dispatched: true, origin: faultContract, scope: scopeContract})
 		}
 		result.BlobSource = &envelope
 	}
@@ -679,7 +681,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 			if call.Ambiguous {
 				class = classAmbiguous
 			}
-			return fail(class, &attemptFailure{dispatched: true})
+			return fail(class, &attemptFailure{dispatched: true, origin: faultContract, scope: scopeContract})
 		}
 	}
 	fb := result.FirstByte
@@ -971,6 +973,13 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaO
 
 // streamMediaEvents drains a stream inside its attempt's deadline and quota
 // reservation. Only a terminal event proves that the response completed.
+// Media-stream faults that are not provider transport evidence: the strict
+// contract rejected a frame, or the provider declared an in-band failure.
+var (
+	errMediaStreamContract = errors.New("media stream event violated the admitted contract")
+	errMediaProviderFailed = errors.New("provider media stream failed")
+)
+
 func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*openai.Usage, bool, *attemptFailure) {
 	defer result.Body.Close()
 	sw := &streamWriter{w: w, family: x.family}
@@ -990,7 +999,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 					frameName = *frame.Event
 				}
 				if _, err := contract.Event(bound.Descriptor, frame.Data, frameName, sequence); err != nil {
-					return err
+					return fmt.Errorf("%w: %v", errMediaStreamContract, err)
 				}
 				sequence++
 			}
@@ -1003,7 +1012,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 			}
 		}
 		if event == "error" || (len(payload.Error) > 0 && string(payload.Error) != "null") {
-			return errors.New("provider media stream failed")
+			return errMediaProviderFailed
 		}
 		var buf bytes.Buffer
 		if contract != nil && frame.ID != nil {
@@ -1057,14 +1066,20 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 	if errors.Is(decodeErr, terminal) {
 		return usage, sw.committed, nil
 	}
-	class := classProtocol
+	f := &attemptFailure{class: classProtocol, committed: sw.committed, dispatched: true}
 	switch {
 	case errors.Is(decodeErr, errClientWrite), errors.Is(ctx.Err(), context.Canceled):
-		class = classCancelled
+		f.class = classCancelled
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		class = classTimeout
+		f.class = classTimeout
+	case errors.Is(decodeErr, sse.ErrEventTooLarge):
+		f.origin, f.scope, f.resource = faultProxyCapacity, scopeRequest, "event bytes"
+	case errors.Is(decodeErr, errMediaStreamContract):
+		f.origin, f.scope = faultContract, scopeContract
+	case errors.Is(decodeErr, errMediaProviderFailed):
+		f.origin, f.scope = faultProviderDeclared, scopeEndpoint
 	}
-	return usage, sw.committed, &attemptFailure{class: class, committed: sw.committed, dispatched: true}
+	return usage, sw.committed, f
 }
 
 // mediaError maps a media-layer failure onto a gateway error.

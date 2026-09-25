@@ -22,6 +22,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -489,7 +490,9 @@ func TestOversizedEventFailsBeforeCommit(t *testing.T) {
 		fmt.Fprintf(w, "data: {\"padding\":%q}\n\n", strings.Repeat("x", 5000))
 	})
 	resp, body := h.chat(fullKey, nil, `,"stream":true`)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "provider_protocol_error" {
+	// The gateway's own event bound names itself rather than blaming the
+	// provider for malformed data.
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, body) != "proxy_resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
@@ -498,7 +501,7 @@ func TestOversizedUnaryResponseRejected(t *testing.T) {
 	h := newHarness(t, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 512, MaxEventBytes: 256})
 	h.mock.set("a", completion(modelA, strings.Repeat("y", 1000)))
 	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "provider_protocol_error" {
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, body) != "proxy_resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
@@ -854,13 +857,57 @@ func TestCORSPreflight(t *testing.T) {
 
 func TestClientWriteFailureIsCancellation(t *testing.T) {
 	st := &attemptState{parent: context.Background()}
-	if got := st.classify(fmt.Errorf("%w: broken pipe", errClientWrite), true); got != classCancelled {
-		t.Fatalf("client write failure classified as %q, want %q", got, classCancelled)
+	if got := st.classify(fmt.Errorf("%w: broken pipe", errClientWrite), true); got.class != classCancelled {
+		t.Fatalf("client write failure classified as %q, want %q", got.class, classCancelled)
 	}
-	if got := st.classify(errors.New("unexpected EOF"), true); got != classProtocol {
-		t.Fatalf("committed upstream failure classified as %q, want %q", got, classProtocol)
+	if got := st.classify(errors.New("unexpected EOF"), true); got.class != classProtocol {
+		t.Fatalf("committed upstream failure classified as %q, want %q", got.class, classProtocol)
 	}
-	if got := st.classify(errors.New("connection refused"), false); got != classConnect {
-		t.Fatalf("pre-commit transport failure classified as %q, want %q", got, classConnect)
+	if got := st.classify(errors.New("connection refused"), false); got.class != classConnect {
+		t.Fatalf("pre-commit transport failure classified as %q, want %q", got.class, classConnect)
+	}
+}
+
+// The fault table separates who owns a failure from the retry class it keeps:
+// only provider-owned origins may charge the shared endpoint circuit.
+func TestClassifyFaultAttribution(t *testing.T) {
+	deadline, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	deadlineCancel()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	cases := []struct {
+		name       string
+		parent     context.Context
+		reason     int32
+		dispatched bool
+		err        error
+		committed  bool
+		class      string
+		origin     string
+		scope      string
+	}{
+		{name: "client write failure", parent: context.Background(), err: fmt.Errorf("%w: broken pipe", errClientWrite), committed: true, class: classCancelled, origin: faultClientDelivery, scope: scopeRequest},
+		{name: "caller cancelled", parent: cancelled, err: context.Canceled, class: classCancelled, origin: faultClientDelivery, scope: scopeRequest},
+		{name: "caller deadline before dispatch", parent: deadline, err: context.DeadlineExceeded, class: classTimeout, origin: faultProviderTransport, scope: scopeRequest},
+		{name: "caller deadline after dispatch", parent: deadline, dispatched: true, err: context.DeadlineExceeded, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
+		{name: "first byte deadline", parent: context.Background(), reason: 1, dispatched: true, err: context.Canceled, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
+		{name: "idle deadline", parent: context.Background(), reason: 2, dispatched: true, err: context.Canceled, class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint},
+		{name: "stream lifetime cap", parent: context.Background(), reason: 3, dispatched: true, err: context.Canceled, committed: true, class: classTimeout, origin: faultProxyCapacity, scope: scopeRequest},
+		{name: "event byte ceiling", parent: context.Background(), err: openai.ErrEventTooLarge, committed: true, class: classProtocol, origin: faultProxyCapacity, scope: scopeRequest},
+		{name: "frame projection defect", parent: context.Background(), err: fmt.Errorf("%w: id remap", errFrameProjection), committed: true, class: classProtocol, origin: faultContract, scope: scopeContract},
+		{name: "committed transport cut", parent: context.Background(), err: errors.New("unexpected EOF"), committed: true, class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint},
+		{name: "truncated provider stream", parent: context.Background(), err: &openai.ProtocolError{Detail: "ended", Truncated: true}, class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint},
+		{name: "connect refusal", parent: context.Background(), err: errors.New("connection refused"), class: classConnect, origin: faultProviderTransport, scope: scopeEndpoint},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &attemptState{parent: tc.parent}
+			st.reason.Store(tc.reason)
+			st.dispatched.Store(tc.dispatched)
+			got := st.classify(tc.err, tc.committed)
+			if got.class != tc.class || got.origin != tc.origin || got.scope != tc.scope {
+				t.Fatalf("classify = (%q, %q, %q), want (%q, %q, %q)", got.class, got.origin, got.scope, tc.class, tc.origin, tc.scope)
+			}
+		})
 	}
 }

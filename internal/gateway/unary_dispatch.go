@@ -41,6 +41,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
 			v := f.retryAfter
@@ -55,19 +56,19 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	}
 	plan, err := x.unaryPlan(provider, a.UpstreamModel)
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	endpoint, err := plan.Endpoint()
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	if _, err = s.egress.ValidateEndpoint(endpoint); err != nil {
-		return fail(classConnect, nil)
+		return fail(classConnect, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(classTimeout, &attemptFailure{overall: true, origin: faultProxyCapacity, scope: scopeRequest, resource: "request deadline"})
 	}
 	actx, cancel := context.WithCancel(attemptCtx)
 	defer cancel()
@@ -76,7 +77,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	body := plan.Body()
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, state.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fail(classConnect, nil)
+		return fail(classConnect, &attemptFailure{origin: faultContract, scope: scopeRequest})
 	}
 	if trace != nil {
 		trace.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
@@ -91,17 +92,20 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	credentialValues, err := s.auth.Apply(actx, req, plan.Config(), secret, body)
 	if err != nil {
 		if actx.Err() != nil {
-			return fail(state.classify(err, false), nil)
+			f := state.classify(err, false)
+			return fail(f.class, f)
 		}
-		return fail(classCredential, nil)
+		// Signing the request is local machinery; the provider never saw it.
+		return fail(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	client, err := s.providerClient(actx, x.request.release, provider, slot)
 	if err != nil {
-		return fail(classCredential, nil)
+		return fail(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return fail(state.classify(err, false), nil)
+		f := state.classify(err, false)
+		return fail(f.class, f)
 	}
 	defer response.Body.Close()
 	received := s.now().Sub(fact.StartedAt)
@@ -112,7 +116,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 			state.upstream.Store(3)
 		}
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
-		failure := &attemptFailure{status: response.StatusCode, upstream: openai.ParseErrorBody(raw)}
+		failure := &attemptFailure{status: response.StatusCode, upstream: openai.ParseErrorBody(raw), origin: faultProviderDeclared}
 		if failure.upstream != nil {
 			failure.upstream.Message = redactCredentials(failure.upstream.Message, credentialValues)
 		}
@@ -132,7 +136,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	state.upstream.Store(2)
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation", origin: faultContract, scope: scopeContract})
 	}
 	cap := plan.Receipt().Obligations.MaxBodyBytes
 	if s.cfg.MaxResponseBytes > 0 {
@@ -140,10 +144,11 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(cap)+1))
 	if err != nil {
-		return fail(state.classify(err, false), nil)
+		f := state.classify(err, false)
+		return fail(f.class, f)
 	}
 	if len(raw) > cap {
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation", origin: faultContract, scope: scopeContract})
 	}
 	state.upstream.Store(3)
 	result, err := plan.Decode(raw)
@@ -156,7 +161,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		if errors.As(err, &incompatible) && (incompatible.Code == "content_policy_blocked" || incompatible.Code == "policy_conflict") {
 			return fail(classPolicy, &attemptFailure{policyCode: incompatible.Code})
 		}
-		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation", origin: faultContract, scope: scopeContract})
 	}
 	fact.Class = classSuccess
 	fact.Duration = s.now().Sub(fact.StartedAt)

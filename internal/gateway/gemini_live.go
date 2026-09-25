@@ -315,6 +315,16 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		}
 		if relayErr != nil {
 			fact.Class = class
+			switch {
+			case errors.Is(relayErr, errGeminiLiveClientProtocol), errors.Is(relayErr, errGeminiLiveClientClosed), errors.Is(relayErr, context.Canceled):
+				fact.FaultOrigin, fact.FaultScope = faultClientDelivery, scopeRequest
+			case errors.Is(relayErr, errGeminiLiveAuthority):
+				fact.FaultOrigin, fact.FaultScope = faultProxyPolicy, scopeCredential
+			case errors.Is(relayErr, errGeminiLiveProviderError):
+				fact.FaultOrigin, fact.FaultScope = faultProviderDeclared, scopeEndpoint
+			default:
+				fact.FaultOrigin, fact.FaultScope = defaultFault(class)
+			}
 			if fact.Interaction != nil {
 				if errors.Is(relayErr, errGeminiLiveProviderError) {
 					fact.Interaction.UpstreamState = usage.UpstreamTerminal

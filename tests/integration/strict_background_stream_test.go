@@ -166,6 +166,57 @@ func TestStrictBackgroundResponseFailedTerminalIsVisibleAndSettled(t *testing.T)
 	}
 }
 
+// A retained replay whose provider terminal is response.incomplete is a
+// successful native outcome: the gateway delivers the event with its empty
+// visible output, reasoning item and incomplete_details unchanged, records no
+// fault, reconciles the retained state to "incomplete" and settles the native
+// usage exactly once.
+func TestStrictBackgroundResponseIncompleteTerminalIsANativeOutcome(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}},
+		[]string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	fixture.resps["resp-up-1"]["status"] = "in_progress"
+	fixture.resps["resp-up-1"]["usage"] = nil
+	status, created, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
+		strings.NewReader(`{"model":"`+slug+`","input":"incomplete work","background":true,"store":true}`),
+		map[string]string{"Content-Type": "application/json"})
+	local, ok := jsonStringField(created, "id")
+	if status != http.StatusOK || !ok || !strings.HasPrefix(local, "strict_response_") {
+		t.Fatalf("pending strict response: %d %s", status, created)
+	}
+	fixture.respGetStream.Store("event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"sequence_number\":7,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"incomplete\",\"model\":\"" + vendorModel + "\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[]}],\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":6,\"total_tokens\":10}}}\n\n")
+	status, body, _ := h.gatewayRaw(http.MethodGet, "/v1/responses/"+local+"?stream=true&starting_after=6", key, nil, nil)
+	if status != http.StatusOK || !bytes.Contains(body, []byte(`"type":"response.incomplete"`)) ||
+		!bytes.Contains(body, []byte(`"incomplete_details":{"reason":"max_output_tokens"}`)) ||
+		!bytes.Contains(body, []byte(`"type":"reasoning"`)) ||
+		!bytes.Contains(body, []byte(`"id":"`+local+`"`)) || bytes.Contains(body, []byte("resp-up-1")) ||
+		bytes.Contains(body, []byte("event: error")) {
+		t.Fatalf("native incomplete terminal was relabeled or gained a synthetic error: status=%d body=%s", status, body)
+	}
+	terminal := sink.last()
+	if terminal.Outcome != "success" || terminal.ErrorClass != "" || !terminal.Committed || len(terminal.Attempts) != 1 ||
+		terminal.Attempts[0].Class != "success" || terminal.Attempts[0].NativeStatus != "incomplete" ||
+		terminal.Attempts[0].FaultOrigin != "" {
+		t.Fatalf("native incomplete terminal was not recorded as its own outcome: %+v", terminal)
+	}
+	var state string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state); err != nil || state != "incomplete" {
+		t.Fatalf("retained state did not reconcile to the native terminal: %q %v", state, err)
+	}
+	var attempts, input, output int64
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
+ FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &input, &output); err != nil || attempts != 1 || input != 4 || output != 6 {
+		t.Fatalf("incomplete terminal usage duplicated/lost: attempts=%d input=%d output=%d err=%v", attempts, input, output, err)
+	}
+}
+
 func TestStrictBackgroundResponsePinnedJavaScriptSDKRecovery(t *testing.T) {
 	fixture := newOpenAIFixture(t, "")
 	h := newAccessHarness(t)

@@ -77,9 +77,26 @@ type AttemptFact struct {
 	Mode               string // unary or streaming
 	Status             int    // upstream HTTP status; 0 when none was received
 	Class              string // success or a failure class from the retry taxonomy
-	Committed          bool
-	StartedAt          time.Time
-	Duration           time.Duration
+	// FaultOrigin attributes a failed attempt to the component that owns the
+	// failure: provider transport, a provider-declared error, a delivered
+	// native outcome, the client's own delivery, a proxy-local capacity or
+	// persistence fault, or a contract mismatch. FaultScope bounds how far the
+	// failure may charge shared state: endpoint, credential, contract, or
+	// request. Both are empty on success and derived from Class when a
+	// failure site left them unset; only provider-owned endpoint and
+	// credential scopes may ever charge the shared provider circuit.
+	FaultOrigin string
+	FaultScope  string
+	// FaultResource names the bounded gateway resource a proxy-capacity
+	// fault hit, such as event bytes or continuation state.
+	FaultResource string
+	// NativeStatus is the provider-declared terminal status observed on a
+	// native Responses exchange, such as "incomplete"; empty when no native
+	// terminal status was seen.
+	NativeStatus string
+	Committed    bool
+	StartedAt    time.Time
+	Duration     time.Duration
 	// FirstByte is the time from the start of the attempt until the upstream
 	// response status was received. It is nil when no response arrived.
 	FirstByte *time.Duration
@@ -140,6 +157,10 @@ func (l LogSink) Terminal(e Envelope) {
 			"credential_version":   a.CredentialVersion,
 			"status":               a.Status,
 			"class":                a.Class,
+			"fault_origin":         a.FaultOrigin,
+			"fault_scope":          a.FaultScope,
+			"fault_resource":       a.FaultResource,
+			"native_status":        a.NativeStatus,
 			"committed":            a.Committed,
 			"duration":             a.Duration,
 			"mode":                 a.Mode,

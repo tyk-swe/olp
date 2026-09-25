@@ -48,7 +48,7 @@ func TestStreamsUsePerEventLimitNotUnaryResponseLimit(t *testing.T) {
 				if w.Code != http.StatusOK || strings.Count(w.Body.String(), "piece") != chunks {
 					t.Fatalf("valid events were lost: %d %s", w.Code, w.Body.String())
 				}
-				if strings.Contains(w.Body.String(), marker) == oversizedEvent || strings.Contains(w.Body.String(), `"code":"provider_protocol_error"`) != oversizedEvent {
+				if strings.Contains(w.Body.String(), marker) == oversizedEvent || strings.Contains(w.Body.String(), `"code":"proxy_resource_exhausted"`) != oversizedEvent {
 					t.Fatalf("incorrect terminal frame: %s", w.Body.String())
 				}
 				env := h.sink.last(t)

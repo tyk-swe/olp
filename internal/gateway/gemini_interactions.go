@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -80,7 +81,18 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		if x.dispatched && len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			if fact.Class == classSuccess {
+				// The provider exchange already succeeded; a failure rendered
+				// now is this gateway's persistence, capacity, or projection
+				// defect — the error code names which.
 				fact.Class, fact.BillingUncertain, fact.UsageComplete = classProtocol, true, false
+				switch e.Code {
+				case "provider_state_unavailable":
+					fact.FaultOrigin, fact.FaultScope = faultProxyPersistence, scopeRequest
+				case "upstream_response_too_large":
+					fact.FaultOrigin, fact.FaultScope, fact.FaultResource = faultProxyCapacity, scopeRequest, "response bytes"
+				default:
+					fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
+				}
 				if fact.Interaction != nil {
 					fact.Interaction.UpstreamState = usage.UpstreamTerminal
 				}
@@ -374,7 +386,18 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		if x.dispatched && len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			if fact.Class == classSuccess {
+				// The provider exchange already succeeded; a failure rendered
+				// now is this gateway's persistence, capacity, or projection
+				// defect — the error code names which.
 				fact.Class = classProtocol
+				switch e.Code {
+				case "provider_state_unavailable":
+					fact.FaultOrigin, fact.FaultScope = faultProxyPersistence, scopeRequest
+				case "upstream_response_too_large":
+					fact.FaultOrigin, fact.FaultScope, fact.FaultResource = faultProxyCapacity, scopeRequest, "response bytes"
+				default:
+					fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
+				}
 				if fact.Interaction != nil {
 					fact.Interaction.UpstreamState = usage.UpstreamTerminal
 				}
@@ -589,6 +612,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class = classCancelled
+			fact.FaultOrigin, fact.FaultScope = faultClientDelivery, scopeRequest
 			if fact.Interaction != nil {
 				fact.Interaction.UpstreamState = usage.UpstreamTerminal
 				if n > 0 {
@@ -644,7 +668,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			}
 			local, err = s.storeGeminiInteraction(ctx, x, p, authority.ID, state.ID, initial, parent)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w: %v", errResponsePersistence, err)
 			}
 			localID = local.ID
 		}
@@ -653,15 +677,15 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			err := s.Resources.MarkInteractionStatus(commitCtx, authority.ID, local.ID, event.Status)
 			stopCommit()
 			if err != nil {
-				return err
+				return fmt.Errorf("%w: %v", errResponsePersistence, err)
 			}
 		}
 		projected, err := event.WithProjection(localID, previous, x.route.Slug)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %v", errFrameProjection, err)
 		}
 		if local != nil && containsNativeResourceID(projected, state.ID) {
-			return errors.New("Interaction event contains an unbound native resource identity")
+			return fmt.Errorf("%w: Interaction event contains an unbound native resource identity", errFrameProjection)
 		}
 		var output bytes.Buffer
 		if frame.ID != nil {
@@ -686,7 +710,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		}
 		output.WriteByte('\n')
 		if output.Len() > limit {
-			return errors.New("projected Interaction event exceeds byte limit")
+			return fmt.Errorf("%w: projected Interaction event", openai.ErrEventTooLarge)
 		}
 		if !committed {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -698,7 +722,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			}
 		}
 		if _, err := w.Write(output.Bytes()); err != nil {
-			return err
+			return fmt.Errorf("%w: %v", errClientWrite, err)
 		}
 		x.delivered(s.now())
 		if f := &x.facts[len(x.facts)-1]; f.Interaction != nil {
@@ -716,12 +740,31 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 				s.recordGeminiInteractionUsage(x, object)
 			}
 		}
-		return http.NewResponseController(w).Flush()
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return fmt.Errorf("%w: %v", errClientWrite, err)
+		}
+		return nil
 	})
 	if err != nil || !state.Done {
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classProtocol, true
+			// Each leg of the stream loop attributes its own fault: the
+			// provider's wire, this gateway's durable store and projection,
+			// the event bound, or the client's own connection.
+			switch {
+			case errors.Is(err, errClientWrite):
+				fact.Class = classCancelled
+				fact.FaultOrigin, fact.FaultScope = faultClientDelivery, scopeRequest
+			case errors.Is(err, errResponsePersistence):
+				fact.FaultOrigin, fact.FaultScope = faultProxyPersistence, scopeRequest
+			case errors.Is(err, errFrameProjection):
+				fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
+			case errors.Is(err, openai.ErrEventTooLarge), errors.Is(err, sse.ErrEventTooLarge):
+				fact.FaultOrigin, fact.FaultScope, fact.FaultResource = faultProxyCapacity, scopeRequest, "event bytes"
+			default:
+				fact.FaultOrigin, fact.FaultScope = faultProviderTransport, scopeEndpoint
+			}
 			if fact.Interaction != nil {
 				fact.Interaction.UpstreamState = usage.UpstreamUnknown
 			}

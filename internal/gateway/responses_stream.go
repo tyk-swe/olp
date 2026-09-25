@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -79,29 +80,29 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
 func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool) ([]byte, []byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
-		return nil, nil, errors.New("response stream frame has no data")
+		return nil, nil, fmt.Errorf("%w: response stream frame has no data", errResponseMapping)
 	}
 	payload := bytes.TrimSpace(frame[i+7:])
 	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(frame) + 2048})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return nil, nil, errors.New("response stream frame is malformed")
+		return nil, nil, fmt.Errorf("%w: response stream frame is malformed", errResponseMapping)
 	}
 	response, present := doc.Root().Lookup("response")
 	if !present {
 		if kind, found := doc.Root().Lookup("type"); found {
 			if name, valid := kind.Text(); valid && (name == "response.created" || name == "response.in_progress" || name == "response.queued") {
-				return nil, nil, errors.New("response lifecycle event has no resource identity")
+				return nil, nil, fmt.Errorf("%w: response lifecycle event has no resource identity", errResponseMapping)
 			}
 		}
 		return frame, nil, nil
 	}
 	if response.Kind() != oif.Object {
-		return nil, nil, errors.New("response stream frame has no response object")
+		return nil, nil, fmt.Errorf("%w: response stream frame has no response object", errResponseMapping)
 	}
 	id, present := response.Lookup("id")
 	identity, valid := id.Text()
 	if !present || !valid || identity != projection.upstreamID {
-		return nil, nil, errors.New("response stream changed resource identity")
+		return nil, nil, fmt.Errorf("%w: response stream changed resource identity", errResponseMapping)
 	}
 	var mapped oif.Document
 	if strict {
@@ -186,6 +187,14 @@ func redactFailedResponseFrame(frame []byte, credentials []string) ([]byte, erro
 	return out, nil
 }
 
+// Retained-stream faults that originate in this gateway rather than the
+// provider: replay projection defects and durability of the local resource
+// state. They never charge the provider's shared circuit.
+var (
+	errRetainedProjection = errors.New("retained response event could not be projected")
+	errRetainedCommit     = errors.New("retained response terminal state could not be committed")
+)
+
 func (s *Server) responseCredentialValues(x *execution, p *pin, response *http.Response) []string {
 	values := []string{string(s.pinSecret(x, p))}
 	if response.Request != nil {
@@ -226,32 +235,47 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	x.dispatched = true
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
-		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
+		// The provider answered a stream endpoint without an event stream;
+		// that is malformed provider data, not a projection defect.
+		if len(x.facts) > 0 {
+			fact := &x.facts[len(x.facts)-1]
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultProviderTransport, scopeEndpoint
+		}
+		return serverError(http.StatusBadGateway, "provider_protocol_error", "The provider did not return a Responses event stream.")
 	}
 	limit := int(s.cfg.MaxEventBytes)
 	if limit <= 0 {
 		limit = 1 << 20
 	}
 	committed := false
-	nativeIncomplete := false
 	nativeTerminalFailure := false
 	fact := &x.facts[len(x.facts)-1]
 	credentialValues := s.responseCredentialValues(x, p, resp)
 	emit := func(frame []byte) error {
 		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
-		if err != nil || len(projected) > limit {
-			return errors.New("retained response event could not be projected")
+		if err != nil {
+			if errors.Is(err, errResponseMapping) {
+				// Malformed or drifting provider frame data is endpoint
+				// evidence, not a projection defect of this gateway.
+				return err
+			}
+			return fmt.Errorf("%w: %v", errRetainedProjection, err)
+		}
+		if len(projected) > limit {
+			return openai.ErrEventTooLarge
 		}
 		if original != nil {
 			if status, ok := upstreamString(original, "status"); ok {
-				if status == "incomplete" {
-					nativeIncomplete = true
-				}
 				if status == "failed" {
 					nativeTerminalFailure = true
 				}
 				switch status {
 				case "completed", "failed", "incomplete", "cancelled":
+					// A terminal status the provider declared is outcome
+					// evidence; "incomplete" is a valid terminal, never a
+					// fault of the replay.
+					fact.NativeStatus = status
 					commitCtx, stopCommit := resourceCommitContext(ctx)
 					reconcileErr := s.reconcileResponse(commitCtx, res.ID, original)
 					var updateErr error
@@ -260,7 +284,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 					}
 					stopCommit()
 					if reconcileErr != nil || updateErr != nil {
-						return errors.New("retained response terminal state could not be committed")
+						return errRetainedCommit
 					}
 				}
 			}
@@ -268,10 +292,10 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if bytes.Contains(projected, []byte("event: response.failed\n")) || bytes.Contains(projected, []byte("event: error\n")) {
 			projected, err = redactFailedResponseFrame(projected, credentialValues)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w: %v", errRetainedProjection, err)
 			}
 			if len(projected) > limit {
-				return errors.New("redacted response event exceeds byte limit")
+				return openai.ErrEventTooLarge
 			}
 		}
 		if !committed {
@@ -281,24 +305,69 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			committed = true
 		}
 		if _, err := w.Write(projected); err != nil {
-			return err
+			return fmt.Errorf("%w: %v", errClientWrite, err)
 		}
 		x.delivered(s.now())
 		if fact.Interaction != nil {
 			fact.Interaction.ClientState = usage.ClientPartial
 		}
-		return http.NewResponseController(w).Flush()
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return fmt.Errorf("%w: %v", errClientWrite, err)
+		}
+		return nil
 	}
 	_, streamErr := protocols.StreamWithEvents(openai.FamilyResponses, openai.FamilyResponses,
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, nil)
 	if streamErr != nil {
+		out := &outcome{committed: committed}
 		var upstream *openai.UpstreamError
-		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
+		switch {
+		case errors.Is(streamErr, errClientWrite):
+			// The caller went away mid-replay; nothing about the provider
+			// changed and nothing more can be delivered.
+			fact.Class = classCancelled
+			fact.FaultOrigin, fact.FaultScope = faultClientDelivery, scopeRequest
+			x.failure = (&attemptFailure{class: classCancelled}).toError()
+			out.err, out.cancelled = x.failure, true
+		case errors.Is(streamErr, errRetainedCommit):
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultProxyPersistence, scopeRequest
+			x.failure = serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The gateway could not durably record the provider outcome.")
+			out.err = x.failure
+		case errors.Is(streamErr, openai.ErrEventTooLarge):
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope, fact.FaultResource = faultProxyCapacity, scopeRequest, "event bytes"
+			x.failure = serverError(http.StatusServiceUnavailable, "proxy_resource_exhausted", "The provider exchange exceeded the gateway's event bytes limit.")
+			out.err = x.failure
+		case errors.Is(streamErr, errRetainedProjection):
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultContract, scopeContract
+			x.failure = serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained response stream could not be projected faithfully.")
+			out.err = x.failure
+		case errors.Is(streamErr, errResponseMapping):
+			// The retained provider's own frames were malformed or drifted
+			// from the accepted identity; that is endpoint evidence.
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultProviderTransport, scopeEndpoint
+			x.failure = serverError(http.StatusBadGateway, "provider_protocol_error", "The retained provider stream returned malformed data.")
+			out.err = x.failure
+		case errors.As(streamErr, &upstream) && nativeTerminalFailure:
 			x.failure = serverError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 			fact.Class = classUpstreamServer
-		} else {
+			fact.FaultOrigin, fact.FaultScope = faultNativeOutcome, scopeEndpoint
+			out.err = x.failure
+		case errors.As(streamErr, &upstream):
+			// The provider declared an in-band error envelope without a
+			// failed terminal state; that is still provider evidence.
+			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultProviderDeclared, scopeEndpoint
+			x.failure = serverError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
+			out.err = x.failure
+		default:
 			x.failure = serverError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
 			fact.Class = classProtocol
+			fact.FaultOrigin, fact.FaultScope = faultProviderTransport, scopeEndpoint
+			out.err = x.failure
 		}
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = usage.UpstreamUnknown
@@ -309,16 +378,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if !committed {
 			return x.failure
 		}
-		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
-		return nil
-	}
-	if nativeIncomplete && res.Kind == resources.KindStrictResponse {
-		x.failure = serverError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
-		fact.Class = classProtocol
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
-		}
-		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
+		s.finish(x, out, http.StatusOK)
 		return nil
 	}
 	if fact.Interaction != nil {

@@ -254,6 +254,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Committed = f.committed
 		if fact.Interaction != nil && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
 			switch {
@@ -271,11 +272,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, finish(classConnect, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	parsed.RawQuery, parsed.Fragment = "", ""
 	if _, err := s.egress.ValidateEndpoint(parsed.String()); err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, finish(classConnect, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	var reader io.Reader
 	if body != nil {
@@ -283,7 +284,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, finish(classConnect, &attemptFailure{origin: faultContract, scope: scopeRequest})
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -299,11 +300,13 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
-		return nil, finish(classCredential, nil)
+		// Applying the credential is local machinery; the provider never saw
+		// the request, so this is not provider-declared credential evidence.
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
-		return nil, finish(classCredential, nil)
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -363,7 +366,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 
 func upstreamError(f *attemptFailure) *Error {
 	if f.upstream != nil && f.upstream.Message != "" {
-		return &Error{Status: f.status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
+		code := f.upstream.Code
+		if code == "" {
+			code = "upstream_failed"
+		}
+		return &Error{Status: f.status, Type: f.upstream.Type, Code: code, Message: f.upstream.Message}
 	}
 	return serverError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 }
@@ -943,6 +950,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Committed = f.committed
 		if fact.Interaction != nil && f.dispatched {
 			if f.status > 0 {
@@ -959,19 +967,19 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pipeR)
 	if err != nil {
 		pipeR.CloseWithError(err)
-		return nil, finish(classConnect, nil)
+		return nil, finish(classConnect, &attemptFailure{origin: faultContract, scope: scopeRequest})
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
 	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
 		pipeR.CloseWithError(err)
-		return nil, finish(classCredential, nil)
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
 		pipeR.CloseWithError(err)
-		return nil, finish(classCredential, nil)
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -991,7 +999,10 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	_ = pipeR.CloseWithError(io.ErrClosedPipe)
 	if sendErr := <-sendDone; sendErr != nil {
 		resp.Body.Close()
-		return nil, finish(classConnect, &attemptFailure{dispatched: true})
+		// The multipart body is produced from this gateway's own staged
+		// uploads; its failure after the provider already answered is local
+		// persistence, not endpoint evidence.
+		return nil, finish(classConnect, &attemptFailure{dispatched: true, origin: faultProxyPersistence, scope: scopeRequest})
 	}
 	received := s.now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
