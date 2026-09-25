@@ -518,3 +518,98 @@ func TestStrictOperationInspectorUsesRegisteredContractWithoutDispatch(t *testin
 		t.Fatal("inspector exposed native input or provider credential")
 	}
 }
+
+func TestStrictOperationInspectorReportsQualifiedMappingProvenance(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	f := newOperationFixture(t, "/v1/embeddings", `{"object":"list","data":[{"index":0,"embedding":[1,2]}],"model":"fixture-model","usage":{"total_tokens":2}}`)
+	slug, _ := publishOperation(t, h, owner, f, "voyage-embeddings", "embeddings", "openai", nil)
+	request := map[string]any{"model": slug, "input": []string{"private-inspector-prompt", "second"}, "dimensions": 2, "encoding_format": "float"}
+	base := map[string]any{"operation": map[string]any{"operation": "embeddings", "route": slug, "request": request}, "surface": "openai", "mode": "unary", "dialect": "openai-embeddings", "seed": "registered-qualified-inspection"}
+	rows := h.list(owner, "POST", "/api/v3/routing/simulate", base, nil, 200)
+	if len(rows) != 1 {
+		t.Fatalf("inspection target count: %v", rows)
+	}
+	admitted := rows[0].(map[string]any)
+	interaction := admitted["interaction"].(map[string]any)
+	if admitted["eligible"] != true || interaction["status"] != "admitted" || interaction["class"] != "qualified_interaction" || interaction["ingress_dialect"] != "openai-embeddings" || interaction["egress_dialect"] != "voyage-embeddings" || len(f.snapshot()) != 0 {
+		t.Fatalf("qualified inspection did not match dispatch semantics: %v", admitted)
+	}
+	dispositions := map[string]map[string]any{}
+	for _, raw := range interaction["dispositions"].([]any) {
+		d := raw.(map[string]any)
+		dispositions[d["field"].(string)] = d
+	}
+	for field, want := range map[string][2]string{
+		"/model":                      {"bound", "published model binding"},
+		"/input":                      {"preserved", "native_source_identity"},
+		"/dimensions":                 {"relocated", "qualified native control relocation"},
+		"/output_dimension":           {"relocated", "qualified native control relocation"},
+		"/encoding_format":            {"mapped", "registered equivalent native control"},
+		"/truncation":                 {"introduced", "registered equivalent native control"},
+		"/result/model":               {"bound", "published model binding"},
+		"/result/usage/prompt_tokens": {"introduced", "registered equivalent native control"},
+	} {
+		d, ok := dispositions[field]
+		if !ok || d["disposition"] != want[0] || d["rule"] != want[1] {
+			t.Fatalf("qualified disposition %s missing or wrong: %v", field, interaction["dispositions"])
+		}
+	}
+	if _, ok := dispositions["/request"]; ok {
+		t.Fatalf("blanket native identity disposition on a changed request: %v", interaction["dispositions"])
+	}
+	fields := map[string]map[string]any{}
+	for _, raw := range interaction["effective_request"].(map[string]any)["fields"].([]any) {
+		f := raw.(map[string]any)
+		fields[f["field"].(string)] = f
+	}
+	if fields["/output_dimension"]["origin"] != "qualified_mapping" || fields["/output_dimension"]["value_json"] != "2" ||
+		fields["/truncation"]["origin"] != "qualified_mapping" || fields["/truncation"]["value_json"] != "false" ||
+		fields["/model"]["origin"] != "identity_binding" || fields["/input"]["origin"] != "caller" || fields["/input"]["redacted"] != true {
+		t.Fatalf("per-change provenance not rendered: %v", interaction["effective_request"])
+	}
+	encoded, _ := json.Marshal(admitted)
+	if bytes.Contains(encoded, []byte("private-inspector-prompt")) || bytes.Contains(encoded, []byte(vendorSecret)) {
+		t.Fatal("qualified inspector exposed native input or provider credential")
+	}
+
+	ranking := newOperationFixture(t, "/v1/rerank", `{"data":[{"index":0,"relevance_score":0.5}],"usage":{"total_tokens":3}}`)
+	rankSlug, _ := publishOperation(t, h, owner, ranking, "voyage-rerank", "rerank", "openai", nil)
+	rankRequest := map[string]any{"model": rankSlug, "query": "private-inspector-query", "documents": []string{"private-document"}, "top_n": 1}
+	base = map[string]any{"operation": map[string]any{"operation": "rerank", "route": rankSlug, "request": rankRequest}, "surface": "openai", "mode": "unary", "dialect": "rerank", "seed": "registered-qualified-inspection"}
+	rows = h.list(owner, "POST", "/api/v3/routing/simulate", base, nil, 200)
+	if len(rows) != 1 {
+		t.Fatalf("rerank inspection target count: %v", rows)
+	}
+	admitted = rows[0].(map[string]any)
+	interaction = admitted["interaction"].(map[string]any)
+	if admitted["eligible"] != true || interaction["status"] != "admitted" || interaction["class"] != "qualified_interaction" || len(ranking.snapshot()) != 0 {
+		t.Fatalf("qualified rerank inspection did not match dispatch semantics: %v", admitted)
+	}
+	dispositions = map[string]map[string]any{}
+	for _, raw := range interaction["dispositions"].([]any) {
+		d := raw.(map[string]any)
+		dispositions[d["field"].(string)] = d
+	}
+	for field, want := range map[string][2]string{
+		"/top_n":          {"relocated", "qualified native control relocation"},
+		"/top_k":          {"relocated", "qualified native control relocation"},
+		"/query":          {"preserved", "native_source_identity"},
+		"/documents":      {"preserved", "native_source_identity"},
+		"/result/model":   {"bound", "published model binding"},
+		"/result/data":    {"relocated", "qualified native control relocation"},
+		"/result/results": {"relocated", "qualified native control relocation"},
+	} {
+		d, ok := dispositions[field]
+		if !ok || d["disposition"] != want[0] || d["rule"] != want[1] {
+			t.Fatalf("qualified rerank disposition %s missing or wrong: %v", field, interaction["dispositions"])
+		}
+	}
+	if _, ok := dispositions["/request"]; ok {
+		t.Fatalf("blanket native identity disposition on a changed request: %v", interaction["dispositions"])
+	}
+	encoded, _ = json.Marshal(admitted)
+	if bytes.Contains(encoded, []byte("private-inspector-query")) || bytes.Contains(encoded, []byte("private-document")) || bytes.Contains(encoded, []byte(vendorSecret)) {
+		t.Fatal("qualified rerank inspector exposed native input or provider credential")
+	}
+}
