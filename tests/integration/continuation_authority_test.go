@@ -93,9 +93,25 @@ func TestPublicContinuationBranchesStayOwnedAndExpire(t *testing.T) {
 	}
 	var ready struct {
 		Assistant json.RawMessage `json:"assistant"`
+		Terminal  json.RawMessage `json:"native_terminal"`
+		Delivery  json.RawMessage `json:"delivery"`
 	}
 	if json.Unmarshal(recovered, &ready) != nil || len(ready.Assistant) == 0 {
 		t.Fatal("missing owned assistant")
+	}
+	// Recovery serves the committed terminal record verbatim, top-level and
+	// inside the delivery it was committed with.
+	if err := fidelity.Compare([]byte(`{"stop_reason":"tool_use","stop_sequence":null,"finish_reason":"tool_calls"}`), ready.Terminal); err != nil {
+		t.Fatalf("recovered terminal %s: %v", ready.Terminal, err)
+	}
+	var deliveryDoc struct {
+		Terminal json.RawMessage `json:"native_terminal"`
+	}
+	if json.Unmarshal(ready.Delivery, &deliveryDoc) != nil {
+		t.Fatal("recovered delivery unreadable")
+	}
+	if err := fidelity.Compare([]byte(`{"stop_reason":"tool_use","stop_sequence":null,"finish_reason":"tool_calls"}`), deliveryDoc.Terminal); err != nil {
+		t.Fatalf("delivery terminal %s: %v", deliveryDoc.Terminal, err)
 	}
 	status, denied, _ := h.gatewayRaw("GET", recoveryPath, otherKey, nil, map[string]string{"X-OLP-Continuation": continuationClientVersion})
 	if status != 404 || bytes.Contains(denied, []byte("Branch completed")) || calls.Load() != 1 {

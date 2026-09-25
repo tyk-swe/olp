@@ -60,10 +60,12 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
     ]
     assert any(item["type"] == "thinking" and item.get("opaque_state") is True for item in first["observations"])
     assert first["native_usage"] == {"input_tokens": 18, "output_tokens": 28}
+    assert first["native_terminal"] == {"stop_reason": "tool_use", "stop_sequence": None, "finish_reason": "tool_calls"}
     assert "opaque-fixture-signature-do-not-log" not in repr(first["chunks"])
     recovered = recover_submission(origin, key, first["submission"])
     assert recovered["handle"] == first["handle"]
     assert recovered["assistant"] == first["assistant"]
+    assert recovered["native_terminal"] == first["native_terminal"]
     assert isinstance(recovered["delivery"]["frames"], list) and recovered["delivery"]["frames"]
     replay = stream_turn(client, request, submission=first["submission"])
     assert replay["handle"] == first["handle"]
@@ -76,4 +78,5 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
     assert final["response"].choices[0].message.content == "Both tools completed."
     assert final["response"].choices[0].finish_reason == "stop"
     assert final["native_usage"] == {"input_tokens": 30, "output_tokens": 4}
+    assert final["native_terminal"] == {"stop_reason": "end_turn", "stop_sequence": None, "finish_reason": "stop"}
     print(f"openai-python-3.8.0: {len(first['observations'])} observations; two native dispatches")

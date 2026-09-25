@@ -11,13 +11,61 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
+// NativeTerminal is the bounded terminal observation the negotiated carrier
+// retains for one accepted native result. It records the dialect reducer's
+// admitted terminal facts verbatim beside the compatible client-protocol
+// finish reason; it is never reconstructed from the narrowed Chat output.
+type NativeTerminal struct {
+	// Reason is the declared native stop_reason at the terminal boundary.
+	Reason string `json:"stop_reason"`
+	// Sequence carries the matched stop_sequence exactly as the native
+	// contract defines it: a string when the terminal declared a match, an
+	// explicit null when it declared none, and an absent member when no
+	// admitted update carried the member at all.
+	Sequence json.RawMessage `json:"stop_sequence,omitempty"`
+	// Finish is the compatible client-protocol finish reason emitted beside
+	// this record.
+	Finish string `json:"finish_reason"`
+}
+
+// Valid reports whether a decoded record satisfies the admitted carrier
+// grammar: a qualified native reason, the compatible finish it projects to,
+// and the matched-sequence correspondence the native contract defines. A
+// stored record that fails this shape was never committed by this contract.
+func (t *NativeTerminal) Valid() bool {
+	if t == nil {
+		return false
+	}
+	switch t.Reason {
+	case "end_turn", "tool_use", "max_tokens", "stop_sequence":
+	default:
+		return false
+	}
+	switch t.Finish {
+	case "stop", "tool_calls", "length":
+	default:
+		return false
+	}
+	matched := len(t.Sequence) != 0 && string(t.Sequence) != "null"
+	if matched {
+		var sequence string
+		if json.Unmarshal(t.Sequence, &sequence) != nil || sequence == "" {
+			return false
+		}
+	}
+	return (t.Reason == "stop_sequence") == matched
+}
+
 // Delivery is already projected client data. The gateway commits it with the
 // complete native dependency before publishing any queued actionable frame.
 // Replaying this value never invokes a provider or claims new token usage.
+// Terminal is additive on the carrier: deliveries committed before the record
+// existed decode with a nil Terminal and read as explicitly unavailable.
 type Delivery struct {
-	Stream bool              `json:"stream"`
-	Frames []json.RawMessage `json:"frames,omitempty"`
-	Body   json.RawMessage   `json:"body,omitempty"`
+	Stream   bool              `json:"stream"`
+	Frames   []json.RawMessage `json:"frames,omitempty"`
+	Body     json.RawMessage   `json:"body,omitempty"`
+	Terminal *NativeTerminal   `json:"native_terminal,omitempty"`
 }
 type ToolProjection struct {
 	plan  *Plan
@@ -484,10 +532,24 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 			if (reason == "tool_use") != (p.toolCount > 0) {
 				return nil, guardFailure("/events/stop_reason", "tool_terminal_correspondence")
 			}
+			// A matched sequence belongs only to a stop_sequence terminal.
+			if _, matched := p.trace.StopSequence(); matched && reason != "stop_sequence" {
+				return nil, guardFailure("/events/stop_sequence", "terminal_sequence_correspondence")
+			}
 		}
 	case protocols.AnthropicMessageStop:
-		if _, declared := p.trace.StopReason(); !onlyMembers(root, "type") || !declared || len(p.active) > 0 {
+		reason, declared := p.trace.StopReason()
+		sequence, matched := p.trace.StopSequence()
+		if !onlyMembers(root, "type") || !declared || len(p.active) > 0 {
 			return nil, guardFailure("/events", "complete_native_terminal")
+		}
+		// The native contract defines stop_sequence as the matched sequence
+		// that caused the stop: a stop_sequence reason without a declared
+		// match — or a declared match under any other reason — contradicts
+		// the accepted terminal. An empty match is no match at all and would
+		// produce a record the committed carrier itself rejects.
+		if (reason == "stop_sequence") != matched || (matched && sequence == "") {
+			return nil, guardFailure("/events/stop_sequence", "terminal_sequence_correspondence")
 		}
 	default:
 		return nil, guardFailure("/events", "qualified_native_event")
@@ -518,7 +580,12 @@ func (p *Plan) declaresTool(name string) bool {
 // terminal boundary. It builds a bounded delivery; the caller still must commit
 // it and its dependency state before emitting the queued frames or handle.
 func (p *ToolProjection) Complete(completion *openai.Completion, handle string) (*Continuation, Delivery, error) {
-	if !p.trace.Terminal() || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" {
+	reason, declared := p.trace.StopReason()
+	sequence, matched := p.trace.StopSequence()
+	// The terminal/content correspondence is revalidated here so a record can
+	// never be completed from a trace whose declared reason and matched
+	// sequence contradict each other.
+	if !p.trace.Terminal() || completion == nil || completion.Usage == nil || len(p.nativeUsage) == 0 || handle == "" || !declared || (reason == "stop_sequence") != matched || (matched && sequence == "") {
 		return nil, Delivery{}, guardFailure("/result", "complete_recoverable_result")
 	}
 	assistant := map[string]any{"role": "assistant", "content": p.content.String()}
@@ -532,11 +599,24 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 	if completion.Usage.CachedInputTokens != nil {
 		usage["prompt_tokens_details"] = map[string]any{"cached_tokens": *completion.Usage.CachedInputTokens}
 	}
-	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage}
+	// The terminal observation comes only from the reducer's admitted native
+	// facts — the declared reason, the matched-sequence member presence — with
+	// the compatible client finish reason recorded beside it, never derived
+	// back from the narrowed projection.
 	finish := completion.FinishReason
-	if reason, _ := p.trace.StopReason(); reason == "tool_use" {
+	if reason == "tool_use" {
 		finish = "tool_calls"
 	}
+	terminalRecord := &NativeTerminal{Reason: reason, Finish: finish}
+	switch p.trace.StopSequencePresence() {
+	case oif.Present:
+		sequence, _ := p.trace.StopSequence()
+		terminalRecord.Sequence, _ = json.Marshal(sequence)
+	case oif.ExplicitNull:
+		terminalRecord.Sequence = json.RawMessage("null")
+	}
+	recordRaw, _ := json.Marshal(terminalRecord)
+	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage, "native_terminal": terminalRecord}
 	terminal, _ := json.Marshal(map[string]any{"id": p.id, "object": "chat.completion.chunk", "created": 0, "model": p.plan.route, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}, "usage": usage, "olp": extension})
 	// Retained dependency: the persisted interaction representation — source,
 	// native request, serialized assistant and the block array's own
@@ -544,7 +624,14 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 	if err := p.dependency.charge(len(assistantRaw) + len(state.Source) + len(state.NativeRequest) + len(blocks) - p.blocksCharged); err != nil {
 		return nil, Delivery{}, err
 	}
-	delivery := Delivery{Stream: p.plan.stream}
+	// The terminal record is retained delivery state committed on the carrier
+	// in both modes; its standalone serialization charges the delivery budget
+	// once here while the copies embedded in the terminal frame or unary body
+	// are charged with those serializations below.
+	if err := p.delivery.charge(len(recordRaw)); err != nil {
+		return nil, Delivery{}, err
+	}
+	delivery := Delivery{Stream: p.plan.stream, Terminal: terminalRecord}
 	extension["observations"] = p.observations
 	if p.plan.stream {
 		// The terminal frame is replayed delivery; its serialization is
@@ -604,6 +691,9 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 	fields := document.Fields()
 	fields["content"] = json.RawMessage(`[]`)
 	fields["stop_reason"] = json.RawMessage(`null`)
+	// Anthropic message_start always opens with both terminal members null;
+	// the result's terminal facts enter through the synthesized delta below.
+	fields["stop_sequence"] = json.RawMessage(`null`)
 	if err = observe("message_start", map[string]any{"type": "message_start", "message": fields}); err != nil {
 		return nil, Delivery{}, err
 	}
@@ -616,7 +706,13 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 			return nil, Delivery{}, err
 		}
 	}
-	if err = observe("message_delta", map[string]any{"type": "message_delta", "delta": map[string]json.RawMessage{"stop_reason": member(root, "stop_reason").Bytes(), "stop_sequence": member(root, "stop_sequence").Bytes()}, "usage": json.RawMessage(member(root, "usage").Bytes())}); err != nil {
+	// The synthesized update preserves the result's terminal members exactly:
+	// an absent stop_sequence stays absent rather than collapsing into null.
+	delta := map[string]json.RawMessage{"stop_reason": member(root, "stop_reason").Bytes()}
+	if sequence, present := root.Lookup("stop_sequence"); present {
+		delta["stop_sequence"] = sequence.Bytes()
+	}
+	if err = observe("message_delta", map[string]any{"type": "message_delta", "delta": delta, "usage": json.RawMessage(member(root, "usage").Bytes())}); err != nil {
 		return nil, Delivery{}, err
 	}
 	if err = observe("message_stop", map[string]any{"type": "message_stop"}); err != nil {

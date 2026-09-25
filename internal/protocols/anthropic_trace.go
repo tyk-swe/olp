@@ -92,18 +92,19 @@ type AnthropicTransition struct {
 // terminal boundary. Usage updates omit fields they do not change; omission
 // never erases a previously declared count.
 type AnthropicTrace struct {
-	limit     int
-	blocks    map[int64]*contentBlock
-	next      int64
-	retained  int
-	usage     Object
-	started   bool
-	updating  bool
-	done      bool
-	reason    string
-	hasReason bool
-	stopSeq   string
-	hasSeq    bool
+	limit       int
+	blocks      map[int64]*contentBlock
+	next        int64
+	retained    int
+	usage       Object
+	started     bool
+	updating    bool
+	done        bool
+	reason      string
+	hasReason   bool
+	stopSeq     string
+	hasSeq      bool
+	seqPresence oif.Presence
 }
 
 // NewAnthropicTrace opens a reducer for one native Anthropic stream. limit
@@ -134,6 +135,13 @@ func (t *AnthropicTrace) StopReason() (string, bool) { return t.reason, t.hasRea
 // StopSequence returns the declared stop_sequence string and whether one has
 // been declared; presence is distinct from value.
 func (t *AnthropicTrace) StopSequence() (string, bool) { return t.stopSeq, t.hasSeq }
+
+// StopSequencePresence reports how admitted updates carried the terminal
+// stop_sequence member: Missing when no update carried it, ExplicitNull when
+// it was carried only as null, and Present once a matched value is declared.
+// A declared value can never be unset, so presence never returns to null or
+// missing after Present.
+func (t *AnthropicTrace) StopSequencePresence() oif.Presence { return t.seqPresence }
 
 // Usage returns the cumulative native usage document: a merge of every
 // admitted usage member where absent fields never erase earlier values.
@@ -324,15 +332,22 @@ func (t *AnthropicTrace) declareTerminal(delta Object) error {
 		}
 		t.reason, t.hasReason = reason, true
 	}
-	if v := delta["stop_sequence"]; present(v) {
-		seq, ok := rawString(v)
-		if !ok {
-			return protocolError("invalid stop sequence")
+	if v, carried := delta["stop_sequence"]; carried {
+		if present(v) {
+			seq, ok := rawString(v)
+			if !ok {
+				return protocolError("invalid stop sequence")
+			}
+			if t.hasSeq && t.stopSeq != seq {
+				return protocolError("inconsistent stop sequence")
+			}
+			t.stopSeq, t.hasSeq = seq, true
+			t.seqPresence = oif.Present
+		} else if t.seqPresence == oif.Missing {
+			// An explicit null declares "no matched sequence yet"; it
+			// never erases a match already declared by an earlier update.
+			t.seqPresence = oif.ExplicitNull
 		}
-		if t.hasSeq && t.stopSeq != seq {
-			return protocolError("inconsistent stop sequence")
-		}
-		t.stopSeq, t.hasSeq = seq, true
 	}
 	return nil
 }

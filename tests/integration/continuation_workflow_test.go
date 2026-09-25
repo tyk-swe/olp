@@ -86,6 +86,7 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 	var handle string
 	var tools []any
 	var text strings.Builder
+	var terminal json.RawMessage
 	sawTool := false
 	for line := range strings.SplitSeq(string(raw), "\n") {
 		if !strings.HasPrefix(line, "data: {") {
@@ -98,6 +99,9 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 		if ext, ok := chunk["olp"].(map[string]any); ok {
 			if value, ok := ext["handle"].(string); ok {
 				handle = value
+			}
+			if record, ok := ext["native_terminal"]; ok {
+				terminal, _ = json.Marshal(record)
 			}
 		}
 		for _, choice := range chunk["choices"].([]any) {
@@ -126,6 +130,11 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("opaque-fixture-signature-do-not-log")) {
 		t.Fatal("opaque signature exposed")
+	}
+	// The terminal frame carries the accepted native outcome verbatim beside
+	// the compatible client finish reason, not a narrowed reconstruction.
+	if err := fidelity.Compare([]byte(`{"stop_reason":"tool_use","stop_sequence":null,"finish_reason":"tool_calls"}`), terminal); err != nil {
+		t.Fatalf("native terminal record %s: %v", terminal, err)
 	}
 	before := calls.Load()
 	status, replay, replayHeaders := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(source), headers)

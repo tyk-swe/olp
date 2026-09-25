@@ -68,6 +68,7 @@ def stream_turn(
     finish = None
     usage = None
     native_usage = None
+    native_terminal = None
     terminal = False
     for chunk in stream:
         ext = _extension(chunk)
@@ -100,6 +101,7 @@ def stream_turn(
             ready_handle = ext["handle"]
             usage = chunk.usage
             native_usage = ext.get("native_usage")
+            native_terminal = ext.get("native_terminal")
             terminal = True
     if not terminal or not ready_handle or not native_usage:
         raise ValueError("Incomplete continuation delivery")
@@ -117,6 +119,7 @@ def stream_turn(
         "submission": submission, "handle": ready_handle, "assistant": assistant,
         "observations": observations, "chunks": chunks, "finish": finish,
         "usage": usage, "native_usage": native_usage,
+        "native_terminal": native_terminal,
     }
 
 
@@ -153,6 +156,7 @@ def unary_turn(
         "submission": submission, "handle": ext["handle"],
         "assistant": response.choices[0].message,
         "native_usage": ext["native_usage"], "response": response,
+        "native_terminal": ext.get("native_terminal"),
     }
 
 

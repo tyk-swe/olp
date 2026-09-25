@@ -13,6 +13,14 @@ delivery. The terminal extension also returns validated provider-native usage
 categories in `olp.native_usage`; cache-read tokens appear in standard Chat
 `prompt_tokens_details`, while cache-write and TTL details stay in that
 versioned extension. An unknown native category makes the delivery incomplete.
+`olp.native_terminal` carries the committed native terminal observation — the
+declared native `stop_reason`, the matched `stop_sequence` (a string, an
+explicit `null`, or an absent member where the native contract omits it) and
+the compatible client `finish_reason` — so `end_turn`, a first and a second
+configured stop sequence stay distinct even when the projected text, usage and
+finish reason are identical. Unary, streaming and recovered delivery expose the
+same record; a delivery committed before the record existed reports
+`"native_terminal": "unavailable"` instead of inventing one.
 A complete assistant plus one ordered result per call is passed to
 `nextTurn`; `unaryTurn` submits it with the previous handle and a fresh
 submission identity. Keep the returned submission identity unchanged when

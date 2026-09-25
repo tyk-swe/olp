@@ -48,10 +48,12 @@ assert.deepEqual(first.observations.filter((item) => item.phase === 'start').map
   ['thinking', 'text', 'tool_use', 'tool_use', 'text']);
 assert.ok(first.observations.some((item) => item.type === 'thinking' && item.opaque_state === true));
 assert.deepEqual(first.nativeUsage, { input_tokens: 18, output_tokens: 28 });
+assert.deepEqual(first.nativeTerminal, { stop_reason: 'tool_use', stop_sequence: null, finish_reason: 'tool_calls' });
 assert.ok(!JSON.stringify(first.chunks).includes('opaque-fixture-signature-do-not-log'));
 const recovered = await recoverSubmission(origin, key, first.submission, localOnlyFetch);
 assert.equal(recovered.handle, first.handle);
 assert.deepEqual(recovered.assistant, first.assistant);
+assert.deepEqual(recovered.native_terminal, first.nativeTerminal);
 assert.ok(Array.isArray(recovered.delivery.frames) && recovered.delivery.frames.length > 0);
 const replay = await streamTurn(client, request, { submission: first.submission });
 assert.equal(replay.handle, first.handle);
@@ -64,4 +66,5 @@ const final = await unaryTurn(client, next, { handle: first.handle });
 assert.equal(final.response.choices[0].message.content, 'Both tools completed.');
 assert.equal(final.response.choices[0].finish_reason, 'stop');
 assert.deepEqual(final.nativeUsage, { input_tokens: 30, output_tokens: 4 });
+assert.deepEqual(final.nativeTerminal, { stop_reason: 'end_turn', stop_sequence: null, finish_reason: 'stop' });
 process.stdout.write(JSON.stringify({ sdk: 'openai-js-7.4.0', first: first.handle, final: final.handle, observations: first.observations.length }) + '\n');

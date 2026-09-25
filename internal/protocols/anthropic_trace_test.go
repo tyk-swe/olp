@@ -86,6 +86,7 @@ func TestAnthropicTraceAdmitsLegalUpdateVariants(t *testing.T) {
 		sequence   string
 		hasReason  bool
 		hasSeq     bool
+		presence   oif.Presence
 		usage      string
 		terminated bool
 	}{
@@ -94,7 +95,7 @@ func TestAnthropicTraceAdmitsLegalUpdateVariants(t *testing.T) {
 			wire: anthropicStartWire + anthropicTextWire +
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":7}}`) +
 				anthropicStopWire,
-			reason: "end_turn", hasReason: true, terminated: true,
+			reason: "end_turn", hasReason: true, presence: oif.ExplicitNull, terminated: true,
 			usage: `{"input_tokens":3,"output_tokens":7}`,
 		},
 		{
@@ -103,7 +104,7 @@ func TestAnthropicTraceAdmitsLegalUpdateVariants(t *testing.T) {
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":null,"stop_sequence":null},"usage":{"output_tokens":5}}`) +
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`) +
 				anthropicStopWire,
-			reason: "end_turn", hasReason: true, terminated: true,
+			reason: "end_turn", hasReason: true, presence: oif.ExplicitNull, terminated: true,
 			usage: `{"input_tokens":3,"output_tokens":7}`,
 		},
 		{
@@ -113,7 +114,7 @@ func TestAnthropicTraceAdmitsLegalUpdateVariants(t *testing.T) {
 				anthropicWireEvent("message_delta", `{"type":"message_delta","usage":{"output_tokens":9}}`) +
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`) +
 				anthropicStopWire,
-			reason: "end_turn", hasReason: true, terminated: true,
+			reason: "end_turn", hasReason: true, presence: oif.ExplicitNull, terminated: true,
 			usage: `{"input_tokens":3,"output_tokens":9}`,
 		},
 		{
@@ -143,8 +144,26 @@ data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"a
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"###"},"usage":{"output_tokens":4}}`) +
 				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"###"}}`) +
 				anthropicStopWire,
-			reason: "stop_sequence", hasReason: true, sequence: "###", hasSeq: true, terminated: true,
+			reason: "stop_sequence", hasReason: true, sequence: "###", hasSeq: true, presence: oif.Present, terminated: true,
 			usage: `{"input_tokens":3,"output_tokens":4}`,
+		},
+		{
+			name: "matched sequence after interim nulls",
+			wire: anthropicStartWire + anthropicTextWire +
+				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":null,"stop_sequence":null},"usage":{"output_tokens":4}}`) +
+				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"## DONE"},"usage":{"output_tokens":7}}`) +
+				anthropicStopWire,
+			reason: "stop_sequence", hasReason: true, sequence: "## DONE", hasSeq: true, presence: oif.Present, terminated: true,
+			usage: `{"input_tokens":3,"output_tokens":7}`,
+		},
+		{
+			name: "declared sequence survives a later null member",
+			wire: anthropicStartWire + anthropicTextWire +
+				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"## DONE"},"usage":{"output_tokens":4}}`) +
+				anthropicWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_sequence":null},"usage":{"output_tokens":7}}`) +
+				anthropicStopWire,
+			reason: "stop_sequence", hasReason: true, sequence: "## DONE", hasSeq: true, presence: oif.Present, terminated: true,
+			usage: `{"input_tokens":3,"output_tokens":7}`,
 		},
 		{
 			name: "message_stop is the terminal boundary without a reason",
@@ -197,6 +216,9 @@ data: {"type":"ping"}
 			}
 			if seq, ok := trace.StopSequence(); ok != tc.hasSeq || seq != tc.sequence {
 				t.Fatalf("stop sequence %q,%v want %q,%v", seq, ok, tc.sequence, tc.hasSeq)
+			}
+			if presence := trace.StopSequencePresence(); presence != tc.presence {
+				t.Fatalf("stop sequence presence %v want %v", presence, tc.presence)
 			}
 			usage, _ := json.Marshal(trace.Usage())
 			var expected, got any
