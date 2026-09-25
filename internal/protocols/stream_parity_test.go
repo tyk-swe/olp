@@ -232,3 +232,51 @@ func TestGeminiParallelResultsKeepDistinctCallRelationships(t *testing.T) {
 		}
 	}
 }
+
+func TestLaterChatCandidateWithInvalidToolArgumentsIsRefused(t *testing.T) {
+	body := []byte(`{"id":"c","object":"chat.completion","model":"m","choices":[` +
+		`{"index":0,"message":{"role":"assistant","content":"a"},"finish_reason":"stop"},` +
+		`{"index":1,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"not-json"}}]},"finish_reason":"tool_calls"}]}`)
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("upstream candidate panicked translation: %v", p)
+		}
+	}()
+	if _, err := Decode(openai.FamilyChat, openai.FamilyGemini, body, "route", ""); err == nil {
+		t.Fatal("translated a later candidate with invalid tool arguments")
+	}
+}
+
+// Anthropic streams a server tool's input with input_json_delta events, as in
+// the documented web search stream.
+func TestAnthropicServerToolInputStreamsNatively(t *testing.T) {
+	var source strings.Builder
+	for _, event := range []string{
+		`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"weather\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":9}}`,
+		`{"type":"message_stop"}`,
+	} {
+		f, _ := object([]byte(event))
+		source.WriteString("event: " + str(f["type"]) + "\ndata: " + event + "\n\n")
+	}
+	var out bytes.Buffer
+	c, err := Stream(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(source.String()), 1<<16, "route", true, func(frame []byte) error { out.Write(frame); return nil })
+	if err != nil || c.Usage == nil || c.Usage.OutputTokens != 9 || !strings.Contains(out.String(), `"server_tool_use"`) {
+		t.Fatalf("native server-tool stream: usage=%+v err=%v", c.Usage, err)
+	}
+	// A client function-call dialect has no server tool; translation still refuses.
+	var translated bytes.Buffer
+	if _, err = Stream(openai.FamilyAnthropic, openai.FamilyChat, strings.NewReader(source.String()), 1<<16, "route", true, func(frame []byte) error { translated.Write(frame); return nil }); err == nil || strings.Contains(translated.String(), "tool_calls") {
+		t.Fatalf("server tool input became a client tool call: %v %s", err, translated.String())
+	}
+	incomplete := strings.Replace(source.String(), `{\"query\":\"weather\"}`, `{\"query\":`, 1)
+	if _, err = Stream(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(incomplete), 1<<16, "route", true, func([]byte) error { return nil }); err == nil {
+		t.Fatal("accepted incomplete server tool input")
+	}
+}

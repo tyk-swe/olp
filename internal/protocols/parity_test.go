@@ -277,3 +277,25 @@ func TestCallerDefaultsAndVendorProfiles(t *testing.T) {
 		t.Fatalf("Voyage: %s %v", body, e)
 	}
 }
+
+// Gemini's UsageMetadata is proto3 JSON: a zero candidatesTokenCount is omitted,
+// e.g. when thoughts consume the whole output budget. Usage stays observed.
+func TestGeminiUsageWithoutCandidateTokens(t *testing.T) {
+	result := `{"responseId":"r","modelVersion":"w","candidates":[{"index":0,"content":{"role":"model"},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":8,"totalTokenCount":107,"thoughtsTokenCount":99}}`
+	c, err := Decode(openai.FamilyGemini, openai.FamilyChat, []byte(result), "route", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := c.Usage; u == nil || u.InputTokens != 8 || u.OutputTokens != 99 || u.TotalTokens != 107 || *u.ReasoningTokens != 99 {
+		t.Fatalf("unary usage = %+v", c.Usage)
+	}
+	stream := `data: {"responseId":"r","modelVersion":"w","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1,"totalTokenCount":9}}` + "\n\n" +
+		"data: " + result + "\n\n"
+	c, err = Stream(openai.FamilyGemini, openai.FamilyGemini, strings.NewReader(stream), 8192, "route", true, func([]byte) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := c.Usage; u == nil || u.InputTokens != 8 || u.OutputTokens != 99 || u.TotalTokens != 107 {
+		t.Fatalf("stream usage = %+v", c.Usage)
+	}
+}

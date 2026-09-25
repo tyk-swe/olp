@@ -2,12 +2,26 @@ package protocols
 
 import (
 	"bytes"
+
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // MeaningfulFrame distinguishes model output from protocol setup, heartbeats,
 // and usage-only events. Performance measurements use delivered output only.
 func MeaningfulFrame(family openai.Family, frame []byte) bool {
+	if family == openai.FamilyBedrock {
+		// Native Converse frames are AWS event-stream messages, not SSE lines.
+		message, err := eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
+		if err != nil {
+			return false
+		}
+		f, _ := object(message.Payload)
+		delta, _ := optionalObject(f["delta"])
+		start, _ := optionalObject(f["start"])
+		call, _ := optionalObject(delta["toolUse"])
+		return str(delta["text"]) != "" || str(call["input"]) != "" || present(start["toolUse"])
+	}
 	for line := range bytes.SplitSeq(frame, []byte("\n")) {
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue

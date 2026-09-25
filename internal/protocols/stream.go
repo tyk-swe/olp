@@ -96,9 +96,6 @@ func streamError(err error) error {
 
 type contentBlock struct{ kind, args string }
 
-func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamAnthropicEvents(r, limit, route, emit, nil)
-}
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	started, finished, done := false, false, false
@@ -167,11 +164,13 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 				return protocolError("invalid content block")
 			}
 			kind := str(block["type"])
-			if kind == "tool_use" && (str(block["id"]) == "" || str(block["name"]) == "") {
+			// Server tools stream their input with the same JSON deltas.
+			tool := kind == "tool_use" || kind == "server_tool_use"
+			if tool && (str(block["id"]) == "" || str(block["name"]) == "") {
 				return protocolError("incomplete tool start")
 			}
 			state := &contentBlock{kind: kind}
-			if kind == "tool_use" {
+			if tool {
 				input, err := object(block["input"])
 				if err != nil {
 					return protocolError("invalid tool input")
@@ -207,7 +206,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 					return protocolError("invalid text delta")
 				}
 			case "input_json_delta":
-				if block.kind != "tool_use" {
+				if block.kind != "tool_use" && block.kind != "server_tool_use" {
 					return protocolError("tool delta for non-tool block")
 				}
 				var part string
@@ -226,7 +225,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 			if !ok || block == nil || finished {
 				return protocolError("stop outside an active content block")
 			}
-			if block.kind == "tool_use" && block.args != "" {
+			if block.args != "" {
 				if _, e := object([]byte(block.args)); e != nil {
 					return protocolError("incomplete tool arguments")
 				}
@@ -282,9 +281,6 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 		return c, &openai.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
 	}
 	return c, nil
-}
-func streamGemini(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamGeminiEvents(r, limit, route, emit, nil)
 }
 func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
@@ -623,6 +619,10 @@ func (t *streamTranslator) frame(frame []byte) error {
 				case "text_delta":
 					return t.textDelta(str(d["text"]))
 				case "input_json_delta":
+					if t.calls[int(index)] == nil {
+						// Server tool input is not a client function call.
+						return protocolError("tool delta for non-tool block")
+					}
 					return t.toolDelta(int(index), "", "", str(d["partial_json"]))
 				}
 			}

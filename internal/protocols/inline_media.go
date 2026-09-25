@@ -25,8 +25,12 @@ func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) erro
 	if request.Family == openai.FamilyResponses || request.Family == openai.FamilyInputTokens {
 		messages = arr(doc["input"])
 	}
-	if request.Family == openai.FamilyGemini || request.Family == "gemini_count" {
+	switch request.Family {
+	case openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount:
 		messages, partKey = arr(doc["contents"]), "parts"
+		if nested, err := object(doc["generateContentRequest"]); err == nil {
+			messages = append(messages, arr(nested["contents"])...)
+		}
 	}
 	count, total := 0, int64(0)
 	for _, message := range messages {
@@ -85,6 +89,14 @@ func inlineMediaData(p Object) (string, bool) {
 	for _, key := range []string{"inlineData", "inline_data"} {
 		if data := nested(p[key], "data"); data != "" {
 			return data, false
+		}
+	}
+	// Converse media blocks carry base64 bytes at <kind>.source.bytes.
+	for _, key := range []string{"image", "document", "video", "audio"} {
+		if block, err := object(p[key]); err == nil {
+			if data := nested(block["source"], "bytes"); data != "" {
+				return data, false
+			}
 		}
 	}
 	return "", false

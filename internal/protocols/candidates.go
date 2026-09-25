@@ -51,8 +51,15 @@ func translateCandidates(wire, target openai.Family, body []byte, route string) 
 		if err != nil {
 			return nil, err
 		}
+		// Every candidate, not only the first, must render as a valid call.
+		if err := validateTranslatedCalls(c.ToolCalls); err != nil {
+			return nil, err
+		}
 		out, _ := object(renderCompletion(c, target, route))
 		items := arr(out[candidateField(target)])
+		if len(items) != 1 {
+			return nil, protocolError("candidate could not be translated")
+		}
 		entry, _ := object(items[0])
 		entry["index"] = raw(index)
 		translated = append(translated, raw(entry))

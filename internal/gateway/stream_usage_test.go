@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -151,5 +152,32 @@ func TestStreamClientWriteFailureRetainsObservedUsage(t *testing.T) {
 				t.Fatalf("client failure discarded usage: %+v", env)
 			}
 		})
+	}
+}
+
+// AWS prompt caching: Converse inputTokens represents only the non-cached
+// input; total input tokens = inputTokens + cacheReadInputTokens +
+// cacheWriteInputTokens.
+func TestBedrockStreamUsageAddsCacheCategoriesToUncachedInput(t *testing.T) {
+	metadata := func(payload string) *eventstream.Message {
+		h := eventstream.Headers{}
+		h.Set(":message-type", eventstream.StringValue("event"))
+		h.Set(":event-type", eventstream.StringValue("metadata"))
+		return &eventstream.Message{Headers: h, Payload: []byte(payload)}
+	}
+	u := bedrockStreamUsage(metadata(`{"usage":{"inputTokens":4,"outputTokens":318,"totalTokens":7577,"cacheReadInputTokens":7225,"cacheWriteInputTokens":30}}`))
+	if u == nil || u.InputTokens != 7259 || u.OutputTokens != 318 ||
+		u.CachedInputTokens == nil || *u.CachedInputTokens != 7225 ||
+		u.CacheWriteInputTokens == nil || *u.CacheWriteInputTokens != 30 {
+		t.Fatalf("usage = %+v", u)
+	}
+	for _, payload := range []string{
+		`{"usage":{"inputTokens":-1,"outputTokens":2}}`,
+		`{"usage":{"inputTokens":1,"outputTokens":2,"cacheReadInputTokens":-1}}`,
+		`{"usage":{"inputTokens":9223372036854775807,"outputTokens":2,"cacheWriteInputTokens":1}}`,
+	} {
+		if u := bedrockStreamUsage(metadata(payload)); u != nil {
+			t.Fatalf("accepted %s as %+v", payload, u)
+		}
 	}
 }

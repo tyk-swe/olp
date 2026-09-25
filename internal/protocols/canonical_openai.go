@@ -15,6 +15,11 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 	r.parameter("max_tokens", "max_output_tokens")
 	r.parameter("max_completion_tokens", "max_output_tokens")
 	r.parameter("max_output_tokens", "max_output_tokens")
+	if choice, e := object(c.Parameters["tool_choice"]); family != openai.FamilyChat && e == nil &&
+		len(choice) == 2 && str(choice["type"]) == "function" && str(choice["name"]) != "" {
+		// Responses names a forced function at the top level; the shared form is Chat's.
+		c.Parameters["tool_choice"] = raw(map[string]any{"type": "function", "function": map[string]json.RawMessage{"name": choice["name"]}})
+	}
 	if family == openai.FamilyChat {
 		for i, v := range arr(r.take("messages")) {
 			m, e := decodeChatMessage(v, fmt.Sprintf("/messages/%d", i), c)
@@ -134,7 +139,10 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 				content = append(content, Object{"type": raw("text"), "text": raw(p.Text)})
 			}
 		}
-		if len(content) == 1 && str(content[0]["type"]) == "text" {
+		if len(content) == 0 && len(m.Calls) > 0 {
+			// Chat rejects an empty content array; a tool-call turn uses null.
+			v["content"] = raw(nil)
+		} else if len(content) == 1 && str(content[0]["type"]) == "text" {
 			v["content"] = content[0]["text"]
 		} else {
 			v["content"] = raw(content)
@@ -192,6 +200,12 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 				tools = append(tools, Object{"type": raw("function"), "name": raw(t.Name), "description": raw(t.Description), "parameters": t.Schema})
 			}
 			f["tools"] = raw(tools)
+		}
+		// Responses-shaped counting names a forced function at the top level.
+		if choice, e := object(f["tool_choice"]); e == nil && len(choice) == 2 && str(choice["type"]) == "function" {
+			if fn, e := object(choice["function"]); e == nil && len(fn) == 1 && str(fn["name"]) != "" {
+				f["tool_choice"] = raw(map[string]json.RawMessage{"type": choice["type"], "name": fn["name"]})
+			}
 		}
 	} else {
 		f["stream"] = raw(c.Stream)

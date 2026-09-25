@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 
@@ -148,7 +149,12 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 			if _, e := object(t.Schema); e != nil {
 				return nil, unsupported("tool schema")
 			}
-			tools = append(tools, Object{"toolSpec": raw(map[string]any{"name": t.Name, "description": t.Description, "inputSchema": map[string]any{"json": t.Schema}})})
+			spec := map[string]any{"name": t.Name, "inputSchema": map[string]any{"json": t.Schema}}
+			if t.Description != "" {
+				// ToolSpecification.description is optional with a minimum length of 1.
+				spec["description"] = t.Description
+			}
+			tools = append(tools, Object{"toolSpec": raw(spec)})
 		}
 		cfg := Object{"tools": raw(tools)}
 		choice := c.Parameters["tool_choice"]
@@ -198,6 +204,9 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	out, hasOut := count(u["outputTokens"])
 	if !hasIn || !hasOut {
 		return nil, protocolError("invalid Bedrock usage")
+	}
+	if in > math.MaxInt64-out {
+		return nil, protocolError("usage count overflow")
 	}
 	usage := &openai.Usage{InputTokens: in, OutputTokens: out, TotalTokens: in + out}
 	if n, ok := count(u["totalTokens"]); ok {
@@ -259,8 +268,15 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
 		return nil, protocolError("Bedrock cache write detail exceeds total")
 	}
-	if value(usage.CachedInputTokens)+value(usage.CacheWriteInputTokens) > in {
-		return nil, protocolError("Bedrock cache usage exceeds input")
+	// Converse inputTokens counts only uncached input; cache reads and writes
+	// are reported beside it, while canonical input includes both.
+	cached := value(usage.CachedInputTokens) + value(usage.CacheWriteInputTokens)
+	if cached < 0 || cached > math.MaxInt64-in-out {
+		return nil, protocolError("usage count overflow")
+	}
+	usage.InputTokens = in + cached
+	if !present(u["totalTokens"]) {
+		usage.TotalTokens = usage.InputTokens + out
 	}
 	return usage, nil
 }
@@ -305,7 +321,7 @@ func bedrockFinish(reason string) string {
 	switch reason {
 	case "tool_use":
 		return "tool_calls"
-	case "max_tokens":
+	case "max_tokens", "model_context_window_exceeded":
 		return "length"
 	case "content_filtered", "guardrail_intervened":
 		return "content_filter"
@@ -341,9 +357,6 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 		return eventstream.Message{}, err
 	}
 	return eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
-}
-func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamBedrockEvents(r, limit, route, emit, nil, false)
 }
 func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, native bool) (*openai.Completion, error) {
 	c := &openai.Completion{ProviderModel: route}

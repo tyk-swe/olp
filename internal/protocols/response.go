@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"math"
 	"strconv"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -155,13 +154,8 @@ func decodeLegacy(wire, target openai.Family, body []byte, route, encoding strin
 		return c, err
 	}
 	if wire != target && target.Operation() == "generation" {
-		for _, call := range c.ToolCalls {
-			if call.ID == "" || call.Name == "" {
-				return c, protocolError("incomplete translated tool identity")
-			}
-			if _, err := object([]byte(call.Arguments)); err != nil {
-				return c, protocolError("translated tool arguments must be a JSON object")
-			}
+		if err := validateTranslatedCalls(c.ToolCalls); err != nil {
+			return c, err
 		}
 		if supportsCandidates(wire) {
 			translated, e := translateCandidates(wire, target, body, route)
@@ -176,6 +170,17 @@ func decodeLegacy(wire, target openai.Family, body []byte, route, encoding strin
 		c.Body = renderCompletion(c, target, route)
 	}
 	return c, nil
+}
+func validateTranslatedCalls(calls []openai.ToolCall) error {
+	for _, call := range calls {
+		if call.ID == "" || call.Name == "" {
+			return protocolError("incomplete translated tool identity")
+		}
+		if _, err := object([]byte(call.Arguments)); err != nil {
+			return protocolError("translated tool arguments must be a JSON object")
+		}
+	}
+	return nil
 }
 func count(v json.RawMessage) (int64, bool) {
 	if !present(v) {
@@ -201,6 +206,11 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 	}
 	i, hasIn := count(f[in])
 	o, hasOut := count(f[out])
+	if family == "gemini" && hasIn && !present(f[out]) {
+		// Proto3 JSON omits a zero candidate count, e.g. when thinking used
+		// the whole output budget.
+		hasOut = true
+	}
 	if !hasIn || !hasOut {
 		return nil, nil
 	}
@@ -339,7 +349,7 @@ func anthropicFinish(reason string) string {
 	switch reason {
 	case "tool_use":
 		return "tool_calls"
-	case "max_tokens":
+	case "max_tokens", "model_context_window_exceeded":
 		return "length"
 	case "refusal":
 		return "content_filter"
@@ -428,13 +438,7 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 			}
 		}
 		if reason != "" {
-			c.FinishReason = "stop"
-			switch reason {
-			case "MAX_TOKENS":
-				c.FinishReason = "length"
-			case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
-				c.FinishReason = "content_filter"
-			}
+			c.FinishReason = geminiFinish(reason)
 			if c.FinishReason == "stop" && len(c.ToolCalls) > 0 {
 				c.FinishReason = "tool_calls"
 			}
@@ -816,14 +820,4 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 		c.Usage = &openai.Usage{InputTokens: n, TotalTokens: n}
 	}
 	return c, nil
-}
-
-// Redact removes credential values from any upstream-owned diagnostic text.
-func Redact(message string, secrets []string) string {
-	for _, secret := range secrets {
-		if secret != "" {
-			message = strings.ReplaceAll(message, secret, "[REDACTED]")
-		}
-	}
-	return message
 }

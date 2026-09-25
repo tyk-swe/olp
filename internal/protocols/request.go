@@ -426,9 +426,6 @@ func StructuredOutputRequested(r *openai.Request) bool {
 	return err == nil && str(format["type"]) == "json_schema"
 }
 
-func mergeDefaults(fields, defaults Object) {
-	mergeDefaultsTracked(fields, defaults, nil)
-}
 func mergeDefaultsTracked(fields, defaults Object, applied *[]oif.Provenance) {
 	record := func(path string) {
 		if applied != nil {

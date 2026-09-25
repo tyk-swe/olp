@@ -35,6 +35,62 @@ func TestNativeConverseRetainsResultAndAWSFrames(t *testing.T) {
 	}
 }
 
+func TestNativeConverseFramesMarkFirstOutput(t *testing.T) {
+	frame := func(event, payload string) []byte {
+		var encoded bytes.Buffer
+		headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue(event)}}
+		if err := eventstream.NewEncoder().Encode(&encoded, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
+			t.Fatal(err)
+		}
+		return encoded.Bytes()
+	}
+	for _, tc := range []struct {
+		event, payload string
+		want           bool
+	}{
+		{"messageStart", `{"role":"assistant"}`, false},
+		{"contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"hello"}}`, true},
+		{"contentBlockStart", `{"contentBlockIndex":1,"start":{"toolUse":{"toolUseId":"t","name":"w"}}}`, true},
+		{"contentBlockDelta", `{"contentBlockIndex":1,"delta":{"toolUse":{"input":"{\"c\""}}}`, true},
+		{"contentBlockDelta", `{"contentBlockIndex":2,"delta":{"reasoningContent":{"text":"thinking"}}}`, false},
+		{"messageStop", `{"stopReason":"end_turn"}`, false},
+		{"metadata", `{"usage":{"inputTokens":1,"outputTokens":2}}`, false},
+	} {
+		if got := MeaningfulFrame(openai.FamilyBedrock, frame(tc.event, tc.payload)); got != tc.want {
+			t.Errorf("%s %s meaningful=%t", tc.event, tc.payload, got)
+		}
+	}
+}
+
+// AWS ToolSpecification.description is optional with a minimum length of 1.
+func TestConverseOmitsEmptyToolDescription(t *testing.T) {
+	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"plain","parameters":{"type":"object"}}},{"type":"function","function":{"name":"described","description":"Looks up weather","parameters":{"type":"object"}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, err := Encode(request, "bedrock", "bedrock", "m", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"tools":[{"toolSpec":{"inputSchema":{"json":{"type":"object"}},"name":"plain"}},{"toolSpec":{"description":"Looks up weather","inputSchema":{"json":{"type":"object"}},"name":"described"}}]}`
+	if got := jsonAt(t, encoded, "/toolConfig"); got != want {
+		t.Fatalf("toolConfig = %s", got)
+	}
+}
+
+// Anthropic and Bedrock document model_context_window_exceeded as generation
+// stopped by the context window: a truncated response, not a natural stop.
+func TestContextWindowStopIsTruncation(t *testing.T) {
+	anthropic := []byte(`{"id":"m","type":"message","role":"assistant","model":"w","content":[{"type":"text","text":"partial"}],"stop_reason":"model_context_window_exceeded","usage":{"input_tokens":1,"output_tokens":1}}`)
+	if c, err := Decode(openai.FamilyAnthropic, openai.FamilyChat, anthropic, "route", ""); err != nil || c.FinishReason != "length" {
+		t.Fatalf("Anthropic finish=%q err=%v", c.FinishReason, err)
+	}
+	converse := []byte(`{"output":{"message":{"role":"assistant","content":[{"text":"partial"}]}},"stopReason":"model_context_window_exceeded","usage":{"inputTokens":1,"outputTokens":1}}`)
+	if c, err := Decode(openai.FamilyBedrock, openai.FamilyChat, converse, "route", ""); err != nil || c.FinishReason != "length" {
+		t.Fatalf("Converse finish=%q err=%v", c.FinishReason, err)
+	}
+}
+
 func TestConverseRejectsAmbiguousReservedAndExtensionHeaders(t *testing.T) {
 	for _, name := range []string{":message-type", ":event-type", ":exception-type", "future-header"} {
 		headers := eventstream.Headers{{Name: name, Value: eventstream.StringValue("first")}, {Name: name, Value: eventstream.StringValue("last")}}
