@@ -19,14 +19,16 @@ function chunk(
   delta: Record<string, unknown>,
   observation?: Record<string, unknown>,
   finish: string | null = null,
-  ready = false
+  ready = false,
+  extension?: Record<string, unknown>
 ) {
   return {
     choices: [{ index: 0, delta, finish_reason: finish }],
     olp: {
       version: 'chat-anthropic-tools-v1',
       ...(observation ? { observation } : {}),
-      ...(ready ? { handle, ready: true } : {})
+      ...(ready ? { handle, ready: true } : {}),
+      ...extension
     }
   };
 }
@@ -79,7 +81,9 @@ const recorded = [
     { content: 'after' },
     { index: 4, type: 'text', phase: 'start', text: 'after' }
   ),
-  chunk({}, undefined, 'tool_calls', true)
+  chunk({}, undefined, 'tool_calls', true, {
+    actions: { tool_calls: ['call-weather', 'call-clock'] }
+  })
 ];
 
 function sse(frames = recorded, terminal = true): Response {
@@ -141,6 +145,9 @@ describe('browser negotiated tool client', () => {
       'tool_use',
       'text'
     ]);
+    expect(completed.actions).toEqual({
+      tool_calls: ['call-weather', 'call-clock']
+    });
     const sent = transport.mock.calls[0]![1]!;
     expect((sent.headers as Headers).get('Authorization')).toBe(
       'Bearer olp_secret'
@@ -168,12 +175,17 @@ describe('browser negotiated tool client', () => {
         olp: {
           version: 'chat-anthropic-tools-v1',
           handle: finalHandle,
-          ready: true
+          ready: true,
+          actions: { tool_calls: [] }
         }
       })
     );
     const final = await unaryTurn('olp_secret', next, nextSubmission, handle);
     expect(final.assistant.content).toBe('Both tools completed.');
+    expect(final.actions).toEqual({ tool_calls: [] });
+    // A committed final turn exposes an explicit empty claim, so it is
+    // recoverable but never yields tool actions.
+    expect(() => nextTurn(final, [])).toThrow(/no tool actions/);
     expect(
       (transport.mock.calls[1]![1]!.headers as Headers).get(
         'X-OLP-Continuation-Handle'
@@ -191,8 +203,8 @@ describe('browser negotiated tool client', () => {
 
   it('retains exact native cache-usage categories on a ready stream', async () => {
     const terminal = JSON.stringify(recorded.at(-1)).replace(
-      '"ready":true}',
-      '"ready":true,"native_usage":{"cache_read_input_tokens":9007199254740993,"cache_write_input_tokens":-0}}'
+      '"ready":true,',
+      '"ready":true,"native_usage":{"cache_read_input_tokens":9007199254740993,"cache_write_input_tokens":-0},'
     );
     const streamSource =
       recorded
@@ -491,5 +503,206 @@ describe('browser negotiated tool client', () => {
     await expect(
       recoverTurn('olp_secret', submission, nativeChatRequest(source, 'route'))
     ).rejects.toThrow(/does not match/);
+  });
+
+  it('exposes tool actions only through the committed claim', async () => {
+    // The recorded terminal carries the ordered claim; the reconstructed
+    // turn exposes exactly those actions and nextTurn requires them.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(sse(recorded));
+    const completed = await streamTurn(
+      'olp_secret',
+      nativeChatRequest(source, 'route'),
+      submission
+    );
+    expect(completed.actions).toEqual({
+      tool_calls: ['call-weather', 'call-clock']
+    });
+    // A turn whose claim does not name its calls is rejected outright...
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      sse([
+        ...recorded.slice(0, -1),
+        chunk({}, undefined, 'tool_calls', true, {
+          actions: { tool_calls: ['call-weather'] }
+        })
+      ])
+    );
+    await expect(
+      streamTurn('olp_secret', nativeChatRequest(source, 'route'), submission)
+    ).rejects.toThrow(/do not correspond/);
+    // ...as is an unknown member on the claim...
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      sse([
+        ...recorded.slice(0, -1),
+        chunk({}, undefined, 'tool_calls', true, {
+          actions: {
+            tool_calls: ['call-weather', 'call-clock'],
+            hosted: []
+          }
+        })
+      ])
+    );
+    await expect(
+      streamTurn('olp_secret', nativeChatRequest(source, 'route'), submission)
+    ).rejects.toThrow(/Unknown continuation action/);
+    // ...and a ready delivery without any claim exposes no action.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      sse([
+        ...recorded.slice(0, -1),
+        {
+          ...recorded.at(-1)!,
+          olp: { version: 'chat-anthropic-tools-v1', handle, ready: true }
+        }
+      ])
+    );
+    const unclaimed = await streamTurn(
+      'olp_secret',
+      nativeChatRequest(source, 'route'),
+      submission
+    );
+    expect(unclaimed.actions).toBeUndefined();
+    expect(() =>
+      nextTurn(unclaimed, [
+        { tool_call_id: 'call-weather', content: 'sunny' },
+        { tool_call_id: 'call-clock', content: '14:00' }
+      ])
+    ).toThrow(/no actionability claim/);
+  });
+
+  it('rejects partial tool arguments as a canonical call', async () => {
+    const partial = [
+      recorded[0]!,
+      chunk(
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: 'call-weather',
+              type: 'function',
+              function: { name: 'weather', arguments: '{"city":"Par' }
+            }
+          ]
+        },
+        { index: 1, type: 'tool_use', phase: 'start', call_id: 'call-weather' }
+      ),
+      chunk({}, undefined, 'tool_calls', true, {
+        actions: { tool_calls: ['call-weather'] }
+      })
+    ];
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(sse(partial));
+    await expect(
+      streamTurn('olp_secret', nativeChatRequest(source, 'route'), submission)
+    ).rejects.toThrow(/not a complete JSON value/);
+  });
+
+  it('compares the recovered action claim with the committed delivery', async () => {
+    const assistant = {
+      role: 'assistant',
+      content: 'beforeafter',
+      tool_calls: [
+        {
+          id: 'call-weather',
+          type: 'function',
+          function: { name: 'weather', arguments: '{"city":"Paris"}' }
+        },
+        {
+          id: 'call-clock',
+          type: 'function',
+          function: { name: 'clock', arguments: '{"zone":"Europe/Paris"}' }
+        }
+      ]
+    };
+    const actions = { tool_calls: ['call-weather', 'call-clock'] };
+    const transport = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery: { stream: true, frames: recorded },
+        actions
+      })
+    );
+    const recovered = await recoverTurn(
+      'olp_secret',
+      submission,
+      nativeChatRequest(source, 'route')
+    );
+    expect(recovered.actions).toEqual(actions);
+    // The next request is built from the recovered value exactly as from a
+    // live turn.
+    const next = nextTurn(recovered, [
+      { tool_call_id: 'call-weather', content: 'sunny' },
+      { tool_call_id: 'call-clock', content: '14:00' }
+    ]);
+    expect(next.messages).toHaveLength(4);
+    expect(stringifyNativeJSON(next)).toContain(
+      '"tool_call_id":"call-weather"'
+    );
+    // A contradictory committed claim rejects the recovery.
+    transport.mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery: { stream: true, frames: recorded },
+        actions: { tool_calls: ['call-clock', 'call-weather'] }
+      })
+    );
+    await expect(
+      recoverTurn('olp_secret', submission, nativeChatRequest(source, 'route'))
+    ).rejects.toThrow(/actions do not match/);
+  });
+
+  it('reads a historical delivery without a claim as unavailable', async () => {
+    const assistant = {
+      role: 'assistant',
+      content: 'beforeafter',
+      tool_calls: [
+        {
+          id: 'call-weather',
+          type: 'function',
+          function: { name: 'weather', arguments: '{"city":"Paris"}' }
+        },
+        {
+          id: 'call-clock',
+          type: 'function',
+          function: { name: 'clock', arguments: '{"zone":"Europe/Paris"}' }
+        }
+      ]
+    };
+    // A pre-claim delivery has no actions member in its recorded frames.
+    const historical = [
+      ...recorded.slice(0, -1),
+      {
+        ...recorded.at(-1)!,
+        olp: { version: 'chat-anthropic-tools-v1', handle, ready: true }
+      }
+    ];
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery: { stream: true, frames: historical },
+        native_terminal: 'unavailable',
+        actions: 'unavailable'
+      })
+    );
+    const recovered = await recoverTurn(
+      'olp_secret',
+      submission,
+      nativeChatRequest(source, 'route')
+    );
+    expect(recovered.actions).toBeUndefined();
+    expect(recovered.nativeTerminal).toBeUndefined();
+    // A stored pre-claim outcome never upgrades to tool actions on replay.
+    expect(() =>
+      nextTurn(recovered, [
+        { tool_call_id: 'call-weather', content: 'sunny' },
+        { tool_call_id: 'call-clock', content: '14:00' }
+      ])
+    ).toThrow(/no actionability claim/);
   });
 });
