@@ -111,7 +111,7 @@ ingress:
 worker:
   enabled: true
   # One replica keeps the default footprint small. Production installations
-  # should run at least three so stream reclaim and outbox takeover remain
+  # should run at least three so stream reclaim and task leadership remain
   # available through a worker failure.
   replicas: 1
   podDisruptionBudget:
@@ -132,6 +132,10 @@ migration:
   enabled: true
   databaseSecretName: ""
   databaseSecretKey: ""
+  # Existing runtime login that each migration grants feature-table DML
+  # (olp migrate --runtime-role). Set it when databaseSecretName names a
+  # separate migration owner.
+  runtimeRole: ""
   backoffLimit: 3
   activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 300
@@ -173,11 +177,12 @@ config:
   # Comma-separated browser origins allowed to call the inference gateway
   # cross-origin. Empty disables CORS; wildcards are refused.
   gatewayCorsAllowedOrigins: ""
+  # Optional OLP_CONNECTOR_CONFIG_FILE path. The chart mounts no connector or
+  # credential files, so the path must already exist in a derived image.
+  connectorConfigFile: ""
   # Comma-separated CIDRs exempt from the non-public provider egress denylist
   # and hostnames/IP literals whose provider endpoints may use plain HTTP.
   # Empty keeps the public-only HTTPS policy.
-  # Optional mounted connectors, supplied through extraVolumes/extraVolumeMounts.
-  connectorConfigFile: ""
   providerEgressAllowCidrs: ""
   providerEgressAllowHttpHosts: ""
   publicOrigin: https://olp.example.com
@@ -186,8 +191,9 @@ config:
   databaseMaxConnections: 20
   # HTTP/2 connections receive GOAWAY at this age so clients rebalance.
   httpConnectionMaxAgeSeconds: 300
-  # Draining connections get this long, extended while responses still
-  # stream. Must stay below terminationGracePeriodSeconds - preStopDelaySeconds.
+  # Draining connections get this long to finish admitted streams before
+  # they are closed. Must stay below terminationGracePeriodSeconds -
+  # preStopDelaySeconds.
   httpConnectionDrainTimeoutSeconds: 30
   # Request body caps. httpMaxMediaBodyBytes must stay within half of
   # mediaSpool.capacityBytes or every multipart request is refused.
@@ -213,18 +219,17 @@ monitoring:
   scrapeTimeout: 5s
   rules:
     enabled: true
-    # Zero implements the default runbook policy for both thresholds below:
-    # any sustained backlog warns. Raise either value only with a documented
-    # installation-specific noise budget.
+    # Zero implements the default runbook policy: any sustained backlog warns.
+    # Raise it only with a documented installation-specific noise budget.
     requestMetadataPendingThreshold: 0
-    runtimeOutboxPendingThreshold: 0
 
 networkPolicy:
   enabled: false
   # Peers allowed to reach the public listener. Rules target container port
   # 8080, not the Service port. namespaceLabels selects one namespace set,
-  # for example kubernetes.io/metadata.name: ingress-nginx; some CNIs also
-  # need the edge load balancer, node, or kubelet probe CIDRs listed here.
+  # for example kubernetes.io/metadata.name: ingress-nginx; cidrs adds raw
+  # peers such as an edge load balancer or node range. Kubelet probes use the
+  # observability port 9090, which this block does not admit.
   # At least one peer is required whenever this block is enabled.
   edge:
     namespaceLabels: {}

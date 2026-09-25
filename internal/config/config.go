@@ -163,6 +163,13 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if getenv("OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER") != "" || getenv("OLP_OIDC_ALLOW_PRIVATE_NETWORK") != "" {
 		return c, errors.New("OIDC egress cannot be weakened by environment flags; use an explicit oidctest build for local issuer tests")
 	}
+	// Key material is read only from mounted files; an inline value would
+	// otherwise be silently ignored.
+	for _, name := range []string{"OLP_AUTH_HMAC_KEY", "OLP_MASTER_KEY", "OLP_BOOTSTRAP_TOKEN"} {
+		if getenv(name) != "" {
+			return c, fmt.Errorf("inline %s is not accepted; mount it and set %s_FILE", name, name)
+		}
+	}
 	for origin := range strings.SplitSeq(corsOrigins, ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
 			c.GatewayCORSAllowedOrigins = append(c.GatewayCORSAllowedOrigins, origin)
@@ -306,7 +313,7 @@ func (c Config) Validate() error {
 	if c.ProviderMaxEventBytes < 65536 || c.ProviderMaxEventBytes > c.ProviderMaxResponseBytes {
 		return errors.New("OLP_PROVIDER_MAX_EVENT_BYTES must be between 64 KiB and the response cap")
 	}
-	if c.TraceSampleRatio < 0 || c.TraceSampleRatio > 1 {
+	if !(c.TraceSampleRatio >= 0 && c.TraceSampleRatio <= 1) {
 		return errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
 	}
 	for _, setting := range []struct {

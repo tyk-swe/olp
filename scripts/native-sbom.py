@@ -7,6 +7,7 @@ superset is intentional. It is not a claim that each crate is reachable.
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tomllib
@@ -27,8 +28,11 @@ def digest(path):
 packages = []
 for package in lock["package"]:
     name, version = package["name"], package["version"]
+    # SPDX 2.3 identifiers allow only letters, digits, "." and "-"; crate names
+    # carry "_" and versions may carry "+" build metadata.
+    spdx_id = "SPDXRef-" + re.sub(r"[^A-Za-z0-9.-]", "-", f"{name}-{version}")
     item = {
-        "SPDXID": f"SPDXRef-{name}-{version}", "name": name, "versionInfo": version,
+        "SPDXID": spdx_id, "name": name, "versionInfo": version,
         "downloadLocation": (f"https://crates.io/api/v1/crates/{name}/{version}/download"
                              if "checksum" in package else f"git+https://github.com/valkey-io/valkey-glide@{COMMIT}"),
         "filesAnalyzed": False, "licenseConcluded": "NOASSERTION", "licenseDeclared": "NOASSERTION",
@@ -39,6 +43,8 @@ for package in lock["package"]:
     if "checksum" in package:
         item["checksums"] = [{"algorithm": "SHA256", "checksumValue": package["checksum"]}]
     packages.append(item)
+if len({p["SPDXID"] for p in packages}) != len(packages):
+    sys.exit("native inventory SPDX identifiers collide")
 spdx = {
     "spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT",
     "name": f"valkey-glide-go-{VERSION}-ffi-lock-inventory",

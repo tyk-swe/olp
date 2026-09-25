@@ -411,7 +411,8 @@ grant runtime access with `olp migrate --runtime-role olp_runtime` or run
 `psql -v runtime_role=olp_runtime`. The runtime role receives feature-table DML,
 including installation-row updates, and read-only migration history. Reapply
 grants after migrations; never give it migration-owner membership or CREATE
-privileges. Production Helm needs both runtime and migration URL Secrets.
+privileges. Production Helm needs both runtime and migration URL Secrets; set
+`migration.runtimeRole` so every migration Job reapplies the runtime grants.
 
 ## Metric aggregation and incidents
 

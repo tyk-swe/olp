@@ -108,7 +108,14 @@ func (p *BoundedSpanProcessor) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.done:
-		return errors.New("telemetry: trace export worker dropped shutdown response")
+		// The worker answers shutdown before it exits, so its exit can be
+		// observed together with an answer that is already waiting.
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return errors.New("telemetry: trace export worker dropped shutdown response")
+		}
 	}
 }
 

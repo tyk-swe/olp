@@ -222,7 +222,7 @@ First-party contract references consulted for these compositions:
 [Bedrock Converse](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
 [Bedrock Invoke](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html).
 
-A gateway using `OLP_CONNECTORS_FILE` without database decryption keys may supply
+A gateway using `OLP_CONNECTOR_CONFIG_FILE` without database decryption keys may supply
 `network_credential_file` beside `credential_file` in each mounted provider entry.
 The network file contains the same private JSON shape as the creation API. Its
 configured credential UUID must match the published provider's network reference;

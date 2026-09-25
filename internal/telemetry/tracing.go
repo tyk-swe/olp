@@ -87,7 +87,7 @@ type Handle struct {
 // Install validates the configuration and, when an endpoint is set, builds the
 // exporter and provider. An unset endpoint installs no exporter at all.
 func Install(cfg Config) (*Handle, error) {
-	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
+	if !(cfg.SampleRatio >= 0 && cfg.SampleRatio <= 1) {
 		return nil, errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
 	}
 	h := &Handle{tracer: noop.NewTracerProvider().Tracer("openllmproxy"), runtime: RuntimeConfig{

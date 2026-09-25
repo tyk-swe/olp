@@ -14,6 +14,11 @@ for mode in gateway control worker; do
     --set "$mode.enabled=true" >/dev/null
 done
 helm template olp deploy/helm --set-string image.digest="sha256:$(printf '%064d' 0)" >/dev/null
+if ! helm template olp deploy/helm --set-string migration.runtimeRole=olp_runtime |
+  grep -A1 -- '- name: OLP_RUNTIME_ROLE' | grep -q 'value: "olp_runtime"'; then
+  echo 'Expected the migration Job to grant migration.runtimeRole' >&2
+  exit 1
+fi
 for invalid in 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
   'networkPolicy.enabled=true'; do

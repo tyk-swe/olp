@@ -174,7 +174,7 @@
     {
       "path": "github.com/aws/smithy-go",
       "version": "v1.28.1",
-      "indirect": true
+      "indirect": false
     },
     {
       "path": "github.com/aymerick/douceur",
@@ -244,7 +244,7 @@
     {
       "path": "github.com/coder/websocket",
       "version": "v1.8.15",
-      "indirect": true
+      "indirect": false
     },
     {
       "path": "github.com/coreos/go-oidc/v3",
@@ -839,7 +839,7 @@
     {
       "path": "github.com/shopspring/decimal",
       "version": "v1.4.0",
-      "indirect": true
+      "indirect": false
     },
     {
       "path": "github.com/sirupsen/logrus",
@@ -1147,7 +1147,7 @@
       "indirect": true
     }
   ],
-  "directCount": 25,
+  "directCount": 28,
   "resolvedCount": 229,
   "native": "native/inventory.json",
   "javascriptSDKs": {

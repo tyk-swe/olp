@@ -61,6 +61,7 @@
       "properties": {
         "databaseSecretName": { "type": "string" },
         "databaseSecretKey": { "type": "string" },
+        "runtimeRole": { "type": "string" },
         "enabled": { "type": "boolean" },
         "backoffLimit": { "type": "integer", "minimum": 0 },
         "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
@@ -242,11 +243,10 @@
         "scrapeTimeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
         "rules": {
           "type": "object",
-          "required": ["enabled", "requestMetadataPendingThreshold", "runtimeOutboxPendingThreshold"],
+          "required": ["enabled", "requestMetadataPendingThreshold"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 },
-            "runtimeOutboxPendingThreshold": { "type": "integer", "minimum": 0 }
+            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 }
           }
         }
       }

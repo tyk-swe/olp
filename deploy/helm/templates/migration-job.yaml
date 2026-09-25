@@ -42,6 +42,10 @@ spec:
                 secretKeyRef:
                   name: {{ default .Values.config.databaseSecretName .Values.migration.databaseSecretName | quote }}
                   key: {{ default .Values.config.databaseSecretKey .Values.migration.databaseSecretKey | quote }}
+            {{- with .Values.migration.runtimeRole }}
+            - name: OLP_RUNTIME_ROLE
+              value: {{ . | quote }}
+            {{- end }}
             - name: OLP_VALKEY_URL
               valueFrom:
                 secretKeyRef:
