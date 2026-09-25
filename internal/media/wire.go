@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -138,12 +140,11 @@ type Request struct {
 	SourceNormalized bool    // caller multipart text or metadata was normalized
 
 	// Video job operations.
-	JobID           string
-	Variant         string
-	After           string
-	Limit           int64
-	Order           string
-	DeleteMissingOK bool
+	JobID   string
+	Variant string
+	After   string
+	Limit   int64
+	Order   string
 }
 
 // SourceDocument is the immutable complete native JSON source, including member
@@ -226,15 +227,11 @@ func validRouteSlug(value string) bool {
 	return value[0] >= 'a' && value[0] <= 'z' || value[0] >= '0' && value[0] <= '9'
 }
 
-// jsonDoc marshals a field map for an upstream JSON body.
+// jsonDoc marshals a field map for an upstream JSON body. Omitted optional
+// members are typed nil pointers, so the legacy codecs send them as JSON null.
 func jsonDoc(fields map[string]any, extra map[string]any) ([]byte, *Error) {
 	doc := make(map[string]any, len(fields)+len(extra))
-	for name, value := range fields {
-		if value == nil {
-			continue
-		}
-		doc[name] = value
-	}
+	maps.Copy(doc, fields)
 	for name, value := range extra {
 		if _, exists := doc[name]; exists {
 			return nil, invalidMedia("The extension field " + strconv.Quote(name) + " collides with a request field.")
@@ -330,7 +327,7 @@ func DecodeImageGeneration(body []byte) (*Request, *Error) {
 	if strings.TrimSpace(wire.Prompt) == "" {
 		return nil, invalidMedia("The image prompt is required.")
 	}
-	if wire.N != nil && *wire.N == 0 {
+	if wire.N != nil && *wire.N < 1 {
 		return nil, invalidMedia("The image count must be at least 1.")
 	}
 	if !validRouteSlug(wire.Model) {
@@ -393,8 +390,9 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 }
 
 // decodeJSON unmarshals body into wire and returns the remaining top-level
-// fields as extension values. Duplicate or colliding keys are rejected by the
-// encoder at dispatch time.
+// fields as extension values. Numbers stay json.Number so extension fields
+// re-encode with their wire spelling upstream. Duplicate or colliding keys are
+// rejected by the encoder at dispatch time.
 func decodeJSON(body []byte, wire any, known ...string) (map[string]any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
@@ -413,37 +411,7 @@ func decodeJSON(body []byte, wire any, known ...string) (map[string]any, error) 
 	if len(doc) == 0 {
 		return nil, nil
 	}
-	extra := make(map[string]any, len(doc))
-	for name, value := range doc {
-		extra[name] = normalizeJSON(value)
-	}
-	return extra, nil
-}
-
-// normalizeJSON decodes numbers as their wire values rather than json.Number
-// so extension fields re-encode identically upstream.
-func normalizeJSON(value any) any {
-	switch value := value.(type) {
-	case json.Number:
-		if i, err := value.Int64(); err == nil {
-			return i
-		}
-		if f, err := value.Float64(); err == nil {
-			return f
-		}
-		return value.String()
-	case map[string]any:
-		for k, v := range value {
-			value[k] = normalizeJSON(v)
-		}
-		return value
-	case []any:
-		for i, v := range value {
-			value[i] = normalizeJSON(v)
-		}
-		return value
-	}
-	return value
+	return doc, nil
 }
 
 // DecodeImageEdit validates a parsed image-edit form.
@@ -518,7 +486,7 @@ func DecodeImageEdit(form *Form) (*Request, *Error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, invalidMedia("The image prompt is required.")
 	}
-	if n != nil && *n == 0 {
+	if n != nil && *n < 1 {
 		return nil, invalidMedia("The image count must be at least 1.")
 	}
 	if !validRouteSlug(model) {
@@ -578,7 +546,7 @@ func DecodeImageVariation(form *Form) (*Request, *Error) {
 	if image == nil {
 		return nil, invalidMedia("The image file is required.")
 	}
-	if n != nil && *n == 0 {
+	if n != nil && *n < 1 {
 		return nil, invalidMedia("The image count must be at least 1.")
 	}
 	if !validRouteSlug(model) {
@@ -654,7 +622,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	if file == nil {
 		return nil, invalidMedia("The audio file is required.")
 	}
-	if temperature != nil && (*temperature < 0 || *temperature > 1) {
+	if temperature != nil && (math.IsNaN(*temperature) || *temperature < 0 || *temperature > 1) {
 		return nil, invalidMedia("The transcription temperature must be between 0 and 1.")
 	}
 	format := "json"
@@ -1407,12 +1375,8 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	if wire.Object != "video" {
 		return nil, protocolError("The provider returned an unexpected video object type.")
 	}
-	switch wire.Status {
-	case "queued", "in_progress", "completed", "failed":
-	default:
-		// Unknown provider statuses stay observable through the object but do
-		// not map onto a client-visible lifecycle state.
-	}
+	// Unknown provider statuses stay observable through the object but do not
+	// map onto a client-visible lifecycle state (see VideoState).
 	result := &VideoJobResult{
 		ID: wire.ID, Status: wire.Status, Progress: wire.Progress,
 		CreatedAt: wire.CreatedAt, CompletedAt: wire.Completed, ExpiresAt: wire.Expires,

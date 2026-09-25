@@ -1110,22 +1110,3 @@ func ReconciliationSummary(ctx context.Context, q Querier, now time.Time) (Summa
 		Scan(&s.Pending, &s.Stale, &s.Failed, &s.OldestPendingAt)
 	return s, dbError(err)
 }
-
-// PendingJobs lists one key's unreconciled jobs; used by diagnostics.
-func PendingJobs(ctx context.Context, q Querier, apiKeyID string, limit int) ([]JobRecord, error) {
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 32 {
-		limit = 32
-	}
-	rows, err := q.Query(ctx, jobSelect+` WHERE j.api_key_id = $1
-		AND j.lifecycle_state IN ('create_cleanup_pending','delete_pending')
-		ORDER BY j.updated_at ASC, j.id ASC LIMIT $2`, apiKeyID, limit)
-	if err != nil {
-		return nil, dbError(err)
-	}
-	items, err := scanJobs(rows)
-	rows.Close()
-	return items, dbError(err)
-}

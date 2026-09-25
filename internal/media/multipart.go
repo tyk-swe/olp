@@ -8,22 +8,19 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
 const (
-	// MultipartTotalDeadline bounds the entire parser lifetime so a peer
-	// trickling valid frames cannot occupy an admission lease indefinitely.
-	MultipartTotalDeadline = 5 * time.Minute
 	// MaxFields bounds the number of multipart parts per request.
 	MaxFields = 128
 	// MaxTextFieldBytes bounds one text field.
@@ -239,9 +236,6 @@ func (f *Form) Disarm() {
 		f.lease = nil
 	}
 }
-
-// Handles reports the staged artifact handles still owned by the form.
-func (f *Form) Handles() []Handle { return f.handles }
 
 // Cleanup removes every staged artifact still owned by the form and frees
 // the admission lease. It is safe to call once after parse failure or when a
@@ -496,9 +490,9 @@ func ValidateBoundary(contentType string) *Error {
 }
 
 // ParseMultipart streams a bounded multipart body into text fields and
-// spooled file parts. The caller must have set a read deadline of at most
-// MultipartTotalDeadline before invoking ParseMultipart; staged artifacts are
-// cleaned up on every failure path.
+// spooled file parts. The caller must bound the body with a read deadline
+// before invoking ParseMultipart; staged artifacts are cleaned up on every
+// failure path.
 func ParseMultipart(ctx context.Context, r *http.Request, spool *Spool, admission *Admission, maximumFileBytes int64, maximumFiles int) (*Form, error) {
 	if admission == nil || admission.Lease == nil {
 		return nil, Fail(http.StatusServiceUnavailable, "media_admission_overloaded", "The media upload capacity is busy; retry shortly.")
@@ -509,7 +503,7 @@ func ParseMultipart(ctx context.Context, r *http.Request, spool *Spool, admissio
 	}
 	_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	output := newForm(spool, admission.Lease)
-	err := parseMultipartFields(ctx, r, spool, multipart.NewReader(r.Body, params["boundary"]),
+	err := parseMultipartFields(ctx, spool, multipart.NewReader(r.Body, params["boundary"]),
 		maximumFileBytes, maximumFiles, admission, output)
 	if err == nil {
 		// Multipart ends at its closing boundary; the raw-body cap must also
@@ -532,7 +526,7 @@ func multipartReadError(err error) *Error {
 	return invalidRequest(fmt.Sprintf("The multipart request is invalid: %v", err))
 }
 
-func parseMultipartFields(ctx context.Context, r *http.Request, spool *Spool, reader *multipart.Reader,
+func parseMultipartFields(ctx context.Context, spool *Spool, reader *multipart.Reader,
 	maximumFileBytes int64, maximumFiles int, admission *Admission, output *Form) error {
 	var fieldCount, fileCount, textBytes int
 	var authorizedModelSeen bool
@@ -540,7 +534,9 @@ func parseMultipartFields(ctx context.Context, r *http.Request, spool *Spool, re
 		if err := ctx.Err(); err != nil {
 			return Fail(http.StatusRequestTimeout, "multipart_parser_timeout", "The multipart parser timed out.")
 		}
-		part, err := reader.NextPart()
+		// NextPart would decode quoted-printable and hide its header; the raw
+		// part keeps that header visible so decoded bytes count as normalized.
+		part, err := reader.NextRawPart()
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -562,18 +558,22 @@ func parseMultipartFields(ctx context.Context, r *http.Request, spool *Spool, re
 				output.normalized = true
 			}
 		}
+		var body io.Reader = part
+		if strings.EqualFold(part.Header.Get("Content-Transfer-Encoding"), "quoted-printable") {
+			body = quotedprintable.NewReader(part)
+		}
 		if rawFilename, isFile := partFilename(part); isFile {
 			fileCount++
 			if fileCount > maximumFiles {
 				part.Close()
 				return invalidRequest("The multipart request contains too many files.")
 			}
-			if err := storeMultipartFile(ctx, spool, part, rawFilename, name, maximumFileBytes, output); err != nil {
+			if err := storeMultipartFile(ctx, spool, part, body, rawFilename, name, maximumFileBytes, output); err != nil {
 				part.Close()
 				return err
 			}
 		} else {
-			if err := storeMultipartText(part, name, admission, output, &textBytes, &authorizedModelSeen); err != nil {
+			if err := storeMultipartText(part, body, name, admission, output, &textBytes, &authorizedModelSeen); err != nil {
 				part.Close()
 				return err
 			}
@@ -601,7 +601,7 @@ func partFilename(part *multipart.Part) (string, bool) {
 	return filename, ok
 }
 
-func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part, rawFilename, name string,
+func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part, body io.Reader, rawFilename, name string,
 	maximumFileBytes int64, output *Form) error {
 	filename, err := SafeFilename(rawFilename)
 	if err != nil {
@@ -615,7 +615,7 @@ func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part,
 		Filename:      filename,
 		ContentType:   contentType,
 		MaximumLength: maximumFileBytes,
-		Body:          part,
+		Body:          body,
 	})
 	if err != nil {
 		return SpoolError(err)
@@ -634,12 +634,12 @@ func storeMultipartFile(ctx context.Context, spool *Spool, part *multipart.Part,
 	return nil
 }
 
-func storeMultipartText(part *multipart.Part, name string, admission *Admission, output *Form,
+func storeMultipartText(part *multipart.Part, body io.Reader, name string, admission *Admission, output *Form,
 	textBytes *int, authorizedModelSeen *bool) error {
 	var field bytes.Buffer
 	buffer := make([]byte, ReadChunkBytes)
 	for {
-		n, err := part.Read(buffer)
+		n, err := body.Read(buffer)
 		if n > 0 {
 			if field.Len()+n > MaxTextFieldBytes {
 				return invalidRequest("A multipart text field exceeded 64 KiB.")

@@ -11,7 +11,6 @@ package media
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -344,7 +343,7 @@ func (p *pendingWrite) abort(cause error) {
 		p.spool.log.Warn("failed to remove an incomplete media spool write; scheduled for retry",
 			"error", err, "cause", cause)
 	}
-	p.spool.enqueueCleanup(&cleanupJob{path: p.path, bytes: p.reserved, committedEntry: false})
+	p.spool.enqueueCleanup(&cleanupJob{path: p.path, bytes: p.reserved})
 }
 
 // Open returns the artifact metadata and its file for reading.
@@ -406,25 +405,14 @@ func (s *Spool) Remove(handle Handle) error {
 		return nil
 	}
 	s.log.Warn("failed to remove a media spool artifact; scheduled for retry", "error", err)
-	s.enqueueCleanup(&cleanupJob{
-		path:           entry.path,
-		bytes:          entry.contentLength,
-		committedEntry: true,
-		handle:         string(handle),
-		entry:          entry,
-	})
+	s.enqueueCleanup(&cleanupJob{path: entry.path, bytes: entry.contentLength})
 	return ErrUnavailable
 }
 
 // cleanupJob retries filesystem removal until the bytes can be released.
-// For committed entries the job owns the entry bookkeeping: if the job is
-// abandoned the entry is reinserted so a later remove can retry honestly.
 type cleanupJob struct {
-	path           string
-	bytes          int64
-	committedEntry bool
-	handle         string
-	entry          spoolEntry
+	path  string
+	bytes int64
 }
 
 func (s *Spool) enqueueCleanup(job *cleanupJob) {
@@ -470,10 +458,4 @@ func (s *Spool) PutBytes(ctx context.Context, filename, contentType string, data
 		MaximumLength: maximum,
 		Body:          strings.NewReader(string(data)),
 	})
-}
-
-// constantTimeHandleEqual compares handles without leaking length-prefix
-// timing; primarily used by tests asserting handle hygiene.
-func constantTimeHandleEqual(a, b Handle) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
