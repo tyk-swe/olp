@@ -124,3 +124,99 @@ func TestInspectionStructureIsBoundedAndUnknownEnumsAreRedacted(t *testing.T) {
 		t.Fatalf("unknown enum or member escaped: %s", encoded)
 	}
 }
+
+func TestInspectionFieldScopesResultAndOperationControls(t *testing.T) {
+	for pointer, want := range map[string]string{
+		"/dimensions":                          "/dimensions",
+		"/output_dimension":                    "/output_dimension",
+		"/encoding_format":                     "/encoding_format",
+		"/top_n":                               "/top_n",
+		"/documents":                           "/documents",
+		"/result/model":                        "/result/model",
+		"/result/usage/prompt_tokens":          "/result/usage/prompt_tokens",
+		"/result/results/0/document":           "/result/results/0/document",
+		"/result/results/0/private-name":       "/result/results",
+		"/result/private-member":               "/native_fields",
+		"/private-native-key":                  "/native_fields",
+		"/$native":                             "/$native",
+		"/result/usage/prompt~1private-marker": "/result/usage",
+	} {
+		if got := inspectionField(pointer); got != want {
+			t.Fatalf("inspectionField(%s) = %s, want %s", pointer, got, want)
+		}
+	}
+}
+
+func TestInspectionTagsQualifiedProvenancePerPointer(t *testing.T) {
+	document, err := oif.ParseJSON([]byte(`{
+		"model":"route","input":["private-inspector-prompt"],"output_dimension":2,"truncation":false,"encoding_format":null,"private-native-key":1
+	}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := []oif.Provenance{
+		{Pointer: "", Origin: oif.QualifiedMapping, Reason: "qualified-openai-voyage-float-embedding/1"},
+		{Pointer: "/truncation", Origin: oif.QualifiedMapping, Reason: "registered equivalent native control"},
+		{Pointer: "/output_dimension", Origin: oif.QualifiedMapping, Reason: "qualified native control relocation"},
+		{Pointer: "/model", Origin: oif.IdentityBinding, Reason: "published model binding"},
+	}
+	result := inspectRequest(document, provenance)
+	fields := map[string]inspectedField{}
+	for _, field := range result.Fields {
+		fields[field.Field] = field
+	}
+	if fields["/truncation"].Origin != "qualified_mapping" || fields["/output_dimension"].Origin != "qualified_mapping" {
+		t.Fatalf("qualified change provenance lost: %+v", result.Fields)
+	}
+	if fields["/model"].Origin != "identity_binding" {
+		t.Fatalf("identity binding provenance lost: %+v", fields["/model"])
+	}
+	// Untouched members stay caller-owned: the root mapping marker is a class
+	// claim, not per-member evidence.
+	if fields["/input"].Origin != "caller" || fields["/encoding_format"].Origin != "caller" {
+		t.Fatalf("untouched member mislabeled as mapped: %+v", result.Fields)
+	}
+	// Safe operation control values display; content and names never do.
+	if field := fields["/output_dimension"]; field.Redacted || field.ValueJSON == nil || *field.ValueJSON != "2" {
+		t.Fatalf("safe numeric control not shown: %+v", field)
+	}
+	if field := fields["/truncation"]; field.Redacted || field.ValueJSON == nil || *field.ValueJSON != "false" {
+		t.Fatalf("safe boolean control not shown: %+v", field)
+	}
+	if !fields["/input"].Redacted || fields["/input"].ValueJSON != nil {
+		t.Fatal("native input content exposed")
+	}
+	encoded, _ := json.Marshal(result)
+	if strings.Contains(string(encoded), "private-") {
+		t.Fatalf("inspection exposed caller content or names: %s", encoded)
+	}
+	if result.RedactedNativeFields != 1 {
+		t.Fatal("unknown native field was not counted without its name")
+	}
+}
+
+func TestInspectionOperationControlValuesStayEnumBounded(t *testing.T) {
+	for pointer, raw := range map[string]string{
+		"/output_dtype": `"uint8"`,
+		"/input_type":   `"query"`,
+		"/truncate":     `"END"`,
+		"/taskType":     `"RETRIEVAL_QUERY"`,
+	} {
+		document, _ := oif.ParseJSON([]byte(`{"x":`+raw+`}`), oif.Limits{})
+		value, _ := document.Root().Lookup("x")
+		if !safeInspectionValue(pointer, value) {
+			t.Fatalf("registered enum value redacted at %s", pointer)
+		}
+	}
+	for pointer, raw := range map[string]string{
+		"/output_dtype": `"private-dtype-marker"`,
+		"/prompt_name":  `"private-prompt-marker"`,
+		"/title":        `"private-title-marker"`,
+	} {
+		document, _ := oif.ParseJSON([]byte(`{"x":`+raw+`}`), oif.Limits{})
+		value, _ := document.Root().Lookup("x")
+		if safeInspectionValue(pointer, value) {
+			t.Fatalf("caller-controlled string exposed at %s", pointer)
+		}
+	}
+}

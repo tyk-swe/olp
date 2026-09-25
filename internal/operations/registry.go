@@ -7,6 +7,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -64,11 +65,21 @@ type Dialect struct {
 
 // Mapping qualifies one actual source/target pair. It owns both directions;
 // merely retaining foreign fields cannot establish target interpretation.
+//
+// Lower and Project co-construct each destination: they return the document
+// and the declared changes that produce it. The planner re-applies the
+// declaration and requires byte-identical construction, so a change missing
+// from the declaration or a declared change whose value differs from the
+// destination is a contract violation, not a silent drop. Projected declares
+// every result change Project may apply, using /result-scoped fields, so a
+// pre-dispatch receipt can advertise the projection contract; Decode rejects
+// realized result changes the declaration does not cover.
 type Mapping struct {
 	Source, Target    oif.Identity
-	Lower             func(oif.Request, oif.View) (oif.Document, []oif.Provenance, error)
+	Lower             func(oif.Request, oif.View) (oif.Document, []oif.Change, error)
 	ValidateEffective func(oif.Request, oif.Request) error
-	Project           func(oif.Request, oif.Result, oif.View, string) (oif.Document, error)
+	Project           func(oif.Request, oif.Result, oif.View, string) (oif.Document, []oif.Change, error)
+	Projected         []oif.Disposition
 	Evidence          string
 }
 
@@ -105,6 +116,16 @@ func (r *Registry) RegisterMapping(m Mapping) error {
 	b, bok := r.dialects[m.Target]
 	if !aok || !bok || a.Operation != b.Operation || m.Lower == nil || m.Project == nil || m.Evidence == "" || len(r.mappings) >= 1024 {
 		return errors.New("mapping requires registered matching operations and complete directions")
+	}
+	if len(m.Projected) > 64 {
+		return errors.New("mapping result declaration exceeds bounds")
+	}
+	for _, declared := range m.Projected {
+		// Declared result fields are /result-scoped registered-schema names;
+		// they describe what Project may do, never observed content.
+		if !strings.HasPrefix(declared.Field, "/result/") || len(declared.Field) > 256 || declared.Disposition == "" || declared.Rule == "" {
+			return errors.New("mapping result declaration requires bounded /result-scoped field, disposition and rule")
+		}
 	}
 	key := [2]oif.Identity{m.Source, m.Target}
 	if _, exists := r.mappings[key]; exists {
