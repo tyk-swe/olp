@@ -61,10 +61,14 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	if err != nil {
 		return nil, err
 	}
-	effective := prepared.Document()
-	if err := checkAssetResources(effective, t.wire); err != nil {
+	// Provider asset positions admit only bindings the resource authority
+	// already verified; anything else keeps the historical refusal. The
+	// rewrite lands on the effective invocation, never the caller's source.
+	prepared, assets, err := t.admitAssets(request, prepared, context, &receipt)
+	if err != nil {
 		return nil, err
 	}
+	effective := prepared.Document()
 	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
 		return nil, err
 	}
@@ -104,7 +108,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
 	receipt.Dispositions = append(receipt.Dispositions, headerReceipt...)
 	receipt.Dispositions = compactDispositions(receipt.Dispositions)
-	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, route: request.Route, receipt: receipt}, nil
+	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, route: request.Route, receipt: receipt, assets: assets}, nil
 }
 
 func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {

@@ -687,6 +687,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 			}
 		}
 	}
+	// Managed file references resolve through the resource authority before
+	// target planning; only verified bindings reach the strict binder and
+	// provider-native references remain a refusal there.
+	if e := s.resolveRequestFileAssets(ctx, x); e != nil {
+		return e
+	}
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()

@@ -32,6 +32,26 @@ func TestResponsesRejectAccountScopedInputReferences(t *testing.T) {
 	}
 }
 
+// Gateway-managed strict file IDs carry only their shape through parsing;
+// ownership is established later by the resource authority, never here.
+func TestResponsesAdmitGatewayManagedFileIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+	}{
+		{"file", `[{"role":"user","content":[{"type":"input_file","file_id":"strict_file_0123456789abcdef0123456789abcdef"}]}]`},
+		{"image", `[{"type":"message","role":"user","content":[{"type":"input_image","file_id":"strict_file_0123456789abcdef0123456789abcdef"}]}]`},
+		{"item", `[{"type":"input_file","file_id":"strict_file_0123456789abcdef0123456789abcdef","filename":"notes.txt"}]`},
+		{"function output", `[{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_file","file_id":"strict_file_0123456789abcdef0123456789abcdef"}]}]`},
+		{"computer output", `[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"strict_file_0123456789abcdef0123456789abcdef"}}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Parse(FamilyResponses, []byte(`{"model":"r","input":`+tc.input+`}`)); err != nil {
+				t.Fatalf("managed file reference rejected: %v", err)
+			}
+		})
+	}
+}
+
 // Scalar text containing reference-like words is covered by the exact message
 // envelope assertion in TestResponsesTextUsesMessageEnvelopeWithoutLosingNativeExtensions.
 func TestResponsesPreserveInlineInputsAndToolResults(t *testing.T) {

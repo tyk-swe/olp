@@ -38,7 +38,14 @@ type Profile struct {
 	Operations        []string                   `json:"operations"`
 	SemanticHeaders   []string                   `json:"semantic_headers"`
 	QuerySettings     []string                   `json:"query_settings"`
-	Documentation     string                     `json:"documentation"`
+	// FilePurposes are the native upload purposes this profile admits for
+	// gateway-managed inference files. An empty list is no file contract;
+	// batch files keep their own route/file contract and are not inferred here.
+	FilePurposes []string `json:"file_purposes,omitempty"`
+	// FileOptions are the additional native multipart fields forwarded
+	// verbatim on a managed inference-file upload.
+	FileOptions   []string `json:"file_options,omitempty"`
+	Documentation string   `json:"documentation"`
 }
 
 const ProfileRevision = "1"
@@ -135,6 +142,13 @@ func init() {
 			p.Transport = "websocket"
 			p.Documentation = "https://ai.google.dev/api/live"
 		}
+		// The direct OpenAI Responses profile owns the only managed
+		// inference-file contract: native user_data uploads with the provider's
+		// expiry option forwarded verbatim.
+		if p.ID == "openai-responses" {
+			p.FilePurposes = []string{"user_data"}
+			p.FileOptions = []string{"expires_after[anchor]", "expires_after[seconds]"}
+		}
 		completeProfileMetadata(p)
 	}
 	registerUnaryProfiles()
@@ -163,6 +177,8 @@ func cloneProfile(p Profile) Profile {
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
 	p.QuerySettings = slices.Clone(p.QuerySettings)
+	p.FilePurposes = slices.Clone(p.FilePurposes)
+	p.FileOptions = slices.Clone(p.FileOptions)
 	return p
 }
 
@@ -588,6 +604,14 @@ func RegisterProfile(p Profile) error {
 	}
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
 		return errors.New("profile transport and capabilities are required")
+	}
+	// Managed provider-file contracts are reviewed compositions. A registered
+	// profile may omit them to inherit its template's contract, but it can
+	// never assert a different one.
+	if p.FilePurposes == nil && p.FileOptions == nil {
+		p.FilePurposes, p.FileOptions = template.FilePurposes, template.FileOptions
+	} else if !slices.Equal(p.FilePurposes, template.FilePurposes) || !slices.Equal(p.FileOptions, template.FileOptions) {
+		return errors.New("profile file contract is incompatible")
 	}
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))

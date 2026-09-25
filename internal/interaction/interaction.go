@@ -39,9 +39,30 @@ type Context struct {
 	DurableContinuation bool
 	RetainedResponses   bool
 	Continuation        *Continuation
+	// ResolvedAssets binds caller-referenced local resource IDs to verified
+	// provider objects. Every entry is produced by the existing resource
+	// authority before binding; request bodies can only name map keys and can
+	// never assert ownership, native identity, or serving scope themselves.
+	ResolvedAssets map[string]AssetBinding
 }
 type ServingIdentity = oif.ServingIdentity
 type Error = oif.Incompatibility
+
+// AssetBinding is one verified provider-resource binding supplied by the
+// resource authority. A binding carries the authority's own record: the
+// owner-scoped local ID, the provider-native identity, the admitted upload
+// purpose, the serving identity established at commit, and the byte identity
+// of the accepted upload.
+type AssetBinding struct {
+	LocalID   string
+	Kind      string
+	NativeID  string
+	Purpose   string
+	Serving   ServingIdentity
+	Digest    string
+	MediaType string
+	Size      int64
+}
 
 func incompatible(code, field, requirement, message string) *Error {
 	return &Error{Code: code, Field: field, Requirement: requirement, Message: message}
@@ -69,6 +90,7 @@ type Plan struct {
 	stream       bool
 	route        string
 	receipt      Receipt
+	assets       []AssetBinding
 }
 
 // Compile snapshots all caller-owned configuration. A template is immutable and
@@ -131,6 +153,12 @@ func Compile(config Config) (*Template, error) {
 	}
 	return &Template{config: config, profile: profile, wire: wire, policy: compiled, defaults: defaults, origins: origins, serving: serving}, nil
 }
+
+// Serving is the strict serving identity this template binds plans to. The
+// resource authority records it when a managed provider asset is committed so
+// later generation plans can require serving affinity without re-resolving
+// configuration.
+func (t *Template) Serving() ServingIdentity { return t.serving }
 func copyConfig(config connectors.Config) (connectors.Config, error) {
 	out := config
 	out.SemanticHeaders = maps.Clone(config.SemanticHeaders)
@@ -213,6 +241,11 @@ func (p *Plan) Receipt() Receipt {
 	return out
 }
 func (p *Plan) Serving() ServingIdentity { return p.receipt.Serving }
+
+// Assets returns the resource-authority bindings this plan admitted at
+// dialect-owned file positions. The caller's IDs never reached the provider;
+// each entry records the verified local identity bound to a native ID.
+func (p *Plan) Assets() []AssetBinding { return slices.Clone(p.assets) }
 func (p *Plan) Obligations() Obligations {
 	out := p.receipt.Obligations
 	out.Effects = slices.Clone(out.Effects)

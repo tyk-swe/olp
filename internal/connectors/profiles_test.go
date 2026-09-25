@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -334,6 +335,43 @@ func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {
 		}
 	}
 	readers.Wait()
+}
+
+// The managed inference-file contract is owned by the reviewed profile
+// composition: a registered profile may inherit it but can never widen it.
+func TestRegisteredProfilesCannotAssertUnqualifiedFileContracts(t *testing.T) {
+	source, err := LookupProfile("openai-responses", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.FilePurposes) == 0 || len(source.FileOptions) == 0 {
+		t.Fatal("the openai-responses profile lost its managed file contract")
+	}
+	inherited := source
+	inherited.ID = "fixture-" + uuid.NewString()
+	inherited.Label = "Inherited file contract"
+	inherited.FilePurposes, inherited.FileOptions = nil, nil
+	if err := RegisterProfile(inherited); err != nil {
+		t.Fatalf("template file contract was not inherited: %v", err)
+	}
+	registered, err := LookupProfile(inherited.ID, inherited.Revision)
+	if err != nil || !slices.Equal(registered.FilePurposes, source.FilePurposes) || !slices.Equal(registered.FileOptions, source.FileOptions) {
+		t.Fatalf("registered profile drifted from the reviewed file contract: %v %+v", err, registered)
+	}
+	widened := source
+	widened.ID = "fixture-" + uuid.NewString()
+	widened.Label = "Widened file contract"
+	widened.FilePurposes = append(slices.Clone(source.FilePurposes), "unreviewed_purpose")
+	if err := RegisterProfile(widened); err == nil {
+		t.Fatal("a registered profile asserted an unreviewed upload purpose")
+	}
+	narrowed := source
+	narrowed.ID = "fixture-" + uuid.NewString()
+	narrowed.Label = "Narrowed file contract"
+	narrowed.FileOptions = nil
+	if err := RegisterProfile(narrowed); err == nil {
+		t.Fatal("a registered profile dropped the reviewed upload options")
+	}
 }
 
 func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {

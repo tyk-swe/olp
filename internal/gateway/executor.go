@@ -188,6 +188,9 @@ type execution struct {
 	pinnedSecret       []byte
 	providerState      bool
 	responseMap        map[string]string
+	// resolvedAssets are the resource-authority bindings verified during
+	// prepare(); strict binding consumes them, request JSON cannot mint them.
+	resolvedAssets map[string]interaction.AssetBinding
 
 	once       sync.Once
 	facts      []AttemptFact
