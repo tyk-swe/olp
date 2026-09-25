@@ -3,6 +3,7 @@ package configuration
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"time"
 
@@ -25,7 +26,9 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	if err != nil {
 		return err
 	}
-	projectIDs := map[string]string{}
+	// Plan accepts references to destination projects the artifact does not
+	// redeclare, so resolve them the same way here.
+	projectIDs := maps.Clone(state.projects)
 	for _, project := range doc.Projects {
 		key := strings.ToLower(project.Name)
 		if id, ok := state.projects[key]; ok {
@@ -179,9 +182,11 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 					CacheWrite1HInputPerMillion: entry.CacheWrite1HInputPerMillion,
 					UnitPrice:                   entry.UnitPrice, Currency: entry.Currency}
 				if entry.Provider != nil {
-					if id, ok := providerIDs[strings.ToLower(*entry.Provider)]; ok {
-						price.ProviderID = &id
+					id, ok := providerIDs[strings.ToLower(*entry.Provider)]
+					if !ok {
+						return access.Invalid("pricing.prices", "A pricing override names a provider this installation does not know.")
 					}
+					price.ProviderID = &id
 				}
 				prices = append(prices, price)
 			}

@@ -30,7 +30,6 @@ const (
 	maxRoutes        = 10000
 	maxPrices        = 10000
 	maxCredentialRef = 200
-	maxSecretBytes   = 64 << 10
 )
 
 type planItem struct {
@@ -516,9 +515,6 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		if err := providers.ValidCredential(secret); err != nil {
 			return access.Invalid("secret_bindings."+name, "Use a credential of 1–65536 bytes.")
 		}
-		if len(secret) > maxSecretBytes {
-			return access.Invalid("secret_bindings."+name, "Secrets must fit within 64 KiB.")
-		}
 	}
 	return nil
 }
@@ -699,6 +695,21 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		}
 	}
 	if doc.Pricing != nil {
+		// A price scoped to an unknown provider would otherwise be stored
+		// unscoped, applying to every provider of its kind.
+		unknown := map[string]bool{}
+		for _, price := range doc.Pricing.Prices {
+			if price.Provider == nil {
+				continue
+			}
+			key := strings.ToLower(*price.Provider)
+			_, declared := docProviders[key]
+			_, exists := state.providers[key]
+			if !declared && !exists && !unknown[key] {
+				unknown[key] = true
+				result.blocker("pricing", *price.Provider, "provider_unknown")
+			}
+		}
 		changed, err := s.pricingChanged(ctx, q, doc)
 		if err != nil {
 			return nil, err
