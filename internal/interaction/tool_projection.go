@@ -56,16 +56,69 @@ func (t *NativeTerminal) Valid() bool {
 	return (t.Reason == "stop_sequence") == matched
 }
 
+// ContinuationActions is the committed explicit actionability claim of one
+// ready delivery, independent of the ready handle itself. The handle means the
+// dependency and its recorded delivery are recoverable; this member states
+// which next actions the admitted native outcome actually permits. A tool call
+// identity is listed only when the native terminal yielded tool use, the call
+// carried complete validated arguments, the ordered dependencies were
+// retained, and the whole-turn durability barrier committed before any
+// actionable byte was published. A partial or non-tool outcome is recoverable
+// while claiming no tool action; a delivery committed before this member
+// existed decodes with a nil Actions and reads as explicitly unavailable.
+type ContinuationActions struct {
+	// ToolCalls lists the ordered call identities the qualified client may
+	// answer with tool results. An empty member is an explicit "no tool
+	// action" claim; it never means "run these tools" by implication.
+	ToolCalls []string `json:"tool_calls"`
+}
+
+// UnmarshalJSON enforces the committed carrier grammar at the member level:
+// exactly the tool_calls member, so a stored claim carrying anything else —
+// or omitting it — was never committed by this contract and fails decode.
+func (a *ContinuationActions) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	if len(members) != 1 {
+		return errors.New("continuation actions carry members outside the carrier")
+	}
+	var calls []string
+	if err := json.Unmarshal(members["tool_calls"], &calls); err != nil {
+		return err
+	}
+	a.ToolCalls = calls
+	return nil
+}
+
+// Valid reports whether a decoded claim satisfies the committed carrier
+// grammar: an explicit tool_calls member of bounded nonempty identities. A
+// stored claim that fails this shape was never committed by this contract.
+func (a *ContinuationActions) Valid() bool {
+	if a == nil || a.ToolCalls == nil || len(a.ToolCalls) > 1024 {
+		return false
+	}
+	for _, id := range a.ToolCalls {
+		if id == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // Delivery is already projected client data. The gateway commits it with the
 // complete native dependency before publishing any queued actionable frame.
 // Replaying this value never invokes a provider or claims new token usage.
-// Terminal is additive on the carrier: deliveries committed before the record
-// existed decode with a nil Terminal and read as explicitly unavailable.
+// Terminal and Actions are additive on the carrier: deliveries committed
+// before those records existed decode with nil members and read as explicitly
+// unavailable rather than upgrading to a tool yield on replay.
 type Delivery struct {
-	Stream   bool              `json:"stream"`
-	Frames   []json.RawMessage `json:"frames,omitempty"`
-	Body     json.RawMessage   `json:"body,omitempty"`
-	Terminal *NativeTerminal   `json:"native_terminal,omitempty"`
+	Stream   bool                 `json:"stream"`
+	Frames   []json.RawMessage    `json:"frames,omitempty"`
+	Body     json.RawMessage      `json:"body,omitempty"`
+	Terminal *NativeTerminal      `json:"native_terminal,omitempty"`
+	Actions  *ContinuationActions `json:"actions,omitempty"`
 }
 type ToolProjection struct {
 	plan  *Plan
@@ -616,7 +669,24 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 		terminalRecord.Sequence = json.RawMessage("null")
 	}
 	recordRaw, _ := json.Marshal(terminalRecord)
-	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage, "native_terminal": terminalRecord}
+	// The explicit actionability claim is computed from the admitted native
+	// outcome: a tool action exists only when the native terminal yielded
+	// tool use and every call's complete arguments and ordered dependencies
+	// already validated. Any other terminal — output limit, end of turn or a
+	// matched stop sequence — commits ready with an empty claim, never with
+	// an implied one.
+	actions := &ContinuationActions{ToolCalls: []string{}}
+	if reason == "tool_use" {
+		for _, call := range p.calls {
+			id, _ := call["id"].(string)
+			if id == "" {
+				return nil, Delivery{}, guardFailure("/result", "complete_recoverable_result")
+			}
+			actions.ToolCalls = append(actions.ToolCalls, id)
+		}
+	}
+	actionsRaw, _ := json.Marshal(actions)
+	extension := map[string]any{"version": ContinuationV1, "handle": handle, "ready": true, "native_usage": p.nativeUsage, "native_terminal": terminalRecord, "actions": actions}
 	terminal, _ := json.Marshal(map[string]any{"id": p.id, "object": "chat.completion.chunk", "created": 0, "model": p.plan.route, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}, "usage": usage, "olp": extension})
 	// Retained dependency: the persisted interaction representation — source,
 	// native request, serialized assistant and the block array's own
@@ -624,14 +694,14 @@ func (p *ToolProjection) Complete(completion *openai.Completion, handle string) 
 	if err := p.dependency.charge(len(assistantRaw) + len(state.Source) + len(state.NativeRequest) + len(blocks) - p.blocksCharged); err != nil {
 		return nil, Delivery{}, err
 	}
-	// The terminal record is retained delivery state committed on the carrier
-	// in both modes; its standalone serialization charges the delivery budget
-	// once here while the copies embedded in the terminal frame or unary body
-	// are charged with those serializations below.
-	if err := p.delivery.charge(len(recordRaw)); err != nil {
+	// The terminal record and action claim are retained delivery state
+	// committed on the carrier in both modes; their standalone serializations
+	// charge the delivery budget once here while the copies embedded in the
+	// terminal frame or unary body are charged with those serializations.
+	if err := p.delivery.charge(len(recordRaw) + len(actionsRaw)); err != nil {
 		return nil, Delivery{}, err
 	}
-	delivery := Delivery{Stream: p.plan.stream, Terminal: terminalRecord}
+	delivery := Delivery{Stream: p.plan.stream, Terminal: terminalRecord, Actions: actions}
 	extension["observations"] = p.observations
 	if p.plan.stream {
 		// The terminal frame is replayed delivery; its serialization is

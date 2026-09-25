@@ -65,7 +65,43 @@ func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
 	if state.Delivery.Terminal != nil && !state.Delivery.Terminal.Valid() {
 		return nil, resources.ErrContract
 	}
+	// The explicit actionability claim is additive the same way. A committed
+	// claim must satisfy its own grammar and correspond exactly to the
+	// retained assistant's ordered tool calls; a stored record claiming calls
+	// the assistant never contained — or omitting ones it did — was never
+	// committed by this contract.
+	if state.Delivery.Actions != nil {
+		if !state.Delivery.Actions.Valid() {
+			return nil, resources.ErrContract
+		}
+		if state.Interaction != nil && !correspondingActions(state.Delivery.Actions, state.Interaction.Assistant) {
+			return nil, resources.ErrContract
+		}
+	}
 	return &state, nil
+}
+
+// correspondingActions verifies the committed action claim names exactly the
+// ordered tool calls the retained assistant representation carries — no
+// invented identity and no silently dropped call.
+func correspondingActions(actions *interaction.ContinuationActions, assistant json.RawMessage) bool {
+	var committed struct {
+		ToolCalls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(assistant, &committed); err != nil {
+		return false
+	}
+	if len(committed.ToolCalls) != len(actions.ToolCalls) {
+		return false
+	}
+	for i, call := range committed.ToolCalls {
+		if call.ID == "" || call.ID != actions.ToolCalls[i] {
+			return false
+		}
+	}
+	return true
 }
 func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	values := x.semanticHeaders.Values(continuationHeader)
@@ -296,7 +332,7 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Should-Retry", "false")
-	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery, "native_terminal": recoveredTerminal(state.Delivery)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery, "native_terminal": recoveredTerminal(state.Delivery), "actions": recoveredActions(state.Delivery)})
 	s.finish(x, nil, http.StatusOK)
 }
 
@@ -307,6 +343,17 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 func recoveredTerminal(delivery interaction.Delivery) any {
 	if delivery.Terminal != nil {
 		return delivery.Terminal
+	}
+	return "unavailable"
+}
+
+// recoveredActions renders the committed actionability claim for recovery.
+// Deliveries committed before the claim existed keep their historical truth:
+// they read back as the explicit "unavailable" marker, so a stored partial or
+// pre-claim outcome can never be upgraded into tool actions on replay.
+func recoveredActions(delivery interaction.Delivery) any {
+	if delivery.Actions != nil {
+		return delivery.Actions
 	}
 	return "unavailable"
 }

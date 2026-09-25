@@ -41,9 +41,15 @@ try {
   assert.equal(error.code, 'state_carrier');
 }
 const first = await streamTurn(client, request);
+assert.equal(first.version, 'chat-anthropic-tools-v1');
 assert.equal(first.finish, 'tool_calls');
+// F01 regression: the unified completed-turn value exposes the canonical
+// plain assistant mapping, never the raw SDK message object.
+assert.equal(Object.getPrototypeOf(first.assistant), Object.prototype);
 assert.equal(first.assistant.content, 'beforeafter');
 assert.deepEqual(first.assistant.tool_calls.map((call) => call.id), ['call-weather', 'call-clock']);
+assert.deepEqual(first.tools, first.assistant.tool_calls);
+assert.deepEqual(first.actions, { tool_calls: ['call-weather', 'call-clock'] });
 assert.deepEqual(first.observations.filter((item) => item.phase === 'start').map((item) => item.type),
   ['thinking', 'text', 'tool_use', 'tool_use', 'text']);
 assert.ok(first.observations.some((item) => item.type === 'thinking' && item.opaque_state === true));
@@ -53,18 +59,33 @@ assert.ok(!JSON.stringify(first.chunks).includes('opaque-fixture-signature-do-no
 const recovered = await recoverSubmission(origin, key, first.submission, localOnlyFetch);
 assert.equal(recovered.handle, first.handle);
 assert.deepEqual(recovered.assistant, first.assistant);
-assert.deepEqual(recovered.native_terminal, first.nativeTerminal);
+assert.deepEqual(recovered.nativeTerminal, first.nativeTerminal);
+assert.deepEqual(recovered.actions, first.actions);
 assert.ok(Array.isArray(recovered.delivery.frames) && recovered.delivery.frames.length > 0);
 const replay = await streamTurn(client, request, { submission: first.submission });
 assert.equal(replay.handle, first.handle);
 assert.deepEqual(replay.assistant, first.assistant);
+// The explicit claim, not the ready handle alone, gates tool actions.
+assert.throws(() => nextTurn(request, first, [
+  { tool_call_id: 'call-clock', content: '14:00' },
+  { tool_call_id: 'call-weather', content: 'sunny' }
+]), /match call order and identity/);
+assert.throws(() => nextTurn(request, first, [
+  { tool_call_id: 'call-weather', content: 'sunny' }
+]), /one result for each/);
+assert.throws(() => nextTurn(request, { ...first, actions: undefined }, [
+  { tool_call_id: 'call-weather', content: 'sunny' },
+  { tool_call_id: 'call-clock', content: '14:00' }
+]), /no actionability claim/);
 const next = nextTurn(request, first, [
   { tool_call_id: 'call-weather', content: 'sunny' },
   { tool_call_id: 'call-clock', content: '14:00' }
 ]);
 const final = await unaryTurn(client, next, { handle: first.handle });
-assert.equal(final.response.choices[0].message.content, 'Both tools completed.');
-assert.equal(final.response.choices[0].finish_reason, 'stop');
+assert.equal(final.assistant.content, 'Both tools completed.');
+assert.equal(final.finish, 'stop');
+assert.deepEqual(final.actions, { tool_calls: [] });
+assert.throws(() => nextTurn(next, final, []), /no tool actions/);
 assert.deepEqual(final.nativeUsage, { input_tokens: 30, output_tokens: 4 });
 assert.deepEqual(final.nativeTerminal, { stop_reason: 'end_turn', stop_sequence: null, finish_reason: 'stop' });
 process.stdout.write(JSON.stringify({ sdk: 'openai-js-7.4.0', first: first.handle, final: final.handle, observations: first.observations.length }) + '\n');

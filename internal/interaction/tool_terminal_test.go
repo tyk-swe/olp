@@ -367,6 +367,137 @@ func TestNegotiatedUnaryTerminalRejectsUnqualifiedStops(t *testing.T) {
 	}
 }
 
+// Two admitted tool_use blocks yield two ordered claimed actions on both
+// delivery surfaces; a non-tool terminal commits an explicit empty claim.
+const toolSecondBlockWire = `event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-clock","name":"clock","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"zone\":\"Europe/Paris\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+`
+
+func TestNegotiatedActionsClaimOrderedToolCalls(t *testing.T) {
+	wire := toolStartWire + toolBlockWire + toolSecondBlockWire +
+		toolWireEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":7}}`) +
+		toolStopWire
+	expected := `{"tool_calls":["call-weather","call-clock"]}`
+	streamDelivery := projectTerminalStream(t, wire)
+	claimRaw, err := json.Marshal(streamDelivery.Actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fidelity.Compare([]byte(expected), claimRaw); err != nil {
+		t.Fatalf("stream action claim %s: %v", claimRaw, err)
+	}
+	frame, err := oif.ParseJSON(streamDelivery.Frames[len(streamDelivery.Frames)-1], oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, present := frame.Lookup("/olp/actions")
+	if !present {
+		t.Fatalf("terminal frame lost the action claim: %s", frame.Bytes())
+	}
+	if err := fidelity.Compare([]byte(expected), observed.Bytes()); err != nil {
+		t.Fatalf("extension action claim %s: %v", observed.Bytes(), err)
+	}
+	result := `{"id":"msg-actions","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-weather","name":"weather","input":{"city":"Paris"}},{"type":"tool_use","id":"call-clock","name":"clock","input":{"zone":"Europe/Paris"}}],"stop_reason":"tool_use","stop_sequence":null,` + terminalUsage() + `}`
+	unaryDelivery := projectTerminalUnary(t, result)
+	claimRaw, err = json.Marshal(unaryDelivery.Actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fidelity.Compare([]byte(expected), claimRaw); err != nil {
+		t.Fatalf("unary action claim %s: %v", claimRaw, err)
+	}
+	body, err := oif.ParseJSON(unaryDelivery.Body, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, present = body.Lookup("/olp/actions")
+	if !present {
+		t.Fatalf("unary body lost the action claim: %s", body.Bytes())
+	}
+	if err := fidelity.Compare([]byte(expected), observed.Bytes()); err != nil {
+		t.Fatalf("unary extension action claim %s: %v", observed.Bytes(), err)
+	}
+}
+
+func TestNegotiatedActionsEmptyOnNonToolStops(t *testing.T) {
+	// Every other admitted terminal — end of turn, matched sequence or the
+	// output limit — commits ready with an explicit empty claim. The ready
+	// handle alone never implies a tool action.
+	for _, tc := range []struct{ name, delta, result string }{
+		{"end turn", `{"stop_reason":"end_turn","stop_sequence":null}`, `"stop_reason":"end_turn","stop_sequence":null`},
+		{"matched sequence", `{"stop_reason":"stop_sequence","stop_sequence":"###"}`, `"stop_reason":"stop_sequence","stop_sequence":"###"`},
+		{"output limit", `{"stop_reason":"max_tokens","stop_sequence":null}`, `"stop_reason":"max_tokens","stop_sequence":null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := toolStartWire + terminalTextWire +
+				toolWireEvent("message_delta", `{"type":"message_delta","delta":`+tc.delta+`,"usage":{"output_tokens":7}}`) +
+				toolStopWire
+			for _, delivery := range []Delivery{
+				projectTerminalStream(t, wire),
+				projectTerminalUnary(t, `{"id":"msg-empty","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"text","text":"same words"}],`+tc.result+`,`+terminalUsage()+`}`),
+			} {
+				if delivery.Actions == nil || !delivery.Actions.Valid() {
+					t.Fatalf("non-tool terminal committed no explicit claim: %+v", delivery.Actions)
+				}
+				if len(delivery.Actions.ToolCalls) != 0 {
+					t.Fatalf("non-tool terminal claimed actions: %s", delivery.Actions.ToolCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestDeliveryActionsCarrierCompatibility(t *testing.T) {
+	// A committed claim round-trips; a delivery committed before the claim
+	// existed decodes with it absent and can never gain actions on replay.
+	raw := `{"stream":true,"frames":[{"olp":{}}],"actions":{"tool_calls":["call-weather","call-clock"]}}`
+	var delivery Delivery
+	if err := json.Unmarshal([]byte(raw), &delivery); err != nil {
+		t.Fatal(err)
+	}
+	if delivery.Actions == nil || !delivery.Actions.Valid() {
+		t.Fatalf("stored action claim did not decode: %s", raw)
+	}
+	encoded, _ := json.Marshal(delivery)
+	if err := fidelity.Compare([]byte(raw), encoded); err != nil {
+		t.Fatalf("stored action claim changed shape: %s", encoded)
+	}
+	for _, legacy := range []string{
+		`{"stream":true,"frames":[]}`,
+		`{"stream":false,"body":{"id":"m"}}`,
+	} {
+		var old Delivery
+		if err := json.Unmarshal([]byte(legacy), &old); err != nil {
+			t.Fatal(err)
+		}
+		if old.Actions != nil {
+			t.Fatalf("historical delivery gained an action claim: %s", legacy)
+		}
+	}
+	for _, tc := range []struct{ name, claim string }{
+		{"missing tool_calls member", `{"stream":true,"frames":[],"actions":{}}`},
+		{"null tool_calls member", `{"stream":true,"frames":[],"actions":{"tool_calls":null}}`},
+		{"non-array tool_calls", `{"stream":true,"frames":[],"actions":{"tool_calls":"call-weather"}}`},
+		{"empty call identity", `{"stream":true,"frames":[],"actions":{"tool_calls":[""]}}`},
+		{"non-string call identity", `{"stream":true,"frames":[],"actions":{"tool_calls":[42]}}`},
+	} {
+		var stored Delivery
+		// A malformed claim is rejected at the member level during decode or
+		// fails the committed grammar in Valid; either way it can never be
+		// treated as a committed claim.
+		if err := json.Unmarshal([]byte(tc.claim), &stored); err == nil && stored.Actions != nil && stored.Actions.Valid() {
+			t.Fatalf("%s: malformed claim validated: %s", tc.name, tc.claim)
+		}
+	}
+}
+
 func TestDeliveryTerminalRecordCarrierCompatibility(t *testing.T) {
 	// A committed delivery round-trips the record; a delivery committed before
 	// the record existed decodes with it absent, never synthesized.

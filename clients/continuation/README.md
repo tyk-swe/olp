@@ -9,7 +9,13 @@ send complete history through the native API and need no OLP helper.
 `streamTurn` sends one timestamp/UUID submission identity, reads ordinary Chat
 chunks plus ordered `olp.observation` extensions, and returns the standard
 assistant message and opaque handle only after a terminal `olp.ready:true`
-delivery. The terminal extension also returns validated provider-native usage
+delivery. `unaryTurn` and `recoverSubmission` / `recover_submission` return the
+**same completed-turn value**: `version`, `submission`, `handle`, the canonical
+plain `assistant` mapping (`role`, `content`, ordered `tool_calls` with the
+original argument strings — never a raw SDK message object), ordered
+`observations`, `tools`, the compatible `finish` reason, projected `usage` /
+`native_usage`, the `native_terminal` record and the explicit `actions` claim.
+The terminal extension also returns validated provider-native usage
 categories in `olp.native_usage`; cache-read tokens appear in standard Chat
 `prompt_tokens_details`, while cache-write and TTL details stay in that
 versioned extension. An unknown native category makes the delivery incomplete.
@@ -18,14 +24,29 @@ declared native `stop_reason`, the matched `stop_sequence` (a string, an
 explicit `null`, or an absent member where the native contract omits it) and
 the compatible client `finish_reason` — so `end_turn`, a first and a second
 configured stop sequence stay distinct even when the projected text, usage and
-finish reason are identical. Unary, streaming and recovered delivery expose the
-same record; a delivery committed before the record existed reports
-`"native_terminal": "unavailable"` instead of inventing one.
-A complete assistant plus one ordered result per call is passed to
-`nextTurn`; `unaryTurn` submits it with the previous handle and a fresh
+finish reason are identical.
+`olp.actions` is the explicit actionability claim: the ordered call identities
+the committed outcome authorizes the client to answer. A ready handle means
+the delivery is recoverable; it does not itself expose tool actions. The claim
+is present only after the whole-turn durability barrier committed, with the
+native terminal validated and every call's complete arguments retained — a
+`tool_use` terminal lists the call ids in order and any other ready outcome
+commits `{"tool_calls": []}`. Partial argument text may survive inside the raw
+recorded delivery but never forms an action: the helper neither completes
+partial JSON nor substitutes another stop reason. A delivery committed before
+the claim existed reports `"actions": "unavailable"` — and
+`"native_terminal": "unavailable"` for the same period — instead of inventing
+either record; replaying it can never upgrade a stored partial outcome into a
+tool yield.
+A complete assistant plus one ordered result per claimed call is passed to
+`nextTurn`, which validates the carrier version, committed handle and the
+explicit claim before requiring one result per call in the original order and
+identity; `unaryTurn` submits it with the previous handle and a fresh
 submission identity. Keep the returned submission identity unchanged when
 retrying the **same** request after a client or network failure. A retry of a
 committed result returns the exact recorded delivery and performs no inference.
+Raw SDK chunks, responses and the recorded `delivery` remain attached to the
+value for inspection only; they are never canonical next-turn input.
 
 The route's API key needs `inference`, route access and
 `allow_provider_state:true`. The handle references encrypted native reasoning
