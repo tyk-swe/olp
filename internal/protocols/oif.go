@@ -88,14 +88,9 @@ func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model st
 	return p, wire, err
 }
 
-// PrepareIdentity binds only the configured model and necessary transport
-// accounting option. It does not rename token controls, normalize input forms,
-// drop native fields, or assume a different dialect executes foreign state.
-func PrepareIdentity(r *openai.Request, model string) (oif.Prepared, error) {
-	d := r.OIF().Descriptor()
-	if _, err := contracts.Binding(d.Dialect, d.Operation); err != nil {
-		return oif.Prepared{}, err
-	}
+// identityChanges lists the overlays the checked-in identity contract admits:
+// the published model binding plus the chat transport accounting option.
+func identityChanges(r *openai.Request, model string) []oif.Change {
 	changes := []oif.Change{}
 	if r.Family.Surface() != "gemini" && r.Family != openai.FamilyBedrock && r.Family != "bedrock_count" {
 		encoded, _ := json.Marshal(model)
@@ -114,7 +109,18 @@ func PrepareIdentity(r *openai.Request, model string) (oif.Prepared, error) {
 		}
 		changes = append(changes, oif.Change{Pointer: path, Value: value, Origin: oif.TransportOption, Reason: "observe native usage for shared accounting"})
 	}
-	return contracts.PrepareIdentity(r.OIF(), d, changes)
+	return changes
+}
+
+// PrepareIdentity binds only the configured model and necessary transport
+// accounting option. It does not rename token controls, normalize input forms,
+// drop native fields, or assume a different dialect executes foreign state.
+func PrepareIdentity(r *openai.Request, model string) (oif.Prepared, error) {
+	d := r.OIF().Descriptor()
+	if _, err := contracts.Binding(d.Dialect, d.Operation); err != nil {
+		return oif.Prepared{}, err
+	}
+	return contracts.PrepareIdentity(r.OIF(), d, identityChanges(r, model))
 }
 
 func GenerationRequest(r *openai.Request) (generation.Request, error) {

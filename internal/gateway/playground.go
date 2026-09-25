@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -234,7 +235,7 @@ func (in *playgroundRequest) parse(operation, mode string) (*openai.Request, ope
 
 func (p *Playground) execution(r *http.Request, principal access.Principal, parsed *openai.Request, family openai.Family, preferences *routes.Preferences) *execution {
 	s := p.Gateway
-	return &execution{
+	x := &execution{
 		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: preferences,
@@ -243,6 +244,14 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 		userID:      principal.ID,
 		affinity:    []byte(principal.ID),
 	}
+	if parsed != nil {
+		x.source = protocols.SourceOf(parsed)
+		if d, ok := operationregistry.Generation.Dialect(x.source.Descriptor().Dialect); ok {
+			registered := d
+			x.gen = &registered
+		}
+	}
+	return x
 }
 
 func (p *Playground) handle(r *http.Request) (access.Reply, error) {

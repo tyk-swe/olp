@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -505,24 +506,31 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		var parsed *openai.Request
 		var err error
-		if family == openai.FamilyBedrock {
-			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
-		} else {
-			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+		if x.gen == nil {
+			if family == openai.FamilyBedrock {
+				parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
+			} else {
+				parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+			}
+			if err != nil {
+				e = requestError(err)
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+			if err := protocols.ValidateInlineMedia(parsed, s.cfg.InlineMedia); err != nil {
+				e = requestError(err)
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+			x.parsed = parsed
+			x.source = protocols.SourceOf(parsed)
+			if d, ok := operationregistry.Generation.Dialect(x.source.Descriptor().Dialect); ok {
+				registered := d
+				x.gen = &registered
+			}
 		}
-		if err != nil {
-			e = requestError(err)
-			x.failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if err := protocols.ValidateInlineMedia(parsed, s.cfg.InlineMedia); err != nil {
-			e = requestError(err)
-			x.failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		x.parsed = parsed
 		if e := s.prepareContinuation(r.Context(), x); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -573,8 +581,8 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		if parsed.Stream {
-			sw := &streamWriter{w: w, family: family}
+		if x.source.Stream {
+			sw := &streamWriter{w: w, family: x.family}
 			x.emit = func(frame []byte) error {
 				err := sw.emit(frame)
 				if err == nil {
@@ -601,7 +609,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if family == openai.FamilyResponses && authority.Policy.AllowProviderState {
+		if x.family == openai.FamilyResponses && authority.Policy.AllowProviderState {
 			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
 			if me != nil {
 				out.err = me
@@ -647,13 +655,13 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 // ranks the eligible attempts against the pinned snapshot.
 func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug string) bool) *Error {
 	x.mode = "unary"
-	if x.parsed.Stream {
+	if x.source.Stream {
 		x.mode = "streaming"
 	}
 	snapshot := x.snapshot()
-	route, ok := snapshot.Routes[x.parsed.Route]
+	route, ok := snapshot.Routes[x.source.Route]
 	if !ok {
-		return modelNotFound(x.parsed.Route)
+		return modelNotFound(x.source.Route)
 	}
 	x.route = &route
 	if !permitted(route.Slug) {
@@ -707,10 +715,10 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
 				return errors.New("provider network credential unavailable")
 			}
-			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
+			if !cfg.Supports(x.operationName(), x.surfaceName(), x.mode) {
 				return errors.New("connector capability unavailable")
 			}
-			if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
+			if x.providerState && !stateQualified(&p, t.ProviderModel, x.operationName(), x.mode) {
 				semantic = errors.New("provider-state capability unavailable")
 				return semantic
 			}
@@ -746,7 +754,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 			options.Effective = nil
 		}
 	}
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.operationName(), x.surfaceName(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
 		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {

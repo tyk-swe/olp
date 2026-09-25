@@ -10,6 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/generation"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -26,11 +28,17 @@ func (x *execution) operationName() string {
 	if x.unary != nil {
 		return x.unary.dialect.Operation.ID
 	}
+	if x.gen != nil {
+		return x.gen.Operation.ID
+	}
 	return x.family.Operation()
 }
 func (x *execution) surfaceName() string {
 	if x.unary != nil {
 		return x.unary.surface
+	}
+	if x.gen != nil {
+		return x.gen.Surface
 	}
 	return x.family.Surface()
 }
@@ -62,6 +70,14 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	if !x.strict() {
 		return true, operations.Error("target_capability", "/route", "strict_native_operation", "Registered native operation endpoints require a strict route.")
 	}
+	// Generation dialects are operation-owned registrations, not unary codecs:
+	// the dialect lifts the body into the neutral source contract and the
+	// strict interaction path plans it. An explicit /native/ route always
+	// admits on the native surface. A false selection lets the inference flow
+	// continue on the lifted source.
+	if gen, ok := operationregistry.Generation.DialectLabel(dialect); ok {
+		return s.selectNativeGeneration(x, gen, body, model)
+	}
 	codec, ok := operationregistry.Lookup(dialect)
 	if !ok {
 		return true, operations.Error("target_capability", "/dialect", "registered_dialect", "The native dialect is not registered.")
@@ -80,6 +96,35 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	}
 	x.unary.source = source
 	return true, nil
+}
+
+// selectNativeGeneration admits a registered generation dialect on a strict
+// /native/ route: the dialect lifts the caller body into the immutable source
+// envelope and generic planning continues from the neutral source. A dialect
+// that predates registration keeps a legacy envelope view for compatibility
+// callers; registration-only dialects carry no wire family at all.
+func (s *Server) selectNativeGeneration(x *execution, dialect generation.Dialect, body []byte, model string) (bool, error) {
+	transportStream := dialect.DeliveryKey != "" && len(x.semanticQuery[dialect.DeliveryKey]) == 1 && x.semanticQuery[dialect.DeliveryKey][0] == dialect.DeliveryValue
+	source, err := dialect.Lift(body, model, transportStream, int(s.cfg.MaxBodyBytes))
+	if err != nil {
+		return false, err
+	}
+	if source.Request.Descriptor().Dialect != dialect.Identity {
+		return false, operations.Error("target_capability", "/dialect", "source_identity_consistency", "The dialect adapter disagrees with its immutable source contract.")
+	}
+	x.source, x.gen = source, &dialect
+	if dialect.Address.LegacyPath != "" {
+		family := openai.Family(dialect.Address.LegacyPath)
+		if source.Stream && family == openai.FamilyGemini {
+			family = openai.FamilyGeminiStream
+		}
+		x.family = family
+		x.parsed = openai.NewSourceEnvelope(family, model, source.Stream, source.Request.Document())
+		if err := protocols.ValidateInlineMedia(x.parsed, s.cfg.InlineMedia); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan.Plan, error) {
 	key := p.ID + "/" + p.RevisionID + "/" + model

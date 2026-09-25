@@ -1,4 +1,4 @@
-package protocols
+package protocols_test
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -41,11 +42,11 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 							fields["stream"] = raw(true)
 						}
 					}
-					r, e := Parse(source, raw(fields), "team-model")
+					r, e := protocols.Parse(source, raw(fields), "team-model")
 					if e != nil {
 						t.Fatal(e)
 					}
-					body, wire, e := Encode(r, kind, kind, "wire-model", nil)
+					body, wire, e := protocols.Encode(r, kind, kind, "wire-model", nil)
 					if e != nil {
 						t.Fatal(e)
 					}
@@ -65,11 +66,11 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 			if !connectors.Supports(kind, kind, "token_count", count.Surface(), "unary") {
 				continue
 			}
-			r, e := Parse(count, []byte(input), "team-model")
+			r, e := protocols.Parse(count, []byte(input), "team-model")
 			if e != nil {
 				t.Fatal(e)
 			}
-			_, wire, e := Encode(r, kind, kind, "wire-model", nil)
+			_, wire, e := protocols.Encode(r, kind, kind, "wire-model", nil)
 			if e != nil {
 				t.Fatalf("%s count %s: %v", kind, family, e)
 			}
@@ -80,7 +81,7 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 			if wire == "bedrock_count" {
 				body = []byte(`{"inputTokens":13}`)
 			}
-			reply, e := Decode(wire, count, body, "team-model", "")
+			reply, e := protocols.Decode(wire, count, body, "team-model", "")
 			if e != nil || reply.Usage == nil || reply.Usage.InputTokens != 13 {
 				t.Fatalf("count %s/%s: %v", kind, family, e)
 			}
@@ -143,19 +144,19 @@ func TestNativeExtensionsSurviveAndTranslationRefuses(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		r, e := Parse(family, input, "team-model")
+		r, e := protocols.Parse(family, input, "team-model")
 		if e != nil {
 			t.Fatal(e)
 		}
 		kind := family.Surface()
-		body, _, e := Encode(r, kind, kind, "wire-model", nil)
+		body, _, e := protocols.Encode(r, kind, kind, "wire-model", nil)
 		if e != nil {
 			t.Fatal(e)
 		}
 		if !bytes.Contains(body, []byte("vendor")) {
 			t.Fatalf("lost native extension: %s", body)
 		}
-		if _, _, e = Encode(r, "openai", "openai", "wire-model", nil); e == nil {
+		if _, _, e = protocols.Encode(r, "openai", "openai", "wire-model", nil); e == nil {
 			t.Fatal("silently dropped source extension")
 		}
 	}
@@ -164,7 +165,7 @@ func TestExplicitTranslationRefusals(t *testing.T) {
 	for _, test := range []struct{ kind, field, value string }{{"anthropic", "seed", "7"}, {"anthropic", "response_format", `{"type":"json_object"}`}, {"gemini", "parallel_tool_calls", "true"}, {"bedrock", "seed", "7"}, {"bedrock", "n", "2"}, {"cohere", "parallel_tool_calls", "true"}} {
 		fields, _ := object([]byte(generationFixtures[openai.FamilyChat]))
 		fields[test.field] = json.RawMessage(test.value)
-		r, e := Parse(openai.FamilyChat, raw(fields), "")
+		r, e := protocols.Parse(openai.FamilyChat, raw(fields), "")
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -172,21 +173,21 @@ func TestExplicitTranslationRefusals(t *testing.T) {
 		if kind == "cohere" {
 			kind = "openai_compatible"
 		}
-		if _, _, e = Encode(r, kind, test.kind, "wire-model", nil); e == nil {
+		if _, _, e = protocols.Encode(r, kind, test.kind, "wire-model", nil); e == nil {
 			t.Fatalf("accepted %s/%s", test.kind, test.field)
 		}
 	}
 }
 func TestResponseNativePreservationAndUsageCompleteness(t *testing.T) {
 	body := []byte(`{"id":"msg_1","type":"message","role":"assistant","model":"wire-model","content":[{"type":"text","text":"hello","vendor_part":7}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2},"vendor_response":true}`)
-	native, e := Decode(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "team-model", "")
+	native, e := protocols.Decode(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "team-model", "")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if !bytes.Contains(native.Body, []byte("vendor_part")) || !bytes.Contains(native.Body, []byte("vendor_response")) {
 		t.Fatal("native fields lost")
 	}
-	translated, e := Decode(openai.FamilyAnthropic, openai.FamilyChat, body, "team-model", "")
+	translated, e := protocols.Decode(openai.FamilyAnthropic, openai.FamilyChat, body, "team-model", "")
 	if e != nil || translated.OutputText != "hello" || translated.Usage.TotalTokens != 5 {
 		t.Fatalf("translation: %+v %v", translated, e)
 	}
@@ -194,7 +195,7 @@ func TestResponseNativePreservationAndUsageCompleteness(t *testing.T) {
 		t.Fatal("unmodeled response extension escaped")
 	}
 	incomplete := bytes.Replace(body, []byte(`,"output_tokens":2`), nil, 1)
-	c, e := Decode(openai.FamilyAnthropic, openai.FamilyChat, incomplete, "team-model", "")
+	c, e := protocols.Decode(openai.FamilyAnthropic, openai.FamilyChat, incomplete, "team-model", "")
 	if e != nil || c.Usage != nil {
 		t.Fatalf("invented complete usage: %+v %v", c, e)
 	}
@@ -209,40 +210,40 @@ func TestNativeAndTranslatedStreams(t *testing.T) {
 		for _, target := range []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini} {
 			t.Run(string(wire)+"/"+string(target), func(t *testing.T) {
 				var result bytes.Buffer
-				c, e := Stream(wire, target, strings.NewReader(source), 4096, "team-model", true, func(frame []byte) error { _, e := result.Write(frame); return e })
+				c, e := protocols.Stream(wire, target, strings.NewReader(source), 4096, "team-model", true, func(frame []byte) error { _, e := result.Write(frame); return e })
 				if e != nil {
 					t.Fatal(e)
 				}
 				if c.Usage == nil || c.Usage.TotalTokens != 5 || !strings.Contains(result.String(), "héllo 🌍") {
 					t.Fatalf("bad stream: %+v %s", c, result.String())
 				}
-				if _, e = Stream(target, target, bytes.NewReader(result.Bytes()), 4096, "team-model", true, func([]byte) error { return nil }); e != nil {
+				if _, e = protocols.Stream(target, target, bytes.NewReader(result.Bytes()), 4096, "team-model", true, func([]byte) error { return nil }); e != nil {
 					t.Fatalf("invalid translated event sequence: %v\n%s", e, result.String())
 				}
 			})
 		}
-		if _, e := Stream(wire, wire, strings.NewReader(source), 32, "team-model", true, func([]byte) error { return nil }); e == nil {
+		if _, e := protocols.Stream(wire, wire, strings.NewReader(source), 32, "team-model", true, func([]byte) error { return nil }); e == nil {
 			t.Fatal("event bound not enforced")
 		}
 	}
 	truncated := strings.Replace(sources[openai.FamilyAnthropic], "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n", "", 1)
-	if _, e := Stream(openai.FamilyAnthropic, openai.FamilyChat, strings.NewReader(truncated), 4096, "team-model", true, func([]byte) error { return nil }); e == nil {
+	if _, e := protocols.Stream(openai.FamilyAnthropic, openai.FamilyChat, strings.NewReader(truncated), 4096, "team-model", true, func([]byte) error { return nil }); e == nil {
 		t.Fatal("accepted truncated stream")
 	}
 	cancel := errors.New("downstream disconnected")
-	if _, e := Stream(openai.FamilyGemini, openai.FamilyChat, strings.NewReader(sources[openai.FamilyGemini]), 4096, "team-model", true, func([]byte) error { return cancel }); !errors.Is(e, cancel) {
+	if _, e := protocols.Stream(openai.FamilyGemini, openai.FamilyChat, strings.NewReader(sources[openai.FamilyGemini]), 4096, "team-model", true, func([]byte) error { return cancel }); !errors.Is(e, cancel) {
 		t.Fatalf("lost cancellation: %v", e)
 	}
 }
 func TestGeminiToolsNormalizeStopAndBedrockBoundPrecedesAllocation(t *testing.T) {
 	body := []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`)
-	c, e := Decode(openai.FamilyGemini, openai.FamilyChat, body, "team-model", "")
+	c, e := protocols.Decode(openai.FamilyGemini, openai.FamilyChat, body, "team-model", "")
 	if e != nil || c.FinishReason != "tool_calls" || len(c.ToolCalls) != 1 {
 		t.Fatalf("tool completion: %+v %v", c, e)
 	}
 	prelude := make([]byte, 12)
 	binary.BigEndian.PutUint32(prelude, 1<<30)
-	if _, e = ReadBedrockEvent(bytes.NewReader(prelude), 4096); !errors.Is(e, openai.ErrEventTooLarge) {
+	if _, e = protocols.ReadBedrockEvent(bytes.NewReader(prelude), 4096); !errors.Is(e, openai.ErrEventTooLarge) {
 		t.Fatalf("unbounded prelude: %v", e)
 	}
 	var encoded bytes.Buffer
@@ -251,16 +252,16 @@ func TestGeminiToolsNormalizeStopAndBedrockBoundPrecedesAllocation(t *testing.T)
 		t.Fatal(e)
 	}
 	encoded.Bytes()[encoded.Len()-1] ^= 1
-	if _, e = ReadBedrockEvent(&encoded, 4096); e == nil {
+	if _, e = protocols.ReadBedrockEvent(&encoded, 4096); e == nil {
 		t.Fatal("accepted corrupt event CRC")
 	}
 }
 func TestCallerDefaultsAndVendorProfiles(t *testing.T) {
-	r, e := Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17}`), "")
+	r, e := protocols.Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17}`), "")
 	if e != nil {
 		t.Fatal(e)
 	}
-	body, wire, e := Encode(r, "openai_compatible", "deepseek", "wire-model", Object{"max_tokens": raw(90)})
+	body, wire, e := protocols.Encode(r, "openai_compatible", "deepseek", "wire-model", protocols.Object{"max_tokens": raw(90)})
 	if e != nil || wire != openai.FamilyChat {
 		t.Fatal(e)
 	}
@@ -268,11 +269,11 @@ func TestCallerDefaultsAndVendorProfiles(t *testing.T) {
 	if string(f["max_tokens"]) != "17" || f["max_completion_tokens"] != nil {
 		t.Fatalf("caller precedence: %s", body)
 	}
-	r, e = Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":["a","b"],"dimensions":32,"encoding_format":"base64","truncation":false}`), "")
+	r, e = protocols.Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":["a","b"],"dimensions":32,"encoding_format":"base64","truncation":false}`), "")
 	if e != nil {
 		t.Fatal(e)
 	}
-	body, _, e = Encode(r, "openai_compatible", "voyage", "voyage-model", nil)
+	body, _, e = protocols.Encode(r, "openai_compatible", "voyage", "voyage-model", nil)
 	if e != nil || !bytes.Contains(body, []byte(`"output_dimension":32`)) || !bytes.Contains(body, []byte(`"truncation":false`)) {
 		t.Fatalf("Voyage: %s %v", body, e)
 	}
