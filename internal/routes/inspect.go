@@ -26,13 +26,18 @@ type inspectedDecision struct {
 }
 
 type interactionInspection struct {
-	Status              string                 `json:"status"`
-	Fidelity            string                 `json:"fidelity"`
-	Class               string                 `json:"class,omitempty"`
-	Operation           string                 `json:"operation,omitempty"`
-	IngressDialect      string                 `json:"ingress_dialect,omitempty"`
-	EgressDialect       string                 `json:"egress_dialect,omitempty"`
-	ReturnDialect       string                 `json:"return_dialect,omitempty"`
+	Status         string `json:"status"`
+	Fidelity       string `json:"fidelity"`
+	Class          string `json:"class,omitempty"`
+	Operation      string `json:"operation,omitempty"`
+	IngressDialect string `json:"ingress_dialect,omitempty"`
+	EgressDialect  string `json:"egress_dialect,omitempty"`
+	ReturnDialect  string `json:"return_dialect,omitempty"`
+	// HostedTools are the provider-hosted tool families the admitted plan
+	// covers, bounded by the caller's authorization and the bound profile's
+	// qualified lifecycle contracts. It is planner evidence — no tool ran —
+	// and is omitted when the plan admitted none.
+	HostedTools         []string               `json:"hosted_tools,omitempty"`
 	Representation      string                 `json:"representation,omitempty"`
 	ProfileID           string                 `json:"profile_id,omitempty"`
 	ProfileRevision     string                 `json:"profile_revision,omitempty"`
@@ -250,6 +255,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		result.Class, result.Operation = receipt.Class, receipt.Operation
 		result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
 		result.Representation = "oif"
+		result.HostedTools = plan.Hosted()
 		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
 		serving := plan.Serving()
 		result.Serving = &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "", SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}

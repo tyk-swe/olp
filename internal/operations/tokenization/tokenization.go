@@ -100,9 +100,11 @@ func Definitions() []operations.Dialect {
 		}
 		if id == "openai-input-tokens" || id == "anthropic-count-tokens" {
 			d.BindModel = bindModel
+			d.ModelBinding = operations.ModelRequired
 		}
 		if id == "gemini-count-tokens" {
 			d.BindModel = bindGeminiModel
+			d.ModelBinding = operations.ModelOptional
 			d.ValidateRoute = ValidateRoute
 		}
 		out = append(out, d)

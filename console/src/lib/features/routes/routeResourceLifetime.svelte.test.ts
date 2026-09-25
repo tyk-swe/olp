@@ -139,6 +139,7 @@ beforeEach(() => {
   client.setQueryData(routeKeys.draft(draftA.id), draftA);
   client.setQueryData(routeKeys.draft(draftB.id), draftB);
   client.setQueryData(providerKeys.enabledModels(), [model]);
+  client.setQueryData(providerKeys.operationDialects, []);
   vi.mocked(getRouteDraft).mockImplementation(async (id) => {
     const value = drafts[id];
     if (!value) throw new ApiProblem({ title: 'Not found', status: 404 });

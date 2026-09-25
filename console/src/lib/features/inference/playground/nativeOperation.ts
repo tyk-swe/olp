@@ -1,3 +1,4 @@
+import type { components } from '$lib/api/schema';
 import {
   nativeObject,
   parseNativeJSON,
@@ -7,49 +8,44 @@ import {
   type NativeValue
 } from '$lib/json/nativeJson';
 
-export const nativeOperationDialects = {
-  embeddings: [
-    'openai-embeddings',
-    'voyage-embeddings',
-    'cohere-embed-v2',
-    'tei-embeddings',
-    'tei-sparse-embeddings',
-    'tei-multivector-embeddings',
-    'gemini-embeddings',
-    'gemini-batch-embeddings',
-    'vertex-embeddings',
-    'bedrock-embeddings'
-  ],
-  rerank: ['rerank', 'voyage-rerank', 'tei-rerank', 'cohere-rerank-v2'],
-  moderation: ['openai-moderation'],
-  classification: ['tei-classification'],
-  scoring: ['tei-scoring'],
-  token_count: [
-    'openai-input-tokens',
-    'anthropic-count-tokens',
-    'gemini-count-tokens',
-    'bedrock-count-tokens',
-    'tei-tokenize'
-  ]
-} as const;
+/** One registered dialect row from the management dialect catalog. */
+export type OperationDialect = components['schemas']['OperationDialect'];
 
-export type NativeOperation = keyof typeof nativeOperationDialects;
-const bodyModelDialects = new Set([
-  'openai-embeddings',
-  'voyage-embeddings',
-  'cohere-embed-v2',
-  'rerank',
-  'voyage-rerank',
-  'cohere-rerank-v2',
-  'openai-moderation',
-  'openai-input-tokens',
-  'anthropic-count-tokens'
-]);
+/** A unary native operation the public playground can run. */
+export type NativeOperation = string;
 
-export function nativeDialects(operation: string): readonly string[] {
-  return Object.hasOwn(nativeOperationDialects, operation)
-    ? nativeOperationDialects[operation as NativeOperation]
-    : [];
+/** The public /native/ surface serves registered unary operation dialects.
+ * Generation dialects are generation contracts — the strict tool playground
+ * owns them — so they never appear in a native operation picker. */
+export function nativeDialects(
+  catalog: readonly OperationDialect[],
+  operation: string
+): string[] {
+  const ids = new Set<string>();
+  for (const dialect of catalog) {
+    if (
+      dialect.operation === operation &&
+      dialect.operation !== 'generation' &&
+      dialect.mode === 'unary'
+    )
+      ids.add(dialect.id);
+  }
+  return [...ids];
+}
+
+/** The registered dialect row a native operation run will address. */
+export function nativeDialectEntry(
+  catalog: readonly OperationDialect[],
+  operation: string,
+  id: string
+): OperationDialect | undefined {
+  return catalog.find(
+    (dialect) =>
+      dialect.operation === operation &&
+      dialect.operation !== 'generation' &&
+      dialect.mode === 'unary' &&
+      dialect.id === id
+  );
 }
 
 export type NativeOperationResult = {
@@ -59,12 +55,13 @@ export type NativeOperationResult = {
 };
 
 /** The UI advertises only code-registered dialects. Route identity in a
- * model-bearing native body is bound from the chosen public slug. URL-bound
- * bodies such as TEI remain source-exact. */
+ * model-bearing native body is bound from the chosen public slug — only a
+ * dialect whose registered model binding requires it carries that member.
+ * Optional and URL-bound bodies such as TEI remain source-exact. */
 export function nativeOperationRequest(
   source: string,
   route: string,
-  dialect: string
+  modelBinding: OperationDialect['model_binding']
 ): NativeObject {
   const parsed = parseNativeJSON(source);
   if (!nativeObject(parsed))
@@ -72,7 +69,7 @@ export function nativeOperationRequest(
   const model = parsed.model;
   if (model !== undefined && model !== '' && model !== route)
     throw new Error('The native request names another route.');
-  if (model === '' && bodyModelDialects.has(dialect))
+  if (model === '' && modelBinding === 'required')
     return replaceNative(parsed, ['model'], route) as NativeObject;
   if (model === '')
     throw new Error(
@@ -82,6 +79,7 @@ export function nativeOperationRequest(
 }
 
 export async function runNativeOperation(
+  catalog: readonly OperationDialect[],
   operation: NativeOperation,
   dialect: string,
   route: string,
@@ -89,13 +87,14 @@ export async function runNativeOperation(
   source: string,
   signal?: AbortSignal
 ): Promise<NativeOperationResult> {
-  if (!nativeDialects(operation).includes(dialect))
+  const entry = nativeDialectEntry(catalog, operation, dialect);
+  if (!entry)
     throw new Error('Choose a registered native dialect for this operation.');
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(route))
     throw new Error('Choose an active published route slug.');
   if (!key.startsWith('olp_') || key.length > 512)
     throw new Error('Enter an inference API key for this route.');
-  const request = nativeOperationRequest(source, route, dialect);
+  const request = nativeOperationRequest(source, route, entry.model_binding);
   const body = stringifyNativeJSON(request);
   if (new TextEncoder().encode(body).byteLength > 1 << 20)
     throw new Error(

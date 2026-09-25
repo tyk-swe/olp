@@ -296,7 +296,41 @@
     <div class="assistant-result">
       <h3>Assistant text</h3>
       <pre>{active.assistant.content || 'No ordinary text'}</pre>
-      <p>Finish reason: {active.finish}</p>
+      <dl class="terminal-facts">
+        <div>
+          <dt>Client finish reason</dt>
+          <dd>{active.finish}</dd>
+        </div>
+        <div>
+          <dt>Native terminal</dt>
+          <dd>
+            {#if active.nativeTerminal}
+              {active.nativeTerminal
+                .stop_reason}{#if 'stop_sequence' in active.nativeTerminal}{active
+                  .nativeTerminal.stop_sequence !== null
+                  ? ` · stop sequence ${active.nativeTerminal.stop_sequence}`
+                  : ' · stop sequence null'}{/if}
+            {:else}
+              Not recorded in this delivery
+            {/if}
+          </dd>
+        </div>
+        <div>
+          <dt>Actionability claim</dt>
+          <dd>
+            {#if active.actions === undefined}
+              Not recorded — this delivery predates the claim
+            {:else if active.actions.tool_calls.length}
+              {active.actions.tool_calls.length} tool call{active.actions
+                .tool_calls.length === 1
+                ? ''
+                : 's'} claimed
+            {:else}
+              Claimed no tool actions
+            {/if}
+          </dd>
+        </div>
+      </dl>
       {#if active.nativeUsageRaw}
         <details>
           <summary>Native provider usage categories</summary>
@@ -388,6 +422,19 @@
   }
   .observations {
     padding-left: 1.25rem;
+    margin: 0;
+  }
+  .terminal-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.5rem;
+    margin: 0.6rem 0 0;
+    font-size: var(--text-caption);
+  }
+  .terminal-facts dt {
+    color: var(--foreground-subtle);
+  }
+  .terminal-facts dd {
     margin: 0;
   }
   .observations li {

@@ -5,21 +5,24 @@
     nativeDialects,
     runNativeOperation,
     type NativeOperation,
-    type NativeOperationResult
+    type NativeOperationResult,
+    type OperationDialect
   } from './nativeOperation';
 
   let {
     route,
     operation,
     requestText,
+    catalog,
     dialect = $bindable('')
   }: {
     route: string;
     operation: NativeOperation;
     requestText: string;
+    catalog: readonly OperationDialect[];
     dialect?: string;
   } = $props();
-  const options = $derived(nativeDialects(operation));
+  const options = $derived(nativeDialects(catalog, operation));
   $effect(() => {
     if (!options.includes(dialect)) dialect = options[0] ?? '';
   });
@@ -40,6 +43,7 @@
     abort = new AbortController();
     try {
       const value = await runNativeOperation(
+        catalog,
         operation,
         dialect,
         route,

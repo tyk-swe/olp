@@ -18,11 +18,24 @@ export type ProviderProbe = Schemas['ProbeResponse'];
 /** Reviewed connection facts for one known vendor, independent of protocol. */
 export type ProviderVendor = Schemas['Vendor'];
 
+/** One registered operation or generation dialect row from the registry. */
+export type OperationDialect = Schemas['OperationDialect'];
+
 export async function listProviderVendors(
   signal?: AbortSignal
 ): Promise<ProviderVendor[]> {
   const response = await apiClient.GET('/api/v3/provider-vendors', { signal });
   return result(response.data, response.error, response.response);
+}
+
+/** The registered dialect catalog the management plane owns. */
+export async function listOperationDialects(
+  signal?: AbortSignal
+): Promise<OperationDialect[]> {
+  const response = await apiClient.GET('/api/v3/operation-dialects', {
+    signal
+  });
+  return result(response.data, response.error, response.response).items;
 }
 
 export async function listProviders(

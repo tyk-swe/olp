@@ -1,10 +1,18 @@
 <script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
   import { modesFor, surfacesFor } from '$lib/features/routes/routeEditor';
   import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
+  import { listOperationDialects } from '$lib/features/providers/api';
+  import { providerKeys } from '$lib/features/providers/providerKeys';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   let { editor }: { editor: RouteDraftEditorState } = $props();
+  const dialects = createQuery(() => ({
+    queryKey: providerKeys.operationDialects,
+    queryFn: ({ signal }) => listOperationDialects(signal)
+  }));
+  const dialectCatalog = $derived(dialects.data ?? []);
 </script>
 
 <aside class="card publish-panel" aria-labelledby="publish-heading">
@@ -62,7 +70,7 @@
     <label for="simulation-dialect">Native request dialect</label>
     <select id="simulation-dialect" bind:value={editor.simulationDialect}>
       <option value="">Default for operation and surface</option>
-      {#each inspectionDialects(editor.simulationOperation, editor.simulationSurface) as dialect (dialect)}
+      {#each inspectionDialects(dialectCatalog, editor.simulationOperation, editor.simulationSurface, editor.simulationMode) as dialect (dialect)}
         <option value={dialect}>{dialect}</option>
       {/each}
     </select>

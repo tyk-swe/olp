@@ -334,6 +334,13 @@ func (p *Plan) Serving() ServingIdentity { return p.receipt.Serving }
 // dialect-owned file positions. The caller's IDs never reached the provider;
 // each entry records the verified local identity bound to a native ID.
 func (p *Plan) Assets() []AssetBinding { return slices.Clone(p.assets) }
+
+// Hosted returns the provider-hosted tool families this plan admitted at bind
+// time, bounded by the caller's authorization and the bound profile's
+// qualified lifecycle contracts. Admission is a planner fact: it records what
+// provider-hosted work the contract covers, never an executed effect.
+func (p *Plan) Hosted() []string { return slices.Clone(p.hosted) }
+
 func (p *Plan) Obligations() Obligations {
 	out := p.receipt.Obligations
 	out.Effects = slices.Clone(out.Effects)

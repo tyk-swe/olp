@@ -316,7 +316,7 @@ func routingEvidence(x *execution) []map[string]any {
 				break
 			}
 		}
-		routing = append(routing, map[string]any{
+		row := map[string]any{
 			"target_id":      fact.TargetID,
 			"provider_id":    fact.ProviderID,
 			"upstream_model": fact.UpstreamModel,
@@ -327,7 +327,13 @@ func routingEvidence(x *execution) []map[string]any {
 			"attempt":            fact.Ordinal,
 			"credential_slot_id": fact.SlotID,
 			"reason":             fact.Class,
-		})
+			// Outcome and execution are the attempt's own recorded facts —
+			// they are emitted only when the attempt carried them and are
+			// never reconstructed from its HTTP status or finish reason.
+			"outcome":   accountingOutcome(&fact),
+			"execution": fact.Interaction,
+		}
+		routing = append(routing, row)
 	}
 	return routing
 }

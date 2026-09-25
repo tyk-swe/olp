@@ -290,6 +290,9 @@ func (f *attemptFailure) attribute(fact *AttemptFact) {
 		resource = f.exhausted.Resource
 	}
 	fact.FaultOrigin, fact.FaultScope, fact.FaultResource = f.origin, f.scope, resource
+	if f.exhausted != nil {
+		fact.LimitCategory, fact.Limit = string(f.exhausted.Category), int64(f.exhausted.Limit)
+	}
 }
 
 // The quotas that can reject an attempt before it is dispatched.

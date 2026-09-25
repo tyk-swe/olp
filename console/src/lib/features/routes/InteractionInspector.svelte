@@ -14,12 +14,14 @@
 
   const effective = $derived(inspection?.effective_request);
   const obligations = $derived(inspection?.obligations);
+  const hostedTools = $derived(inspection?.hosted_tools ?? []);
   const hasDetails = $derived(
     Boolean(
       effective ||
       inspection?.semantic_context?.length ||
       inspection?.dispositions?.length ||
-      obligations
+      obligations ||
+      hostedTools.length
     )
   );
   const status = $derived(inspection?.status ?? 'not_inspected');
@@ -83,6 +85,12 @@
             {inspection?.profile_id ??
               'Not established'}{#if inspection?.profile_revision}
               · revision {inspection.profile_revision}{/if}
+          </dd>
+          <dt>Hosted tools</dt>
+          <dd>
+            {hostedTools.length
+              ? hostedTools.map(label).join(', ')
+              : 'None admitted'}
           </dd>
           {#if inspection?.serving}
             <dt>Serving binding</dt>
@@ -211,10 +219,13 @@
             <dd>
               {obligations.effects.map(label).join(', ') || 'None declared'}
             </dd>
+            <dt>Actionability</dt>
+            <dd>{label(obligations.actionability)}</dd>
             <dt>Planner bounds</dt>
             <dd>
               Body {obligations.max_body_bytes} bytes · event {obligations.max_event_bytes}
-              bytes
+              bytes{#if obligations.max_continuation_bytes}
+                · continuation {obligations.max_continuation_bytes} bytes{/if}
             </dd>
             <dt>Result guard</dt>
             <dd>{obligations.guard_results ? 'Required' : 'None declared'}</dd>
@@ -231,8 +242,8 @@
     <p class="scope-note">
       Evidence scope: {evidence.length
         ? evidence.map(label).join(' · ')
-        : 'Unknown'}. Provider connectivity, declared capability, deterministic
-      plan admission, and empirical quality are separate evidence.
+        : 'None recorded'}. Provider connectivity, declared capability,
+      deterministic plan admission, and empirical quality are separate evidence.
     </p>
   </div>
 {/if}

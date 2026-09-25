@@ -31,5 +31,7 @@ export const providerKeys = {
   enabledModels: () => ['providers', 'models', 'catalog', 'enabled'] as const,
   modelsOf: (id: string) => ['providers', 'models', 'of', id] as const,
   models: (id: string, cursor?: string) =>
-    ['providers', 'models', 'of', id, cursor ?? 'first'] as const
+    ['providers', 'models', 'of', id, cursor ?? 'first'] as const,
+  /** The registered operation and generation dialect catalog. */
+  operationDialects: ['providers', 'operation-dialects'] as const
 };
