@@ -27,7 +27,7 @@ func TestExpiredKeyCreationStillReplaysItsOriginalResult(t *testing.T) {
 	if status != 201 || !reflect.DeepEqual(created, replayed) || originalHeaders.Get("ETag") != replayHeaders.Get("ETag") || originalHeaders.Get("Location") != replayHeaders.Get("Location") {
 		t.Fatal("expiry changed the original creation replay", status)
 	}
-	authority, err := h.Server.LookupAuthority(t.Context(), created["secret"].(string))
+	authority, err := h.authority(created["secret"].(string))
 	if err != nil || authority.Allows("inference", "", nil, time.Now()) {
 		t.Fatal("replay must not extend the key's authority")
 	}

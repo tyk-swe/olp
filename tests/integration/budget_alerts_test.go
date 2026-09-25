@@ -560,3 +560,37 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	}
 	_ = updated
 }
+
+// A destination owns its signing secret: replacing or clearing it removes the
+// previous ciphertext rather than retaining an unreachable record.
+func TestNotificationSecretReplacementRemovesPreviousSecret(t *testing.T) {
+	h := newAccessHarness(t)
+	h.Server.Egress = alertPolicy()
+	owner := h.owner()
+	hook := newWebhookFixture(t)
+	destination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+		map[string]any{"name": "signed", "url": hook.URL + "/signed", "secret": "first-signing-key"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	path := "/api/v3/notifications/destinations/" + destination["id"].(string)
+	assertSecrets := func(step string, want int) {
+		t.Helper()
+		var stored, owned int
+		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE id=(SELECT secret_id FROM olp_go.notification_destinations WHERE id=$1))
+			FROM olp_go.secrets WHERE purpose='notification_secret'`, destination["id"]).Scan(&stored, &owned); err != nil {
+			t.Fatal(err)
+		}
+		if stored != want || owned != want {
+			t.Fatalf("%s: %d notification secrets stored, %d owned; want %d", step, stored, owned, want)
+		}
+	}
+	assertSecrets("create", 1)
+	for _, step := range []struct {
+		name   string
+		secret any
+		want   int
+	}{{"replace", "second-signing-key", 1}, {"clear", nil, 0}, {"set", "third-signing-key", 1}} {
+		detail := h.want(owner, "GET", path, nil, nil, 200)
+		h.want(owner, "PATCH", path, map[string]any{"secret": step.secret}, withMatch(detail, nil), 200)
+		assertSecrets(step.name, step.want)
+	}
+}

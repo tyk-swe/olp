@@ -739,7 +739,7 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var local, localEnabled, enabled, locallyManaged bool
-	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false),role_management='local' FROM olp_go.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
+	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,"+localLoginSetting+",COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false),role_management='local' FROM olp_go.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	usable, err := usableOIDCIdentities(r, s.Pool, p, locallyManaged)
@@ -794,7 +794,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var local, localEnabled, locallyManaged bool
-	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),role_management='local' FROM olp_go.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,`+localLoginSetting+`,role_management='local' FROM olp_go.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	if !local || !locallyManaged || !localEnabled || s.LocalLoginDisabled {

@@ -50,7 +50,7 @@ func TestKeyBudgetFormats(t *testing.T) {
 				} else {
 					input.MonthlyCostLimit = &value
 				}
-				err := validateKey(input, false)
+				err := validateKey(&input, false)
 				if tc.valid {
 					if err != nil {
 						t.Fatalf("rejected supported budget %q: %v", tc.value, err)
@@ -82,7 +82,7 @@ func TestKeyLimitRanges(t *testing.T) {
 				case "max_concurrency":
 					input.MaxConcurrency = &value
 				}
-				err := validateKey(input, false)
+				err := validateKey(&input, false)
 				if value > 0 && value <= limits.MaxCounter && (field == "tokens_per_minute" || value <= math.MaxInt32) {
 					if err != nil {
 						t.Fatalf("rejected supported limit: %v", err)
@@ -97,7 +97,7 @@ func TestKeyLimitRanges(t *testing.T) {
 		}
 	}
 	input := keyInput{Name: "unlimited", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
-	if err := validateKey(input, false); err != nil {
+	if err := validateKey(&input, false); err != nil {
 		t.Fatalf("rejected omitted limits: %v", err)
 	}
 }

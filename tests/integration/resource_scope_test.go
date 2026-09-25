@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -478,5 +479,39 @@ func TestGatewayKeyProjectIsolation(t *testing.T) {
 		if status != want {
 			t.Fatalf("%s inference: %d %v", slug, status, out)
 		}
+	}
+}
+
+// Project identifiers are validated before any query and compared in canonical
+// form, so malformed input is a client error and equivalent spellings match.
+func TestProjectIdentifiersAreValidatedAndCanonical(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Canonical")
+	provider := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": "http://127.0.0.1:9/v1/"}
+	for path, body := range map[string]map[string]any{
+		"/api/v3/api-keys":      {"name": "malformed"},
+		"/api/v3/budget-groups": {"name": "malformed", "daily_cost_limit": "1"},
+		"/api/v3/providers":     {"name": "Malformed", "configuration": provider, "credential": "x"},
+		"/api/v3/route-drafts":  {"slug": "malformed", "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "targets": []any{}},
+	} {
+		body["project_id"] = "not-a-uuid"
+		if status, out, _ := h.request(owner, "POST", path, body, idem("malformed"+path)); status != 422 {
+			t.Fatalf("%s: malformed project_id returned %d %v, want 422", path, status, out)
+		}
+	}
+
+	upper := strings.ToUpper(project)
+	group := h.want(owner, "POST", "/api/v3/budget-groups", map[string]any{"name": "shared", "daily_cost_limit": "1", "project_id": project}, idem("group"), 201)
+	h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "grouped", "project_id": upper, "budget_group_id": group["id"]}, idem("key-grouped"), 201)
+
+	member := h.invite(owner, "manager@example.com", "developer")
+	profile := h.want(member, "GET", "/api/v3/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v3/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	addMember(h, owner, project, profile["id"].(string), "manager")
+	member = login(h, "manager@example.com")
+	key := h.want(member, "POST", "/api/v3/api-keys", map[string]any{"name": "assigned", "project_id": upper}, idem("key-assigned"), 201)
+	if detail := h.want(member, "GET", "/api/v3/api-keys/"+key["id"].(string), nil, nil, 200); detail["project_id"] != project {
+		t.Fatal("the key must be stored in its canonical project", detail["project_id"])
 	}
 }
