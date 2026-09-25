@@ -32,6 +32,14 @@ export type Assistant = {
   content: string;
   tool_calls?: ToolCall[];
 };
+/** The committed native terminal observation: the declared native
+ * stop_reason and matched stop_sequence (string, explicit null, or an absent
+ * member) beside the compatible client finish_reason. */
+export type NativeTerminal = {
+  stop_reason: string;
+  stop_sequence?: string | null;
+  finish_reason: string;
+};
 export type ReadyTurn = {
   submission: string;
   handle: string;
@@ -40,6 +48,7 @@ export type ReadyTurn = {
   observations: Observation[];
   finish: string;
   nativeUsageRaw?: string;
+  nativeTerminal?: NativeTerminal;
 };
 
 function nested(
@@ -121,6 +130,41 @@ function observationsFrom(value: unknown): Observation[] {
       throw new Error('Invalid opaque state marker.');
     return entry as Observation;
   });
+}
+
+function terminalFrom(value: unknown): NativeTerminal | undefined {
+  if (value === undefined) return undefined;
+  const terminal = record(value);
+  if (
+    typeof terminal.stop_reason !== 'string' ||
+    typeof terminal.finish_reason !== 'string'
+  )
+    throw new Error('Invalid native terminal record in continuation delivery.');
+  const sequence = terminal.stop_sequence;
+  if (
+    sequence !== undefined &&
+    sequence !== null &&
+    typeof sequence !== 'string'
+  )
+    throw new Error('Invalid native stop sequence in continuation delivery.');
+  return {
+    stop_reason: terminal.stop_reason,
+    ...(sequence !== undefined ? { stop_sequence: sequence } : {}),
+    finish_reason: terminal.finish_reason
+  };
+}
+
+function sameTerminal(
+  a: NativeTerminal | undefined,
+  b: NativeTerminal | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.stop_reason === b.stop_reason &&
+    a.finish_reason === b.finish_reason &&
+    Object.hasOwn(a, 'stop_sequence') === Object.hasOwn(b, 'stop_sequence') &&
+    a.stop_sequence === b.stop_sequence
+  );
 }
 
 function assistantFrom(value: unknown): Assistant {
@@ -246,6 +290,7 @@ function assemble(frames: Chunk[]): {
   handle: string;
   finish: string;
   nativeUsageRaw?: string;
+  nativeTerminal?: NativeTerminal;
 } {
   const observations: Observation[] = [];
   const calls = new Map<number, ToolCall>();
@@ -254,6 +299,7 @@ function assemble(frames: Chunk[]): {
   let finish = '';
   let terminal = false;
   let nativeUsageRaw: string | undefined;
+  let nativeTerminal: NativeTerminal | undefined;
   for (const chunk of frames) {
     if (chunk.nativeUsageRaw !== undefined)
       nativeUsageRaw = chunk.nativeUsageRaw;
@@ -315,6 +361,16 @@ function assemble(frames: Chunk[]): {
         throw new Error('Terminal delivery has no committed continuation.');
       handle = validHandle(extension.handle);
       finish = string(selected.finish_reason);
+      nativeTerminal = terminalFrom(extension.native_terminal);
+      // The committed record's compatible finish reason must equal the
+      // delivered finish reason; a contradiction is a corrupt delivery.
+      if (
+        nativeTerminal !== undefined &&
+        nativeTerminal.finish_reason !== finish
+      )
+        throw new Error(
+          'Native terminal record does not match the delivered finish.'
+        );
       terminal = true;
     }
   }
@@ -343,7 +399,8 @@ function assemble(frames: Chunk[]): {
     observations,
     handle,
     finish,
-    nativeUsageRaw
+    nativeUsageRaw,
+    nativeTerminal
   };
 }
 
@@ -478,14 +535,21 @@ function completedUnary(
     extension.observations === undefined
       ? []
       : observationsFrom(extension.observations);
+  const finish = string(selected.finish_reason);
+  const nativeTerminal = terminalFrom(extension.native_terminal);
+  if (nativeTerminal !== undefined && nativeTerminal.finish_reason !== finish)
+    throw new Error(
+      'Native terminal record does not match the delivered finish.'
+    );
   return {
     submission,
     handle: validHandle(extension.handle),
     request,
     assistant,
     observations,
-    finish: string(selected.finish_reason),
-    nativeUsageRaw
+    finish,
+    nativeUsageRaw,
+    nativeTerminal
   };
 }
 
@@ -581,5 +645,21 @@ export async function recoverTurn(
     throw new Error('Recovered assistant does not match the committed stream.');
   if (completed.handle !== validHandle(recovery.handle))
     throw new Error('Recovered handle does not match the committed stream.');
+  // A historical delivery committed before the terminal record existed reads
+  // back as the explicit "unavailable" marker; it is never re-invented from
+  // the replayed frames.
+  const committed = recovery.native_terminal;
+  if (committed === 'unavailable') {
+    if (completed.nativeTerminal !== undefined)
+      throw new Error(
+        'Recovered terminal does not match the committed delivery.'
+      );
+  } else if (
+    committed !== undefined &&
+    !sameTerminal(terminalFrom(committed), completed.nativeTerminal)
+  )
+    throw new Error(
+      'Recovered terminal does not match the committed delivery.'
+    );
   return completed;
 }

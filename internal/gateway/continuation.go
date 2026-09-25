@@ -59,6 +59,12 @@ func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
 	if err := json.Unmarshal(payload, &state); err != nil || state.Version != interaction.ContinuationV1 || len(state.Source) == 0 || state.Binding == "" {
 		return nil, resources.ErrContract
 	}
+	// The native terminal record is additive on this carrier. A stored record
+	// that fails the admitted grammar was never committed by this contract;
+	// an absent one stays a valid historical delivery that reads unavailable.
+	if state.Delivery.Terminal != nil && !state.Delivery.Terminal.Valid() {
+		return nil, resources.ErrContract
+	}
 	return &state, nil
 }
 func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
@@ -290,8 +296,19 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Should-Retry", "false")
-	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
+	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery, "native_terminal": recoveredTerminal(state.Delivery)})
 	s.finish(x, nil, http.StatusOK)
+}
+
+// recoveredTerminal renders the committed native terminal observation for
+// recovery. Deliveries committed before the record existed on this carrier
+// keep their historical truth and report the literal "unavailable" marker —
+// the gateway never invents a matched sequence for them.
+func recoveredTerminal(delivery interaction.Delivery) any {
+	if delivery.Terminal != nil {
+		return delivery.Terminal
+	}
+	return "unavailable"
 }
 
 // Only semantic controls enter encrypted correspondence, never authentication,

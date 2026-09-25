@@ -249,4 +249,247 @@ describe('browser negotiated tool client', () => {
     );
     expect(transport.mock.calls[0]![1]!.method).toBe('GET');
   });
+
+  it('keeps distinct native terminal records on ready turns', async () => {
+    // Identical text and finish reason; only the native terminal differs,
+    // including an explicit null versus an absent stop_sequence member.
+    const textFrames = [
+      chunk(
+        { content: 'done' },
+        { index: 0, type: 'text', phase: 'start', text: 'done' }
+      )
+    ];
+    for (const record of [
+      {
+        stop_reason: 'stop_sequence',
+        stop_sequence: '###',
+        finish_reason: 'stop'
+      },
+      { stop_reason: 'end_turn', stop_sequence: null, finish_reason: 'stop' },
+      { stop_reason: 'end_turn', finish_reason: 'stop' }
+    ]) {
+      const terminal = {
+        ...chunk({}, undefined, 'stop', true),
+        olp: {
+          version: 'chat-anthropic-tools-v1',
+          handle,
+          ready: true,
+          native_terminal: record
+        }
+      };
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        sse([...textFrames, terminal])
+      );
+      const turn = await streamTurn(
+        'olp_secret',
+        nativeChatRequest(source, 'route'),
+        submission
+      );
+      expect(turn.nativeTerminal).toEqual(record);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('rejects a terminal record whose finish contradicts the delivery', async () => {
+    const terminal = {
+      ...chunk({}, undefined, 'tool_calls', true),
+      olp: {
+        version: 'chat-anthropic-tools-v1',
+        handle,
+        ready: true,
+        native_terminal: {
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          finish_reason: 'stop'
+        }
+      }
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      sse([...recorded.slice(0, -1), terminal])
+    );
+    await expect(
+      streamTurn('olp_secret', nativeChatRequest(source, 'route'), submission)
+    ).rejects.toThrow(/does not match/);
+  });
+
+  it('keeps the terminal record on a unary ready turn', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        choices: [
+          {
+            message: { role: 'assistant', content: 'done' },
+            finish_reason: 'stop'
+          }
+        ],
+        olp: {
+          version: 'chat-anthropic-tools-v1',
+          handle: finalHandle,
+          ready: true,
+          native_terminal: {
+            stop_reason: 'stop_sequence',
+            stop_sequence: '###',
+            finish_reason: 'stop'
+          }
+        }
+      })
+    );
+    const turn = await unaryTurn(
+      'olp_secret',
+      nativeChatRequest(source, 'route'),
+      submission,
+      handle
+    );
+    expect(turn.nativeTerminal).toEqual({
+      stop_reason: 'stop_sequence',
+      stop_sequence: '###',
+      finish_reason: 'stop'
+    });
+  });
+
+  it('rejects a malformed terminal record on a ready turn', async () => {
+    for (const record of [
+      { stop_sequence: '###', finish_reason: 'stop' },
+      { stop_reason: 'end_turn', finish_reason: 'stop', stop_sequence: 42 }
+    ]) {
+      const terminal = {
+        ...recorded.at(-1)!,
+        olp: { ...recorded.at(-1)!.olp, native_terminal: record }
+      };
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        sse([...recorded.slice(0, -1), terminal])
+      );
+      await expect(
+        streamTurn('olp_secret', nativeChatRequest(source, 'route'), submission)
+      ).rejects.toThrow(/native (terminal|stop sequence)/);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('compares the recovered terminal record with the committed delivery', async () => {
+    const assistant = {
+      role: 'assistant',
+      content: 'beforeafter',
+      tool_calls: [
+        {
+          id: 'call-weather',
+          type: 'function',
+          function: { name: 'weather', arguments: '{"city":"Paris"}' }
+        },
+        {
+          id: 'call-clock',
+          type: 'function',
+          function: { name: 'clock', arguments: '{"zone":"Europe/Paris"}' }
+        }
+      ]
+    };
+    const committed = {
+      stop_reason: 'tool_use',
+      stop_sequence: null,
+      finish_reason: 'tool_calls'
+    };
+    const terminal = {
+      ...recorded.at(-1)!,
+      olp: { ...recorded.at(-1)!.olp, native_terminal: committed }
+    };
+    const delivery = {
+      stream: true,
+      frames: [...recorded.slice(0, -1), terminal],
+      native_terminal: committed
+    };
+    const transport = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery,
+        native_terminal: committed
+      })
+    );
+    const recovered = await recoverTurn(
+      'olp_secret',
+      submission,
+      nativeChatRequest(source, 'route')
+    );
+    expect(recovered.nativeTerminal).toEqual(committed);
+    transport.mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery,
+        native_terminal: {
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          finish_reason: 'stop'
+        }
+      })
+    );
+    await expect(
+      recoverTurn('olp_secret', submission, nativeChatRequest(source, 'route'))
+    ).rejects.toThrow(/does not match/);
+  });
+
+  it('reads a historical delivery without a record as unavailable', async () => {
+    const assistant = {
+      role: 'assistant',
+      content: 'beforeafter',
+      tool_calls: [
+        {
+          id: 'call-weather',
+          type: 'function',
+          function: { name: 'weather', arguments: '{"city":"Paris"}' }
+        },
+        {
+          id: 'call-clock',
+          type: 'function',
+          function: { name: 'clock', arguments: '{"zone":"Europe/Paris"}' }
+        }
+      ]
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery: { stream: true, frames: recorded },
+        native_terminal: 'unavailable'
+      })
+    );
+    const recovered = await recoverTurn(
+      'olp_secret',
+      submission,
+      nativeChatRequest(source, 'route')
+    );
+    expect(recovered.nativeTerminal).toBeUndefined();
+    // A delivery that does carry a record must never read as unavailable.
+    const committed = {
+      stop_reason: 'tool_use',
+      stop_sequence: null,
+      finish_reason: 'tool_calls'
+    };
+    const terminal = {
+      ...recorded.at(-1)!,
+      olp: { ...recorded.at(-1)!.olp, native_terminal: committed }
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        version: 'chat-anthropic-tools-v1',
+        state: 'ready',
+        handle,
+        assistant,
+        delivery: {
+          stream: true,
+          frames: [...recorded.slice(0, -1), terminal],
+          native_terminal: committed
+        },
+        native_terminal: 'unavailable'
+      })
+    );
+    await expect(
+      recoverTurn('olp_secret', submission, nativeChatRequest(source, 'route'))
+    ).rejects.toThrow(/does not match/);
+  });
 });

@@ -48,6 +48,7 @@ export async function streamTurn(client, request, { submission = submissionID(),
   let finish;
   let usage;
   let nativeUsage;
+  let nativeTerminal;
   let terminal = false;
   for await (const chunk of stream) {
     checkExtension(chunk.olp);
@@ -75,6 +76,7 @@ export async function streamTurn(client, request, { submission = submissionID(),
       readyHandle = chunk.olp.handle;
       usage = chunk.usage;
       nativeUsage = chunk.olp.native_usage;
+      nativeTerminal = chunk.olp.native_terminal;
       terminal = true;
     }
   }
@@ -90,7 +92,7 @@ export async function streamTurn(client, request, { submission = submissionID(),
   if ((finish === 'tool_calls') !== (toolCalls.length > 0)) throw new Error('Tool terminal mismatch');
   const assistant = { role: 'assistant', content: text };
   if (toolCalls.length) assistant.tool_calls = toolCalls;
-  return { submission, handle: readyHandle, assistant, observations, chunks, finish, usage, nativeUsage };
+  return { submission, handle: readyHandle, assistant, observations, chunks, finish, usage, nativeUsage, nativeTerminal };
 }
 
 export function nextTurn(request, completed, results) {
@@ -122,7 +124,7 @@ export async function unaryTurn(client, request, { submission = submissionID(), 
   if (response.olp.ready !== true || !response.olp.handle || !response.olp.native_usage || !response.choices?.[0]?.message) {
     throw new Error('Incomplete continuation delivery');
   }
-  return { submission, handle: response.olp.handle, assistant: response.choices[0].message, nativeUsage: response.olp.native_usage, response };
+  return { submission, handle: response.olp.handle, assistant: response.choices[0].message, nativeUsage: response.olp.native_usage, nativeTerminal: response.olp.native_terminal, response };
 }
 
 // Recovery reads only the committed delivery. It never starts an inference
