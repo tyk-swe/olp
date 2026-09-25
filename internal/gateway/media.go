@@ -317,7 +317,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		}})
 	if err != nil {
 		var se *runtime.SelectionError
-		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
+		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != runtime.AttemptBudgetIncreaseForbidden {
 			return selectionError(err, route.Slug)
 		}
 		return requestError(err)

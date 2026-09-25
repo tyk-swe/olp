@@ -77,17 +77,6 @@ func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 	return err
 }
 
-func requireFidelityExecution(raw json.RawMessage) error {
-	f, err := runtime.DecodeFidelity(raw)
-	if err != nil {
-		return access.Invalid("fidelity", err.Error())
-	}
-	if err = runtime.RequireRouteExecution(f); err != nil {
-		return access.Fail(422, "strict_execution_unavailable", err.Error())
-	}
-	return nil
-}
-
 // compileDraftExecution checks the same configured links used by release
 // installation. It is read-only and never performs provider inference or probes.
 func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {

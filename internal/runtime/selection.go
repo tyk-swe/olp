@@ -34,9 +34,10 @@ func (e *SelectionError) Error() string { return e.Code }
 
 // Selection error codes.
 const (
-	RouteNotFound         = "route_not_found"
-	OperationNotSupported = "operation_not_supported"
-	NoEligibleTargets     = "no_eligible_targets"
+	RouteNotFound                  = "route_not_found"
+	OperationNotSupported          = "operation_not_supported"
+	NoEligibleTargets              = "no_eligible_targets"
+	AttemptBudgetIncreaseForbidden = "attempt_budget_increase_forbidden"
 )
 
 // Select plans attempts for one request: enabled providers that certified the

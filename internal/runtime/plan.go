@@ -355,4 +355,4 @@ func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price
 	}
 	return ""
 }
-func unsupportedBudget() error { return &SelectionError{Code: "attempt_budget_increase_forbidden"} }
+func unsupportedBudget() error { return &SelectionError{Code: AttemptBudgetIncreaseForbidden} }

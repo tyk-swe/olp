@@ -27,6 +27,9 @@ func (s *Snapshot) CompileRouteExecution(route Route) error {
 	if err == nil {
 		_, err = s.compileDurable(route)
 	}
+	if err == nil {
+		_, err = s.compileRealtime(route)
+	}
 	return err
 }
 

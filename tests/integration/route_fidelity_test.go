@@ -160,6 +160,15 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	if diff["fidelity_changed"] != true || routeFidelityMode(t, diff["fidelity_after"]) != "legacy" {
 		t.Fatal("explicit legacy transition was not reviewable", diff)
 	}
+
+	// The historical revision omitted its contract. Once the route publishes an
+	// explicit one, storage refuses another omission, so restoring it must
+	// state the legacy contract it meant and stay publishable.
+	historical := h.want(owner, "POST", routePath+"/revisions/1/restore-as-draft", nil, idem(uuid.NewString()), 201)
+	if historical["fidelity"] == nil || routeFidelityMode(t, historical["fidelity"]) != "legacy" {
+		t.Fatal("restored historical revision did not state its legacy contract", historical["fidelity"])
+	}
+	h.want(owner, "POST", "/api/v3/route-drafts/"+historical["id"].(string)+"/activate", nil, withMatch(historical, idem(uuid.NewString())), 200)
 }
 
 func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing.T) {

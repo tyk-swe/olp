@@ -1,9 +1,13 @@
 package routes
 
 import (
-	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"errors"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
@@ -59,5 +63,39 @@ func TestTokenDemandValidation(t *testing.T) {
 	demand, err := tokenDemand(&input, &output)
 	if err != nil || demand.EstimatedInputTokens != 100 || *demand.MaxOutputTokens != 20 {
 		t.Errorf("demand %+v %v", demand, err)
+	}
+}
+
+// Simulation input that planning refuses is the caller's mistake, not an
+// unavailable management service.
+func TestSimulationRefusalsAreClientErrors(t *testing.T) {
+	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}, Routes: map[string]runtime.Route{}}
+	snapshot.Routes["known"] = simulationRoute(uuid.NewString(), "known", []string{"generation"}, 1000, 1, nil)
+	two := 2
+	for _, tc := range []struct {
+		name, slug, operation string
+		preferences           *Preferences
+		code                  string
+	}{
+		{"unknown route", "missing", "generation", nil, ""},
+		{"unsupported operation", "known", "embeddings", nil, runtime.OperationNotSupported},
+		{"attempt budget increase", "known", "generation", &Preferences{MaxAttempts: &two}, runtime.AttemptBudgetIncreaseForbidden},
+	} {
+		_, err := runtime.PlanRequest(snapshot, tc.slug, tc.operation, "openai", "unary", nil, runtime.SelectionOptions{Preferences: tc.preferences})
+		err = selectionProblem(err)
+		if tc.code == "" {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				t.Errorf("%s: %v, want the not-found reply of a hidden route", tc.name, err)
+			}
+			continue
+		}
+		var problem *access.Problem
+		if !errors.As(err, &problem) || problem.Status != 422 || problem.Code != tc.code {
+			t.Errorf("%s: %v, want a 422 %s problem", tc.name, err, tc.code)
+		}
+	}
+	other := &runtime.SelectionError{Code: runtime.NoEligibleTargets}
+	if err := selectionProblem(other); err != other {
+		t.Errorf("an unrelated selection error was rewritten to %v", err)
 	}
 }
