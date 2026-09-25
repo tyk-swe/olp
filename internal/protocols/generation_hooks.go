@@ -99,82 +99,124 @@ func bedrockEffects(effective oif.Document, in generation.StateInput, obligation
 	return wireEffects(openai.FamilyBedrock)(effective, in, obligations)
 }
 
-// wireAssets visits dialect-owned media positions only. A tool's own JSON may
-// contain identically named keys without referring to provider state.
-func wireAssets(family openai.Family) func(effective oif.Document) error {
-	return func(document oif.Document) error {
-		fail := func(path string) error {
-			return generation.Incompatible("resource_affinity", path, "asset_resource_authority", "Provider asset references require resolved ownership and historical serving authority.")
+// admittedFileKinds are the only Responses part types whose file_id member a
+// resolved binding may occupy. Every other provider-asset position keeps the
+// historical refusal; a local ID is never a claim the request document can
+// widen into a new position.
+var admittedFileKinds = map[string]bool{"input_file": true, "input_image": true, "computer_screenshot": true}
+
+// wireAssets surveys the dialect-owned provider-asset positions of one
+// effective document in document order. Collecting a reference never grants
+// it meaning: file-reference members are reported for the orchestrator's
+// resource-authority binding check — Bindable marks the positions a verified
+// binding may occupy — while provider-asset forms no binding can qualify
+// report Refuse. A tool's own JSON may contain identically named keys without
+// referring to provider state, so only the dialect's media positions are
+// visited.
+func wireAssets(family openai.Family) func(effective oif.Document) []generation.AssetRef {
+	return func(document oif.Document) []generation.AssetRef {
+		var refs []generation.AssetRef
+		visit := func(value oif.Value, pointer, kind string) {
+			id, text := value.Text()
+			refs = append(refs, generation.AssetRef{Pointer: pointer, ID: id, Text: text, Bindable: family == openai.FamilyResponses && admittedFileKinds[kind]})
 		}
-		var parts func(oif.Value, string) error
-		parts = func(value oif.Value, path string) error {
+		refuse := func(pointer string) {
+			refs = append(refs, generation.AssetRef{Pointer: pointer, Refuse: true})
+		}
+		openaiFilePart := func(part oif.Value, path, kind string) {
+			if kind != "file" && !admittedFileKinds[kind] {
+				return
+			}
+			if value, present := part.Lookup("file_id"); present && value.Kind() != oif.Null {
+				visit(value, path+"/file_id", kind)
+			}
+			if value, present := generation.Member(part, "file").Lookup("file_id"); present && value.Kind() != oif.Null {
+				visit(value, path+"/file/file_id", kind)
+			}
+		}
+		var parts func(oif.Value, string)
+		parts = func(value oif.Value, path string) {
 			for index, part := range value.Elements() {
 				at := oif.Pointer(path, strconv.Itoa(index))
+				kind := generation.Text(generation.Member(part, "type"))
 				switch family {
-				case openai.FamilyChat, openai.FamilyResponses:
-					if kind := generation.Text(generation.Member(part, "type")); kind == "file" || kind == "input_file" || kind == "input_image" {
-						if _, present := part.Lookup("file_id"); present {
-							return fail(at + "/file_id")
-						}
-						if _, present := generation.Member(part, "file").Lookup("file_id"); present {
-							return fail(at + "/file/file_id")
-						}
-					}
+				case openai.FamilyChat:
+					openaiFilePart(part, at, kind)
 				case openai.FamilyAnthropic:
-					if kind := generation.Text(generation.Member(part, "type")); kind == "image" || kind == "document" || kind == "container_upload" {
-						if _, present := part.Lookup("file_id"); present {
-							return fail(at + "/file_id")
+					if kind == "image" || kind == "document" || kind == "container_upload" {
+						if value, present := part.Lookup("file_id"); present && value.Kind() != oif.Null {
+							visit(value, at+"/file_id", kind)
 						}
 						source := generation.Member(part, "source")
-						if _, present := source.Lookup("file_id"); present || generation.Text(generation.Member(source, "type")) == "file" {
-							return fail(at + "/source/file_id")
+						if value, present := source.Lookup("file_id"); present && value.Kind() != oif.Null {
+							visit(value, at+"/source/file_id", kind)
+						} else if generation.Text(generation.Member(source, "type")) == "file" {
+							refuse(at + "/source")
 						}
 					}
-					if generation.Text(generation.Member(part, "type")) == "tool_result" {
-						if err := parts(generation.Member(part, "content"), at+"/content"); err != nil {
-							return err
-						}
+					if kind == "tool_result" {
+						parts(generation.Member(part, "content"), at+"/content")
 					}
 				case openai.FamilyGemini, openai.FamilyGeminiStream:
 					uri := generation.Text(generation.Member(generation.Member(part, "fileData"), "fileUri"))
 					if uri != "" {
 						parsed, err := url.Parse(uri)
 						if err != nil || strings.HasPrefix(strings.TrimPrefix(uri, "/"), "files/") || strings.EqualFold(strings.TrimSuffix(parsed.Hostname(), "."), "generativelanguage.googleapis.com") || strings.EqualFold(parsed.Scheme, "gs") || strings.EqualFold(parsed.Scheme, "s3") {
-							return fail(at + "/fileData/fileUri")
+							refuse(at + "/fileData/fileUri")
 						}
 					}
 				case openai.FamilyBedrock:
 					for _, kind := range []string{"image", "document", "video"} {
 						if _, present := generation.Member(generation.Member(part, kind), "source").Lookup("s3Location"); present {
-							return fail(at + "/" + kind + "/source/s3Location")
+							refuse(at + "/" + kind + "/source/s3Location")
 						}
 					}
-					if err := parts(generation.Member(generation.Member(part, "toolResult"), "content"), at+"/toolResult/content"); err != nil {
-						return err
-					}
+					parts(generation.Member(generation.Member(part, "toolResult"), "content"), at+"/toolResult/content")
 				}
 			}
-			return nil
 		}
 		root := document.Root()
+		if family == openai.FamilyResponses {
+			// Responses file references live on input items themselves and
+			// inside message content or tool-result output parts.
+			for index, item := range generation.Member(root, "input").Elements() {
+				at := oif.Pointer("/input", strconv.Itoa(index))
+				kind := generation.Text(generation.Member(item, "type"))
+				openaiFilePart(item, at, kind)
+				field := "content"
+				switch kind {
+				case "", "message":
+				case "function_call_output", "custom_tool_call_output", "computer_call_output":
+					field = "output"
+				default:
+					continue
+				}
+				container := generation.Member(item, field)
+				elements := container.Elements()
+				if container.Kind() == oif.Object {
+					elements = []oif.Value{container}
+				}
+				for i, part := range elements {
+					partAt := at + "/" + field
+					if container.Kind() == oif.Array {
+						partAt = oif.Pointer(partAt, strconv.Itoa(i))
+					}
+					openaiFilePart(part, partAt, generation.Text(generation.Member(part, "type")))
+				}
+			}
+			return refs
+		}
 		for _, field := range []string{"messages", "input", "contents"} {
 			for index, message := range generation.Member(root, field).Elements() {
 				path := "/" + field + "/" + strconv.Itoa(index)
-				if family == openai.FamilyResponses {
-					if kind := generation.Text(generation.Member(message, "type")); kind != "" && kind != "message" {
-						continue
-					}
-				}
 				partName := "content"
 				if field == "contents" {
 					partName = "parts"
 				}
-				if err := parts(generation.Member(message, partName), path+"/"+partName); err != nil {
-					return err
-				}
+				parts(generation.Member(message, partName), path+"/"+partName)
 			}
 		}
-		return nil
+		return refs
 	}
 }
 

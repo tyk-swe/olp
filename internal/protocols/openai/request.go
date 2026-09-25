@@ -447,7 +447,13 @@ func validateResponseFileReference(part map[string]json.RawMessage, path string)
 	switch kind {
 	case "input_file", "input_image", "computer_screenshot":
 		if raw, present := part["file_id"]; present && !isNull(raw) {
-			return &RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			var id string
+			// A gateway-managed strict file ID may continue to the resource
+			// authority; the parser only carries its shape and never grants
+			// ownership. Any other file_id remains a provider reference.
+			if json.Unmarshal(raw, &id) != nil || !strings.HasPrefix(id, "strict_file_") {
+				return &RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
+			}
 		}
 	}
 	return nil

@@ -107,12 +107,14 @@ func (t *Template) Bind(source generation.Source, context Context) (*Plan, error
 	if err != nil {
 		return nil, err
 	}
-	effective := prepared.Document()
-	if target.Assets != nil {
-		if err := target.Assets(effective); err != nil {
-			return nil, err
-		}
+	// Provider asset positions admit only bindings the resource authority
+	// already verified; anything else keeps the historical refusal. The
+	// rewrite lands on the effective invocation, never the caller's source.
+	prepared, assets, err := t.admitAssets(source, prepared, context, &receipt)
+	if err != nil {
+		return nil, err
 	}
+	effective := prepared.Document()
 	var hosted []string
 	if target.Effects != nil {
 		hosted, err = target.Effects(effective, generation.StateInput{AllowProviderState: context.AllowProviderState, AllowHostedTools: context.AllowHostedTools, HostedTools: t.profile.HostedTools, RetainedResponses: context.RetainedResponses, RequiredServing: context.RequiredServing}, &receipt.Obligations)
@@ -159,7 +161,7 @@ func (t *Template) Bind(source generation.Source, context Context) (*Plan, error
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
 	receipt.Dispositions = append(receipt.Dispositions, headerReceipt...)
 	receipt.Dispositions = compactDispositions(receipt.Dispositions)
-	return &Plan{template: t, config: config, prepared: prepared, effective: effective, source: source, target: target, mapping: mapping, stream: stream, route: source.Route, receipt: receipt, hosted: hosted}, nil
+	return &Plan{template: t, config: config, prepared: prepared, effective: effective, source: source, target: target, mapping: mapping, stream: stream, route: source.Route, receipt: receipt, hosted: hosted, assets: assets}, nil
 }
 
 // qualifiedMappingError preserves the admission failures callers observed when

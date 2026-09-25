@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -156,6 +158,77 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		p.secret, p.hasSecret = secret, true
 	}
 	return p, route, nil
+}
+
+// resolveRequestFileAssets resolves every gateway-managed file reference in
+// the lifted source request through the existing resource authority before
+// binding. A caller string only nominates a candidate resource; owner,
+// committed purpose, route and serving scope are established here by the
+// durable contract, and any provider-native or unmanaged reference stays for
+// the strict planner's generic refusal.
+func (s *Server) resolveRequestFileAssets(ctx context.Context, x *execution) *Error {
+	if x.gen == nil {
+		return nil
+	}
+	refs := interaction.FileReferences(x.source.Request.Document(), *x.gen)
+	var managed []string
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref, resources.KindStrictFile+"_") || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		managed = append(managed, ref)
+	}
+	if len(managed) == 0 {
+		return nil
+	}
+	if !x.strict() {
+		param := "file_id"
+		return invalidRequest("invalid_file_id", "Gateway-managed file references require a strict route.", &param)
+	}
+	bindings := make(map[string]interaction.AssetBinding, len(managed))
+	for _, ref := range managed {
+		binding, e := s.resolveFileAsset(ctx, x, ref)
+		if e != nil {
+			return e
+		}
+		bindings[ref] = *binding
+	}
+	x.resolvedAssets = bindings
+	return nil
+}
+
+func (s *Server) resolveFileAsset(ctx context.Context, x *execution, ref string) (*interaction.AssetBinding, *Error) {
+	res, contract, err := s.readDurable(ctx, resources.KindStrictFile, x.authority.ID, ref)
+	if errors.Is(err, resources.ErrNotFound) {
+		param := "file_id"
+		return nil, invalidRequest("invalid_file_id", "file_id must name an inference file uploaded through this key.", &param)
+	}
+	if errors.Is(err, resources.ErrContract) {
+		return nil, durableError(err)
+	}
+	if err != nil {
+		return nil, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read.")
+	}
+	if res.RouteSlug != x.route.Slug {
+		param := "file_id"
+		return nil, invalidRequest("invalid_file_id", "file_id must reference a file uploaded under this model.", &param)
+	}
+	if contract.Asset == nil || contract.Asset.Purpose == "" || contract.Asset.Purpose == "batch" {
+		param := "file_id"
+		return nil, invalidRequest("invalid_file_id", "The named file was not uploaded for inference use.", &param)
+	}
+	// The durable authority re-establishes the owning route revision, slot and
+	// credential under the generation operation before any plan may consume
+	// the native identity.
+	if e := s.authorizeDurable(ctx, x, x.authority, res, contract, "generation"); e != nil {
+		return nil, e
+	}
+	return &interaction.AssetBinding{
+		LocalID: res.ID, Kind: res.Kind, NativeID: res.UpstreamID, Purpose: contract.Asset.Purpose,
+		Serving: contract.Serving, Digest: contract.Asset.SHA256, MediaType: contract.Asset.ContentType, Size: contract.Asset.Size,
+	}, nil
 }
 
 func (s *Server) pinSecret(x *execution, p *pin) []byte {
@@ -705,10 +778,6 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."), x.family)
 		return
 	}
-	if !slices.Contains(route.Operations, "batch") {
-		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
-		return
-	}
 	if e := policySurfaceGate(&route); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -738,14 +807,32 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, mediaError(mErr), x.family)
 		return
 	}
+	// purpose=batch is the batch-input contract; any other purpose on a strict
+	// route is an inference-file upload admitted only through the generation
+	// operation and a profile-declared native purpose.
+	inference := x.strict() && purpose != "batch"
+	operation := "batch"
+	if inference {
+		operation = "generation"
+	}
+	if !slices.Contains(route.Operations, operation) {
+		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow "+operation+" operations.", nil), x.family)
+		return
+	}
 	var strictSource []byte
 	fileFirst := false
 	if x.strict() {
 		fields, normalized := form.SourceFields()
-		fileFirst = len(fields) == 2 && fields[0].Name == "file" && fields[0].File != nil && fields[1].Name == "purpose" && fields[1].Text != nil
-		purposeFirst := len(fields) == 2 && fields[0].Name == "purpose" && fields[0].Text != nil && fields[1].Name == "file" && fields[1].File != nil
-		if normalized || !purposeFirst && !fileFirst || len(extra) != 0 || purpose != "batch" ||
-			file.ContentType == "" || strings.ContainsAny(file.Filename, "\"\\\r\n") || r.Header.Get("Idempotency-Key") != "" {
+		fileFirst = len(fields) >= 2 && fields[0].Name == "file" && fields[0].File != nil
+		fileLast := len(fields) >= 2 && fields[len(fields)-1].Name == "file" && fields[len(fields)-1].File != nil
+		if normalized || (!fileFirst && !fileLast) || file.ContentType == "" ||
+			strings.ContainsAny(file.Filename, "\"\\\r\n") || r.Header.Get("Idempotency-Key") != "" {
+			s.stateFail(x, w, invalidRequest("target_capability", "Strict file upload requires one purpose field, one typed file field, and only qualified native options.", nil), x.family)
+			return
+		}
+		purposeThenFile := len(fields) == 2 && fields[0].Name == "purpose" && fields[0].Text != nil && fields[1].Name == "file" && fields[1].File != nil
+		fileThenPurpose := len(fields) == 2 && fields[0].Name == "file" && fields[0].File != nil && fields[1].Name == "purpose" && fields[1].Text != nil
+		if !inference && !purposeThenFile && !fileThenPurpose {
 			s.stateFail(x, w, invalidRequest("target_capability", "Strict batch file upload requires one purpose=batch and one typed file field without unqualified options.", nil), x.family)
 			return
 		}
@@ -754,7 +841,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			Value string        `json:"value,omitempty"`
 			Asset *durableAsset `json:"asset,omitempty"`
 		}
-		ordered := make([]sourceField, 0, 2)
+		ordered := make([]sourceField, 0, len(fields))
 		for _, field := range fields {
 			if field.Text != nil {
 				ordered = append(ordered, sourceField{Name: field.Name, Value: *field.Text})
@@ -770,7 +857,38 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			s.log.Warn("file upload cleanup failed", "error", err)
 		}
 	}()
-	p, e := s.selectPin(r.Context(), x, &route, "batch", "unary")
+	var p *pin
+	if inference {
+		// The purpose and option contract is profile-owned; refuse clearly
+		// when no route target admits this native upload shape at all.
+		admitted := false
+		for _, target := range route.Targets {
+			provider, ok := snapshot.Providers[target.ProviderID]
+			if !ok {
+				continue
+			}
+			if profile, err := provider.Connector().Profile(); err == nil && fileUploadAdmitted(profile, purpose, extra) {
+				admitted = true
+				break
+			}
+		}
+		if !admitted {
+			s.stateFail(x, w, invalidRequest("target_capability", "The model `"+route.Slug+"` has no target admitting this file purpose and its options.", nil), x.family)
+			return
+		}
+		// Inference-file uploads select their serving through the generation
+		// contract so the committed binding is the same identity a later
+		// strict generation plan requires.
+		p, e = s.selectPinSurface(r.Context(), x, &route, "generation", "openai", "unary", func(provider *runtime.Provider, model string) bool {
+			if !stateQualified(provider, model, "generation", "unary") {
+				return false
+			}
+			profile, err := provider.Connector().Profile()
+			return err == nil && fileUploadAdmitted(profile, purpose, extra)
+		})
+	} else {
+		p, e = s.selectPin(r.Context(), x, &route, "batch", "unary")
+	}
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -779,17 +897,26 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	var strictEndpoint string
 	var strictItems int
 	if x.strict() {
-		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
-		if !ok {
-			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
-			return
-		}
-		strictServing = template.Serving()
-		var validationErr error
-		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
-		if validationErr != nil {
-			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
-			return
+		if inference {
+			template, ok := x.snapshot().InteractionTemplate(route.Slug, p.target.ID)
+			if !ok {
+				s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict generation contract for managed files.", nil), x.family)
+				return
+			}
+			strictServing = template.Serving()
+		} else {
+			template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
+			if !ok {
+				s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
+				return
+			}
+			strictServing = template.Serving()
+			var validationErr error
+			strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
+			if validationErr != nil {
+				s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
+				return
+			}
 		}
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), &route)
@@ -856,7 +983,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		version := resources.DurableContractVersion
 		resource.ContractVersion = &version
 		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: strictSource, Result: body, Binding: p.model, Serving: strictServing,
-			Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: strictEndpoint, ItemCount: strictItems}})
+			Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: strictEndpoint, ItemCount: strictItems, Purpose: purpose}})
 		if marshalErr != nil {
 			s.stateFail(x, w, durableError(marshalErr), x.family)
 			return
@@ -869,6 +996,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."), x.family)
 		return
 	}
+
 	var out []byte
 	if x.strict() {
 		out, err = durableProjection(body, res.ID, nil)
@@ -880,6 +1008,21 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeStateJSON(w, x, out)
+}
+
+// fileUploadAdmitted reports whether the provider profile contract admits
+// this managed upload: the native purpose is declared and every extra
+// multipart field is a named native option carried verbatim.
+func fileUploadAdmitted(profile connectors.Profile, purpose string, extra map[string]string) bool {
+	if !slices.Contains(profile.FilePurposes, purpose) {
+		return false
+	}
+	for name := range extra {
+		if !slices.Contains(profile.FileOptions, name) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part, fileFirst bool) (*http.Response, *attemptFailure) {
@@ -925,8 +1068,10 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 			sendDone <- failure(err)
 			return
 		}
-		for name, value := range extra {
-			if err := form.WriteField(name, value); err != nil {
+		// Options replay in a fixed order; multipart field order carries no
+		// meaning but the committed source records the caller's order.
+		for _, name := range slices.Sorted(maps.Keys(extra)) {
+			if err := form.WriteField(name, extra[name]); err != nil {
 				sendDone <- failure(err)
 				return
 			}
@@ -1065,7 +1210,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch") != nil {
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, durableOperation(contract)) != nil {
 				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."), x.family)
 				return
 			}
@@ -1260,11 +1405,12 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, op func(contex
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
 		return
 	}
-	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch"); e != nil {
+	operation := durableOperation(contract)
+	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, operation); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch")
+	p, route, e := s.resolveResource(r.Context(), x, authority, res, operation)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return

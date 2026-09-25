@@ -237,6 +237,22 @@ type Estimate struct {
 	Candidates int64
 }
 
+// AssetRef is one provider-asset position a dialect visited in an effective
+// document, reported in document order. Positions whose grammar can never
+// carry a resolved binding report Refuse so generic orchestration keeps the
+// historical refusal; file-reference members report the caller's reference
+// text (Text/ID) and whether a verified resource binding may occupy the
+// position (Bindable). The dialect owns the grammar positions only — which
+// bindings are real, owned and currently authorized stays with the resource
+// authority.
+type AssetRef struct {
+	Pointer  string // dialect-owned JSON pointer of the reference member
+	ID       string // caller-supplied reference text when Text is set
+	Text     bool   // the referenced member carried a JSON string
+	Bindable bool   // a verified resource binding may occupy this position
+	Refuse   bool   // provider-asset form no resolved binding can qualify
+}
+
 // StateInput carries the caller-binding values a declared-effects contract may
 // rely on. A dialect never reads headers, keys or resources directly.
 // AllowHostedTools is the caller's provider-hosted tool authorization and
@@ -382,16 +398,19 @@ type Dialect struct {
 
 	// Declared effects and limits.
 	//
-	// Assets rejects provider asset references outside authorized positions.
-	// Effects evaluates provider-state and tool declarations in the effective
-	// document, amends the obligation record and reports the provider-hosted
-	// tool families it admitted; downstream guards bound provider emissions
-	// against that admission. InputCoverage, RequestCoverage and ResultCoverage
-	// are the policy inspection contracts — hosted is the same admission — and
-	// a nil coverage hook fails closed. Estimate and Parameters are the
-	// reservation and routing shapes. Admit performs final admission of the
-	// identity-prepared effective document.
-	Assets          func(effective oif.Document) error
+	// Assets surveys dialect-owned provider-asset positions in document order:
+	// unqualified provider references report Refuse, and caller file
+	// references report their positions so the orchestrator's verified
+	// resource bindings may occupy them. A nil hook claims the dialect has no
+	// provider-asset positions. Effects evaluates provider-state and tool
+	// declarations in the effective document, amends the obligation record
+	// and reports the provider-hosted tool families it admitted; downstream
+	// guards bound provider emissions against that admission. InputCoverage,
+	// RequestCoverage and ResultCoverage are the policy inspection contracts —
+	// hosted is the same admission — and a nil coverage hook fails closed.
+	// Estimate and Parameters are the reservation and routing shapes. Admit
+	// performs final admission of the identity-prepared effective document.
+	Assets          func(effective oif.Document) []AssetRef
 	Effects         func(effective oif.Document, in StateInput, obligations *oif.Obligations) (hosted []string, err error)
 	InputCoverage   func(effective oif.Document) error
 	RequestCoverage func(effective oif.Document, hosted []string) error
