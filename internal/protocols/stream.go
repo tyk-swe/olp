@@ -46,20 +46,10 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 	var err error
 	switch wire {
 	case openai.FamilyChat, openai.FamilyResponses:
-		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, true, func(frame []byte) error {
-			if native && wire == openai.FamilyChat && !includeUsage {
-				var f Object
-				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
-				if json.Unmarshal([]byte(payload), &f) == nil {
-					if len(arr(f["choices"])) == 0 && present(f["usage"]) {
-						return nil
-					}
-					delete(f, "usage")
-					frame = eventFrame("", f)
-				}
-			}
-			return upstreamEmit(frame)
-		}, observe)
+		// The codec owns client usage presentation: filtering is field-scoped
+		// inside the chat emitter, and native envelopes reach upstreamEmit
+		// with their admitted framing intact.
+		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, includeUsage, upstreamEmit, observe)
 	case openai.FamilyAnthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case openai.FamilyGemini:

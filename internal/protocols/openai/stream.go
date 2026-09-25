@@ -104,6 +104,7 @@ type chatStream struct {
 }
 
 func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
+	framing := event.Framing()
 	if f.Data == "[DONE]" {
 		if !s.finished[0] {
 			return &ProtocolError{Detail: "[DONE] arrived before the first choice finished", Truncated: true}
@@ -114,7 +115,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 			}
 		}
 		s.done = true
-		if err := s.emit([]byte("data: [DONE]\n\n")); err != nil {
+		if err := s.emit(framedPayload(framing, event.Name(), "[DONE]")); err != nil {
 			return err
 		}
 		return errStreamComplete
@@ -151,22 +152,84 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 		return err
 	}
 	if usage != nil {
+		// Provider accounting observes usage regardless of client negotiation.
 		s.c.Usage = usage
 	}
-	if !s.includeUsage {
-		if usage != nil && len(choices) == 0 {
-			return nil
+	var changes []oif.Change
+	if _, present := fields["model"]; present {
+		bound, err := json.Marshal(s.route)
+		if err != nil {
+			return err
 		}
-		delete(fields, "usage")
+		changes = append(changes, oif.Change{Pointer: "/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published route model"})
 	}
-	if err := rewriteModel(fields, s.route); err != nil {
-		return err
+	if !s.includeUsage {
+		if _, present := fields["usage"]; present {
+			// Usage filtering is field-scoped: only the negotiated usage
+			// contribution is removed. The event survives whenever the
+			// residual payload or the envelope still carries an observation.
+			if len(choices) == 0 && !chatStreamObservation(fields, event) {
+				return nil
+			}
+			changes = append(changes, oif.Change{Pointer: "/usage", Remove: true, Origin: oif.TransportOption, Reason: "client stream did not negotiate usage"})
+		}
 	}
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return err
+	source := event.Source()
+	if len(changes) > 0 {
+		if source, err = oif.Apply(source, changes); err != nil {
+			return err
+		}
 	}
-	return s.emit(append(append([]byte("data: "), encoded...), '\n', '\n'))
+	return s.emit(framedPayload(framing, event.Name(), source.Raw()))
+}
+
+// chatStreamEnvelopeMembers only restate stream identity that every chunk
+// repeats. They carry no per-event observation the client negotiated.
+var chatStreamEnvelopeMembers = map[string]bool{
+	"id": true, "object": true, "created": true, "model": true,
+	"system_fingerprint": true, "service_tier": true, "choices": true,
+}
+
+// chatStreamObservation reports whether an event whose usage contribution was
+// filtered still carries something the client contract observes: any native
+// member outside the repeated chunk envelope, or event id/retry/name framing.
+// Preserved framing is never an authorization for reconnect or resumption.
+func chatStreamObservation(fields map[string]json.RawMessage, event oif.Event) bool {
+	framing := event.Framing()
+	if event.Name() != "" || framing.HasID || framing.HasRetry {
+		return true
+	}
+	for name := range fields {
+		if name != "usage" && !chatStreamEnvelopeMembers[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// framedPayload renders one SSE event from preserved envelope fields and the
+// admitted payload. Presence is meaningful: an empty id resets the client event
+// buffer and a zero retry is a real hint, so HasID/HasRetry gate the lines.
+func framedPayload(framing oif.Framing, name, payload string) []byte {
+	frame := make([]byte, 0, len(payload)+len(name)+len(framing.ID)+48)
+	if framing.HasID {
+		frame = append(frame, "id: "...)
+		frame = append(frame, framing.ID...)
+		frame = append(frame, '\n')
+	}
+	if framing.HasRetry {
+		frame = append(frame, "retry: "...)
+		frame = strconv.AppendUint(frame, framing.RetryMillis, 10)
+		frame = append(frame, '\n')
+	}
+	if name != "" {
+		frame = append(frame, "event: "...)
+		frame = append(frame, name...)
+		frame = append(frame, '\n')
+	}
+	frame = append(frame, "data: "...)
+	frame = append(frame, payload...)
+	return append(frame, '\n', '\n')
 }
 
 func (s *chatStream) choice(raw json.RawMessage) error {
