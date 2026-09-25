@@ -65,14 +65,15 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	if err := checkAssetResources(effective, t.wire); err != nil {
 		return nil, err
 	}
-	if err := checkState(effective, t.wire, context, &receipt.Obligations); err != nil {
+	hosted, err := t.checkState(effective, context, &receipt.Obligations)
+	if err != nil {
 		return nil, err
 	}
 	if t.policy != nil && t.policy.HasOutput() && (request.Stream || receipt.Obligations.Lifetime != "request" || slices.Contains(receipt.Obligations.Effects, "resource_read") || t.wire == openai.FamilyBedrock) {
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
 	}
 	if t.policy != nil && t.policy.HasOutput() {
-		if err := outputRequestCoverage(effective); err != nil {
+		if err := outputRequestCoverage(effective, hosted); err != nil {
 			return nil, err
 		}
 	}
@@ -104,7 +105,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
 	receipt.Dispositions = append(receipt.Dispositions, headerReceipt...)
 	receipt.Dispositions = compactDispositions(receipt.Dispositions)
-	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, route: request.Route, receipt: receipt}, nil
+	return &Plan{template: t, config: config, prepared: prepared, effective: effective, sourceFamily: request.Family, stream: request.Stream, route: request.Route, receipt: receipt, hosted: hosted}, nil
 }
 
 func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {
@@ -277,12 +278,14 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 	return config, receipts, nil
 }
 
-func checkState(document oif.Document, wire openai.Family, context Context, obligations *Obligations) error {
+func (t *Template) checkState(document oif.Document, context Context, obligations *Obligations) ([]string, error) {
+	wire := t.wire
+	fail := func(err error) ([]string, error) { return nil, err }
 	root := document.Root()
 	background, _ := root.Lookup("background")
 	queued := background.Raw() == "true"
 	if queued && (wire != openai.FamilyResponses || member(root, "store").Raw() == "false") {
-		return incompatible("state_carrier", "/background", "durable_lifecycle", "Background Responses require retained native state.")
+		return fail(incompatible("state_carrier", "/background", "durable_lifecycle", "Background Responses require retained native state."))
 	}
 	retained := member(root, "store").Raw() == "true"
 	if wire == openai.FamilyResponses {
@@ -308,15 +311,15 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 			retained = true
 		}
 		if context.RequiredServing == nil {
-			return incompatible("resource_affinity", "/"+name, "resolved_resource_affinity", "Provider resources require resolved historical serving authority.")
+			return fail(incompatible("resource_affinity", "/"+name, "resolved_resource_affinity", "Provider resources require resolved historical serving authority."))
 		}
 	}
 	if (retained || referenced) && !context.AllowProviderState {
-		return incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
+		return fail(incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it."))
 	}
 	if retained || referenced {
 		if wire != openai.FamilyResponses || !context.RetainedResponses || unsupportedReference {
-			return incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
+			return fail(incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract."))
 		}
 		obligations.Lifetime = "durable"
 		obligations.Continuation = "native_response_resource"
@@ -327,86 +330,21 @@ func checkState(document oif.Document, wire openai.Family, context Context, obli
 			obligations.Effects = append(obligations.Effects, "resource_read")
 		}
 	}
-	tools, err := declaredClientTools(root, wire)
+	client, hostedTools, err := classifyRequestTools(root, wire)
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	if tools {
+	if client {
 		obligations.Effects = append(obligations.Effects, "client_tool_call")
 	}
-	return nil
-}
-func declaredClientTools(root oif.Value, wire openai.Family) (bool, error) {
-	client := false
-	reject := func() (bool, error) {
-		return false, incompatible("state_carrier", "/tools", "hosted_tool_effects", "Provider-hosted or unregistered tool effects require a separately qualified lifecycle contract.")
+	hosted, err := t.admitHostedTools(hostedTools, context, obligations)
+	if err != nil {
+		return fail(err)
 	}
-	if tools, present := root.Lookup("tools"); present && tools.Kind() != oif.Null {
-		if tools.Kind() != oif.Array {
-			return reject()
-		}
-		for _, tool := range tools.Elements() {
-			kind := valueText(member(tool, "type"))
-			switch wire {
-			case openai.FamilyChat, openai.FamilyResponses:
-				if kind != "function" {
-					return reject()
-				}
-			case openai.FamilyAnthropic:
-				if kind != "" && kind != "custom" || member(tool, "name").Kind() != oif.String || member(tool, "input_schema").Kind() != oif.Object {
-					return reject()
-				}
-			case openai.FamilyGemini:
-				if !onlyMembers(tool, "functionDeclarations") || member(tool, "functionDeclarations").Kind() != oif.Array {
-					return reject()
-				}
-			default:
-				return reject()
-			}
-			client = true
-		}
+	if err := checkHostedSelectors(root, wire, hosted); err != nil {
+		return fail(err)
 	}
-	if config, present := root.Lookup("toolConfig"); present && config.Kind() != oif.Null {
-		if wire == openai.FamilyBedrock {
-			if tools, present := config.Lookup("tools"); present {
-				if tools.Kind() != oif.Array {
-					return reject()
-				}
-				for _, tool := range tools.Elements() {
-					if !onlyMembers(tool, "toolSpec") || member(tool, "toolSpec").Kind() != oif.Object {
-						return reject()
-					}
-					client = true
-				}
-			}
-		}
-	}
-	var history func(oif.Value) bool
-	history = func(value oif.Value) bool {
-		for _, field := range value.Members() {
-			if slices.Contains([]string{"tool_calls", "function_call", "functionCall", "functionResponse", "toolUse", "toolResult"}, field.Name) {
-				return true
-			}
-			if field.Name == "type" && slices.Contains([]string{"tool_use", "tool_result", "function_call", "function_call_output"}, valueText(field.Value)) {
-				return true
-			}
-			if history(field.Value) {
-				return true
-			}
-		}
-		for _, element := range value.Elements() {
-			if history(element) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, name := range []string{"messages", "contents", "input"} {
-		if history(member(root, name)) {
-			client = true
-		}
-	}
-	return client, nil
+	return hosted, nil
 }
 
 // Only schema-owned names are observable receipt fields. Arbitrary native

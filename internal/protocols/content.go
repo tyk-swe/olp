@@ -105,9 +105,18 @@ func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, 
 	case openai.FamilyResponses:
 		w.field(fields, "output", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
+				var probe struct {
+					Type string `json:"type"`
+				}
+				_ = json.Unmarshal(*item, &probe)
+				if probe.Type == "web_search_call" {
+					// Hosted search observations are declared data: queries,
+					// page URLs and source lists are all inspectable strings.
+					*item = w.stringValues(*item)
+					return
+				}
 				*item = w.object(*item, func(o map[string]json.RawMessage) {
-					itemType, _ := rawString(o["type"])
-					if itemType != "message" {
+					if probe.Type != "message" {
 						return
 					}
 					if c, ok := o["content"]; ok {
@@ -209,6 +218,10 @@ func (w *inspector) textOrParts(raw json.RawMessage) json.RawMessage {
 				if v, ok := p[name]; ok {
 					p[name] = w.text(v)
 				}
+			}
+			// Citation annotations are observable text, not fetch permission.
+			if v, ok := p["annotations"]; ok {
+				p["annotations"] = w.stringValues(v)
 			}
 			if v, ok := p["content"]; ok && w.depth < inspectMaxDepth {
 				w.depth++

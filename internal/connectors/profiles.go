@@ -38,6 +38,7 @@ type Profile struct {
 	Operations        []string                   `json:"operations"`
 	SemanticHeaders   []string                   `json:"semantic_headers"`
 	QuerySettings     []string                   `json:"query_settings"`
+	HostedTools       []string                   `json:"hosted_tools"`
 	Documentation     string                     `json:"documentation"`
 }
 
@@ -48,7 +49,7 @@ var profileMu sync.RWMutex
 
 var profileRegistry = []Profile{
 	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
-	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
+	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai", HostedTools: []string{"web_search"}},
 	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
 	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
 	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
@@ -163,6 +164,7 @@ func cloneProfile(p Profile) Profile {
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
 	p.QuerySettings = slices.Clone(p.QuerySettings)
+	p.HostedTools = slices.Clone(p.HostedTools)
 	return p
 }
 
@@ -525,6 +527,9 @@ func completeProfileMetadata(p *Profile) {
 	if p.OperationDialects == nil {
 		p.OperationDialects = map[string]string{}
 	}
+	if p.HostedTools == nil {
+		p.HostedTools = []string{}
+	}
 	p.DefaultSchemas = map[string]json.RawMessage{}
 	for _, operation := range p.Operations {
 		dialect := p.OperationDialect(operation)
@@ -584,6 +589,11 @@ func RegisterProfile(p Profile) error {
 	for _, query := range p.QuerySettings {
 		if !slices.Contains(template.QuerySettings, query) {
 			return errors.New("profile query setting is incompatible")
+		}
+	}
+	for _, family := range p.HostedTools {
+		if !slices.Contains(template.HostedTools, family) {
+			return errors.New("profile hosted tool is outside the qualified composition")
 		}
 	}
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {

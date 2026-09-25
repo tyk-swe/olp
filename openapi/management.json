@@ -72,6 +72,10 @@
       },
       "ApiKeyDetailResponse": {
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources (stored responses, background\njobs, previous_response_id chains) under this key. Provider state may\nretain user content.",
             "type": "boolean"
@@ -202,6 +206,7 @@
           "scopes",
           "allowed_routes",
           "allow_provider_state",
+          "allow_hosted_tools",
           "budget",
           "etag",
           "created_at",
@@ -1981,6 +1986,10 @@
       },
       "CreateApiKeyRequest": {
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control; defaults to false.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content; defaults to false.",
             "type": "boolean"
@@ -5915,6 +5924,13 @@
           "hosting": {
             "type": "string"
           },
+          "hosted_tools": {
+            "description": "Provider-hosted tool families with a qualified lifecycle contract on this profile composition.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -5971,7 +5987,8 @@
           "semantic_headers",
           "query_settings",
           "operation_dialects",
-          "default_schemas"
+          "default_schemas",
+          "hosted_tools"
         ],
         "type": "object"
       },
@@ -8970,6 +8987,10 @@
       "UpdateApiKeyRequest": {
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
             "type": "boolean"
@@ -10096,7 +10117,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
+            "description": "Effect obligations such as inference, client_tool_call, hosted_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
           },
           "max_continuation_bytes": {
             "type": "integer",

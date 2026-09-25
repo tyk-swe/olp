@@ -435,9 +435,15 @@ func TestNativeExecutionEffectsAreScopedAndImmutable(t *testing.T) {
 	if plan.Obligations().Effects[0] != "inference" {
 		t.Fatal("effect metadata exposes mutable aliases")
 	}
-	hosted := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","tools":[{"type":"web_search"}]}`)
-	_, err := compiled.Bind(hosted, Context{AllowProviderState: true})
-	assertReason(t, err, "state_carrier")
+	// A hosted tool without authorization refuses before dispatch; the retained
+	// default cannot smuggle it past the provider-state gate either.
+	hosted := request(t, openai.FamilyResponses, `{"model":"route","input":"hello","store":false,"tools":[{"type":"web_search"}]}`)
+	_, err := compiled.Bind(hosted, Context{})
+	assertReason(t, err, "policy_conflict")
+	_, err = compiled.Bind(hosted, Context{AllowHostedTools: true})
+	if err != nil {
+		t.Fatalf("admitted hosted web search: %v", err)
+	}
 }
 
 func TestNestedUnknownControlsCannotBypassInputPolicyCoverage(t *testing.T) {

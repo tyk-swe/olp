@@ -34,6 +34,7 @@ type Context struct {
 	Headers             http.Header
 	Query               url.Values
 	AllowProviderState  bool
+	AllowHostedTools    bool
 	RequiredServing     *ServingIdentity
 	ContinuationVersion string
 	DurableContinuation bool
@@ -69,6 +70,10 @@ type Plan struct {
 	stream       bool
 	route        string
 	receipt      Receipt
+	// hosted records the provider-hosted tool families admitted at bind time.
+	// Result, event and policy guards use it to bound what the provider may
+	// emit and what the caller may observe.
+	hosted []string
 }
 
 // Compile snapshots all caller-owned configuration. A template is immutable and

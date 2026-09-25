@@ -15,7 +15,7 @@ func inputFields(wire openai.Family) []string {
 	case openai.FamilyChat:
 		return strings.Fields(common + " messages max_completion_tokens stream_options stop n presence_penalty frequency_penalty logit_bias seed response_format parallel_tool_calls logprobs top_logprobs user service_tier store")
 	case openai.FamilyResponses:
-		return strings.Fields(common + " input instructions max_output_tokens text parallel_tool_calls truncation service_tier store previous_response_id conversation background")
+		return strings.Fields(common + " input instructions max_output_tokens text parallel_tool_calls truncation service_tier store previous_response_id conversation background include")
 	case openai.FamilyAnthropic:
 		return strings.Fields(common + " messages system stop_sequences anthropic_version")
 	case openai.FamilyGemini:
@@ -90,12 +90,18 @@ func inspectableContent(value oif.Value, responseInput bool) error {
 				if hasOpaqueNative(field.Value) {
 					return incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input includes opaque native tool or reasoning state.")
 				}
+			case "status", "action", "sources", "results", "annotations":
+				// Replayed hosted-tool observations are declared data; their
+				// queries, URLs and titles are all inspectable strings.
+				if hasOpaqueNative(field.Value) {
+					return incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input includes opaque native tool or reasoning state.")
+				}
 			default:
 				return incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input policy has no inspection contract for a native message member.")
 			}
 		}
 		kind := valueText(member(value, "type"))
-		if kind != "" && !slices.Contains([]string{"text", "input_text", "output_text", "message", "tool_use", "tool_result", "function_call", "function_call_output", "refusal"}, kind) {
+		if kind != "" && !slices.Contains([]string{"text", "input_text", "output_text", "message", "tool_use", "tool_result", "function_call", "function_call_output", "refusal", "web_search_call"}, kind) {
 			return incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input policy cannot inspect this native content type.")
 		}
 	default:
@@ -206,7 +212,16 @@ func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
 				return false
 			}
 		case openai.FamilyResponses:
-			if !onlyMembers(tool, "type name description parameters strict") || valueText(member(tool, "type")) != "function" {
+			kind := valueText(member(tool, "type"))
+			if hostedRequestTools[kind] == "web_search" {
+				// Hosted tool declarations are inspectable control data; deep
+				// validation happens at admission against the hosted contract.
+				if !onlyMembers(tool, "type filters search_context_size user_location") {
+					return false
+				}
+				continue
+			}
+			if !onlyMembers(tool, "type name description parameters strict") || kind != "function" {
 				return false
 			}
 		case openai.FamilyAnthropic:

@@ -263,6 +263,19 @@
         Permits stored Responses, previous_response_id chains, and lifecycle
         access. Provider state may retain user content at the upstream provider.
       </p>
+      <label
+        ><input
+          type="checkbox"
+          bind:checked={form.allowHostedTools}
+          disabled={!canManage}
+        />
+        Allow provider-hosted tools</label
+      >
+      <p class="section-help">
+        Permits provider-executed built-in tools such as native web search on
+        qualified profiles. Hosted tools perform work outside the caller's
+        control.
+      </p>
     </fieldset>
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>

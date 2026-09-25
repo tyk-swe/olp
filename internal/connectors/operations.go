@@ -42,6 +42,9 @@ func RegisterOperationProfile(p Profile) error {
 	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" || p.Transport != "http" || len(p.Operations) == 0 || len(profileRegistry) >= 4096 {
 		return errors.New("operation profile requires bounded identity and HTTP contracts")
 	}
+	if len(p.HostedTools) > 0 {
+		return errors.New("operation profiles do not carry hosted tool contracts")
+	}
 	var host *Profile
 	for i := range profileRegistry {
 		prior := &profileRegistry[i]

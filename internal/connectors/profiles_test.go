@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -254,6 +255,65 @@ func TestExistingDialectProviderExtensionNeedsOnlyRegistrationAndBinding(t *test
 	if reflect.DeepEqual(copy.OperationDialects, fresh.OperationDialects) {
 		t.Fatal("catalogue metadata aliases registry")
 	}
+}
+
+func TestRegisteredProfilesKeepHostedQualificationScoped(t *testing.T) {
+	// The qualified composition may carry its declared family forward; anything
+	// else declaring a hosted family is refused rather than silently qualified.
+	qualified, err := LookupProfile("openai-responses", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualified.ID = "fixture-" + uuid.NewString()
+	qualified.Label = "Qualified hosted registration"
+	if err := RegisterProfile(qualified); err != nil {
+		t.Fatalf("qualified composition lost its hosted family: %v", err)
+	}
+	registered, err := LookupProfile(qualified.ID, qualified.Revision)
+	if err != nil || !slices.Contains(registered.HostedTools, "web_search") {
+		t.Fatalf("registered profile did not retain hosted qualification: %+v %v", registered, err)
+	}
+	unqualified, err := LookupProfile("compatible-responses", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unqualified.ID = "fixture-" + uuid.NewString()
+	unqualified.Label = "Unqualified hosted claim"
+	unqualified.HostedTools = []string{"web_search"}
+	if err := RegisterProfile(unqualified); err == nil {
+		t.Fatal("an unqualified composition registered a hosted tool family")
+	}
+	if _, err := LookupProfile(unqualified.ID, unqualified.Revision); err == nil {
+		t.Fatal("rejected hosted claim still registered")
+	}
+	// Profiles that declare no hosted families serialize an empty list, never
+	// null, so the published profile contract stays a bounded array.
+	plain, err := LookupProfile("compatible-responses", ProfileRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain.ID = "fixture-" + uuid.NewString()
+	plain.Label = "Plain registration"
+	if err := RegisterProfile(plain); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(mustLookupProfile(t, plain.ID, plain.Revision))
+	if err != nil || !bytes.Contains(encoded, []byte(`"hosted_tools":[]`)) {
+		t.Fatalf("registered profile serialized hosted_tools as non-array: %s %v", encoded, err)
+	}
+	operation := Profile{ID: "fixture-" + uuid.NewString(), Revision: ProfileRevision, Label: "Hosted operation claim", Kind: "openai_compatible", Hosting: "direct-compatible", Authentication: []string{"api_key"}, Transport: "http", Operations: []string{"embeddings"}, OperationDialects: map[string]string{"embeddings": "openai-embeddings"}, HostedTools: []string{"web_search"}}
+	if err := RegisterOperationProfile(operation); err == nil {
+		t.Fatal("an operation profile registered a hosted tool family")
+	}
+}
+
+func mustLookupProfile(t *testing.T, id, revision string) Profile {
+	t.Helper()
+	profile, err := LookupProfile(id, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return profile
 }
 
 func TestProfileInternalReadsRetainRegisteredSnapshot(t *testing.T) {

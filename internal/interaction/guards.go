@@ -43,8 +43,13 @@ func (p *Plan) ValidateResult(result oif.Result) error {
 			return err
 		}
 	}
+	if p.Wire() == openai.FamilyResponses {
+		if err := validateHostedResult(document, p.hosted); err != nil {
+			return err
+		}
+	}
 	if p.template.policy != nil && p.template.policy.HasOutput() {
-		if err := outputPolicyCoverage(p.Wire(), document); err != nil {
+		if err := outputPolicyCoverage(p.Wire(), document, p.hosted); err != nil {
 			return err
 		}
 	}
@@ -165,6 +170,9 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 		if valueText(member(root, "type")) == "" {
 			return guardFailure("/events/type", "event_identity")
 		}
+		if err := validateHostedEvent(root, p.hosted); err != nil {
+			return err
+		}
 	case openai.FamilyGemini:
 		if candidates, present := root.Lookup("candidates"); present && candidates.Kind() != oif.Array {
 			return guardFailure("/events/candidates", "candidate_grammar")
@@ -173,7 +181,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	return nil
 }
 
-func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
+func outputPolicyCoverage(wire openai.Family, document oif.Document, hosted []string) error {
 	fail := func() error {
 		return incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")
 	}
@@ -199,6 +207,14 @@ func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
 			return fail()
 		}
 		for _, item := range member(root, "output").Elements() {
+			switch valueText(member(item, "type")) {
+			case "web_search_call":
+				// Admitted hosted search output is inspectable declared data.
+				if !slices.Contains(hosted, "web_search") || !onlyMembers(item, "id type status action") {
+					return fail()
+				}
+				continue
+			}
 			if !onlyMembers(item, "id type status role content") || valueText(member(item, "type")) != "message" {
 				return fail()
 			}
@@ -242,23 +258,51 @@ func outputPolicyCoverage(wire openai.Family, document oif.Document) error {
 			return fail()
 		}
 		for _, part := range content.Elements() {
-			if !onlyMembers(part, "type text refusal annotations logprobs") || !emptyOptional(member(part, "annotations")) || !emptyOptional(member(part, "logprobs")) || !slices.Contains([]string{"text", "output_text", "refusal"}, valueText(member(part, "type"))) {
+			if !onlyMembers(part, "type text refusal annotations logprobs") || !emptyOptional(member(part, "logprobs")) || !slices.Contains([]string{"text", "output_text", "refusal"}, valueText(member(part, "type"))) {
 				return fail()
+			}
+			annotations := member(part, "annotations")
+			if annotations.Kind() == oif.Absent || annotations.Kind() == oif.Null || annotations.Kind() == oif.Array && len(annotations.Elements()) == 0 {
+				continue
+			}
+			if annotations.Kind() != oif.Array || !slices.Contains(hosted, "web_search") {
+				return fail()
+			}
+			for _, annotation := range annotations.Elements() {
+				if !inspectableURLCitation(annotation) {
+					return fail()
+				}
 			}
 		}
 	}
 	return nil
 }
 
+// inspectableURLCitation bounds a web citation to its observable members; every
+// value is plain text the output policy can read.
+func inspectableURLCitation(annotation oif.Value) bool {
+	return onlyMembers(annotation, "type url title start_index end_index") &&
+		valueText(member(annotation, "type")) == "url_citation" &&
+		member(annotation, "url").Kind() == oif.String &&
+		member(annotation, "title").Kind() == oif.String &&
+		nonnegativeInteger(member(annotation, "start_index")) &&
+		nonnegativeInteger(member(annotation, "end_index"))
+}
+
 func emptyOptional(value oif.Value) bool {
 	return value.Kind() == oif.Absent || value.Kind() == oif.Null || value.Kind() == oif.Array && len(value.Elements()) == 0
 }
 
-func outputRequestCoverage(document oif.Document) error {
+func outputRequestCoverage(document oif.Document, hosted []string) error {
 	for _, path := range []string{"/tools", "/toolConfig", "/reasoning", "/reasoning_effort", "/thinking", "/generationConfig/thinkingConfig"} {
-		if value, present := document.Lookup(path); present && !emptyOptional(value) {
-			return incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
+		value, present := document.Lookup(path)
+		if !present || emptyOptional(value) {
+			continue
 		}
+		if path == "/tools" && toolsAllHostedSearch(value, hosted) {
+			continue
+		}
+		return incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
 	}
 	for _, path := range []string{"/logprobs", "/top_logprobs", "/generationConfig/responseLogprobs", "/generationConfig/logprobs"} {
 		if value, present := document.Lookup(path); present && value.Kind() != oif.Null && value.Raw() != "false" && value.Raw() != "0" {
@@ -266,4 +310,19 @@ func outputRequestCoverage(document oif.Document) error {
 		}
 	}
 	return nil
+}
+
+// toolsAllHostedSearch reports whether every declared tool is admitted hosted
+// web search — the only tool-declared output the output policy can inspect in
+// this slice. Client tool calls remain uninspectable actionable bytes.
+func toolsAllHostedSearch(tools oif.Value, hosted []string) bool {
+	if tools.Kind() != oif.Array || len(tools.Elements()) == 0 || !slices.Contains(hosted, "web_search") {
+		return false
+	}
+	for _, tool := range tools.Elements() {
+		if hostedRequestTools[valueText(member(tool, "type"))] != "web_search" {
+			return false
+		}
+	}
+	return true
 }

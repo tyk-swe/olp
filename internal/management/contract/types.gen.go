@@ -1211,6 +1211,11 @@ type ApiKeyBudgetWindowResponse struct {
 
 // ApiKeyDetailResponse defines model for ApiKeyDetailResponse.
 type ApiKeyDetailResponse struct {
+	// AllowHostedTools Permits provider-hosted tool effects (provider-executed search or similar
+	// built-in tools) under this key. Hosted tools perform work outside the
+	// caller's control.
+	AllowHostedTools bool `json:"allow_hosted_tools"`
+
 	// AllowProviderState Permits stateful provider resources (stored responses, background
 	// jobs, previous_response_id chains) under this key. Provider state may
 	// retain user content.
@@ -1772,6 +1777,11 @@ type ContentPolicyRulePhase string
 
 // CreateApiKeyRequest defines model for CreateApiKeyRequest.
 type CreateApiKeyRequest struct {
+	// AllowHostedTools Permits provider-hosted tool effects (provider-executed search or similar
+	// built-in tools) under this key. Hosted tools perform work outside the
+	// caller's control; defaults to false.
+	AllowHostedTools *bool `json:"allow_hosted_tools,omitempty"`
+
 	// AllowProviderState Permits stateful provider resources under this key. Provider state
 	// may retain user content; defaults to false.
 	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
@@ -2199,7 +2209,7 @@ type InteractionObligations struct {
 	Continuation  string  `json:"continuation"`
 	Delivery      string  `json:"delivery"`
 
-	// Effects Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection.
+	// Effects Effect obligations such as inference, client_tool_call, hosted_tool_call, resource_read and resource_mutation; no effect is executed by inspection.
 	Effects      []string `json:"effects"`
 	GuardResults bool     `json:"guard_results"`
 	Lifetime     string   `json:"lifetime"`
@@ -3086,10 +3096,13 @@ type ProviderProfile struct {
 	Dialect         string                            `json:"dialect"`
 	DialectRevision string                            `json:"dialect_revision"`
 	Documentation   string                            `json:"documentation"`
-	Hosting         string                            `json:"hosting"`
-	Id              string                            `json:"id"`
-	Kind            string                            `json:"kind"`
-	Label           string                            `json:"label"`
+
+	// HostedTools Provider-hosted tool families with a qualified lifecycle contract on this profile composition.
+	HostedTools []string `json:"hosted_tools"`
+	Hosting     string   `json:"hosting"`
+	Id          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Label       string   `json:"label"`
 
 	// OperationDialects Dialect identity for each supported operation.
 	OperationDialects map[string]string `json:"operation_dialects"`
@@ -3979,6 +3992,11 @@ type TransportMode string
 // would silently widen a key's privileges — a rename would drop the route
 // allowlist, the rate limits, and the expiry.
 type UpdateApiKeyRequest struct {
+	// AllowHostedTools Permits provider-hosted tool effects (provider-executed search or similar
+	// built-in tools) under this key. Hosted tools perform work outside the
+	// caller's control.
+	AllowHostedTools *bool `json:"allow_hosted_tools,omitempty"`
+
 	// AllowProviderState Permits stateful provider resources under this key. Provider state
 	// may retain user content.
 	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
