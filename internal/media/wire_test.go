@@ -1,6 +1,7 @@
 package media
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -77,6 +78,75 @@ func TestDecodeVideoCreateValidation(t *testing.T) {
 		t.Fatal(failure)
 	} else if r.Extra["vendor_flag"] != "x" {
 		t.Fatalf("extension dropped: %+v", r.Extra)
+	}
+}
+
+func TestDecodeMediaRejectsOutOfRangeCountAndTemperature(t *testing.T) {
+	if _, failure := DecodeImageGeneration([]byte(`{"model":"image-model","prompt":"x","n":-1}`)); failure == nil {
+		t.Fatal("negative image generation count accepted")
+	}
+	spool := testSpool(t, MinCapacityBytes)
+	state := NewAdmissionState(MinCapacityBytes)
+	parse := func(fields map[string]string, files map[string][]byte, decode func(*Form) (*Request, *Error)) *Error {
+		contentType, body := buildMultipartTyped(t, fields, files, "image/png")
+		r := httptest.NewRequest("POST", "/v1/media", body)
+		r.Header.Set("Content-Type", contentType)
+		form, err := ParseMultipart(t.Context(), r, spool, parseAdmission(t, state, 1<<20), 1<<20, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer form.Cleanup()
+		_, failure := decode(form)
+		return failure
+	}
+	image := map[string][]byte{"image": []byte("png")}
+	for name, test := range map[string]struct {
+		fields map[string]string
+		decode func(*Form) (*Request, *Error)
+	}{
+		"edit":      {map[string]string{"model": "image-model", "prompt": "x"}, DecodeImageEdit},
+		"variation": {map[string]string{"model": "image-model"}, DecodeImageVariation},
+	} {
+		for _, n := range []string{"1", "-1"} {
+			test.fields["n"] = n
+			if failure := parse(test.fields, image, test.decode); (failure == nil) != (n == "1") {
+				t.Fatalf("image %s n=%s: %v", name, n, failure)
+			}
+		}
+	}
+	audio := map[string][]byte{"file": []byte("audio")}
+	for _, temperature := range []string{"0.5", "NaN", "-0.1", "1.5"} {
+		failure := parse(map[string]string{"model": "audio-model", "temperature": temperature}, audio, DecodeTranscription)
+		if (failure == nil) != (temperature == "0.5") {
+			t.Fatalf("transcription temperature=%s: %v", temperature, failure)
+		}
+	}
+}
+
+func TestLegacyJSONEncodingKeepsExtensionNumberSpelling(t *testing.T) {
+	extension := `{"big":12345678901234567890,"huge":1e400,"minus_zero":-0,"nested":[1.50,99999999999999999999],"trailing":1.10}`
+	for _, test := range []struct {
+		body   string
+		decode func([]byte) (*Request, *Error)
+	}{
+		{`{"model":"images","prompt":"p","seed":12345678901234567890,"vendor":` + extension + `}`, DecodeImageGeneration},
+		{`{"model":"voice","input":"hello","voice":"alloy","seed":12345678901234567890,"vendor":` + extension + `}`, DecodeSpeech},
+	} {
+		r, failure := test.decode([]byte(test.body))
+		if failure != nil {
+			t.Fatal(failure)
+		}
+		call, failure := Encode(r, "openai", "upstream-model")
+		if failure != nil {
+			t.Fatal(failure)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(call.JSON, &body); err != nil {
+			t.Fatal(err)
+		}
+		if string(body["seed"]) != "12345678901234567890" || string(body["vendor"]) != extension {
+			t.Fatalf("legacy extension numbers changed: %s", call.JSON)
+		}
 	}
 }
 

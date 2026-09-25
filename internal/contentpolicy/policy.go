@@ -37,6 +37,23 @@ type Rule struct {
 	Pattern     string `json:"pattern"`
 	Action      string `json:"action"`
 	Replacement string `json:"replacement,omitempty"`
+	// emptyReplacement marks an explicit empty redact replacement accepted by
+	// Decode, which would otherwise re-read the omitted member as the default.
+	emptyReplacement bool
+}
+
+// MarshalJSON keeps a decoded explicit empty replacement. Every other rule,
+// including one read from a published snapshot, keeps its historical bytes so
+// snapshot digests are unchanged.
+func (r Rule) MarshalJSON() ([]byte, error) {
+	type plain Rule
+	if !r.emptyReplacement {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Replacement string `json:"replacement"`
+	}{plain(r), r.Replacement})
 }
 
 type Policy struct {
@@ -124,7 +141,7 @@ func validateRules(wire []ruleWire) (*Policy, error) {
 				if !utf8.ValidString(*w.Replacement) || utf8.RuneCountInString(*w.Replacement) > MaxReplacementChars {
 					return nil, fmt.Errorf("content_policy rule %q replacement must be at most %d UTF-8 characters", *w.ID, MaxReplacementChars)
 				}
-				rule.Replacement = *w.Replacement
+				rule.Replacement, rule.emptyReplacement = *w.Replacement, *w.Replacement == ""
 			}
 		}
 		rules = append(rules, rule)

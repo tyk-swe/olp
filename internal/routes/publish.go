@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -85,14 +84,8 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
-	if len(current.ContentPolicy) > 0 {
-		var policy contentpolicy.Policy
-		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
-			return access.Reply{}, err
-		}
-		if _, err = contentpolicy.Compile(&policy); err != nil {
-			return access.Reply{}, access.Invalid("content_policy", err.Error())
-		}
+	if err = requireStatedFidelity(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
 	}
 	etag := access.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
@@ -144,13 +137,13 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err = check(current, live); err != nil {
 		return access.Reply{}, err
 	}
-	if err = requireFidelityExecution(current.Fidelity); err != nil {
-		return access.Reply{}, err
-	}
 	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
 		return access.Reply{}, err
 	}
 	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
+	if err = requireStatedFidelity(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	for i := range current.Targets {
@@ -627,7 +620,19 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = ValidateFidelityMigration(r.Context(), tx, v.Slug, v.Fidelity); err != nil {
+	// Storage refuses a revision that omits a published explicit contract, so
+	// restore a historical omission as the explicit legacy mode it meant.
+	fidelity := json.RawMessage(v.Fidelity)
+	if len(fidelity) == 0 {
+		published, err := PublishedFidelity(r.Context(), tx, v.Slug, project)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if len(published) > 0 {
+			fidelity = json.RawMessage(`{"mode":"legacy"}`)
+		}
+	}
+	if err = ValidateFidelityMigration(r.Context(), tx, v.Slug, fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	draftID, etag := access.NewID(), access.NewID()
@@ -637,7 +642,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		targets[i].ID = access.NewID()
 	}
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, v.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if v.Policy != nil {

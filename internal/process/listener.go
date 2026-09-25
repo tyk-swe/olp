@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +14,9 @@ import (
 // the standard library send HTTP/2 GOAWAY at the connection's maximum age while
 // already admitted streams drain; closing a raw socket would truncate them.
 // The admission cap bounds both connections and their serving goroutines.
+// A hijacked connection (a WebSocket upgrade) leaves both the cap and the
+// drain: its handler owns the socket, the inference admission pool bounds it,
+// and cancelling the request context at shutdown ends it.
 type listenerServer struct {
 	handler     http.Handler
 	limit       int
@@ -34,6 +38,7 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 	s.socket = socket
 	s.connections = make(map[*http.Server]struct{})
 	s.mu.Unlock()
+	var backoff time.Duration
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -43,8 +48,16 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 			if closed {
 				return http.ErrServerClosed
 			}
+			// Like http.Server, back off on temporary failures such as
+			// descriptor exhaustion instead of stopping the process.
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
+				time.Sleep(backoff)
+				continue
+			}
 			return err
 		}
+		backoff = 0
 		s.mu.Lock()
 		if s.closed || len(s.connections) >= s.limit {
 			s.mu.Unlock()
@@ -52,6 +65,7 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 			continue
 		}
 		one := &singleConnection{conn: conn, done: make(chan struct{})}
+		var hijacked atomic.Bool
 		protocols := new(http.Protocols)
 		protocols.SetHTTP1(true)
 		protocols.SetUnencryptedHTTP2(true)
@@ -60,6 +74,9 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 			ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 32 * 1024,
 			BaseContext: func(net.Listener) context.Context { return s.requests },
 			ConnState: func(_ net.Conn, state http.ConnState) {
+				if state == http.StateHijacked {
+					hijacked.Store(true)
+				}
 				if state == http.StateClosed || state == http.StateHijacked {
 					one.Close()
 				}
@@ -68,7 +85,11 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 		s.connections[server] = struct{}{}
 		s.mu.Unlock()
 		go func() {
-			defer conn.Close()
+			defer func() {
+				if !hijacked.Load() {
+					conn.Close()
+				}
+			}()
 			timer := time.AfterFunc(s.age, func() {
 				ctx, cancel := context.WithTimeout(context.Background(), s.drain)
 				defer cancel()

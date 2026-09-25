@@ -108,13 +108,23 @@ func Compile(config Config) (*Template, error) {
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}
+	// Alternative input collections, such as Cohere texts, images or inputs,
+	// are operation input rather than routing parameters.
 	var schema struct {
 		Required []string `json:"required"`
+		AnyOf    []struct {
+			Required []string `json:"required"`
+		} `json:"anyOf"`
 	}
 	_ = json.Unmarshal(codec.RequestSchema, &schema)
 	inputs := map[string]bool{"model": true}
 	for _, name := range schema.Required {
 		inputs[name] = true
+	}
+	for _, alternative := range schema.AnyOf {
+		for _, name := range alternative.Required {
+			inputs[name] = true
+		}
 	}
 	return &Template{config: config, profile: p, codec: codec, defaults: defaults, origins: origins, policy: policy, serving: serving, inputs: inputs}, nil
 }

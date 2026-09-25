@@ -64,8 +64,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
       "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byRegexp", "options": "/.* latency/" }, "properties": [{ "id": "unit", "value": "s" }] }, { "matcher": { "id": "byRegexp", "options": "/.* success/" }, "properties": [{ "id": "unit", "value": "percentunit" }] }] },
       "targets": [
-        { "refId": "A", "expr": "max by (provider_name) (olp_provider_success_ratio_15m{namespace=~\"$namespace\"})", "legendFormat": "{{provider_name}} success" },
-        { "refId": "B", "expr": "max by (provider_name) (olp_provider_latency_seconds_15m{namespace=~\"$namespace\"})", "legendFormat": "{{provider_name}} latency" }
+        { "refId": "A", "expr": "max by (provider_id) (olp_provider_success_ratio_15m{namespace=~\"$namespace\"}) * on (provider_id) group_left (provider_name) topk by (provider_id) (1, max by (provider_id, provider_name) (olp_provider_health{namespace=~\"$namespace\"}))", "legendFormat": "{{provider_name}} success" },
+        { "refId": "B", "expr": "max by (provider_id) (olp_provider_latency_seconds_15m{namespace=~\"$namespace\"}) * on (provider_id) group_left (provider_name) topk by (provider_id) (1, max by (provider_id, provider_name) (olp_provider_health{namespace=~\"$namespace\"}))", "legendFormat": "{{provider_name}} latency" }
       ]
     },
     {
@@ -123,18 +123,13 @@
     },
     {
       "type": "timeseries",
-      "title": "Worker recovery and runtime outbox",
+      "title": "Worker recovery",
       "id": 14,
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
-      "fieldConfig": { "defaults": {}, "overrides": [{ "matcher": { "id": "byRegexp", "options": "/.* age \\\\(s\\\\)/" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "custom.axisPlacement", "value": "right" }] }] },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
       "targets": [
-        { "refId": "A", "expr": "max(olp_runtime_outbox_pending_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox pending" },
-        { "refId": "B", "expr": "max(olp_runtime_outbox_claimed_rows{namespace=~\"$namespace\"})", "legendFormat": "outbox claimed" },
-        { "refId": "C", "expr": "max(olp_runtime_outbox_oldest_pending_age_seconds{namespace=~\"$namespace\"})", "legendFormat": "oldest pending age (s)" },
-        { "refId": "D", "expr": "max(rate(olp_request_metadata_events_reclaimed_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata reclaimed/s" },
-        { "refId": "E", "expr": "max(rate(olp_request_metadata_persistence_duplicates_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata duplicates/s" },
-        { "refId": "F", "expr": "max(rate(olp_runtime_outbox_publication_retries_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "outbox retries/s" },
-        { "refId": "G", "expr": "max(rate(olp_runtime_outbox_failed_takeovers_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "failed takeovers/s" }
+        { "refId": "A", "expr": "max(rate(olp_request_metadata_events_reclaimed_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata reclaimed/s" },
+        { "refId": "B", "expr": "max(rate(olp_request_metadata_persistence_duplicates_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata duplicates/s" }
       ]
     }
   ],

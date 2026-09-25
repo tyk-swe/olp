@@ -1,5 +1,6 @@
 <script lang="ts">
   import { stringifyNativeJSON } from '$lib/json/nativeJson';
+  import { downloadBlob } from '$lib/download';
   import {
     nativeCountFields,
     rerankRows,
@@ -38,17 +39,10 @@
   const realtime = $derived(operation === 'realtime');
 
   function download() {
-    const url = URL.createObjectURL(
-      new Blob([raw], { type: 'application/json' })
+    downloadBlob(
+      new Blob([raw], { type: 'application/json' }),
+      `${operation}-native-result.json`
     );
-    try {
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${operation}-native-result.json`;
-      anchor.click();
-    } finally {
-      URL.revokeObjectURL(url);
-    }
   }
 </script>
 

@@ -123,7 +123,7 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if userID == "" {
 		userID = p.ID
 	}
-	if userID != p.ID && p.Role != "owner" {
+	if userID != p.ID && (p.Role != "owner" || !p.AllProjects) {
 		return Reply{}, Forbidden()
 	}
 	if _, err := ParseUUID(userID); err != nil {
@@ -167,7 +167,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp_go.sessions WHERE id=$1", id).Scan(&userID); err != nil {
 		return Reply{}, err
 	}
-	if userID != p.ID && p.Role != "owner" {
+	if userID != p.ID && (p.Role != "owner" || !p.AllProjects) {
 		return Reply{}, Forbidden()
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE id=$1", id); err != nil {

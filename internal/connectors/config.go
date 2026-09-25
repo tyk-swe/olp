@@ -230,19 +230,8 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
 	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
-		if model != c.Deployment && !c.hasDeployment(model) {
-			var metadata struct {
-				Deployment string `json:"deployment"`
-			}
-			for _, v := range c.Models {
-				_ = json.Unmarshal(v, &metadata)
-				if metadata.Deployment == model {
-					break
-				}
-			}
-			if metadata.Deployment != model {
-				return "", errors.New("model has no configured Azure deployment")
-			}
+		if !c.configuredDeployment(model) {
+			return "", errors.New("model has no configured Azure deployment")
 		}
 		base += "/openai/deployments/" + url.PathEscape(model)
 		path += "?api-version=" + url.QueryEscape(c.APIVersion)
@@ -262,22 +251,8 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	base := c.profileBase()
 	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
 		deployment := c.Model(model)
-		if deployment != c.Deployment && !c.hasDeployment(deployment) {
-			var metadata struct {
-				Deployment string `json:"deployment"`
-			}
-			found := false
-			for _, v := range c.Models {
-				metadata.Deployment = ""
-				_ = json.Unmarshal(v, &metadata)
-				if metadata.Deployment == deployment {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return "", errors.New("model has no configured Azure deployment")
-			}
+		if !c.configuredDeployment(deployment) {
+			return "", errors.New("model has no configured Azure deployment")
 		}
 		base += "/openai/deployments/" + url.PathEscape(deployment)
 	}
@@ -295,9 +270,23 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	return u, nil
 }
 
-func (c Config) hasDeployment(model string) bool {
+// configuredDeployment reports whether an Azure deployment is the connection
+// deployment, a binding deployment, or a deployment declared in model metadata.
+func (c Config) configuredDeployment(deployment string) bool {
+	if deployment == c.Deployment {
+		return true
+	}
 	for _, binding := range c.Bindings {
-		if binding.Deployment == model {
+		if binding.Deployment == deployment {
+			return true
+		}
+	}
+	for _, v := range c.Models {
+		var metadata struct {
+			Deployment string `json:"deployment"`
+		}
+		_ = json.Unmarshal(v, &metadata)
+		if metadata.Deployment == deployment {
 			return true
 		}
 	}

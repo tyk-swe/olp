@@ -11,38 +11,6 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-// Span attribute allowlists. Every recorded attribute is metadata: no prompts,
-// no file names, no provider payloads, and no header values ever appear on a
-// span.
-var RequestAttributeKeys = []string{
-	"olp.request_id",
-	"olp.surface",
-	"olp.operation",
-	"olp.route_slug",
-	"olp.key_id",
-	"olp.installation_id",
-	"olp.generation",
-	"olp.status",
-	"olp.error_class",
-	"olp.attempt_count",
-	"olp.time_to_first_byte_ms",
-	"olp.total_duration_ms",
-	"olp.cancelled",
-}
-
-var AttemptAttributeKeys = []string{
-	"olp.provider_kind",
-	"olp.provider_revision",
-	"olp.model",
-	"olp.outcome_class",
-	"olp.upstream_status_class",
-	"olp.usage.input_tokens",
-	"olp.usage.output_tokens",
-	"olp.usage.cached_input_tokens",
-	"olp.usage.media_units",
-	"olp.pricing_provenance",
-}
-
 // ErrorClassClientCancelled is the error class a span records when the client
 // went away before the response finished.
 const ErrorClassClientCancelled = "client_cancelled"
@@ -70,20 +38,9 @@ func (t *RequestTrace) withContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, contextKey{}, t)
 }
 
-// AttemptsOnly keeps propagation and attempt spans but stops request-level
-// recording, for call sites that own the request span themselves.
-func (t *RequestTrace) AttemptsOnly() *RequestTrace {
-	return &RequestTrace{span: t.span, propagateUpstream: t.propagateUpstream}
-}
-
 // PropagateUpstream reports whether attempt spans inject their context into
 // provider requests.
 func (t *RequestTrace) PropagateUpstream() bool { return t != nil && t.propagateUpstream }
-
-// Context returns a context carrying the request span, for attempt parenting.
-func (t *RequestTrace) Context(ctx context.Context) context.Context {
-	return trace.ContextWithSpan(ctx, t.span)
-}
 
 // RecordInferenceContext records the identity settled by authentication and
 // route resolution.
@@ -167,12 +124,6 @@ func (t *RequestTrace) Attempt(ctx context.Context, providerKind, providerRevisi
 }
 
 func noopTracer() trace.Tracer { return noop.NewTracerProvider().Tracer("openllmproxy") }
-
-// Context returns the context carrying the attempt span.
-func (a *AttemptTrace) Context() context.Context { return a.ctx }
-
-// SpanContext returns the attempt span's context for header injection.
-func (a *AttemptTrace) SpanContext() trace.SpanContext { return a.span.SpanContext() }
 
 // RecordUsage records the accounting counters the attempt observed.
 func (a *AttemptTrace) RecordUsage(inputTokens, outputTokens, cachedInputTokens *int64, mediaUnits *string) {

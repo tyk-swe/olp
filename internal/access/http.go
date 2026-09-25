@@ -511,8 +511,14 @@ func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, pro
 		}
 		return Forbidden()
 	}
+	// Callers compare and persist the identifier after this check.
+	parsed, err := uuid.Parse(*projectID)
+	if err != nil {
+		return Invalid("project_id", "Use a valid project UUID.")
+	}
+	*projectID = parsed.String()
 	var exists bool
-	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
+	if err = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {

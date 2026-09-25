@@ -398,7 +398,7 @@ func (c Config) AzureScope() string {
 	if c.Hosting() == "azure-v1" {
 		return "https://ai.azure.com/.default"
 	}
-	return "https://cognitiveservices.azure.com/.default"
+	return azureScope
 }
 
 func (c Config) profileBase() string {

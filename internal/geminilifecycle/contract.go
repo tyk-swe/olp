@@ -113,10 +113,6 @@ func (r InteractionResponse) WithID(id string) ([]byte, error) {
 	return r.WithProjection(id, "", "")
 }
 
-func (r InteractionResponse) WithIDs(id, previous string) ([]byte, error) {
-	return r.WithProjection(id, previous, "")
-}
-
 func (r InteractionResponse) WithProjection(id, previous, route string) ([]byte, error) {
 	changes := []oif.Change{{Pointer: "/id", Value: quoted(id), Origin: oif.ResourceBinding, Reason: "owner-scoped Gemini interaction"}}
 	if route != "" {

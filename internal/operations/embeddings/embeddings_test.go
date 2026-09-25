@@ -4,6 +4,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,26 @@ func TestSparseDimensionUnknownAndMultivectorRankRetained(t *testing.T) {
 	vectors := view.(embeddings.Result).Vectors()
 	if vectors[0].TokenVectors != 2 || vectors[1].TokenVectors != 1 || vectors[0].Format.LogicalDimensions != 2 {
 		t.Fatal("token-vector layout flattened")
+	}
+}
+func TestTokenInputEstimateReservesEveryTokenID(t *testing.T) {
+	ids := strings.TrimSuffix(strings.Repeat("7,", 4096), ",")
+	for _, test := range []struct {
+		dialect, body string
+		tokens        int64
+	}{
+		{"openai-embeddings", `{"model":"m","input":[` + ids + `]}`, 4096},
+		{"openai-embeddings", `{"model":"m","input":[[` + ids + `],[` + ids + `]]}`, 8192},
+		{"openai-embeddings", `{"model":"m","input":["abcd",[` + ids + `]]}`, 4097},
+		{"tei-embeddings", `{"inputs":[[` + ids + `]]}`, 4096},
+	} {
+		d := codec(t, test.dialect)
+		view, err := d.Request(request(t, d, test.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := d.Estimate(view); got < test.tokens {
+			t.Errorf("%s reserved %d tokens for %d token IDs", test.dialect, got, test.tokens)
+		}
 	}
 }

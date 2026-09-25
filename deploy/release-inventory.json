@@ -4,7 +4,7 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "b05a7677d047d3b20d55bbf8c62ca5a1046f4ac5669e918889a7ea5755bf9c45",
+    "sha256": "38325944811b62e57ebb1379f43525ed74b035ea8fea54e36e15f870febcd215",
     "operations": 150
   },
   "behaviorMapping": {
@@ -6371,6 +6371,8 @@
     "internal/media/upstream_test.go",
     "internal/media/wire_test.go",
     "internal/observability/handler_test.go",
+    "internal/observability/metrics_test.go",
+    "internal/observability/public_test.go",
     "internal/oif/registry_test.go",
     "internal/oif/source_test.go",
     "internal/operationplan/plan_test.go",
@@ -6382,6 +6384,7 @@
     "internal/process/listener_test.go",
     "internal/process/listeners_test.go",
     "internal/process/maintenance_test.go",
+    "internal/process/run_test.go",
     "internal/process/secrets_test.go",
     "internal/protocols/bedrock_test.go",
     "internal/protocols/cache_usage_test.go",
@@ -6538,6 +6541,7 @@
     "tests/integration/provider_profiles_cloud_test.go",
     "tests/integration/provider_profiles_network_test.go",
     "tests/integration/provider_regressions_test.go",
+    "tests/integration/provider_resource_listing_test.go",
     "tests/integration/provider_resources_test.go",
     "tests/integration/provider_state_test.go",
     "tests/integration/provider_validation_test.go",

@@ -50,6 +50,40 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 		} else {
 			w.geminiFields(fields)
 		}
+	case openai.FamilyBedrock:
+		w.bedrockFields(fields)
+	case "bedrock_count":
+		w.field(fields, "input", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, func(input map[string]json.RawMessage) {
+				w.field(input, "converse", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, w.bedrockFields)
+				})
+			})
+		})
+	case openai.FamilyGeminiEmbeddings:
+		w.field(fields, "content", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, w.geminiParts)
+		})
+	case openai.FamilyGeminiEmbeddingsBatch:
+		w.field(fields, "requests", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(request map[string]json.RawMessage) {
+					w.field(request, "content", func(raw json.RawMessage) json.RawMessage {
+						return w.object(raw, w.geminiParts)
+					})
+				})
+			})
+		})
+	case openai.FamilyVertexEmbeddings:
+		w.field(fields, "instances", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(instance map[string]json.RawMessage) {
+					w.field(instance, "content", w.text)
+				})
+			})
+		})
+	case openai.FamilyBedrockEmbeddings:
+		w.field(fields, "inputText", w.text)
 	}
 	// Configured tool/schema text is part of the effective invocation too. Arrays
 	// remain ordered and atomic; the explicit mutation policy controls text values.
@@ -259,6 +293,35 @@ func (w *inspector) geminiParts(obj map[string]json.RawMessage) {
 				if v, ok := p["text"]; ok {
 					p["text"] = w.text(v)
 				}
+			})
+		})
+	})
+}
+
+// Converse text is an untyped member of each content block; tool results nest
+// their own content blocks.
+func (w *inspector) bedrockFields(fields map[string]json.RawMessage) {
+	w.field(fields, "system", w.bedrockBlocks)
+	w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
+		return w.messageList(raw, func(m map[string]json.RawMessage, w *inspector) {
+			w.field(m, "content", w.bedrockBlocks)
+		})
+	})
+}
+
+func (w *inspector) bedrockBlocks(raw json.RawMessage) json.RawMessage {
+	return w.list(raw, func(block *json.RawMessage) {
+		*block = w.object(*block, func(b map[string]json.RawMessage) {
+			w.field(b, "text", w.text)
+			if w.depth >= inspectMaxDepth {
+				return
+			}
+			w.depth++
+			defer func() { w.depth-- }()
+			w.field(b, "toolResult", func(raw json.RawMessage) json.RawMessage {
+				return w.object(raw, func(result map[string]json.RawMessage) {
+					w.field(result, "content", w.bedrockBlocks)
+				})
 			})
 		})
 	})

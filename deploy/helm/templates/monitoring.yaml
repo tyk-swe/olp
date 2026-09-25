@@ -139,20 +139,6 @@ spec:
           annotations:
             summary: OpenLLMProxy asynchronous worker observability is unavailable
             description: A gateway or control target cannot read the durable worker summaries that feed asynchronous-plane alerts.
-        - alert: OLPRuntimeOutboxBacklogHigh
-          expr: max(olp_runtime_outbox_pending_rows{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) > {{ .Values.monitoring.rules.runtimeOutboxPendingThreshold }}
-          for: 10m
-          labels: { severity: warning }
-          annotations:
-            summary: OpenLLMProxy runtime outbox backlog is sustained
-            description: Unpublished runtime-generation hints have remained above the configured threshold.
-        - alert: OLPRuntimeOutboxTakeoverBlocked
-          expr: max(increase(olp_runtime_outbox_failed_takeovers_total{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}[5m])) > 0
-          for: 0m
-          labels: { severity: critical }
-          annotations:
-            summary: OpenLLMProxy runtime outbox takeover is blocked
-            description: A surviving worker could not acquire the advisory lock from an owner past its heartbeat window.
 {{ end }}
 {{ if $gatewayMonitored }}
         - alert: OLPDistributedLimiterUnavailable

@@ -39,7 +39,6 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	type pendingProvider struct {
 		entry *ProviderEntry
 		id    string
-		live  bool
 	}
 	var pending []pendingProvider
 	for providersRows.Next() {
@@ -109,6 +108,12 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		portableNetwork(pp.entry)
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
+	// Route revisions keep the provider name recorded at activation; a later
+	// rename must not leave targets naming a provider the artifact omits.
+	providerNames, err := providerNameMap(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity
         FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id
         LEFT JOIN olp_go.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
@@ -130,7 +135,11 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			return nil, err
 		}
 		for _, t := range published {
-			route.Targets = append(route.Targets, TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS)})
+			name := t.ProviderName
+			if current, ok := providerNames[t.ProviderID]; ok {
+				name = current
+			}
+			route.Targets = append(route.Targets, TargetEntry{Provider: name, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS)})
 		}
 		if policy != nil {
 			var p runtime.Policy
@@ -149,10 +158,6 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		return nil, err
 	}
 	if len(revisions) == 1 {
-		providerNames, err := providerNameMap(ctx, q)
-		if err != nil {
-			return nil, err
-		}
 		latest := revisions[0]
 		doc.Pricing = &PricingEntry{EffectiveAt: latest.EffectiveAt.Format(time.RFC3339)}
 		for _, price := range latest.Prices {

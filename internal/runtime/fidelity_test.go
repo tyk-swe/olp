@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -87,5 +89,26 @@ func TestExplicitFidelityDefaultsAndInvalidContracts(t *testing.T) {
 		if _, err := DecodeFidelity([]byte(raw)); err == nil {
 			t.Fatalf("ambiguous fidelity accepted: %s", raw)
 		}
+	}
+}
+
+// Draft validation compiles the same links release installation does, so a
+// strict realtime target installation would refuse is refused before publish.
+func TestDraftCompilationRefusesUninstallableStrictRealtime(t *testing.T) {
+	providerID := uuid.NewString()
+	provider := Provider{ID: providerID, Name: "realtime", Kind: "openai", Enabled: true, RevisionID: uuid.NewString(),
+		Capabilities: []Capability{{Model: "gpt-realtime", Operation: "realtime", Surface: "openai", Mode: "realtime"}}}
+	route := Route{ID: uuid.NewString(), Slug: "rt", Operations: []string{"realtime"}, OverallTimeout: 1000, MaxAttempts: 1,
+		Fidelity: &RouteFidelity{Mode: FidelityStrict},
+		Targets:  []Target{{ID: uuid.NewString(), ProviderID: providerID, ProviderModel: "gpt-realtime", Weight: 1, Timeout: 1000, RoutingID: uuid.NewString()}}}
+	route.RoutingID = route.ID
+	snapshot := &Snapshot{Generation: Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
+		Providers: map[string]Provider{providerID: provider}, Routes: map[string]Route{route.Slug: route}}
+	installErr := snapshot.Validate()
+	if installErr == nil {
+		t.Fatal("installation accepted a strict realtime target without a versioned profile")
+	}
+	if err := snapshot.CompileRouteExecution(route); err == nil {
+		t.Fatalf("draft compilation accepted a route installation refuses: %v", installErr)
 	}
 }

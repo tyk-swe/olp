@@ -103,22 +103,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		public.Handle("/", assets)
 		public.Handle("/health", assets)
 	}
-	// These prefixes must never fall through to the SPA, in any public mode.
-	// When inference is enabled the gateway registers its own, more specific
-	// handlers under /v1/, /anthropic/, and /gemini/; anything left over is
-	// answered honestly instead of reaching the console.
-	for _, prefix := range []string{"/api/", "/v1/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
-		handler := http.HandlerFunc(http.NotFound)
-		if c.Mode.Inference() {
-			switch prefix {
-			case "/v1/":
-				continue
-			case "/anthropic/", "/gemini/":
-				handler = management.NotFound
-			}
-		}
-		public.Handle(prefix, handler)
-	}
+	guardPublicPrefixes(public, c.Mode.Inference())
 	startup, cancelStartup := context.WithTimeout(ctx, c.StartupTimeout)
 	defer cancelStartup()
 	pool, err := database.Open(startup, pgConfig)
@@ -207,39 +192,35 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
 		}
-		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
-			spoolDir := c.MediaSpoolDir
-			if spoolDir == "" {
-				spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
-			}
-			spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, log)
-			if err != nil {
-				return err
-			}
-			mediaSpool = spool
-			defer spool.Close()
-			mediaService = &media.Service{
-				Pool:         pool,
-				Keys:         keys,
-				Installation: installation,
-				Gaps:         &mediaGapsTotal,
-				Transport: &media.Transport{
-					Client:           policy.Client(mediaUpstreamHeaderTimeout),
-					Auth:             connectors.NewAuth(&policy),
-					Egress:           &policy,
-					Spool:            spool,
-					MaxResponseBytes: c.ProviderMaxResponseBytes,
-				},
-				Revoked: rt.Revoked,
-				Log:     log,
-			}
+		spoolDir := c.MediaSpoolDir
+		if spoolDir == "" {
+			spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
+		}
+		spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, log)
+		if err != nil {
+			return err
+		}
+		mediaSpool = spool
+		defer spool.Close()
+		mediaService = &media.Service{
+			Pool:         pool,
+			Keys:         keys,
+			Installation: installation,
+			Gaps:         &mediaGapsTotal,
+			Transport: &media.Transport{
+				Client:           policy.Client(mediaUpstreamHeaderTimeout),
+				Auth:             connectors.NewAuth(&policy),
+				Egress:           &policy,
+				Spool:            spool,
+				MaxResponseBytes: c.ProviderMaxResponseBytes,
+			},
+			Revoked: rt.Revoked,
+			Log:     log,
 		}
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
-			if pool != nil {
-				gw.Resources = resources.NewEncrypted(pool, installation, keys)
-				gw.Resolver = resources.NewResolver(pool, installation, keys)
-			}
+			gw.Resources = resources.NewEncrypted(pool, installation, keys)
+			gw.Resolver = resources.NewResolver(pool, installation, keys)
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather
 			// than serving it unmetered, and keeps logging its metadata.
@@ -452,6 +433,26 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 		}
 	}
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
+}
+
+// guardPublicPrefixes keeps protocol and private prefixes from falling through
+// to the SPA, in any public mode. When inference is enabled the gateway
+// registers its own, more specific handlers under /v1/, /bedrock/,
+// /anthropic/, and /gemini/; anything left over is answered honestly instead
+// of reaching the console.
+func guardPublicPrefixes(public *http.ServeMux, inference bool) {
+	for _, prefix := range []string{"/api/", "/v1/", "/bedrock/", "/native/", "/ws/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
+		handler := http.HandlerFunc(http.NotFound)
+		if inference {
+			switch prefix {
+			case "/v1/", "/bedrock/":
+				continue
+			case "/anthropic/", "/gemini/":
+				handler = management.NotFound
+			}
+		}
+		public.Handle(prefix, handler)
+	}
 }
 
 // rejectPublic answers a public request its surface's pool could not admit.

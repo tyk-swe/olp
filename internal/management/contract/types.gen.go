@@ -764,7 +764,10 @@ const (
 	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
 	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
 	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindInteraction    ProviderResourceItemKind = "interaction"
 	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
+	ProviderResourceItemKindStrictBatch    ProviderResourceItemKind = "strict_batch"
+	ProviderResourceItemKindStrictFile     ProviderResourceItemKind = "strict_file"
 	ProviderResourceItemKindStrictResponse ProviderResourceItemKind = "strict_response"
 )
 
@@ -777,7 +780,13 @@ func (e ProviderResourceItemKind) Valid() bool {
 		return true
 	case ProviderResourceItemKindFile:
 		return true
+	case ProviderResourceItemKindInteraction:
+		return true
 	case ProviderResourceItemKindResponse:
+		return true
+	case ProviderResourceItemKindStrictBatch:
+		return true
+	case ProviderResourceItemKindStrictFile:
 		return true
 	case ProviderResourceItemKindStrictResponse:
 		return true
@@ -1163,7 +1172,10 @@ const (
 	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
 	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
 	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindInteraction    ListProviderResourcesParamsKind = "interaction"
 	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindStrictBatch    ListProviderResourcesParamsKind = "strict_batch"
+	ListProviderResourcesParamsKindStrictFile     ListProviderResourcesParamsKind = "strict_file"
 	ListProviderResourcesParamsKindStrictResponse ListProviderResourcesParamsKind = "strict_response"
 )
 
@@ -1176,7 +1188,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 		return true
 	case ListProviderResourcesParamsKindFile:
 		return true
+	case ListProviderResourcesParamsKindInteraction:
+		return true
 	case ListProviderResourcesParamsKindResponse:
+		return true
+	case ListProviderResourcesParamsKindStrictBatch:
+		return true
+	case ListProviderResourcesParamsKindStrictFile:
 		return true
 	case ListProviderResourcesParamsKindStrictResponse:
 		return true

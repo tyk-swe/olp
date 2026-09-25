@@ -6,9 +6,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"golang.org/x/net/http2"
 )
 
@@ -133,5 +137,97 @@ func TestConnectionCapacityAndForcedShutdownAreBounded(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(time.Second):
 		t.Fatal("forced shutdown did not cancel request")
+	}
+}
+
+func TestHijackedWebSocketSessionOutlivesItsConnectionServer(t *testing.T) {
+	server, address := serveListener(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			kind, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			if err := conn.Write(r.Context(), kind, data); err != nil {
+				return
+			}
+		}
+	}), time.Hour, time.Second, 4)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws://"+address+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	// The upgrade hands the socket to the handler, and the per-connection
+	// server stops tracking it; the session must keep working afterwards.
+	for {
+		server.mu.Lock()
+		tracked := len(server.connections)
+		server.mu.Unlock()
+		if tracked == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("hijacked connection stayed tracked")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	for _, message := range []string{"first", "second"} {
+		if err := conn.Write(ctx, websocket.MessageText, []byte(message)); err != nil {
+			t.Fatalf("write after upgrade: %v", err)
+		}
+		if _, data, err := conn.Read(ctx); err != nil || string(data) != message {
+			t.Fatalf("echo after upgrade: %q, %v", data, err)
+		}
+	}
+}
+
+// exhaustedListener fails its first accept with descriptor exhaustion, as
+// accept4 does under EMFILE, and then accepts normally.
+type exhaustedListener struct {
+	net.Listener
+	failed atomic.Bool
+}
+
+func (l *exhaustedListener) Accept() (net.Conn, error) {
+	if !l.failed.Swap(true) {
+		return nil, &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept4", syscall.EMFILE)}
+	}
+	return l.Listener.Accept()
+}
+
+func TestTemporaryAcceptFailureKeepsListenerServing(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &listenerServer{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }),
+		requests: context.Background(), age: time.Hour, drain: time.Second, limit: 4}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(&exhaustedListener{Listener: ln}) }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("listener stopped serving after a temporary accept failure: %v", err)
+		}
+	}()
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + ln.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("request after a temporary accept failure: %v", err)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || string(body) != "ok" {
+		t.Fatalf("response after a temporary accept failure: %q, %v", body, err)
 	}
 }

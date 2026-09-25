@@ -170,8 +170,8 @@ networkPolicy:
 ```
 
 `edge.namespaceLabels` selects the namespaces allowed to reach 8080;
-`edge.cidrs` adds raw peers for an edge load balancer or node range, and some
-CNIs need the kubelet probe CIDRs there as well. The `prometheus` block is
+`edge.cidrs` adds raw peers for an edge load balancer or node range. Kubelet
+probes use the observability port 9090, not this rule. The `prometheus` block is
 separate from `monitoring.*`, which only places the ServiceMonitor object:
 leaving both `prometheus` maps empty denies every scrape of 9090. Workers expose
 only private health/metrics on 9090; the Prometheus peer may reach that port.

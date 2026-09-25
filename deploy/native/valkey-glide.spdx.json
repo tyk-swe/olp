@@ -81,7 +81,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-android_system_properties-0.1.5",
+      "SPDXID": "SPDXRef-android-system-properties-0.1.5",
       "name": "android_system_properties",
       "versionInfo": "0.1.5",
       "downloadLocation": "https://crates.io/api/v1/crates/android_system_properties/0.1.5/download",
@@ -1783,7 +1783,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-form_urlencoded-1.2.2",
+      "SPDXID": "SPDXRef-form-urlencoded-1.2.2",
       "name": "form_urlencoded",
       "versionInfo": "1.2.2",
       "downloadLocation": "https://crates.io/api/v1/crates/form_urlencoded/1.2.2/download",
@@ -1806,7 +1806,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-fs_extra-1.3.0",
+      "SPDXID": "SPDXRef-fs-extra-1.3.0",
       "name": "fs_extra",
       "versionInfo": "1.3.0",
       "downloadLocation": "https://crates.io/api/v1/crates/fs_extra/1.3.0/download",
@@ -2714,7 +2714,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_collections-2.2.0",
+      "SPDXID": "SPDXRef-icu-collections-2.2.0",
       "name": "icu_collections",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_collections/2.2.0/download",
@@ -2737,7 +2737,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_locale_core-2.2.0",
+      "SPDXID": "SPDXRef-icu-locale-core-2.2.0",
       "name": "icu_locale_core",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_locale_core/2.2.0/download",
@@ -2760,7 +2760,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_normalizer-2.2.0",
+      "SPDXID": "SPDXRef-icu-normalizer-2.2.0",
       "name": "icu_normalizer",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_normalizer/2.2.0/download",
@@ -2783,7 +2783,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_normalizer_data-2.2.0",
+      "SPDXID": "SPDXRef-icu-normalizer-data-2.2.0",
       "name": "icu_normalizer_data",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_normalizer_data/2.2.0/download",
@@ -2806,7 +2806,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_properties-2.2.0",
+      "SPDXID": "SPDXRef-icu-properties-2.2.0",
       "name": "icu_properties",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_properties/2.2.0/download",
@@ -2829,7 +2829,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_properties_data-2.2.0",
+      "SPDXID": "SPDXRef-icu-properties-data-2.2.0",
       "name": "icu_properties_data",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_properties_data/2.2.0/download",
@@ -2852,7 +2852,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-icu_provider-2.2.0",
+      "SPDXID": "SPDXRef-icu-provider-2.2.0",
       "name": "icu_provider",
       "versionInfo": "2.2.0",
       "downloadLocation": "https://crates.io/api/v1/crates/icu_provider/2.2.0/download",
@@ -2921,7 +2921,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-idna_adapter-1.2.2",
+      "SPDXID": "SPDXRef-idna-adapter-1.2.2",
       "name": "idna_adapter",
       "versionInfo": "1.2.2",
       "downloadLocation": "https://crates.io/api/v1/crates/idna_adapter/1.2.2/download",
@@ -3197,7 +3197,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-lazy_static-1.5.0",
+      "SPDXID": "SPDXRef-lazy-static-1.5.0",
       "name": "lazy_static",
       "versionInfo": "1.5.0",
       "downloadLocation": "https://crates.io/api/v1/crates/lazy_static/1.5.0/download",
@@ -3335,7 +3335,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-lock_api-0.4.14",
+      "SPDXID": "SPDXRef-lock-api-0.4.14",
       "name": "lock_api",
       "versionInfo": "0.4.14",
       "downloadLocation": "https://crates.io/api/v1/crates/lock_api/0.4.14/download",
@@ -3381,7 +3381,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-logger_core-0.1.0",
+      "SPDXID": "SPDXRef-logger-core-0.1.0",
       "name": "logger_core",
       "versionInfo": "0.1.0",
       "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
@@ -3444,7 +3444,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-lz4-sys-1.11.1+lz4-1.10.0",
+      "SPDXID": "SPDXRef-lz4-sys-1.11.1-lz4-1.10.0",
       "name": "lz4-sys",
       "versionInfo": "1.11.1+lz4-1.10.0",
       "downloadLocation": "https://crates.io/api/v1/crates/lz4-sys/1.11.1+lz4-1.10.0/download",
@@ -3490,7 +3490,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-miniz_oxide-0.8.9",
+      "SPDXID": "SPDXRef-miniz-oxide-0.8.9",
       "name": "miniz_oxide",
       "versionInfo": "0.8.9",
       "downloadLocation": "https://crates.io/api/v1/crates/miniz_oxide/0.8.9/download",
@@ -3697,7 +3697,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-once_cell-1.21.4",
+      "SPDXID": "SPDXRef-once-cell-1.21.4",
       "name": "once_cell",
       "versionInfo": "1.21.4",
       "downloadLocation": "https://crates.io/api/v1/crates/once_cell/1.21.4/download",
@@ -3835,7 +3835,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-opentelemetry_sdk-0.32.1",
+      "SPDXID": "SPDXRef-opentelemetry-sdk-0.32.1",
       "name": "opentelemetry_sdk",
       "versionInfo": "0.32.1",
       "downloadLocation": "https://crates.io/api/v1/crates/opentelemetry_sdk/0.32.1/download",
@@ -3881,7 +3881,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-parking_lot-0.12.5",
+      "SPDXID": "SPDXRef-parking-lot-0.12.5",
       "name": "parking_lot",
       "versionInfo": "0.12.5",
       "downloadLocation": "https://crates.io/api/v1/crates/parking_lot/0.12.5/download",
@@ -3904,7 +3904,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-parking_lot_core-0.9.12",
+      "SPDXID": "SPDXRef-parking-lot-core-0.9.12",
       "name": "parking_lot_core",
       "versionInfo": "0.9.12",
       "downloadLocation": "https://crates.io/api/v1/crates/parking_lot_core/0.9.12/download",
@@ -4088,7 +4088,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-potential_utf-0.1.5",
+      "SPDXID": "SPDXRef-potential-utf-0.1.5",
       "name": "potential_utf",
       "versionInfo": "0.1.5",
       "downloadLocation": "https://crates.io/api/v1/crates/potential_utf/0.1.5/download",
@@ -4548,7 +4548,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_chacha-0.3.1",
+      "SPDXID": "SPDXRef-rand-chacha-0.3.1",
       "name": "rand_chacha",
       "versionInfo": "0.3.1",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_chacha/0.3.1/download",
@@ -4571,7 +4571,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_chacha-0.9.0",
+      "SPDXID": "SPDXRef-rand-chacha-0.9.0",
       "name": "rand_chacha",
       "versionInfo": "0.9.0",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_chacha/0.9.0/download",
@@ -4594,7 +4594,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_core-0.6.4",
+      "SPDXID": "SPDXRef-rand-core-0.6.4",
       "name": "rand_core",
       "versionInfo": "0.6.4",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_core/0.6.4/download",
@@ -4617,7 +4617,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_core-0.9.5",
+      "SPDXID": "SPDXRef-rand-core-0.9.5",
       "name": "rand_core",
       "versionInfo": "0.9.5",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_core/0.9.5/download",
@@ -4640,7 +4640,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_core-0.10.1",
+      "SPDXID": "SPDXRef-rand-core-0.10.1",
       "name": "rand_core",
       "versionInfo": "0.10.1",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_core/0.10.1/download",
@@ -4663,7 +4663,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rand_xorshift-0.4.0",
+      "SPDXID": "SPDXRef-rand-xorshift-0.4.0",
       "name": "rand_xorshift",
       "versionInfo": "0.4.0",
       "downloadLocation": "https://crates.io/api/v1/crates/rand_xorshift/0.4.0/download",
@@ -4703,7 +4703,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-redox_syscall-0.5.18",
+      "SPDXID": "SPDXRef-redox-syscall-0.5.18",
       "name": "redox_syscall",
       "versionInfo": "0.5.18",
       "downloadLocation": "https://crates.io/api/v1/crates/redox_syscall/0.5.18/download",
@@ -4910,7 +4910,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rstest_macros-0.23.0",
+      "SPDXID": "SPDXRef-rstest-macros-0.23.0",
       "name": "rstest_macros",
       "versionInfo": "0.23.0",
       "downloadLocation": "https://crates.io/api/v1/crates/rstest_macros/0.23.0/download",
@@ -4933,7 +4933,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rustc_version-0.4.1",
+      "SPDXID": "SPDXRef-rustc-version-0.4.1",
       "name": "rustc_version",
       "versionInfo": "0.4.1",
       "downloadLocation": "https://crates.io/api/v1/crates/rustc_version/0.4.1/download",
@@ -5393,7 +5393,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-serde_core-1.0.228",
+      "SPDXID": "SPDXRef-serde-core-1.0.228",
       "name": "serde_core",
       "versionInfo": "1.0.228",
       "downloadLocation": "https://crates.io/api/v1/crates/serde_core/1.0.228/download",
@@ -5416,7 +5416,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-serde_derive-1.0.228",
+      "SPDXID": "SPDXRef-serde-derive-1.0.228",
       "name": "serde_derive",
       "versionInfo": "1.0.228",
       "downloadLocation": "https://crates.io/api/v1/crates/serde_derive/1.0.228/download",
@@ -5439,7 +5439,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-serde_json-1.0.149",
+      "SPDXID": "SPDXRef-serde-json-1.0.149",
       "name": "serde_json",
       "versionInfo": "1.0.149",
       "downloadLocation": "https://crates.io/api/v1/crates/serde_json/1.0.149/download",
@@ -5462,7 +5462,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-serial_test-3.4.0",
+      "SPDXID": "SPDXRef-serial-test-3.4.0",
       "name": "serial_test",
       "versionInfo": "3.4.0",
       "downloadLocation": "https://crates.io/api/v1/crates/serial_test/3.4.0/download",
@@ -5485,7 +5485,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-serial_test_derive-3.4.0",
+      "SPDXID": "SPDXRef-serial-test-derive-3.4.0",
       "name": "serial_test_derive",
       "versionInfo": "3.4.0",
       "downloadLocation": "https://crates.io/api/v1/crates/serial_test_derive/3.4.0/download",
@@ -5531,7 +5531,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-sha1_smol-1.0.1",
+      "SPDXID": "SPDXRef-sha1-smol-1.0.1",
       "name": "sha1_smol",
       "versionInfo": "1.0.1",
       "downloadLocation": "https://crates.io/api/v1/crates/sha1_smol/1.0.1/download",
@@ -5738,7 +5738,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-stable_deref_trait-1.2.1",
+      "SPDXID": "SPDXRef-stable-deref-trait-1.2.1",
       "name": "stable_deref_trait",
       "versionInfo": "1.2.1",
       "downloadLocation": "https://crates.io/api/v1/crates/stable_deref_trait/1.2.1/download",
@@ -5807,7 +5807,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-strum_macros-0.26.4",
+      "SPDXID": "SPDXRef-strum-macros-0.26.4",
       "name": "strum_macros",
       "versionInfo": "0.26.4",
       "downloadLocation": "https://crates.io/api/v1/crates/strum_macros/0.26.4/download",
@@ -5830,7 +5830,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-strum_macros-0.27.2",
+      "SPDXID": "SPDXRef-strum-macros-0.27.2",
       "name": "strum_macros",
       "versionInfo": "0.27.2",
       "downloadLocation": "https://crates.io/api/v1/crates/strum_macros/0.27.2/download",
@@ -5922,7 +5922,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-sync_wrapper-1.0.2",
+      "SPDXID": "SPDXRef-sync-wrapper-1.0.2",
       "name": "sync_wrapper",
       "versionInfo": "1.0.2",
       "downloadLocation": "https://crates.io/api/v1/crates/sync_wrapper/1.0.2/download",
@@ -6100,7 +6100,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-thread_local-1.1.9",
+      "SPDXID": "SPDXRef-thread-local-1.1.9",
       "name": "thread_local",
       "versionInfo": "1.1.9",
       "downloadLocation": "https://crates.io/api/v1/crates/thread_local/1.1.9/download",
@@ -6376,7 +6376,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-toml_datetime-1.1.1+spec-1.1.0",
+      "SPDXID": "SPDXRef-toml-datetime-1.1.1-spec-1.1.0",
       "name": "toml_datetime",
       "versionInfo": "1.1.1+spec-1.1.0",
       "downloadLocation": "https://crates.io/api/v1/crates/toml_datetime/1.1.1+spec-1.1.0/download",
@@ -6399,7 +6399,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-toml_edit-0.25.11+spec-1.1.0",
+      "SPDXID": "SPDXRef-toml-edit-0.25.11-spec-1.1.0",
       "name": "toml_edit",
       "versionInfo": "0.25.11+spec-1.1.0",
       "downloadLocation": "https://crates.io/api/v1/crates/toml_edit/0.25.11+spec-1.1.0/download",
@@ -6422,7 +6422,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-toml_parser-1.1.2+spec-1.1.0",
+      "SPDXID": "SPDXRef-toml-parser-1.1.2-spec-1.1.0",
       "name": "toml_parser",
       "versionInfo": "1.1.2+spec-1.1.0",
       "downloadLocation": "https://crates.io/api/v1/crates/toml_parser/1.1.2+spec-1.1.0/download",
@@ -6928,7 +6928,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-utf8_iter-1.0.4",
+      "SPDXID": "SPDXRef-utf8-iter-1.0.4",
       "name": "utf8_iter",
       "versionInfo": "1.0.4",
       "downloadLocation": "https://crates.io/api/v1/crates/utf8_iter/1.0.4/download",
@@ -6997,7 +6997,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-version_check-0.9.5",
+      "SPDXID": "SPDXRef-version-check-0.9.5",
       "name": "version_check",
       "versionInfo": "0.9.5",
       "downloadLocation": "https://crates.io/api/v1/crates/version_check/0.9.5/download",
@@ -7112,7 +7112,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-wasi-0.11.1+wasi-snapshot-preview1",
+      "SPDXID": "SPDXRef-wasi-0.11.1-wasi-snapshot-preview1",
       "name": "wasi",
       "versionInfo": "0.11.1+wasi-snapshot-preview1",
       "downloadLocation": "https://crates.io/api/v1/crates/wasi/0.11.1+wasi-snapshot-preview1/download",
@@ -7135,7 +7135,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-wasip2-1.0.3+wasi-0.2.9",
+      "SPDXID": "SPDXRef-wasip2-1.0.3-wasi-0.2.9",
       "name": "wasip2",
       "versionInfo": "1.0.3+wasi-0.2.9",
       "downloadLocation": "https://crates.io/api/v1/crates/wasip2/1.0.3+wasi-0.2.9/download",
@@ -7158,7 +7158,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-wasip3-0.4.0+wasi-0.3.0-rc-2026-01-06",
+      "SPDXID": "SPDXRef-wasip3-0.4.0-wasi-0.3.0-rc-2026-01-06",
       "name": "wasip3",
       "versionInfo": "0.4.0+wasi-0.3.0-rc-2026-01-06",
       "downloadLocation": "https://crates.io/api/v1/crates/wasip3/0.4.0+wasi-0.3.0-rc-2026-01-06/download",
@@ -7733,7 +7733,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_aarch64_gnullvm-0.42.2",
+      "SPDXID": "SPDXRef-windows-aarch64-gnullvm-0.42.2",
       "name": "windows_aarch64_gnullvm",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_aarch64_gnullvm/0.42.2/download",
@@ -7756,7 +7756,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_aarch64_gnullvm-0.52.6",
+      "SPDXID": "SPDXRef-windows-aarch64-gnullvm-0.52.6",
       "name": "windows_aarch64_gnullvm",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_aarch64_gnullvm/0.52.6/download",
@@ -7779,7 +7779,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_aarch64_msvc-0.42.2",
+      "SPDXID": "SPDXRef-windows-aarch64-msvc-0.42.2",
       "name": "windows_aarch64_msvc",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_aarch64_msvc/0.42.2/download",
@@ -7802,7 +7802,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_aarch64_msvc-0.52.6",
+      "SPDXID": "SPDXRef-windows-aarch64-msvc-0.52.6",
       "name": "windows_aarch64_msvc",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_aarch64_msvc/0.52.6/download",
@@ -7825,7 +7825,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_i686_gnu-0.42.2",
+      "SPDXID": "SPDXRef-windows-i686-gnu-0.42.2",
       "name": "windows_i686_gnu",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_i686_gnu/0.42.2/download",
@@ -7848,7 +7848,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_i686_gnu-0.52.6",
+      "SPDXID": "SPDXRef-windows-i686-gnu-0.52.6",
       "name": "windows_i686_gnu",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_i686_gnu/0.52.6/download",
@@ -7871,7 +7871,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_i686_gnullvm-0.52.6",
+      "SPDXID": "SPDXRef-windows-i686-gnullvm-0.52.6",
       "name": "windows_i686_gnullvm",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_i686_gnullvm/0.52.6/download",
@@ -7894,7 +7894,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_i686_msvc-0.42.2",
+      "SPDXID": "SPDXRef-windows-i686-msvc-0.42.2",
       "name": "windows_i686_msvc",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_i686_msvc/0.42.2/download",
@@ -7917,7 +7917,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_i686_msvc-0.52.6",
+      "SPDXID": "SPDXRef-windows-i686-msvc-0.52.6",
       "name": "windows_i686_msvc",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_i686_msvc/0.52.6/download",
@@ -7940,7 +7940,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_gnu-0.42.2",
+      "SPDXID": "SPDXRef-windows-x86-64-gnu-0.42.2",
       "name": "windows_x86_64_gnu",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_gnu/0.42.2/download",
@@ -7963,7 +7963,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_gnu-0.52.6",
+      "SPDXID": "SPDXRef-windows-x86-64-gnu-0.52.6",
       "name": "windows_x86_64_gnu",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_gnu/0.52.6/download",
@@ -7986,7 +7986,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_gnullvm-0.42.2",
+      "SPDXID": "SPDXRef-windows-x86-64-gnullvm-0.42.2",
       "name": "windows_x86_64_gnullvm",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_gnullvm/0.42.2/download",
@@ -8009,7 +8009,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_gnullvm-0.52.6",
+      "SPDXID": "SPDXRef-windows-x86-64-gnullvm-0.52.6",
       "name": "windows_x86_64_gnullvm",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_gnullvm/0.52.6/download",
@@ -8032,7 +8032,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_msvc-0.42.2",
+      "SPDXID": "SPDXRef-windows-x86-64-msvc-0.42.2",
       "name": "windows_x86_64_msvc",
       "versionInfo": "0.42.2",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_msvc/0.42.2/download",
@@ -8055,7 +8055,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-windows_x86_64_msvc-0.52.6",
+      "SPDXID": "SPDXRef-windows-x86-64-msvc-0.52.6",
       "name": "windows_x86_64_msvc",
       "versionInfo": "0.52.6",
       "downloadLocation": "https://crates.io/api/v1/crates/windows_x86_64_msvc/0.52.6/download",
@@ -8607,7 +8607,7 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-zstd-sys-2.0.16+zstd.1.5.7",
+      "SPDXID": "SPDXRef-zstd-sys-2.0.16-zstd.1.5.7",
       "name": "zstd-sys",
       "versionInfo": "2.0.16+zstd.1.5.7",
       "downloadLocation": "https://crates.io/api/v1/crates/zstd-sys/2.0.16+zstd.1.5.7/download",
@@ -8649,7 +8649,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-android_system_properties-0.1.5"
+      "relatedSpdxElement": "SPDXRef-android-system-properties-0.1.5"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9019,12 +9019,12 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-form_urlencoded-1.2.2"
+      "relatedSpdxElement": "SPDXRef-form-urlencoded-1.2.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-fs_extra-1.3.0"
+      "relatedSpdxElement": "SPDXRef-fs-extra-1.3.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9224,37 +9224,37 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_collections-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-collections-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_locale_core-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-locale-core-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_normalizer-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-normalizer-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_normalizer_data-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-normalizer-data-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_properties-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-properties-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_properties_data-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-properties-data-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-icu_provider-2.2.0"
+      "relatedSpdxElement": "SPDXRef-icu-provider-2.2.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9269,7 +9269,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-idna_adapter-1.2.2"
+      "relatedSpdxElement": "SPDXRef-idna-adapter-1.2.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9329,7 +9329,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-lazy_static-1.5.0"
+      "relatedSpdxElement": "SPDXRef-lazy-static-1.5.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9359,7 +9359,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-lock_api-0.4.14"
+      "relatedSpdxElement": "SPDXRef-lock-api-0.4.14"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9369,7 +9369,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-logger_core-0.1.0"
+      "relatedSpdxElement": "SPDXRef-logger-core-0.1.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9384,7 +9384,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-lz4-sys-1.11.1+lz4-1.10.0"
+      "relatedSpdxElement": "SPDXRef-lz4-sys-1.11.1-lz4-1.10.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9394,7 +9394,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-miniz_oxide-0.8.9"
+      "relatedSpdxElement": "SPDXRef-miniz-oxide-0.8.9"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9439,7 +9439,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-once_cell-1.21.4"
+      "relatedSpdxElement": "SPDXRef-once-cell-1.21.4"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9469,7 +9469,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-opentelemetry_sdk-0.32.1"
+      "relatedSpdxElement": "SPDXRef-opentelemetry-sdk-0.32.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9479,12 +9479,12 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-parking_lot-0.12.5"
+      "relatedSpdxElement": "SPDXRef-parking-lot-0.12.5"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-parking_lot_core-0.9.12"
+      "relatedSpdxElement": "SPDXRef-parking-lot-core-0.9.12"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9524,7 +9524,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-potential_utf-0.1.5"
+      "relatedSpdxElement": "SPDXRef-potential-utf-0.1.5"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9624,32 +9624,32 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_chacha-0.3.1"
+      "relatedSpdxElement": "SPDXRef-rand-chacha-0.3.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_chacha-0.9.0"
+      "relatedSpdxElement": "SPDXRef-rand-chacha-0.9.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_core-0.6.4"
+      "relatedSpdxElement": "SPDXRef-rand-core-0.6.4"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_core-0.9.5"
+      "relatedSpdxElement": "SPDXRef-rand-core-0.9.5"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_core-0.10.1"
+      "relatedSpdxElement": "SPDXRef-rand-core-0.10.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rand_xorshift-0.4.0"
+      "relatedSpdxElement": "SPDXRef-rand-xorshift-0.4.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9659,7 +9659,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-redox_syscall-0.5.18"
+      "relatedSpdxElement": "SPDXRef-redox-syscall-0.5.18"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9704,12 +9704,12 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rstest_macros-0.23.0"
+      "relatedSpdxElement": "SPDXRef-rstest-macros-0.23.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rustc_version-0.4.1"
+      "relatedSpdxElement": "SPDXRef-rustc-version-0.4.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9809,27 +9809,27 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-serde_core-1.0.228"
+      "relatedSpdxElement": "SPDXRef-serde-core-1.0.228"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-serde_derive-1.0.228"
+      "relatedSpdxElement": "SPDXRef-serde-derive-1.0.228"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-serde_json-1.0.149"
+      "relatedSpdxElement": "SPDXRef-serde-json-1.0.149"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-serial_test-3.4.0"
+      "relatedSpdxElement": "SPDXRef-serial-test-3.4.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-serial_test_derive-3.4.0"
+      "relatedSpdxElement": "SPDXRef-serial-test-derive-3.4.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9839,7 +9839,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-sha1_smol-1.0.1"
+      "relatedSpdxElement": "SPDXRef-sha1-smol-1.0.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9884,7 +9884,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-stable_deref_trait-1.2.1"
+      "relatedSpdxElement": "SPDXRef-stable-deref-trait-1.2.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9899,12 +9899,12 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-strum_macros-0.26.4"
+      "relatedSpdxElement": "SPDXRef-strum-macros-0.26.4"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-strum_macros-0.27.2"
+      "relatedSpdxElement": "SPDXRef-strum-macros-0.27.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9924,7 +9924,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-sync_wrapper-1.0.2"
+      "relatedSpdxElement": "SPDXRef-sync-wrapper-1.0.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9964,7 +9964,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-thread_local-1.1.9"
+      "relatedSpdxElement": "SPDXRef-thread-local-1.1.9"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10024,17 +10024,17 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-toml_datetime-1.1.1+spec-1.1.0"
+      "relatedSpdxElement": "SPDXRef-toml-datetime-1.1.1-spec-1.1.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-toml_edit-0.25.11+spec-1.1.0"
+      "relatedSpdxElement": "SPDXRef-toml-edit-0.25.11-spec-1.1.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-toml_parser-1.1.2+spec-1.1.0"
+      "relatedSpdxElement": "SPDXRef-toml-parser-1.1.2-spec-1.1.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10144,7 +10144,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-utf8_iter-1.0.4"
+      "relatedSpdxElement": "SPDXRef-utf8-iter-1.0.4"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10159,7 +10159,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-version_check-0.9.5"
+      "relatedSpdxElement": "SPDXRef-version-check-0.9.5"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10184,17 +10184,17 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-wasi-0.11.1+wasi-snapshot-preview1"
+      "relatedSpdxElement": "SPDXRef-wasi-0.11.1-wasi-snapshot-preview1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-wasip2-1.0.3+wasi-0.2.9"
+      "relatedSpdxElement": "SPDXRef-wasip2-1.0.3-wasi-0.2.9"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-wasip3-0.4.0+wasi-0.3.0-rc-2026-01-06"
+      "relatedSpdxElement": "SPDXRef-wasip3-0.4.0-wasi-0.3.0-rc-2026-01-06"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10319,77 +10319,77 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_aarch64_gnullvm-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-aarch64-gnullvm-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_aarch64_gnullvm-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-aarch64-gnullvm-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_aarch64_msvc-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-aarch64-msvc-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_aarch64_msvc-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-aarch64-msvc-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_i686_gnu-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-i686-gnu-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_i686_gnu-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-i686-gnu-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_i686_gnullvm-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-i686-gnullvm-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_i686_msvc-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-i686-msvc-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_i686_msvc-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-i686-msvc-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_gnu-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-gnu-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_gnu-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-gnu-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_gnullvm-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-gnullvm-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_gnullvm-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-gnullvm-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_msvc-0.42.2"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-msvc-0.42.2"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-windows_x86_64_msvc-0.52.6"
+      "relatedSpdxElement": "SPDXRef-windows-x86-64-msvc-0.52.6"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -10509,7 +10509,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-zstd-sys-2.0.16+zstd.1.5.7"
+      "relatedSpdxElement": "SPDXRef-zstd-sys-2.0.16-zstd.1.5.7"
     }
   ]
 }

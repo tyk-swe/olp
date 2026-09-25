@@ -180,7 +180,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	}
 	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)
 	if err != nil {
-		return access.Reply{}, err
+		return access.Reply{}, selectionProblem(err)
 	}
 	targets := []map[string]any{}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
@@ -201,6 +201,26 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+// selectionProblem reports a planning refusal caused by the simulated input as
+// a client error instead of an unavailable management service.
+func selectionProblem(err error) error {
+	var selection *runtime.SelectionError
+	if !errors.As(err, &selection) {
+		return err
+	}
+	switch selection.Code {
+	case runtime.RouteNotFound:
+		// Match the reply for a route hidden from this principal's projects.
+		return pgx.ErrNoRows
+	case runtime.OperationNotSupported:
+		return access.Fail(422, selection.Code, "The route does not allow this operation.")
+	case runtime.AttemptBudgetIncreaseForbidden:
+		return access.Fail(422, selection.Code, "The preferred attempt budget exceeds the route's max_attempts.")
+	default:
+		return err
+	}
+}
 
 type simulationRequest struct {
 	Operation            map[string]json.RawMessage `json:"operation"`
@@ -331,7 +351,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 
 	plan, err := runtime.PlanRequest(snapshot, slug, operation, input.Surface, input.Mode, []byte(input.Seed), options)
 	if err != nil {
-		return access.Reply{}, err
+		return access.Reply{}, selectionProblem(err)
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
 	return access.OK(inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections)), nil

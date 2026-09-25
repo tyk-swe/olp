@@ -12,7 +12,7 @@
     createBudgetAlertRule,
     createNotificationDestination,
     listBudgetAlertRules,
-    listNotificationDeliveries,
+    listNotificationDeliveryPage,
     listNotificationDestinations,
     updateBudgetAlertRule,
     updateNotificationDestination,
@@ -21,6 +21,11 @@
   } from '$lib/features/access/notifications/api';
   import { notificationKeys } from '$lib/features/access/notifications/notificationKeys';
   import { formatDate } from '$lib/format';
+  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import {
+    cursorPaginationProps,
+    emptyCursorHistory
+  } from '$lib/lists/pagination';
 
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
@@ -35,10 +40,15 @@
     queryKey: notificationKeys.rules(),
     queryFn: ({ signal }) => listBudgetAlertRules(signal)
   }));
+  // Delivery history grows with every crossed threshold, so it is paged
+  // like the audit log instead of collected in full.
+  const deliveryPagination = $state(emptyCursorHistory());
   const deliveries = createQuery(() => ({
-    queryKey: notificationKeys.deliveries(),
-    queryFn: ({ signal }) => listNotificationDeliveries(undefined, signal)
+    queryKey: notificationKeys.deliveries(deliveryPagination.cursor),
+    queryFn: ({ signal }) =>
+      listNotificationDeliveryPage(deliveryPagination.cursor, undefined, signal)
   }));
+  const deliveryItems = $derived(deliveries.data?.items ?? []);
   const apiKeys = createQuery(() => ({
     queryKey: apiKeyQueries.list(),
     queryFn: ({ signal }) => listApiKeys(signal)
@@ -278,8 +288,9 @@
         <div class="form-field">
           <label for="dest-secret">Signing secret</label><input
             id="dest-secret"
+            type="password"
             bind:value={destSecret}
-            autocomplete="off"
+            autocomplete="new-password"
             placeholder="Optional HMAC secret"
           />
         </div>
@@ -341,6 +352,8 @@
                 ><td
                   ><input
                     aria-label="New signing secret"
+                    type="password"
+                    autocomplete="new-password"
                     bind:value={editDestSecret}
                     placeholder="Keep current"
                   /><button
@@ -515,7 +528,9 @@
         onclick={() => deliveries.refetch()}>Retry</button
       ></span
     >
-  {:else if !(deliveries.data ?? []).length}<p class="section-help">
+  {:else if !deliveryItems.length && deliveryPagination.history.length === 0}<p
+      class="section-help"
+    >
       No deliveries recorded yet.
     </p>
   {:else}
@@ -533,7 +548,7 @@
           ></thead
         >
         <tbody>
-          {#each deliveries.data ?? [] as delivery (delivery.id)}
+          {#each deliveryItems as delivery (delivery.id)}
             <tr
               ><td>{delivery.rule_name}</td><td
                 ><span class="mono">{delivery.window_id}</span></td
@@ -565,6 +580,15 @@
         </tbody>
       </table>
     </div>
+    {#if deliveryPagination.history.length > 0 || deliveries.data?.nextCursor}
+      <CursorPagination
+        {...cursorPaginationProps(
+          deliveryPagination,
+          deliveries.data?.nextCursor
+        )}
+        label="Delivery pages"
+      />
+    {/if}
   {/if}
 </section>
 

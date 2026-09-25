@@ -76,8 +76,8 @@ fail startup.
 Inbound `traceparent` is accepted only when tracing and inbound acceptance are
 enabled; invalid context starts a local trace. Caller `tracestate` is discarded.
 Upstream propagation uses fresh span headers, never exporter credentials. Spans
-contain only allowed identifiers, classification, timing, usage, and pricing,
-without prompts, outputs, tool data, raw headers, or provider errors. Only
+contain only allowed identifiers, classification, timing, and usage, without
+prompts, outputs, tool data, raw headers, or provider errors. Only
 canonical lowercase hyphenated UUID `x-request-id` values enter the trace
 attribute. See [tracing operations](operations.md#distributed-tracing) for
 sampling, monitoring, and local exploration.
@@ -218,9 +218,8 @@ compiled-in escape hatch.
 
 Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
-support local suites; `OLP_E2E_*` supports the HA contract harness;
-`OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL` support operations
-scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
+support local suites; `OLP_BACKUP_*`, `OLP_RESTORE_*`, and `OLP_PSQL` support
+operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
 `OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and `OLP_BEDROCK_LIVE_*` opt
 into live-provider tests. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
 [`docs/operations.md`](operations.md) for command-specific requirements.

@@ -748,7 +748,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
-		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
+		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != runtime.AttemptBudgetIncreaseForbidden {
 			return selectionError(err, route.Slug)
 		}
 		return requestError(err)

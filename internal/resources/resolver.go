@@ -44,10 +44,6 @@ func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation 
 	return r.resolve(ctx, conn, res, operation)
 }
 
-func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
-	return r.resolve(ctx, tx, res, operation)
-}
-
 func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
 	var providerID, providerName, providerState string
 	var providerProject *string

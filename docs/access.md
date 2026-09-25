@@ -187,7 +187,8 @@ installation role. Global users can access all projects and unassigned resources
 within that role's permissions. Assigned users see only their member projects;
 project managers can write resources and project viewers can read them, subject
 to installation-role permissions. Assigned users cannot administer installation
-membership, OIDC, or global settings. Keep at least one manager per project.
+membership, other members' sessions, OIDC, or global settings. Keep at least one
+manager per project.
 
 Manage projects and membership through `/api/v3/projects` and
 `/api/v3/projects/{id}/members`. Providers, routes, and gateway keys carry a
@@ -232,7 +233,8 @@ with the `access` scope may call it. The body is the authoritative desired state
 (`email`, `display_name`, `role`, `active`): a missing `(source, external_id)`
 mapping creates a passwordless provisioned-managed user, and a mapped one is
 updated in place. Every reconciliation invalidates the member's sessions
-immediately, and deactivation also retires outstanding invitations they issued.
+immediately, and deactivation or loss of the owner role also retires outstanding
+invitations they issued.
 A provisioned identity cannot take an email owned by another account, and the
 last usable owner cannot be deprovisioned. `DELETE` on the same path reconciles
 to inactive and returns 404 only when the mapping does not exist. This is a

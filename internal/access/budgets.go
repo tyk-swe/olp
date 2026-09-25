@@ -24,14 +24,8 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit} {
-		if value != nil {
-			amount := strings.TrimSpace(*value)
-			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
-				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
-			}
-			*value = amount
-		}
+	if err := validCostLimits(input.DailyCostLimit, input.MonthlyCostLimit); err != nil {
+		return err
 	}
 	if input.DailyCostLimit == nil && input.MonthlyCostLimit == nil {
 		return Invalid("daily_cost_limit", "Set at least one cost limit.")
@@ -201,12 +195,19 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(map[string]any{"etag": etag}, etag))
 }
 
+// checkBudgetGroup canonicalizes a key's budget group identifier in place and
+// requires the group to share the key's project boundary.
 func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string) error {
 	if groupID == nil {
 		return nil
 	}
+	parsed, err := ParseUUID(*groupID)
+	if err != nil {
+		return err
+	}
+	*groupID = parsed
 	var groupProject *string
-	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp_go.budget_groups WHERE id=$1", *groupID).Scan(&groupProject); err != nil {
+	if err = q.QueryRow(ctx, "SELECT project_id::text FROM olp_go.budget_groups WHERE id=$1", *groupID).Scan(&groupProject); err != nil {
 		return err
 	}
 	if (groupProject == nil) != (projectID == nil) || (groupProject != nil && *groupProject != *projectID) {

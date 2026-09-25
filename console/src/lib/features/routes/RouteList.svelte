@@ -64,7 +64,13 @@
 
   function reviewMigration(item: ActiveRoute) {
     migrationRoute = item;
-    migrationSlug = `${item.slug.slice(0, 93)}-strict`;
+    // The review draft opens in the route editor, so propose a slug it can
+    // save: at most 63 lowercase letters or digits with single hyphens.
+    const base = item.slug
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 56)
+      .replace(/^-|-$/g, '');
+    migrationSlug = `${base}-strict`;
     migrationError = null;
   }
 
@@ -233,8 +239,8 @@
             id="migration-slug"
             type="text"
             required
-            maxlength="100"
-            pattern="[a-z0-9](?:[a-z0-9._]|-)*"
+            maxlength="63"
+            pattern="[a-z0-9]+(-[a-z0-9]+)*"
             bind:value={migrationSlug}
             disabled={migrationBusy}
           />

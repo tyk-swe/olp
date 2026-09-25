@@ -48,6 +48,12 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	if route["latest_revision"].(map[string]any)["fidelity"] != nil {
 		t.Fatal("historical route acquired an explicit contract")
 	}
+	// Drafted while the route still omitted its contract; the route publishes
+	// explicit contracts below.
+	stale := h.want(owner, "POST", "/api/v3/route-drafts", fidelityDraft(slug, provider["id"]), idem(uuid.NewString()), 201)
+	if stale["fidelity"] != nil {
+		t.Fatal("a draft of a historical route acquired an explicit contract", stale["fidelity"])
+	}
 	release := h.Runtime.Release()
 	originalDigest, sequence := release.Digest, release.Sequence
 	encoded, err := json.Marshal(release.Snapshot.Routes[slug])
@@ -160,6 +166,31 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	if diff["fidelity_changed"] != true || routeFidelityMode(t, diff["fidelity_after"]) != "legacy" {
 		t.Fatal("explicit legacy transition was not reviewable", diff)
 	}
+
+	// The historical revision omitted its contract. Once the route publishes an
+	// explicit one, storage refuses another omission, so restoring it must
+	// state the legacy contract it meant and stay publishable.
+	historical := h.want(owner, "POST", routePath+"/revisions/1/restore-as-draft", nil, idem(uuid.NewString()), 201)
+	if historical["fidelity"] == nil || routeFidelityMode(t, historical["fidelity"]) != "legacy" {
+		t.Fatal("restored historical revision did not state its legacy contract", historical["fidelity"])
+	}
+	h.want(owner, "POST", "/api/v3/route-drafts/"+historical["id"].(string)+"/activate", nil, withMatch(historical, idem(uuid.NewString())), 200)
+
+	// A draft that still omits its contract cannot publish over an explicit one;
+	// editing it without a contract inherits the published contract.
+	stalePath := "/api/v3/route-drafts/" + stale["id"].(string)
+	stale = h.want(owner, "GET", stalePath, nil, nil, 200)
+	for _, action := range []string{"validate", "activate"} {
+		problem := h.want(owner, "POST", stalePath+"/"+action, nil, withMatch(stale, idem(uuid.NewString())), 422)
+		if problemCode(t, problem) != "route_fidelity_required" {
+			t.Fatal("a draft omitting its contract was not refused as the caller's to fix", action, problem)
+		}
+	}
+	stale = h.want(owner, "PUT", stalePath, fidelityDraft(slug, provider["id"]), etagHeader(stale), 200)
+	if routeFidelityMode(t, stale["fidelity"]) != "legacy" || stale["fidelity"] == nil {
+		t.Fatal("editing a draft without a contract did not inherit the published one", stale["fidelity"])
+	}
+	h.want(owner, "POST", stalePath+"/activate", nil, withMatch(stale, idem(uuid.NewString())), 200)
 }
 
 func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing.T) {

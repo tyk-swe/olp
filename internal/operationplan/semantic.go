@@ -69,9 +69,6 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 		receipts = append(receipts, oif.Disposition{Field: "/headers/" + name, Disposition: "preserved", Rule: "caller_semantic_header", Evidence: t.codec.Evidence})
 	}
 	for name, values := range context.Query {
-		// Gemini chooses SSE at the ingress path. This selector never becomes a
-		// configurable semantic query override on the provider URL.
-
 		if len(values) != 1 || !native || !slices.Contains(t.profile.QuerySettings, name) {
 			return connectors.Config{}, nil, fail("target_capability", "/query", "semantic_query", "A caller query setting has no mapping in the selected profile.")
 		}

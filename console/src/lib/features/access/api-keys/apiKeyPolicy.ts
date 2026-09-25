@@ -54,8 +54,13 @@ function optionalDecimal(value: string): string | null {
 }
 
 export function buildApiKeyPolicyInput(
-  state: ApiKeyFormState
+  state: ApiKeyFormState,
+  editing: ApiKey | null = null
 ): ApiKeyPolicyInput {
+  // The picker shows local minutes, so an untouched stored expiry keeps its
+  // exact instant instead of being truncated or shifted by an ambiguous
+  // daylight-saving hour.
+  const storedExpiry = editing?.expires_at;
   return {
     name: state.name.trim(),
     project_id: state.projectId || null,
@@ -67,9 +72,11 @@ export function buildApiKeyPolicyInput(
     max_concurrency: optionalWholeNumber(state.maxConcurrency),
     daily_cost_limit: optionalDecimal(state.dailyCostLimit),
     monthly_cost_limit: optionalDecimal(state.monthlyCostLimit),
-    expires_at: state.expiresAt
-      ? new Date(state.expiresAt).toISOString()
-      : null,
+    expires_at: !state.expiresAt
+      ? null
+      : storedExpiry && state.expiresAt === dateTimeLocalValue(storedExpiry)
+        ? storedExpiry
+        : new Date(state.expiresAt).toISOString(),
     allow_provider_state: state.allowProviderState,
     allowed_attribution_keys: state.allowedAttributionKeys
   };

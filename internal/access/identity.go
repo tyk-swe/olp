@@ -72,7 +72,7 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 }
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc bool
-	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
+	err := s.Pool.QueryRow(r.Context(), `SELECT `+localLoginSetting+`,COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
 	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive}), err
 }
 
@@ -301,7 +301,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	if !u.Active || u.Role != "owner" {
+	if !u.Active || u.Role != "owner" || u.AccessScope != "global" {
 		if err = retireIssuedInvitations(r, tx, id, p.ID, p.UserID()); err != nil {
 			return Reply{}, err
 		}
@@ -324,7 +324,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	var exists bool
 	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE active AND oidc_authorized AND role='owner'
-        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true))`, !s.LocalLoginDisabled).Scan(&exists)
+        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND `+localLoginSetting+`)`, !s.LocalLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -574,11 +574,15 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	return Commit(r, tx, response)
 }
 
+// localLoginSetting reads the stored local sign-in policy; an absent setting
+// permits local sign-in.
+const localLoginSetting = "COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true)"
+
 // The process switch is immutable after composition; database policy is read
 // inside the caller's installation transaction for protected mutations.
 func (s *Server) localLoginEnabled(r *http.Request, q Queryer) (bool, error) {
 	var enabled bool
-	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
+	err := q.QueryRow(r.Context(), "SELECT "+localLoginSetting).Scan(&enabled)
 	return enabled && !s.LocalLoginDisabled, err
 }
 

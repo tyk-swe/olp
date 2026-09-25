@@ -33,6 +33,10 @@ func TestInvalidConfigAndSecretErrors(t *testing.T) {
 		{"OLP_LOG_LEVEL": "info+1"},
 		{"OLP_PUBLIC_ORIGIN": "https://user:secret@example.test"},
 		{"OLP_STARTUP_TIMEOUT": "0s"},
+		{"OLP_TRACE_SAMPLE_RATIO": "NaN"},
+		{"OLP_AUTH_HMAC_KEY": "secret"},
+		{"OLP_MASTER_KEY": "secret"},
+		{"OLP_BOOTSTRAP_TOKEN": "secret"},
 		{"OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER": "true"},
 		{"OLP_OIDC_ALLOW_PRIVATE_NETWORK": "true"},
 	} {

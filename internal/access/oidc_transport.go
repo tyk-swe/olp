@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 func oidcURL(raw string) error {
@@ -29,15 +31,9 @@ func oidcAddressAllowed(ip netip.Addr) bool {
 	if oidcTestBuild && ip.IsLoopback() {
 		return true
 	}
-	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-		return false
-	}
-	for _, block := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32"} {
-		if netip.MustParsePrefix(block).Contains(ip) {
-			return false
-		}
-	}
-	return true
+	// Identity egress shares the provider denylist, including NAT64 and 6to4
+	// forms of private IPv4 destinations, but never its operator exceptions.
+	return !egress.Blocked(ip)
 }
 func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -146,7 +142,3 @@ func safeReturn(value string) bool {
 	destination := base.ResolveReference(path)
 	return destination.Scheme == base.Scheme && destination.Host == base.Host && destination.User == nil
 }
-
-// OIDCTestBuild is false in ordinary and release binaries. Provider egress
-// flags never affect this separately constructed identity HTTP client.
-func OIDCTestBuild() bool { return oidcTestBuild }

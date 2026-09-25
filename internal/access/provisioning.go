@@ -97,7 +97,7 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", userID); err != nil {
 		return Reply{}, err
 	}
-	if !*input.Active {
+	if !*input.Active || input.Role != "owner" {
 		if err = retireIssuedInvitations(r, tx, userID, p.ID, p.UserID()); err != nil {
 			return Reply{}, err
 		}

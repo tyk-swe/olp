@@ -224,3 +224,60 @@ func TestFormHelpersValidate(t *testing.T) {
 		t.Fatalf("OptionalBool: %v %v", stream, failure)
 	}
 }
+
+func TestParseMultipartDecodesQuotedPrintableAsNormalizedSource(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		encoding string
+		file     bool
+	}{
+		{"plain text", "", false},
+		{"quoted-printable text", "quoted-printable", false},
+		{"quoted-printable file", "Quoted-Printable", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spool := testSpool(t, MinCapacityBytes)
+			state := NewAdmissionState(MinCapacityBytes)
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			header := textproto.MIMEHeader{}
+			header.Set("Content-Disposition", `form-data; name="prompt"`)
+			if tc.file {
+				header.Set("Content-Disposition", `form-data; name="image"; filename="image.png"`)
+				header.Set("Content-Type", "image/png")
+			}
+			raw, want := "caf\xc3\xa9", "caf\xc3\xa9"
+			if tc.encoding != "" {
+				header.Set("Content-Transfer-Encoding", tc.encoding)
+				raw = "caf=C3=A9"
+			}
+			part, err := writer.CreatePart(header)
+			if err != nil {
+				t.Fatal(err)
+			}
+			part.Write([]byte(raw))
+			writer.Close()
+			r := httptest.NewRequest("POST", "/v1/images/edits", &buf)
+			r.Header.Set("Content-Type", writer.FormDataContentType())
+			form, err := ParseMultipart(t.Context(), r, spool, parseAdmission(t, state, 1<<20), 1<<20, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer form.Cleanup()
+			fields, normalized := form.SourceFields()
+			if normalized != (tc.encoding != "") {
+				t.Fatalf("normalized=%v for Content-Transfer-Encoding %q", normalized, tc.encoding)
+			}
+			if tc.file {
+				digest := sha256.Sum256([]byte(want))
+				if len(fields) != 1 || fields[0].File == nil || fields[0].File.Digest != hex.EncodeToString(digest[:]) {
+					t.Fatal("legacy file part did not receive the decoded bytes")
+				}
+				return
+			}
+			if len(fields) != 1 || fields[0].Text == nil || *fields[0].Text != want {
+				t.Fatalf("legacy text part did not receive the decoded value: %+v", fields)
+			}
+		})
+	}
+}

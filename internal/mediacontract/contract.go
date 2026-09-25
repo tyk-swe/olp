@@ -142,19 +142,16 @@ type Bound struct {
 	Assets     []oif.BlobRequest
 }
 
+// receipt promises exactly the execution the descriptor declared.
 func (t *Template) receipt(d oif.Descriptor, dispositions []oif.Disposition) oif.Receipt {
-	lifetime, submission, effects := "request", "immediate", []string{"inference"}
 	class := "native_identity"
 	if strings.HasPrefix(t.op, "video_") {
-		lifetime, effects, class = "durable", []string{"inference", "resource_mutation"}, "qualified_translation"
-		if t.op == "video_create" {
-			submission = "queued"
-		}
+		class = "qualified_translation"
 	}
 	return oif.Receipt{Class: class, Operation: t.op, SourceDialect: d.Dialect.ID, TargetDialect: d.Dialect.ID,
 		ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: dispositions,
 		Evidence:    []string{"media/native-openai/1", t.profile.Documentation},
-		Obligations: oif.Obligations{Delivery: d.Execution.Delivery, Lifetime: lifetime, Submission: submission, Continuation: "none", Effects: effects, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: maxDocumentBytes, MaxEventBytes: 1 << 20, RejectAmbiguousFailover: true, GuardResults: true}}
+		Obligations: oif.Obligations{Delivery: d.Execution.Delivery, Lifetime: d.Execution.Lifetime, Submission: d.Execution.Submission, Continuation: "none", Effects: slices.Clone(d.Execution.Effects), Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: maxDocumentBytes, MaxEventBytes: 1 << 20, RejectAmbiguousFailover: true, GuardResults: true}}
 }
 
 func (t *Template) descriptor(mode string) oif.Descriptor {

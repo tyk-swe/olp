@@ -2,6 +2,7 @@ package operationplan_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -80,5 +81,30 @@ func TestUninspectableVectorOutputPolicyRefusesBeforeDispatch(t *testing.T) {
 	}
 	if _, err = plan.CheckInput(); err == nil {
 		t.Fatal("missing output policy coverage admitted")
+	}
+}
+func TestAlternativeInputCollectionsAreNotRoutingParameters(t *testing.T) {
+	c := config("cohere-embed-v2", "embeddings")
+	c.Provider.AuthMode, c.Provider.Endpoint = "api_key", "https://example.com/v2"
+	template, err := operationplan.Compile(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for body, want := range map[string]string{
+		`{"model":"route","input_type":"search_document","texts":["a"],"truncate":"END"}`:                   "truncate",
+		`{"model":"route","input_type":"image","images":["data:image/png;base64,AA=="]}`:                    "",
+		`{"model":"route","input_type":"search_query","inputs":[{"content":[{"type":"text","text":"a"}]}]}`: "",
+	} {
+		source, err := operationplan.Parse("cohere-embed-v2", []byte(body), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := template.Bind(source, operationplan.Context{Route: "route"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(plan.Parameters(), ","); got != want {
+			t.Fatalf("%s: routing parameters %q, want %q", body, got, want)
+		}
 	}
 }

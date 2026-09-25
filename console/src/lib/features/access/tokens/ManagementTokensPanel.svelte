@@ -7,7 +7,7 @@
     createManagementToken,
     listManagementTokenPage,
     revokeManagementToken,
-    listProjectPage,
+    listProjects,
     type ManagementToken,
     type ManagementTokenScope,
     type ManagementTokenSecret
@@ -70,12 +70,12 @@
     enabled: isOwner
   }));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.page(),
-    queryFn: ({ signal }) => listProjectPage(undefined, signal),
+    queryKey: projectKeys.all,
+    queryFn: ({ signal }) => listProjects(signal),
     enabled: isOwner
   }));
   const projectNames = $derived(
-    new Map((projects.data?.items ?? []).map((item) => [item.id, item.name]))
+    new Map((projects.data ?? []).map((item) => [item.id, item.name]))
   );
 
   onDestroy(() => {
@@ -270,7 +270,7 @@
                 type="button"
                 onclick={() => projects.refetch()}>Retry</button
               ></span
-            >{:else}{#each projects.data?.items ?? [] as project (project.id)}<label
+            >{:else}{#each projects.data ?? [] as project (project.id)}<label
                 class="scope-option"
                 ><input
                   type="checkbox"

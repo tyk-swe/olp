@@ -1,10 +1,7 @@
 package access
 
 import (
-	"context"
-	"crypto/hmac"
 	"encoding/json"
-	"errors"
 	"maps"
 	"net/http"
 	"regexp"
@@ -43,7 +40,7 @@ var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 
 const maxAttributionKeys = 8
 
-func validateKey(input keyInput, expirationChanged bool) error {
+func validateKey(input *keyInput, expirationChanged bool) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
@@ -91,7 +88,19 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if input.TokensPerMinute != nil && (*input.TokensPerMinute < 1 || *input.TokensPerMinute > limits.MaxCounter) {
 		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
 	}
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit} {
+	if err := validCostLimits(input.DailyCostLimit, input.MonthlyCostLimit); err != nil {
+		return err
+	}
+	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
+		return Invalid("expires_at", "Choose a future expiry.")
+	}
+	return nil
+}
+
+// validCostLimits trims each supplied cost limit in place and requires a
+// positive decimal amount.
+func validCostLimits(daily, monthly *string) error {
+	for field, value := range map[string]*string{"daily_cost_limit": daily, "monthly_cost_limit": monthly} {
 		if value != nil {
 			amount := strings.TrimSpace(*value)
 			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
@@ -99,9 +108,6 @@ func validateKey(input keyInput, expirationChanged bool) error {
 			}
 			*value = amount
 		}
-	}
-	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
-		return Invalid("expires_at", "Choose a future expiry.")
 	}
 	return nil
 }
@@ -119,7 +125,7 @@ func AdvanceAuthority(r *http.Request, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb)`
+const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(NULLIF(k.policy->'allowed_attribution_keys','null'::jsonb),'[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb)`
 const keyFrom = " FROM olp_go.api_keys k JOIN olp_go.users u ON u.id=k.created_by LEFT JOIN olp_go.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
@@ -203,18 +209,11 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
-	if err := validateKey(input, true); err != nil {
+	if err := validateKey(&input, true); err != nil {
 		return Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
 		return Reply{}, err
-	}
-	if input.BudgetGroupID != nil {
-		var parsed string
-		if parsed, err = ParseUUID(*input.BudgetGroupID); err != nil {
-			return Reply{}, err
-		}
-		input.BudgetGroupID = &parsed
 	}
 	if err = checkBudgetGroup(r.Context(), tx, input.BudgetGroupID, input.ProjectID); err != nil {
 		return Reply{}, err
@@ -305,19 +304,12 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, Invalid("policy", "Invalid policy value.")
 	}
 	_, changed := patch["expires_at"]
-	if err = validateKey(input, changed); err != nil {
+	if err = validateKey(&input, changed); err != nil {
 		return Reply{}, err
 	}
 	if raw, ok := patch["budget_group_id"]; ok {
 		if err = json.Unmarshal(raw, &groupID); err != nil {
 			return Reply{}, Invalid("budget_group_id", "Use a budget group UUID or null.")
-		}
-		if groupID != nil {
-			var parsed string
-			if parsed, err = ParseUUID(*groupID); err != nil {
-				return Reply{}, err
-			}
-			groupID = &parsed
 		}
 		if err = checkBudgetGroup(r.Context(), tx, groupID, projectID); err != nil {
 			return Reply{}, err
@@ -403,13 +395,6 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 			if err = json.Unmarshal(raw, &groupID); err != nil {
 				return Reply{}, Invalid("budget_group_id", "Use a budget group UUID or null.")
 			}
-			if groupID != nil {
-				var parsed string
-				if parsed, err = ParseUUID(*groupID); err != nil {
-					return Reply{}, err
-				}
-				groupID = &parsed
-			}
 			if err = checkBudgetGroup(r.Context(), tx, groupID, projectID); err != nil {
 				return Reply{}, err
 			}
@@ -423,14 +408,14 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		if err != nil {
 			return Reply{}, err
 		}
-		var normalized KeyPolicy
-		if err = json.Unmarshal(data, &normalized); err != nil {
+		candidate := keyInput{Name: name}
+		if err = json.Unmarshal(data, &candidate.KeyPolicy); err != nil {
 			return Reply{}, Invalid("policy", "Invalid cost budget.")
 		}
-		if err = validateKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
+		if err = validateKey(&candidate, false); err != nil {
 			return Reply{}, err
 		}
-		data, err = json.Marshal(normalized)
+		data, err = json.Marshal(candidate.KeyPolicy)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -489,22 +474,6 @@ type Authority struct {
 	ExpiresAt, RevokedAt        *time.Time
 }
 
-func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority, error) {
-	var a Authority
-	parts := strings.Split(secret, "_")
-	if len(parts) != 3 || parts[0] != "olp" {
-		return a, errors.New("invalid API key")
-	}
-	var digest, data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp_go.api_keys k LEFT JOIN olp_go.budget_groups g ON g.id=k.budget_group_id WHERE k.lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &digest, &data, &a.ExpiresAt, &a.RevokedAt, &a.BudgetGroupID, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit)
-	if err != nil || !hmac.Equal(digest, s.Auth.Digest("api_key", secret)) {
-		return a, errors.New("invalid API key")
-	}
-	if err = json.Unmarshal(data, &a.Policy); err != nil {
-		return a, err
-	}
-	return a, nil
-}
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {
 	if (a.ProjectID == nil) != (projectID == nil) || (a.ProjectID != nil && *a.ProjectID != *projectID) {
 		return false

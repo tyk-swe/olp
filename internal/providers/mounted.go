@@ -43,7 +43,8 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 	}
 	out := map[string]runtime.MountedProvider{}
 	for _, entry := range document.Providers {
-		if _, err = uuid.Parse(entry.ProviderID); err != nil {
+		// Published snapshots key providers by canonical UUID.
+		if id, err := uuid.Parse(entry.ProviderID); err != nil || id.String() != entry.ProviderID {
 			return nil, errors.New("invalid mounted provider identifier")
 		}
 		if _, exists := out[entry.ProviderID]; exists {

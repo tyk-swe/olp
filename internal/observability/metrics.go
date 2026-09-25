@@ -319,12 +319,14 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 			"# HELP olp_provider_latency_seconds_15m Provider average attempt latency over the trailing fifteen minutes.\n" +
 			"# TYPE olp_provider_latency_seconds_15m gauge\n")
 		for _, provider := range providers {
+			// Values are escaped once, for the exposition format; %q would
+			// escape them again in Go syntax, which that format does not define.
 			id := prometheusLabel(provider.ProviderID)
 			name := prometheusLabel(provider.ProviderName)
 			kind := prometheusLabel(provider.ProviderKind)
-			fmt.Fprintf(&body, "olp_provider_health{provider_id=%q,provider_name=%q,provider_kind=%q,status=%q} 1\n",
+			fmt.Fprintf(&body, "olp_provider_health{provider_id=\"%s\",provider_name=\"%s\",provider_kind=\"%s\",status=\"%s\"} 1\n",
 				id, name, kind, prometheusLabel(provider.Status))
-			fmt.Fprintf(&body, "olp_provider_attempts_15m{provider_id=%q,provider_kind=%q} %d\n",
+			fmt.Fprintf(&body, "olp_provider_attempts_15m{provider_id=\"%s\",provider_kind=\"%s\"} %d\n",
 				id, kind, provider.AttemptCount)
 			if provider.AttemptCount == 0 {
 				continue
@@ -333,8 +335,8 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 			if provider.AverageLatencyMs != nil {
 				averageLatency = *provider.AverageLatencyMs / 1000
 			}
-			fmt.Fprintf(&body, "olp_provider_success_ratio_15m{provider_id=%q,provider_kind=%q} %.6f\n"+
-				"olp_provider_latency_seconds_15m{provider_id=%q,provider_kind=%q} %.6f\n",
+			fmt.Fprintf(&body, "olp_provider_success_ratio_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n"+
+				"olp_provider_latency_seconds_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n",
 				id, kind, successRatio(provider.SuccessCount, provider.AttemptCount),
 				id, kind, averageLatency)
 		}

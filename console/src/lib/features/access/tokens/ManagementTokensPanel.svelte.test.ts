@@ -5,10 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   createManagementToken,
   listManagementTokenPage,
-  listProjectPage,
   revokeManagementToken,
-  type ManagementToken
+  type ManagementToken,
+  type Project
 } from '$lib/features/access/api';
+import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import ManagementTokensProbe from './test/ManagementTokensProbe.svelte';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
@@ -19,7 +20,6 @@ vi.mock('$lib/features/access/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/api')>()),
   createManagementToken: vi.fn(),
   listManagementTokenPage: vi.fn(),
-  listProjectPage: vi.fn(),
   revokeManagementToken: vi.fn()
 }));
 vi.mock('$lib/clipboard', () => ({ copyText: vi.fn(async () => true) }));
@@ -55,6 +55,12 @@ function stub(name: string, implementation: (this: HTMLDialogElement) => void) {
 let host: HTMLElement;
 let client: QueryClient;
 let component: ReturnType<typeof mount> | undefined;
+// Project list pages served by the management API, keyed by request cursor.
+let projectPages: Record<
+  string,
+  { items: Project[]; next_cursor: string | null }
+>;
+let projectRequests: Request[];
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -79,10 +85,12 @@ beforeEach(() => {
     items: [token],
     nextCursor: null
   });
-  vi.mocked(listProjectPage).mockResolvedValue({
-    items: [],
-    nextCursor: null
-  });
+  projectPages = { '': { items: [], next_cursor: null } };
+  projectRequests = captureRequests((request) =>
+    jsonResponse(
+      projectPages[new URL(request.url).searchParams.get('cursor') ?? '']
+    )
+  );
 });
 
 afterEach(async () => {
@@ -188,10 +196,7 @@ it('submits selected project ids for a scoped token', async () => {
     created_at: token.created_at,
     updated_at: token.created_at
   };
-  vi.mocked(listProjectPage).mockResolvedValue({
-    items: [project],
-    nextCursor: null
-  });
+  projectPages = { '': { items: [project], next_cursor: null } };
   vi.mocked(createManagementToken).mockResolvedValue({
     ...token,
     secret: 'olpm_lookup_secret'
@@ -254,4 +259,42 @@ it('surfaces list failures without token controls', async () => {
   await settle();
   const alert = host.querySelector('[role="alert"]');
   expect(alert?.textContent).toContain('management unavailable');
+});
+
+it('offers projects from every page when scoping a token', async () => {
+  const project = (id: string, name: string): Project => ({
+    id,
+    name,
+    etag: `${id}-etag`,
+    member_count: 0,
+    created_by: token.created_by,
+    created_by_email: 'owner@example.com',
+    created_at: token.created_at,
+    updated_at: token.created_at
+  });
+  projectPages = {
+    '': {
+      items: [project('55555555-5555-5555-5555-555555555555', 'First page')],
+      next_cursor: 'projects-2'
+    },
+    'projects-2': {
+      items: [project('66666666-6666-6666-6666-666666666666', 'Later page')],
+      next_cursor: null
+    }
+  };
+  render();
+  for (let tick = 0; tick < 5; tick += 1) await settle();
+  host
+    .querySelectorAll<HTMLInputElement>('input[name="token-projects"]')[1]!
+    .click();
+  await settle();
+  const options = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  ].map((box) => box.closest('label')?.textContent);
+  expect(options).toEqual(expect.arrayContaining(['First page', 'Later page']));
+  expect(
+    projectRequests.map((request) =>
+      new URL(request.url).searchParams.get('cursor')
+    )
+  ).toEqual([null, 'projects-2']);
 });

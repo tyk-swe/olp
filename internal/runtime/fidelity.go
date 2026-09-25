@@ -82,9 +82,3 @@ func ValidateRouteFidelity(f *RouteFidelity, policy *contentpolicy.Policy) error
 	}
 	return nil
 }
-
-// RequireRouteExecution validates the mode. Snapshot compilation additionally
-// requires a compiled strict interaction template for every route target.
-func RequireRouteExecution(f *RouteFidelity) error {
-	return validateFidelity(f)
-}

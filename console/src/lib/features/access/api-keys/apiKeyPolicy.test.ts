@@ -94,4 +94,27 @@ describe('API key form state', () => {
       expires_at: null
     });
   });
+
+  it('keeps an untouched stored expiry exactly while other fields change', () => {
+    // 01:30 EST on the New York fall-back day, the second 01:30 of that night.
+    for (const expiresAt of [
+      '2027-01-01T12:30:45.123456Z',
+      '2026-11-01T06:30:00Z'
+    ]) {
+      const stored = { ...key, expires_at: expiresAt };
+      const state = createApiKeyFormState(stored);
+      state.name = 'renamed SDK';
+
+      expect(buildApiKeyPolicyInput(state, stored).expires_at).toBe(expiresAt);
+    }
+  });
+
+  it('submits a changed expiry as the chosen local minute', () => {
+    const state = createApiKeyFormState(key);
+    state.expiresAt = '2027-02-01T09:15';
+
+    expect(buildApiKeyPolicyInput(state, key).expires_at).toBe(
+      '2027-02-01T14:15:00.000Z'
+    );
+  });
 });

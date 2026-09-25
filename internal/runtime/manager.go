@@ -47,7 +47,6 @@ type Release struct {
 	credentials map[string][]byte
 }
 
-// Credential returns the plaintext credential referenced by a slot.
 // NewRelease builds an installed release directly from a snapshot and its
 // credentials for fixtures and tests that bypass the database.
 func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[string][]byte) (*Release, error) {
@@ -61,6 +60,7 @@ func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[s
 	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: maps.Clone(credentials)}, nil
 }
 
+// Credential returns the plaintext credential referenced by a slot.
 func (r *Release) Credential(id string) ([]byte, bool) {
 	secret, ok := r.credentials[id]
 	return secret, ok

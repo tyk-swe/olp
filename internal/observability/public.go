@@ -22,8 +22,12 @@ func SurfaceFromPath(path string) (surface string, inference bool) {
 		return "openai", true
 	case strings.HasPrefix(path, "/anthropic/"):
 		return "anthropic", true
-	case strings.HasPrefix(path, "/gemini/"):
+	case strings.HasPrefix(path, "/gemini/"), strings.HasPrefix(path, "/ws/google.ai.generativelanguage."):
 		return "gemini", true
+	case strings.HasPrefix(path, "/bedrock/"):
+		return "bedrock", true
+	case strings.HasPrefix(path, "/native/"):
+		return "native", true
 	}
 	return "management", false
 }

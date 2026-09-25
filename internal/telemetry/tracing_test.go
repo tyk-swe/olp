@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -215,5 +216,43 @@ func TestFailedExportCountsDroppedSpans(t *testing.T) {
 	}
 	if err := provider.Shutdown(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallRejectsSampleRatiosOutsideUnitInterval(t *testing.T) {
+	for _, ratio := range []float64{math.NaN(), -0.1, 1.1} {
+		if _, err := Install(Config{Endpoint: "http://127.0.0.1:1/v1/traces", SampleRatio: ratio}); err == nil {
+			t.Errorf("accepted sample ratio %v", ratio)
+		}
+	}
+}
+
+type noopExporter struct{}
+
+func (noopExporter) ExportSpans(context.Context, []sdktrace.ReadOnlySpan) error { return nil }
+func (noopExporter) Shutdown(context.Context) error                             { return nil }
+
+// exitedWorkerContext holds Shutdown's wait for the worker's answer until the
+// worker has answered and exited, so the answer and the exit are both ready.
+type exitedWorkerContext struct {
+	context.Context
+	exited <-chan struct{}
+	calls  int
+}
+
+func (c *exitedWorkerContext) Done() <-chan struct{} {
+	if c.calls++; c.calls == 2 {
+		<-c.exited
+	}
+	return nil
+}
+
+func TestShutdownReportsAcknowledgedResultAfterWorkerExit(t *testing.T) {
+	for range 64 {
+		p := NewBoundedSpanProcessor(noopExporter{}, 1, 1, time.Hour)
+		ctx := &exitedWorkerContext{Context: context.Background(), exited: p.done}
+		if err := p.Shutdown(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

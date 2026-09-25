@@ -241,6 +241,46 @@ func TestInspectInputTextGemini(t *testing.T) {
 	}
 }
 
+// Legacy routes with a content policy inspect the effective translated
+// destination, so every native destination family must expose its input text.
+func TestInspectInputTextCoversTranslatedDestinations(t *testing.T) {
+	tools := `"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]`
+	for _, tc := range []struct {
+		name, kind, model string
+		family            openai.Family
+		body              string
+		wire              openai.Family
+	}{
+		{"chat to Converse", "bedrock", "m", openai.FamilyChat, `{"model":"route","messages":[{"role":"system","content":"sys s3cr3t"},{"role":"user","content":"ask s3cr3t"},{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":"result s3cr3t"}],` + tools + `}`, openai.FamilyBedrock},
+		{"count to Converse", "bedrock", "m", openai.FamilyAnthropicCount, `{"model":"route","system":"sys s3cr3t","messages":[{"role":"user","content":"ask s3cr3t"}]}`, "bedrock_count"},
+		{"embeddings to Gemini", "gemini", "m", openai.FamilyEmbeddings, `{"model":"route","input":"embed s3cr3t"}`, openai.FamilyGeminiEmbeddings},
+		{"embeddings to Gemini batch", "gemini", "m", openai.FamilyEmbeddings, `{"model":"route","input":["embed s3cr3t","other s3cr3t"]}`, openai.FamilyGeminiEmbeddingsBatch},
+		{"embeddings to Vertex", "vertex_ai", "m", openai.FamilyEmbeddings, `{"model":"route","input":["embed s3cr3t"]}`, openai.FamilyVertexEmbeddings},
+		{"embeddings to Titan", "bedrock", "amazon.titan-embed-text-v2:0", openai.FamilyEmbeddings, `{"model":"route","input":"embed s3cr3t"}`, openai.FamilyBedrockEmbeddings},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := parse(t, tc.family, tc.body)
+			prepared, wire, err := PrepareTarget(source, WireFamily(tc.kind, tc.kind, source.Family), tc.kind, tc.kind, tc.model, nil)
+			if err != nil || wire != tc.wire {
+				t.Fatalf("wire=%s err=%v", wire, err)
+			}
+			native := openai.NewSourceEnvelope(wire, source.Route, source.Stream, prepared.Document())
+			redacted := string(InspectInputText(native, redactSecret).OIF().Document().Bytes())
+			if strings.Contains(redacted, "s3cr3t") || !strings.Contains(redacted, "[REDACTED]") {
+				t.Fatalf("destination text escaped inspection: %s", redacted)
+			}
+			blocked := false
+			InspectInputText(native, func(text string) (string, bool) {
+				blocked = blocked || strings.Contains(text, "s3cr3t")
+				return text, blocked
+			})
+			if !blocked {
+				t.Fatalf("block rule never saw destination text: %s", prepared.Document().Bytes())
+			}
+		})
+	}
+}
+
 func outputText(t *testing.T, family openai.Family, body string) []byte {
 	t.Helper()
 	out, err := InspectOutputText(family, []byte(body), redactSecret)

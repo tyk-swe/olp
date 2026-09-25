@@ -213,8 +213,9 @@ func (w *alertWorker) pass(ctx context.Context) (Outcome, bool) {
 		if !retryDue(d.lastAttemptAt, d.attempts, now) {
 			continue
 		}
-		w.deliver(passCtx, d)
-		sent++
+		if w.deliver(passCtx, d) {
+			sent++
+		}
 	}
 	return OutcomeSuccess, claimed > 0 || sent > 0
 }
@@ -350,7 +351,20 @@ func deliveryErrorCode(err error) string {
 	return "network"
 }
 
-func (w *alertWorker) deliver(ctx context.Context, d delivery) {
+// deliver claims one attempt before posting it. The advisory lock covers only
+// claimDue, so another replica's pass may have read the same row; only the pass
+// whose compare-and-set advances attempts may send.
+func (w *alertWorker) deliver(ctx context.Context, d delivery) bool {
+	tag, err := w.pool.Exec(ctx,
+		`UPDATE olp_go.budget_alert_deliveries SET attempts=attempts+1,last_attempt_at=now()
+		 WHERE id=$1 AND attempts=$2 AND status IN ('pending','failed')`, d.id, d.attempts)
+	if err != nil {
+		w.log.Warn("budget alert delivery claim failed", "delivery", d.id, "error", err)
+		return false
+	}
+	if tag.RowsAffected() == 0 {
+		return false
+	}
 	code := w.send(ctx, d)
 	delivered := code == ""
 	var lastError *string
@@ -359,12 +373,13 @@ func (w *alertWorker) deliver(ctx context.Context, d delivery) {
 	}
 	if _, err := w.pool.Exec(ctx,
 		`UPDATE olp_go.budget_alert_deliveries
-		 SET attempts=attempts+1,last_attempt_at=now(),status=$2,last_error_code=$3,
+		 SET status=$2,last_error_code=$3,
 		     delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
 		 WHERE id=$1`,
 		d.id, map[bool]string{true: "delivered", false: "failed"}[delivered], lastError); err != nil {
 		w.log.Warn("budget alert delivery update failed", "delivery", d.id, "error", err)
 	}
+	return true
 }
 
 func (w *alertWorker) send(ctx context.Context, d delivery) string {

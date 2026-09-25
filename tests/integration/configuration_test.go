@@ -391,3 +391,63 @@ func TestConfigurationPricingRequiresSettings(t *testing.T) {
 	exported := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)["document"]
 	h.machineWant(configure, "POST", "/api/v3/configuration/apply", map[string]any{"document": exported}, idem("unchanged-pricing"), 200)
 }
+
+// Exported and imported names resolve against the installation they describe:
+// a renamed provider keeps its route targets, an existing destination project
+// need not be redeclared, and a price never silently loses its provider scope.
+func TestConfigurationReferencesResolveAgainstInstallations(t *testing.T) {
+	source := newAccessHarness(t)
+	owner := source.owner()
+	projectID := createProject(source, owner, "Shared")
+	vendor := newVendor(t)
+	provider := createScopedProvider(source, owner, "Original vendor", vendor.URL+"/v1", projectID, 201)
+	activateScopedProvider(source, owner, provider)
+	draft := source.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+		"slug": "renamed-target", "project_id": projectID, "operations": []any{"generation"},
+		"overall_timeout_ms": 30000, "max_attempts": 1,
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
+	}, idem("draft-renamed-target"), 201)
+	source.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-renamed-target")), 200)
+	path := "/api/v3/providers/" + provider["id"].(string)
+	current := source.want(owner, "GET", path, nil, nil, 200)
+	source.want(owner, "PATCH", path, map[string]any{"name": "Renamed vendor", "configuration": current["configuration"]}, etagHeader(current), 200)
+
+	document := source.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	target := document["routes"].([]any)[0].(map[string]any)["targets"].([]any)[0].(map[string]any)
+	if target["provider"] != "Renamed vendor" {
+		t.Fatal("exported route target names a provider the artifact does not declare", target)
+	}
+	source.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+
+	destination := newAccessHarness(t)
+	destinationOwner := destination.owner()
+	createProject(destination, destinationOwner, "Shared")
+	document["projects"] = []any{}
+	planned := destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	var binding string
+	for _, item := range planned["blockers"].([]any) {
+		entry := item.(map[string]any)
+		if entry["detail"] != "secret_binding_required" {
+			t.Fatal("an existing destination project was not accepted", planned)
+		}
+		binding = entry["key"].(string)
+	}
+	apply := map[string]any{"document": document, "secret_bindings": map[string]any{binding: vendorSecret}}
+	destination.want(destinationOwner, "POST", "/api/v3/configuration/apply", apply, idem("apply-existing-project"), 200)
+	var staged string
+	if err := destination.Pool.QueryRow(t.Context(), `SELECT pr.name FROM olp_go.providers p
+        JOIN olp_go.projects pr ON pr.id=p.project_id WHERE p.name='Renamed vendor'`).Scan(&staged); err != nil || staged != "Shared" {
+		t.Fatalf("staged provider project = %q, %v", staged, err)
+	}
+
+	unknown := "Unknown vendor"
+	price := repPrice("openai_compatible", vendorModel, "generation")
+	price["provider"] = unknown
+	document["pricing"] = map[string]any{"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339), "prices": []any{price, price}}
+	planned = destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", apply, nil, 200)
+	blockers := planned["blockers"].([]any)
+	if len(blockers) != 1 || blockers[0].(map[string]any)["kind"] != "pricing" ||
+		blockers[0].(map[string]any)["key"] != unknown || blockers[0].(map[string]any)["detail"] != "provider_unknown" {
+		t.Fatal("a price scoped to an unknown provider was not refused", planned)
+	}
+}

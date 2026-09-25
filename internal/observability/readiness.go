@@ -119,12 +119,6 @@ func LiveHealth() Health {
 	}
 }
 
-// ErrSnapshotStale marks a readiness snapshot older than its freshness budget.
-var ErrSnapshotStale = errors.New("observability_snapshot_stale")
-
-// ErrSnapshotUnavailable marks a process that has never collected readiness.
-var ErrSnapshotUnavailable = errors.New("observability_snapshot_unavailable")
-
 // CollectReadiness probes every dependency and builds the readiness payload.
 // Database failure degrades honestly: a gateway with a pinned runtime may keep
 // serving from the last known good snapshot, which is reported as such.

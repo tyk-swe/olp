@@ -187,6 +187,7 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 	system := []Object{}
 	started := false
 	names := map[string]string{}
+	var results []Object
 	for _, m := range c.Messages {
 		if m.Name != "" {
 			return nil, unsupported("message name")
@@ -225,6 +226,16 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 			}
 			names[t.ID] = t.Name
 			parts = append(parts, Object{"functionCall": raw(map[string]any{"name": t.Name, "id": t.ID, "args": json.RawMessage(t.Arguments)})})
+		}
+		if m.Role == "tool" && results != nil {
+			// Parallel call results answer their call turn in one content.
+			results = append(results, parts...)
+			contents[len(contents)-1]["parts"] = raw(results)
+			continue
+		}
+		results = nil
+		if m.Role == "tool" {
+			results = parts
 		}
 		contents = append(contents, Object{"role": raw(role), "parts": raw(parts)})
 	}

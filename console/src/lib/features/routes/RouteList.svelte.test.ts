@@ -10,6 +10,7 @@ import {
 import { draft } from '$lib/forms/test/draftFixtures';
 import type { ActiveRoute, RouteDraft } from './api';
 import RouteListProbe from './test/RouteListProbe.svelte';
+import { validateRouteEditor, type RouteEditorValues } from './routeEditor';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -191,6 +192,73 @@ describe('strict route migration', () => {
         'reviewed-strict'
       );
     });
+  });
+
+  it('proposes and accepts only slugs the route editor can save', async () => {
+    const editor: RouteEditorValues = {
+      slug: '',
+      operations: ['generation'],
+      overallTimeoutMs: 120_000,
+      maxAttempts: 1,
+      targets: [
+        {
+          providerModelId: 'model-a',
+          priority: 0,
+          weight: 1,
+          timeoutMs: 60_000
+        }
+      ],
+      contentPolicyRules: []
+    };
+    const saveable = (slug: string) =>
+      validateRouteEditor({ ...editor, slug }) === null;
+    // Legacy slugs published through the API may be up to 100 characters and
+    // contain dots or underscores.
+    const legacySlugs = [
+      `a${'b'.repeat(59)}`,
+      `a-${'b'.repeat(53)}-c`,
+      'gpt-4.1_mini'
+    ];
+    await establish(
+      legacySlugs.map((slug, index) => ({
+        ...activeRoute,
+        id: `legacy-${index}`,
+        slug,
+        latest_revision: { ...activeRoute.latest_revision, fidelity: null }
+      })),
+      null,
+      []
+    );
+    const proposals = [...host.querySelectorAll('button')]
+      .filter(
+        (candidate) =>
+          candidate.textContent?.trim() === 'Create strict migration draft'
+      )
+      .map((review) => {
+        review.click();
+        flushSync();
+        return host.querySelector<HTMLInputElement>('#migration-slug')!.value;
+      });
+    expect(proposals).toEqual([
+      `a${'b'.repeat(55)}-strict`,
+      `a-${'b'.repeat(53)}-strict`,
+      'gpt-4-1-mini-strict'
+    ]);
+    expect(proposals.every(saveable)).toBe(true);
+
+    const input = host.querySelector<HTMLInputElement>('#migration-slug')!;
+    const accepted = (slug: string) =>
+      new RegExp(`^(?:${input.pattern})$`, 'u').test(slug) &&
+      slug.length <= input.maxLength;
+    for (const slug of [
+      'reviewed-strict',
+      'gpt-4.1-strict',
+      'under_score',
+      'double--hyphen',
+      `a${'b'.repeat(62)}`,
+      `a${'b'.repeat(63)}`
+    ])
+      expect(accepted(slug), slug).toBe(saveable(slug));
   });
 });
 

@@ -155,13 +155,6 @@ func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHea
 			summary.Tasks = append(summary.Tasks, WorkerTaskStatus{Task: task.Name, State: TaskStateUnknown})
 			continue
 		}
-		switch task.Name {
-		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
-			string(usage.TaskMediaReconciliation), string(usage.TaskMaintenance),
-			string(usage.TaskCostReconciliation), string(usage.TaskBudgetAlertDelivery):
-		default:
-			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)
-		}
 		row.State = TaskStateStale
 		if row.LastSuccessAgeSeconds != nil && *row.LastSuccessAgeSeconds <= task.StaleAfter {
 			row.State = TaskStateHealthy
@@ -174,23 +167,20 @@ func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHea
 // WorkerRecoveryCounters are the durable cross-replica counters the worker
 // plane maintains.
 type WorkerRecoveryCounters struct {
-	RequestMetadataReclaimed     int64
-	RequestMetadataRecovered     int64
-	RequestMetadataDuplicates    int64
-	RequestMetadataProcessed     int64
-	MediaReconciliationGapsTotal int64
+	RequestMetadataReclaimed  int64
+	RequestMetadataRecovered  int64
+	RequestMetadataDuplicates int64
+	RequestMetadataProcessed  int64
 }
 
 // ReadWorkerRecoveryCounters loads the durable async worker counters.
 func ReadWorkerRecoveryCounters(ctx context.Context, q access.Queryer) (WorkerRecoveryCounters, error) {
 	var c WorkerRecoveryCounters
 	err := q.QueryRow(ctx, `SELECT request_metadata_reclaimed_total, request_metadata_recovered_total,
-			request_metadata_duplicates_total, request_metadata_processed_total,
-			media_reconciliation_gaps_total
+			request_metadata_duplicates_total, request_metadata_processed_total
 		FROM olp_go.async_worker_counters WHERE singleton`).Scan(
 		&c.RequestMetadataReclaimed, &c.RequestMetadataRecovered,
-		&c.RequestMetadataDuplicates, &c.RequestMetadataProcessed,
-		&c.MediaReconciliationGapsTotal)
+		&c.RequestMetadataDuplicates, &c.RequestMetadataProcessed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, nil
 	}
@@ -198,8 +188,7 @@ func ReadWorkerRecoveryCounters(ctx context.Context, q access.Queryer) (WorkerRe
 		return c, fmt.Errorf("read async worker counters: %w", err)
 	}
 	if c.RequestMetadataReclaimed < 0 || c.RequestMetadataRecovered < 0 ||
-		c.RequestMetadataDuplicates < 0 || c.RequestMetadataProcessed < 0 ||
-		c.MediaReconciliationGapsTotal < 0 {
+		c.RequestMetadataDuplicates < 0 || c.RequestMetadataProcessed < 0 {
 		return c, errors.New("stored async worker counters are invalid")
 	}
 	return c, nil

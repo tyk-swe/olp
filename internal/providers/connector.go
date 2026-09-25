@@ -171,7 +171,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 	}
 	if cfg.Kind == KindAzure || cfg.Kind == KindVertex || !discovery {
 		names := append([]string{}, cfg.ProbeModels...)
-		if cfg.Kind == KindAzure {
+		if cfg.Kind == KindAzure && value(cfg.Deployment) != "" {
 			names = append(names, value(cfg.Deployment))
 		}
 		for name := range cfg.Options.Models {
@@ -198,7 +198,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 			if value(cfg.Options.VendorID) == "voyage" {
 				operation = "embeddings"
 			}
-			tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"}
+			tuple := servedProbe(cfg, CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 			err := s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
 			if err != nil && cfg.Kind == KindAzure {
 				tuple.Operation = "embeddings"
@@ -298,30 +298,6 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		cursors[cursor] = true
 		path = basePath + "?" + url.Values{parameter: []string{cursor}}.Encode()
 	}
-}
-
-func decodeModels(body []byte) ([]string, error) {
-	var listing struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &listing); err != nil || listing.Data == nil {
-		return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream model listing must contain a data array."}
-	}
-	var models []string
-	seen := map[string]bool{}
-	for _, m := range listing.Data {
-		if ValidModelName("model", m.ID) != nil || seen[m.ID] {
-			continue
-		}
-		seen[m.ID] = true
-		models = append(models, m.ID)
-		if len(models) == 2000 {
-			break
-		}
-	}
-	return models, nil
 }
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.

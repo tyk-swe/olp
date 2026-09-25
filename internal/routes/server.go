@@ -100,8 +100,6 @@ type resolved struct {
 	ProviderState string
 	Published     bool
 	Certified     map[string]bool
-	AuthMode      string
-	Slots         []runtime.Slot
 }
 
 func (r *resolved) available() bool {
@@ -116,9 +114,7 @@ func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedT
 		ids = append(ids, t.ProviderModelID)
 	}
 	rows, err := q.Query(ctx, `SELECT m.id::text,p.id::text,p.name,m.upstream_model,p.state,
-		coalesce(r.models,'[]'::jsonb),coalesce(r.configuration->>'auth_mode','none'),
-		coalesce(r.slots,'[]'::jsonb),
-		ARRAY(SELECT c.id::text FROM olp_go.provider_credentials c WHERE c.provider_id=p.id AND c.revoked_at IS NULL)
+		coalesce(r.models,'[]'::jsonb)
 		FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id
 		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id=ANY($1::uuid[])`, ids)
@@ -129,20 +125,10 @@ func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedT
 	out := map[string]*resolved{}
 	for rows.Next() {
 		var id string
-		var models, slots []byte
-		var credentials []string
+		var models []byte
 		r := &resolved{Certified: map[string]bool{}}
-		if err = rows.Scan(&id, &r.ProviderID, &r.ProviderName, &r.ProviderModel, &r.ProviderState, &models, &r.AuthMode, &slots, &credentials); err != nil {
+		if err = rows.Scan(&id, &r.ProviderID, &r.ProviderName, &r.ProviderModel, &r.ProviderState, &models); err != nil {
 			return nil, err
-		}
-		if err = json.Unmarshal(slots, &r.Slots); err != nil {
-			return nil, err
-		}
-		for i := range r.Slots {
-			slot := &r.Slots[i]
-			if slot.CredentialID != nil && !slices.Contains(credentials, *slot.CredentialID) {
-				slot.CredentialID = nil
-			}
 		}
 		var published []runtime.RevisionModel
 		if err = json.Unmarshal(models, &published); err != nil {
@@ -458,6 +444,12 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	}
 	if len(input.Fidelity) == 0 {
 		input.Fidelity = bytes.Clone(current.Fidelity)
+	}
+	if len(input.Fidelity) == 0 {
+		input.Fidelity, err = PublishedFidelity(r.Context(), tx, input.Slug, current.ProjectID)
+		if err != nil {
+			return access.Reply{}, err
+		}
 	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {

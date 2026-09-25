@@ -160,3 +160,32 @@ func TestPriceDecimalsAreExactAndBounded(t *testing.T) {
 		}
 	}
 }
+
+// A published rate reads back from numeric(24,12) with twelve fractional
+// digits; refreshing a source that spells the same rate differently must not
+// report it as changed.
+func TestSourceDiffComparesRatesByValue(t *testing.T) {
+	stored := func(values ...string) Price {
+		price := samplePriceEntry()
+		price.InputPerMillion, price.UnitPrice = &values[0], &values[1]
+		return price
+	}
+	cases := []struct {
+		name            string
+		published, next Price
+		same            bool
+	}{
+		{"equal value, different scale", stored("1.500000000000", "0.020000000000"), stored("1.5", "0.02"), true},
+		{"integer spelling", stored("4.000000000000", "0.000000000000"), stored("4", "0"), true},
+		{"changed value", stored("1.500000000000", "0.020000000000"), stored("1.51", "0.02"), false},
+	}
+	for _, tc := range cases {
+		if got := samePrice(tc.published, tc.next); got != tc.same {
+			t.Errorf("%s: samePrice = %t, want %t", tc.name, got, tc.same)
+		}
+	}
+	withoutUnit := samplePriceEntry()
+	if samePrice(stored("1.5", "0"), withoutUnit) {
+		t.Error("a rate present on one side only was reported unchanged")
+	}
+}

@@ -304,6 +304,14 @@ func etagHeader(record map[string]any) map[string]string {
 	return map[string]string{"If-Match": `"` + record["etag"].(string) + `"`}
 }
 
+// authority resolves an API key as the gateway does, from a freshly read
+// runtime authority.
+func (h *accessHarness) authority(secret string) (access.Authority, error) {
+	h.t.Helper()
+	h.refresh()
+	return h.Runtime.Authenticate(secret)
+}
+
 func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -347,6 +355,60 @@ func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
 	}
 }
 
+// Keys created before attribution allowlists existed, or written with an
+// explicit null, keep an array allowlist through every policy write.
+func TestAPIKeyAttributionAllowlistsRemainArrays(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	assertArray := func(id, step string) map[string]any {
+		t.Helper()
+		record := h.want(owner, "GET", "/api/v3/api-keys/"+id, nil, nil, 200)
+		var stored string
+		if err := h.Pool.QueryRow(t.Context(), "SELECT jsonb_typeof(policy->'allowed_attribution_keys') FROM olp_go.api_keys WHERE id=$1", id).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if keys, ok := record["allowed_attribution_keys"].([]any); !ok || len(keys) != 0 || stored != "array" {
+			t.Fatalf("%s: attribution allowlist is %v (stored %s), want an empty array", step, record["allowed_attribution_keys"], stored)
+		}
+		return record
+	}
+	created := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "explicit null", "allowed_attribution_keys": nil}, map[string]string{"Idempotency-Key": "attribution-null"}, 201)
+	assertArray(created["id"].(string), "create")
+
+	legacy := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "legacy"}, map[string]string{"Idempotency-Key": "attribution-legacy"}, 201)
+	id := legacy["id"].(string)
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET policy=policy-'allowed_attribution_keys' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	record := h.want(owner, "GET", "/api/v3/api-keys/"+id, nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v3/api-keys/"+id, map[string]any{"name": "legacy renamed"}, etagHeader(record), 200)
+	record = assertArray(id, "update")
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET policy=policy-'allowed_attribution_keys' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	headers := etagHeader(record)
+	headers["Idempotency-Key"] = "attribution-rotate"
+	h.want(owner, "POST", "/api/v3/api-keys/"+id+"/rotate", nil, headers, 200)
+	assertArray(id, "rotate")
+	// Earlier releases could persist an explicit null; reads still honor the contract.
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET policy=jsonb_set(policy,'{allowed_attribution_keys}','null') WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v3/api-keys/" + id, "/api/v3/api-keys"} {
+		record := h.want(owner, "GET", path, nil, nil, 200)
+		if items, ok := record["items"].([]any); ok {
+			for _, item := range items {
+				if item.(map[string]any)["id"] == id {
+					record = item.(map[string]any)
+				}
+			}
+		}
+		if keys, ok := record["allowed_attribution_keys"].([]any); !ok || len(keys) != 0 {
+			t.Fatalf("%s: stored null attribution allowlist read as %v", path, record["allowed_attribution_keys"])
+		}
+	}
+}
+
 func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -376,7 +438,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if record["requests_per_minute"] != nil || record["allowed_routes"].([]any)[0] != "private" {
 		t.Fatal("patch did not preserve omitted values and clear explicit null")
 	}
-	authority, err := h.Server.LookupAuthority(t.Context(), first["secret"].(string))
+	authority, err := h.authority(first["secret"].(string))
 	if err != nil || !authority.Allows("models_read", "private", nil, time.Now()) || authority.Allows("inference", "private", nil, time.Now()) {
 		t.Fatal("invalid authority", err)
 	}
@@ -387,14 +449,14 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if rotated["secret"] != replayed["secret"] {
 		t.Fatal("rotation replay differs")
 	}
-	if _, err = h.Server.LookupAuthority(t.Context(), first["secret"].(string)); err == nil {
+	if _, err = h.authority(first["secret"].(string)); err == nil {
 		t.Fatal("old key survived rotation")
 	}
 	record = h.want(owner, "GET", path, nil, nil, 200)
 	revocation := etagHeader(record)
 	revocation["Idempotency-Key"] = "revoke-one"
 	h.want(owner, "POST", path+"/revoke", nil, revocation, 200)
-	authority, err = h.Server.LookupAuthority(t.Context(), rotated["secret"].(string))
+	authority, err = h.authority(rotated["secret"].(string))
 	if err != nil || authority.Allows("models_read", "private", nil, time.Now()) {
 		t.Fatal("revoked key admitted", err)
 	}

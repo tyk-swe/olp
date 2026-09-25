@@ -110,20 +110,25 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 	if raw == nil {
 		return nil
 	}
-	if string(*raw) == "null" {
-		_, err := tx.Exec(r.Context(),
-			"UPDATE olp_go.notification_destinations SET secret_id=NULL WHERE id=$1", id)
-		return err
-	}
-	var secret string
+	var secret *string
 	if err := json.Unmarshal(*raw, &secret); err != nil {
 		return Invalid("secret", "Use a signing secret string or null.")
 	}
-	if secret == "" || len(secret) > 1024 {
+	if secret != nil && (*secret == "" || len(*secret) > 1024) {
 		return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 	}
+	// The destination solely owns its signing secret. Replacing or clearing it
+	// deletes the previous record, whose foreign key clears secret_id.
+	if _, err := tx.Exec(r.Context(),
+		"DELETE FROM olp_go.secrets WHERE id=(SELECT secret_id FROM olp_go.notification_destinations WHERE id=$1) AND purpose=$2",
+		id, notificationSecretPurpose); err != nil {
+		return err
+	}
+	if secret == nil {
+		return nil
+	}
 	secretID := NewID()
-	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, notificationSecretPurpose, []byte(secret), nil); err != nil {
+	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, notificationSecretPurpose, []byte(*secret), nil); err != nil {
 		return err
 	}
 	_, err := tx.Exec(r.Context(),

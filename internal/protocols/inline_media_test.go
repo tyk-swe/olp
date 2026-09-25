@@ -49,3 +49,41 @@ func TestInlineMediaBoundsAcrossNativeFamilies(t *testing.T) {
 		t.Fatalf("prompt text counted as media: %v", err)
 	}
 }
+
+// Streaming Gemini, nested countTokens requests and Converse media bytes carry
+// the same inline base64 media as their unary counterparts.
+func TestInlineMediaBoundsStreamingCountAndConverseLocations(t *testing.T) {
+	gemini := `{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"%s"}}]}`
+	for _, tc := range []struct {
+		name   string
+		family openai.Family
+		body   string
+	}{
+		{"gemini stream", openai.FamilyGeminiStream, `{"contents":[` + gemini + `]}`},
+		{"gemini nested count", openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[` + gemini + `]}}`},
+		{"converse image", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"image":{"format":"png","source":{"bytes":"%s"}}}]}]}`},
+		{"converse document", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"document":{"format":"pdf","name":"doc","source":{"bytes":"%s"}}}]}]}`},
+		{"converse video", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"video":{"format":"mp4","source":{"bytes":"%s"}}}]}]}`},
+		{"converse audio", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"audio":{"format":"wav","source":{"bytes":"%s"}}}]}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, data := range []string{"YWI=", "YWJj", "invalid!"} {
+				body := []byte(fmt.Sprintf(tc.body, data))
+				var r *openai.Request
+				var err error
+				if tc.family == openai.FamilyBedrock {
+					r, err = ParseBedrockRequest(body, "test", false)
+				} else {
+					r, err = Parse(tc.family, body, "test")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = ValidateInlineMedia(r, InlineMediaLimits{Items: 1, ItemBytes: 2, TotalBytes: 2})
+				if (err != nil) != (data != "YWI=") {
+					t.Fatalf("%q: %v", data, err)
+				}
+			}
+		})
+	}
+}

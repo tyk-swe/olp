@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -20,6 +21,21 @@ func configuredOperation(cfg *Configuration, operation string) (operations.Diale
 	}
 	codec, ok := operationregistry.Lookup(profile.OperationDialect(operation))
 	return codec, ok && codec.Operation.ID == operation
+}
+
+// servedProbe keeps a connection probe on an operation the explicit profile
+// serves: operation-only profiles probe their own registered codec instead.
+func servedProbe(cfg *Configuration, tuple CapabilityInput) CapabilityInput {
+	profile, err := cfg.transport().Profile()
+	if err != nil || slices.Contains(profile.Operations, tuple.Operation) {
+		return tuple
+	}
+	for _, operation := range profile.Operations {
+		if codec, ok := configuredOperation(cfg, operation); ok {
+			return CapabilityInput{Operation: operation, Surface: codec.Surface, Mode: ModeUnary}
+		}
+	}
+	return tuple
 }
 func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	if cfg.ProfileID == "gemini-live" {
