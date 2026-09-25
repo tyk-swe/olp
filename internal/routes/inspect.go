@@ -94,8 +94,8 @@ func safeInspectionError(err error) error {
 	return &inspectionDiagnostic{"target_capability", "/", "prepared_invocation", "The selected target cannot prepare this invocation."}
 }
 
-func inspectionContext(headers, query map[string]string, allowState bool) (interaction.Context, error) {
-	context := interaction.Context{Headers: http.Header{}, Query: url.Values{}, AllowProviderState: allowState}
+func inspectionContext(headers, query map[string]string, allowState, allowHosted bool) (interaction.Context, error) {
+	context := interaction.Context{Headers: http.Header{}, Query: url.Values{}, AllowProviderState: allowState, AllowHostedTools: allowHosted}
 	if len(headers) > 16 || len(query) > 16 {
 		return context, access.Invalid("semantic_headers", "Use at most 16 semantic headers and query settings.")
 	}

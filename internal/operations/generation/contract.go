@@ -239,8 +239,13 @@ type Estimate struct {
 
 // StateInput carries the caller-binding values a declared-effects contract may
 // rely on. A dialect never reads headers, keys or resources directly.
+// AllowHostedTools is the caller's provider-hosted tool authorization and
+// HostedTools names the bound profile's qualified hosted tool families; the
+// dialect admits hosted effects only inside that intersection.
 type StateInput struct {
 	AllowProviderState bool
+	AllowHostedTools   bool
+	HostedTools        []string
 	RetainedResponses  bool
 	RequiredServing    *oif.ServingIdentity
 }
@@ -347,8 +352,15 @@ type Dialect struct {
 	// admitted source's own delivery/identity consistency before planning.
 	ValidateSource func(source Source) error
 	// ValidateEvent is the dialect-owned per-event admission guard invoked
-	// before any observation or projection.
-	ValidateEvent func(event oif.Event) error
+	// before any observation or projection. hosted carries the provider-hosted
+	// tool families the bound plan admitted so the grammar can bound
+	// provider-emitted observations against them.
+	ValidateEvent func(event oif.Event, hosted []string) error
+	// ValidateResult, when set, bounds a decoded native result document against
+	// the effects the plan admitted — for example provider-hosted tool
+	// observations — beyond the codec's own grammar. Nil admits codec grammar
+	// only.
+	ValidateResult func(result oif.Document, hosted []string) error
 	// EventActionable marks an admitted native event as carrying client-visible
 	// tool or semantic substance; nil events are never actionable.
 	EventActionable func(event oif.Event) bool
@@ -372,16 +384,18 @@ type Dialect struct {
 	//
 	// Assets rejects provider asset references outside authorized positions.
 	// Effects evaluates provider-state and tool declarations in the effective
-	// document and amends the obligation record. InputCoverage, RequestCoverage
-	// and ResultCoverage are the policy inspection contracts; a nil coverage
-	// hook fails closed. Estimate and Parameters are the reservation and
-	// routing shapes. Admit performs final admission of the identity-prepared
-	// effective document.
+	// document, amends the obligation record and reports the provider-hosted
+	// tool families it admitted; downstream guards bound provider emissions
+	// against that admission. InputCoverage, RequestCoverage and ResultCoverage
+	// are the policy inspection contracts — hosted is the same admission — and
+	// a nil coverage hook fails closed. Estimate and Parameters are the
+	// reservation and routing shapes. Admit performs final admission of the
+	// identity-prepared effective document.
 	Assets          func(effective oif.Document) error
-	Effects         func(effective oif.Document, in StateInput, obligations *oif.Obligations) error
+	Effects         func(effective oif.Document, in StateInput, obligations *oif.Obligations) (hosted []string, err error)
 	InputCoverage   func(effective oif.Document) error
-	RequestCoverage func(effective oif.Document) error
-	ResultCoverage  func(result oif.Document) error
+	RequestCoverage func(effective oif.Document, hosted []string) error
+	ResultCoverage  func(result oif.Document, hosted []string) error
 	Estimate        func(effective oif.Document) Estimate
 	Parameters      func(effective oif.Document) []string
 	Admit           func(effective oif.Document) error

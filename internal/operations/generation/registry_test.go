@@ -56,7 +56,7 @@ func fixtureDialect(id string, streaming bool) Dialect {
 		d.StreamNative = func(in StreamInput, emit func([]byte) error, observe func(oif.Event) error) (*Native, error) {
 			return &Native{Route: in.Route}, nil
 		}
-		d.ValidateEvent = func(oif.Event) error { return nil }
+		d.ValidateEvent = func(oif.Event, []string) error { return nil }
 	}
 	return d
 }

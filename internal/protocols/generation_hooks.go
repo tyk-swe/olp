@@ -16,15 +16,17 @@ import (
 // orchestration only invokes them.
 
 // wireEffects is the dialect's declared-effects contract: provider-state and
-// tool declarations in the effective document amend the obligation record.
-// The grammar positions are the dialect's own.
-func wireEffects(family openai.Family) func(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) error {
-	return func(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) error {
+// tool declarations in the effective document amend the obligation record and
+// report the provider-hosted tool families admitted under the caller's
+// permission and the profile's qualified lifecycle contracts. The grammar
+// positions are the dialect's own.
+func wireEffects(family openai.Family) func(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) ([]string, error) {
+	return func(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) ([]string, error) {
 		root := effective.Root()
 		background, _ := root.Lookup("background")
 		queued := background.Raw() == "true"
 		if queued && (family != openai.FamilyResponses || generation.Member(root, "store").Raw() == "false") {
-			return generation.Incompatible("state_carrier", "/background", "durable_lifecycle", "Background Responses require retained native state.")
+			return nil, generation.Incompatible("state_carrier", "/background", "durable_lifecycle", "Background Responses require retained native state.")
 		}
 		retained := generation.Member(root, "store").Raw() == "true"
 		if family == openai.FamilyResponses {
@@ -50,15 +52,15 @@ func wireEffects(family openai.Family) func(effective oif.Document, in generatio
 				retained = true
 			}
 			if in.RequiredServing == nil {
-				return generation.Incompatible("resource_affinity", "/"+name, "resolved_resource_affinity", "Provider resources require resolved historical serving authority.")
+				return nil, generation.Incompatible("resource_affinity", "/"+name, "resolved_resource_affinity", "Provider resources require resolved historical serving authority.")
 			}
 		}
 		if (retained || referenced) && !in.AllowProviderState {
-			return generation.Incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
+			return nil, generation.Incompatible("policy_conflict", "/store", "provider_state_authorization", "The native invocation retains or reads provider state but the caller does not permit it.")
 		}
 		if retained || referenced {
 			if family != openai.FamilyResponses || !in.RetainedResponses || unsupportedReference {
-				return generation.Incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
+				return nil, generation.Incompatible("state_carrier", "/resources", "historical_resource_contract", "Provider-retained strict continuation requires a qualified historical serving and resource reconstruction contract.")
 			}
 			obligations.Lifetime = "durable"
 			obligations.Continuation = "native_response_resource"
@@ -69,98 +71,32 @@ func wireEffects(family openai.Family) func(effective oif.Document, in generatio
 				obligations.Effects = append(obligations.Effects, "resource_read")
 			}
 		}
-		tools, err := declaredClientTools(root, family)
+		client, hostedTools, err := classifyRequestTools(root, family)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if tools {
+		if client {
 			obligations.Effects = append(obligations.Effects, "client_tool_call")
 		}
-		return nil
+		hosted, err := admitHostedTools(hostedTools, in, obligations)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkHostedSelectors(root, family, hosted); err != nil {
+			return nil, err
+		}
+		return hosted, nil
 	}
 }
 
-func responsesEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) error {
+func responsesEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) ([]string, error) {
 	return wireEffects(openai.FamilyResponses)(effective, in, obligations)
 }
-func anthropicEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) error {
+func anthropicEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) ([]string, error) {
 	return wireEffects(openai.FamilyAnthropic)(effective, in, obligations)
 }
-func bedrockEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) error {
+func bedrockEffects(effective oif.Document, in generation.StateInput, obligations *oif.Obligations) ([]string, error) {
 	return wireEffects(openai.FamilyBedrock)(effective, in, obligations)
-}
-
-func declaredClientTools(root oif.Value, wire openai.Family) (bool, error) {
-	client := false
-	reject := func() (bool, error) {
-		return false, generation.Incompatible("state_carrier", "/tools", "hosted_tool_effects", "Provider-hosted or unregistered tool effects require a separately qualified lifecycle contract.")
-	}
-	if tools, present := root.Lookup("tools"); present && tools.Kind() != oif.Null {
-		if tools.Kind() != oif.Array {
-			return reject()
-		}
-		for _, tool := range tools.Elements() {
-			kind := generation.Text(generation.Member(tool, "type"))
-			switch wire {
-			case openai.FamilyChat, openai.FamilyResponses:
-				if kind != "function" {
-					return reject()
-				}
-			case openai.FamilyAnthropic:
-				if kind != "" && kind != "custom" || generation.Member(tool, "name").Kind() != oif.String || generation.Member(tool, "input_schema").Kind() != oif.Object {
-					return reject()
-				}
-			case openai.FamilyGemini:
-				if !generation.OnlyMembers(tool, "functionDeclarations") || generation.Member(tool, "functionDeclarations").Kind() != oif.Array {
-					return reject()
-				}
-			default:
-				return reject()
-			}
-			client = true
-		}
-	}
-	if config, present := root.Lookup("toolConfig"); present && config.Kind() != oif.Null {
-		if wire == openai.FamilyBedrock {
-			if tools, present := config.Lookup("tools"); present {
-				if tools.Kind() != oif.Array {
-					return reject()
-				}
-				for _, tool := range tools.Elements() {
-					if !generation.OnlyMembers(tool, "toolSpec") || generation.Member(tool, "toolSpec").Kind() != oif.Object {
-						return reject()
-					}
-					client = true
-				}
-			}
-		}
-	}
-	var history func(oif.Value) bool
-	history = func(value oif.Value) bool {
-		for _, field := range value.Members() {
-			if slices.Contains([]string{"tool_calls", "function_call", "functionCall", "functionResponse", "toolUse", "toolResult"}, field.Name) {
-				return true
-			}
-			if field.Name == "type" && slices.Contains([]string{"tool_use", "tool_result", "function_call", "function_call_output"}, generation.Text(field.Value)) {
-				return true
-			}
-			if history(field.Value) {
-				return true
-			}
-		}
-		for _, element := range value.Elements() {
-			if history(element) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, name := range []string{"messages", "contents", "input"} {
-		if history(generation.Member(root, name)) {
-			client = true
-		}
-	}
-	return client, nil
 }
 
 // wireAssets visits dialect-owned media positions only. A tool's own JSON may
@@ -250,7 +186,7 @@ func inputFields(wire openai.Family) []string {
 	case openai.FamilyChat:
 		return strings.Fields(common + " messages max_completion_tokens stream_options stop n presence_penalty frequency_penalty logit_bias seed response_format parallel_tool_calls logprobs top_logprobs user service_tier store")
 	case openai.FamilyResponses:
-		return strings.Fields(common + " input instructions max_output_tokens text parallel_tool_calls truncation service_tier store previous_response_id conversation background")
+		return strings.Fields(common + " input instructions max_output_tokens text parallel_tool_calls truncation service_tier store previous_response_id conversation background include")
 	case openai.FamilyAnthropic:
 		return strings.Fields(common + " messages system stop_sequences anthropic_version")
 	case openai.FamilyGemini:
@@ -329,12 +265,18 @@ func inspectableContent(value oif.Value, responseInput bool) error {
 				if hasOpaqueNative(field.Value) {
 					return generation.Incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input includes opaque native tool or reasoning state.")
 				}
+			case "status", "action", "sources", "results", "annotations":
+				// Replayed hosted-tool observations are declared data; their
+				// queries, URLs and titles are all inspectable strings.
+				if hasOpaqueNative(field.Value) {
+					return generation.Incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input includes opaque native tool or reasoning state.")
+				}
 			default:
 				return generation.Incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input policy has no inspection contract for a native message member.")
 			}
 		}
 		kind := generation.Text(generation.Member(value, "type"))
-		if kind != "" && !slices.Contains([]string{"text", "input_text", "output_text", "message", "tool_use", "tool_result", "function_call", "function_call_output", "refusal"}, kind) {
+		if kind != "" && !slices.Contains([]string{"text", "input_text", "output_text", "message", "tool_use", "tool_result", "function_call", "function_call_output", "refusal", "web_search_call"}, kind) {
 			return generation.Incompatible("policy_conflict", "/messages", "input_policy_coverage", "The input policy cannot inspect this native content type.")
 		}
 	default:
@@ -386,7 +328,16 @@ func inspectableTools(wire openai.Family, name string, value oif.Value) bool {
 				return false
 			}
 		case openai.FamilyResponses:
-			if !generation.OnlyMembers(tool, "type name description parameters strict") || generation.Text(generation.Member(tool, "type")) != "function" {
+			kind := generation.Text(generation.Member(tool, "type"))
+			if hostedRequestTools[kind] == "web_search" {
+				// Hosted tool declarations are inspectable control data; deep
+				// validation happens at admission against the hosted contract.
+				if !generation.OnlyMembers(tool, "type filters search_context_size user_location") {
+					return false
+				}
+				continue
+			}
+			if !generation.OnlyMembers(tool, "type name description parameters strict") || kind != "function" {
 				return false
 			}
 		case openai.FamilyAnthropic:
@@ -435,12 +386,19 @@ func inspectableFormat(value oif.Value, responses bool) bool {
 
 // requestCoverage is the output-policy admission contract on the request: the
 // declared positions whose output semantics a policy cannot inspect must not
-// enter a covered interaction.
-func requestCoverage(effective oif.Document) error {
+// enter a covered interaction. hosted carries the provider-hosted tool
+// families the plan admitted; a tool list of admitted hosted search alone is
+// inspectable declared data.
+func requestCoverage(effective oif.Document, hosted []string) error {
 	for _, path := range []string{"/tools", "/toolConfig", "/reasoning", "/reasoning_effort", "/thinking", "/generationConfig/thinkingConfig"} {
-		if value, present := effective.Lookup(path); present && !generation.EmptyOptional(value) {
-			return generation.Incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
+		value, present := effective.Lookup(path)
+		if !present || generation.EmptyOptional(value) {
+			continue
 		}
+		if path == "/tools" && toolsAllHostedSearch(value, hosted) {
+			continue
+		}
+		return generation.Incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
 	}
 	for _, path := range []string{"/logprobs", "/top_logprobs", "/generationConfig/responseLogprobs", "/generationConfig/logprobs"} {
 		if value, present := effective.Lookup(path); present && value.Kind() != oif.Null && value.Raw() != "false" && value.Raw() != "0" {
@@ -450,13 +408,30 @@ func requestCoverage(effective oif.Document) error {
 	return nil
 }
 
+// toolsAllHostedSearch reports whether every declared tool is admitted hosted
+// web search — the only tool-declared output the output policy can inspect in
+// this slice. Client tool calls remain uninspectable actionable bytes.
+func toolsAllHostedSearch(tools oif.Value, hosted []string) bool {
+	if tools.Kind() != oif.Array || len(tools.Elements()) == 0 || !slices.Contains(hosted, "web_search") {
+		return false
+	}
+	for _, tool := range tools.Elements() {
+		if hostedRequestTools[generation.Text(generation.Member(tool, "type"))] != "web_search" {
+			return false
+		}
+	}
+	return true
+}
+
 // wireResultCoverage is the output-policy inspection contract over the
 // dialect's result document. Opaque or nontext result members fail closed.
-func wireResultCoverage(wire openai.Family) func(result oif.Document) error {
+// hosted carries the provider-hosted tool families the plan admitted; admitted
+// hosted observations are inspectable declared data.
+func wireResultCoverage(wire openai.Family) func(result oif.Document, hosted []string) error {
 	fail := func() error {
 		return generation.Incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")
 	}
-	return func(document oif.Document) error {
+	return func(document oif.Document, hosted []string) error {
 		root := document.Root()
 		var contents []oif.Value
 		switch wire {
@@ -479,6 +454,14 @@ func wireResultCoverage(wire openai.Family) func(result oif.Document) error {
 				return fail()
 			}
 			for _, item := range generation.Member(root, "output").Elements() {
+				switch generation.Text(generation.Member(item, "type")) {
+				case "web_search_call":
+					// Admitted hosted search output is inspectable declared data.
+					if !slices.Contains(hosted, "web_search") || !generation.OnlyMembers(item, "id type status action") {
+						return fail()
+					}
+					continue
+				}
 				if !generation.OnlyMembers(item, "id type status role content") || generation.Text(generation.Member(item, "type")) != "message" {
 					return fail()
 				}
@@ -522,13 +505,36 @@ func wireResultCoverage(wire openai.Family) func(result oif.Document) error {
 				return fail()
 			}
 			for _, part := range content.Elements() {
-				if !generation.OnlyMembers(part, "type text refusal annotations logprobs") || !generation.EmptyOptional(generation.Member(part, "annotations")) || !generation.EmptyOptional(generation.Member(part, "logprobs")) || !slices.Contains([]string{"text", "output_text", "refusal"}, generation.Text(generation.Member(part, "type"))) {
+				if !generation.OnlyMembers(part, "type text refusal annotations logprobs") || !generation.EmptyOptional(generation.Member(part, "logprobs")) || !slices.Contains([]string{"text", "output_text", "refusal"}, generation.Text(generation.Member(part, "type"))) {
 					return fail()
+				}
+				annotations := generation.Member(part, "annotations")
+				if annotations.Kind() == oif.Absent || annotations.Kind() == oif.Null || annotations.Kind() == oif.Array && len(annotations.Elements()) == 0 {
+					continue
+				}
+				if annotations.Kind() != oif.Array || !slices.Contains(hosted, "web_search") {
+					return fail()
+				}
+				for _, annotation := range annotations.Elements() {
+					if !inspectableURLCitation(annotation) {
+						return fail()
+					}
 				}
 			}
 		}
 		return nil
 	}
+}
+
+// inspectableURLCitation bounds a web citation to its observable members; every
+// value is plain text the output policy can read.
+func inspectableURLCitation(annotation oif.Value) bool {
+	return generation.OnlyMembers(annotation, "type url title start_index end_index") &&
+		generation.Text(generation.Member(annotation, "type")) == "url_citation" &&
+		generation.Member(annotation, "url").Kind() == oif.String &&
+		generation.Member(annotation, "title").Kind() == oif.String &&
+		generation.NonnegativeInteger(generation.Member(annotation, "start_index")) &&
+		generation.NonnegativeInteger(generation.Member(annotation, "end_index"))
 }
 
 // wireEstimate is the dialect's conservative reservation shape: prompt tokens,

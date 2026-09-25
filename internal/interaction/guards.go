@@ -39,11 +39,18 @@ func (p *Plan) ValidateResult(result oif.Result) error {
 			return err
 		}
 	}
+	// The dialect bounds provider-emitted declared effects — for example hosted
+	// tool observations — against the families the bound request admitted.
+	if p.target.ValidateResult != nil {
+		if err := p.target.ValidateResult(document, p.hosted); err != nil {
+			return err
+		}
+	}
 	if p.template.policy != nil && p.template.policy.HasOutput() {
 		if p.target.ResultCoverage == nil {
 			return incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")
 		}
-		if err := p.target.ResultCoverage(document); err != nil {
+		if err := p.target.ResultCoverage(document, p.hosted); err != nil {
 			return err
 		}
 	}
@@ -70,5 +77,5 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	if p.target.ValidateEvent == nil {
 		return guardFailure("/events", "event_grammar")
 	}
-	return p.target.ValidateEvent(event)
+	return p.target.ValidateEvent(event, p.hosted)
 }

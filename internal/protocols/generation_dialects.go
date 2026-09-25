@@ -263,6 +263,10 @@ var responsesDialect = generation.Dialect{
 	DecodeNative:    nativeDecode(openai.FamilyResponses),
 	StreamNative:    nativeStream(openai.FamilyResponses),
 	ValidateEvent:   wireEventGuard(openai.FamilyResponses),
+	// Provider-emitted hosted tool items and citations are bounded against the
+	// hosted families the plan admitted; undeclared hosted work violates the
+	// contract.
+	ValidateResult:  validateHostedResult,
 	EventActionable: actionableEvent,
 	TerminalControl: "[DONE]",
 	// The strict published route identity replaces the provider's own model
@@ -426,9 +430,10 @@ func actionableEvent(event oif.Event) bool {
 
 // wireEventGuard is the dialect's per-event admission grammar, moved out of
 // the generic plan validator. A control frame is admitted only as the
-// dialect's declared terminal marker.
-func wireEventGuard(family openai.Family) func(event oif.Event) error {
-	return func(event oif.Event) error {
+// dialect's declared terminal marker; provider-hosted observations are bounded
+// by the hosted families the plan admitted.
+func wireEventGuard(family openai.Family) func(event oif.Event, hosted []string) error {
+	return func(event oif.Event, hosted []string) error {
 		if control := event.Control(); control != "" {
 			if (family == openai.FamilyChat || family == openai.FamilyResponses) && control == "[DONE]" {
 				return nil
@@ -471,6 +476,9 @@ func wireEventGuard(family openai.Family) func(event oif.Event) error {
 		case openai.FamilyResponses:
 			if generation.Text(generation.Member(root, "type")) == "" {
 				return generation.GuardFailure("/events/type", "event_identity")
+			}
+			if err := validateHostedEvent(root, hosted); err != nil {
+				return err
 			}
 		case openai.FamilyGemini:
 			if candidates, present := root.Lookup("candidates"); present && candidates.Kind() != oif.Array {

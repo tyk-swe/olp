@@ -29,6 +29,7 @@ type KeyPolicy struct {
 	MonthlyCostLimit       *string    `json:"monthly_cost_limit"`
 	ExpiresAt              *time.Time `json:"expires_at"`
 	AllowProviderState     bool       `json:"allow_provider_state"`
+	AllowHostedTools       bool       `json:"allow_hosted_tools"`
 }
 type keyInput struct {
 	Name          string  `json:"name"`
@@ -119,7 +120,7 @@ func AdvanceAuthority(r *http.Request, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb)`
+const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'allow_hosted_tools',COALESCE(k.policy->'allow_hosted_tools','false'::jsonb)`
 const keyFrom = " FROM olp_go.api_keys k JOIN olp_go.users u ON u.id=k.created_by LEFT JOIN olp_go.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
@@ -252,7 +253,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"name", "scopes", "allowed_routes", "allowed_attribution_keys", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state"}
+	allowed := []string{"name", "scopes", "allowed_routes", "allowed_attribution_keys", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state", "allow_hosted_tools"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")

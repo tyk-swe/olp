@@ -23,7 +23,9 @@ type ToolProjection struct {
 }
 
 func (p *Plan) projectInput(limit int) generation.ProjectInput {
-	return generation.ProjectInput{Source: p.source, Prepared: p.prepared, Effective: p.effective, Limit: limit, ValidateEvent: p.target.ValidateEvent}
+	return generation.ProjectInput{Source: p.source, Prepared: p.prepared, Effective: p.effective, Limit: limit, ValidateEvent: func(event oif.Event) error {
+		return p.target.ValidateEvent(event, p.hosted)
+	}}
 }
 
 // NewToolProjection starts the registered streaming projection for this plan's

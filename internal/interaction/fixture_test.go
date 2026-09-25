@@ -58,7 +58,7 @@ func fixtureGenerationDialect(id, surface string, streaming bool) generation.Dia
 		d.StreamNative = func(in generation.StreamInput, emit func([]byte) error, observe func(oif.Event) error) (*generation.Native, error) {
 			return &generation.Native{Route: in.Route}, nil
 		}
-		d.ValidateEvent = func(oif.Event) error { return nil }
+		d.ValidateEvent = func(oif.Event, []string) error { return nil }
 	}
 	return d
 }

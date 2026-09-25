@@ -150,7 +150,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
+	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState, key.allowHostedTools)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -299,7 +299,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
+	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState, key.allowHostedTools)
 	if err != nil {
 		return access.Reply{}, err
 	}

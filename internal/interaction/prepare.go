@@ -113,8 +113,10 @@ func (t *Template) Bind(source generation.Source, context Context) (*Plan, error
 			return nil, err
 		}
 	}
+	var hosted []string
 	if target.Effects != nil {
-		if err := target.Effects(effective, generation.StateInput{AllowProviderState: context.AllowProviderState, RetainedResponses: context.RetainedResponses, RequiredServing: context.RequiredServing}, &receipt.Obligations); err != nil {
+		hosted, err = target.Effects(effective, generation.StateInput{AllowProviderState: context.AllowProviderState, AllowHostedTools: context.AllowHostedTools, HostedTools: t.profile.HostedTools, RetainedResponses: context.RetainedResponses, RequiredServing: context.RequiredServing}, &receipt.Obligations)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -122,7 +124,7 @@ func (t *Template) Bind(source generation.Source, context Context) (*Plan, error
 		return nil, incompatible("policy_conflict", "/content_policy", "output_inspection", "The output policy requires a stateless buffered unary interaction.")
 	}
 	if t.policy != nil && t.policy.HasOutput() {
-		if err := target.RequestCoverage(effective); err != nil {
+		if err := target.RequestCoverage(effective, hosted); err != nil {
 			return nil, err
 		}
 	}
@@ -157,7 +159,7 @@ func (t *Template) Bind(source generation.Source, context Context) (*Plan, error
 	prepared = prepared.WithProfile(oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision})
 	receipt.Dispositions = append(receipt.Dispositions, headerReceipt...)
 	receipt.Dispositions = compactDispositions(receipt.Dispositions)
-	return &Plan{template: t, config: config, prepared: prepared, effective: effective, source: source, target: target, mapping: mapping, stream: stream, route: source.Route, receipt: receipt}, nil
+	return &Plan{template: t, config: config, prepared: prepared, effective: effective, source: source, target: target, mapping: mapping, stream: stream, route: source.Route, receipt: receipt, hosted: hosted}, nil
 }
 
 // qualifiedMappingError preserves the admission failures callers observed when
