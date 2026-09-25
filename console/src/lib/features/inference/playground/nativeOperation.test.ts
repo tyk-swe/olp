@@ -1,6 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stringifyNativeJSON } from '$lib/json/nativeJson';
-import { nativeOperationRequest, runNativeOperation } from './nativeOperation';
+import {
+  nativeOperationRequest,
+  runNativeOperation,
+  type OperationDialect
+} from './nativeOperation';
+
+const dialect = (
+  id: string,
+  operation: string,
+  model_binding: OperationDialect['model_binding']
+): OperationDialect => ({
+  id,
+  operation,
+  model_binding,
+  revision: 'v1',
+  operation_revision: 'v1',
+  surface: 'native',
+  mode: 'unary',
+  label: id,
+  documentation: '',
+  evidence: ''
+});
+
+const catalog = [
+  dialect('voyage-embeddings', 'embeddings', 'required'),
+  dialect('tei-sparse-embeddings', 'embeddings', 'none'),
+  dialect('tei-rerank', 'rerank', 'none')
+];
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -15,6 +42,7 @@ describe('registered native operation browser client', () => {
       })
     );
     const result = await runNativeOperation(
+      catalog,
       'embeddings',
       'voyage-embeddings',
       'vector-route',
@@ -41,16 +69,13 @@ describe('registered native operation browser client', () => {
   it('does not add a model to URL-bound TEI requests or dispatch unknown dialects', async () => {
     expect(
       stringifyNativeJSON(
-        nativeOperationRequest(
-          '{"inputs":"hello"}',
-          'route',
-          'tei-sparse-embeddings'
-        )
+        nativeOperationRequest('{"inputs":"hello"}', 'route', 'none')
       )
     ).toBe('{"inputs":"hello"}');
     const transport = vi.spyOn(globalThis, 'fetch');
     await expect(
       runNativeOperation(
+        catalog,
         'embeddings',
         'unregistered-dialect',
         'route',
@@ -59,8 +84,34 @@ describe('registered native operation browser client', () => {
       )
     ).rejects.toThrow(/registered native dialect/);
     await expect(
-      runNativeOperation('rerank', 'tei-rerank', 'route', 'wrong-key', '{}')
+      runNativeOperation(
+        catalog,
+        'rerank',
+        'tei-rerank',
+        'route',
+        'wrong-key',
+        '{}'
+      )
     ).rejects.toThrow(/inference API key/);
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('rejects a conflicting body model for a required binding', () => {
+    expect(() =>
+      nativeOperationRequest(
+        '{"model":"other-route","input":"one"}',
+        'route',
+        'required'
+      )
+    ).toThrow(/another route/);
+    expect(
+      stringifyNativeJSON(
+        nativeOperationRequest(
+          '{"model":"","input":"one"}',
+          'route',
+          'required'
+        )
+      )
+    ).toContain('"model":"route"');
   });
 });

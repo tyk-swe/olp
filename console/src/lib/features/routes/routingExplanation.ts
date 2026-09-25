@@ -25,6 +25,10 @@ export type ExplanationRow = {
   performance: RoutingDecision['performance'];
   metadataObservedAt: string | null;
   interaction: RoutingDecision['interaction'];
+  /** Delivery evidence of an attempt that ran; absent on planned rows. */
+  execution: RoutingDecision['execution'];
+  /** Recorded outcome facts of an attempt that ran; absent on planned rows. */
+  outcome: RoutingDecision['outcome'];
   incompatibility: RoutingDecision['incompatibility'];
 };
 
@@ -48,6 +52,8 @@ function decisionRow(
     performance: decision.performance,
     metadataObservedAt: decision.metadata_observed_at ?? null,
     interaction: decision.interaction,
+    execution: decision.execution,
+    outcome: decision.outcome,
     incompatibility: decision.incompatibility
   };
 }
@@ -103,6 +109,8 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       performance: null,
       metadataObservedAt: null,
       interaction: undefined,
+      execution: undefined,
+      outcome: undefined,
       incompatibility: undefined
     };
   });

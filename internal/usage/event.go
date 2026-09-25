@@ -97,15 +97,19 @@ type AttemptUsage struct {
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
-	Interaction          *InteractionEvidence `json:"interaction,omitempty"`
-	Policy               *json.RawMessage     `json:"policy,omitempty"`
-	Mode                 *string              `json:"mode,omitempty"`
-	FirstOutputMS        *int64               `json:"first_output_ms,omitempty"`
-	StreamedOutputTokens *int64               `json:"streamed_output_tokens,omitempty"`
-	CredentialSlotID     *string              `json:"credential_slot_id"`
-	CredentialVersionID  *string              `json:"credential_version_id"`
-	ProviderRevisionID   string               `json:"provider_revision_id"`
-	PricingRevisionID    *string              `json:"pricing_revision_id"`
+	Interaction *InteractionEvidence `json:"interaction,omitempty"`
+	// Outcome records the attempt's outcome facts; it stays absent on records
+	// written before outcome evidence existed, which is not the same as an
+	// attempt that ran clean.
+	Outcome              *OutcomeEvidence `json:"outcome,omitempty"`
+	Policy               *json.RawMessage `json:"policy,omitempty"`
+	Mode                 *string          `json:"mode,omitempty"`
+	FirstOutputMS        *int64           `json:"first_output_ms,omitempty"`
+	StreamedOutputTokens *int64           `json:"streamed_output_tokens,omitempty"`
+	CredentialSlotID     *string          `json:"credential_slot_id"`
+	CredentialVersionID  *string          `json:"credential_version_id"`
+	ProviderRevisionID   string           `json:"provider_revision_id"`
+	PricingRevisionID    *string          `json:"pricing_revision_id"`
 }
 
 // Encode renders the event as a versioned stream payload.
@@ -233,6 +237,7 @@ type wireDecision struct {
 
 type wireRouting struct {
 	Interaction          *InteractionEvidence `json:"interaction"`
+	Outcome              *OutcomeEvidence     `json:"outcome"`
 	Policy               *json.RawMessage     `json:"policy"`
 	Mode                 *string              `json:"mode"`
 	FirstOutputMS        *uint64              `json:"first_output_ms"`
@@ -432,8 +437,11 @@ func (w wireUsage) decode() (*AttemptUsage, error) {
 }
 
 func (w wireRouting) decode() (*Routing, error) {
-	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
+	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction, Outcome: w.Outcome}
 	if err := routing.Interaction.validate(); err != nil {
+		return nil, err
+	}
+	if err := routing.Outcome.validate(); err != nil {
 		return nil, err
 	}
 	var err error
@@ -679,6 +687,9 @@ func Validate(e *Event) (*Validated, error) {
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	if attempt.Routing != nil {
 		if err := attempt.Routing.Interaction.validate(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
+		if err := attempt.Routing.Outcome.validate(); err != nil {
 			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 		}
 	}

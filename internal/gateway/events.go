@@ -90,6 +90,11 @@ type AttemptFact struct {
 	// FaultResource names the bounded gateway resource a proxy-capacity
 	// fault hit, such as event bytes or continuation state.
 	FaultResource string
+	// LimitCategory classifies the bounded proxy-local resource an
+	// exhaustion ran out, and Limit is its configured ceiling in the
+	// resource's own unit; zero means no limit was recorded.
+	LimitCategory string
+	Limit         int64
 	// NativeStatus is the provider-declared terminal status observed on a
 	// native Responses exchange, such as "incomplete"; empty when no native
 	// terminal status was seen.
@@ -160,6 +165,8 @@ func (l LogSink) Terminal(e Envelope) {
 			"fault_origin":         a.FaultOrigin,
 			"fault_scope":          a.FaultScope,
 			"fault_resource":       a.FaultResource,
+			"limit_category":       a.LimitCategory,
+			"limit":                a.Limit,
 			"native_status":        a.NativeStatus,
 			"committed":            a.Committed,
 			"duration":             a.Duration,

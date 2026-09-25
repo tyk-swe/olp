@@ -3,6 +3,7 @@
     orderedRows,
     type ExplanationRow
   } from '$lib/features/routes/routingExplanation';
+  import { stateLabel } from '$lib/format';
   import InteractionInspector from './InteractionInspector.svelte';
   let { rows }: { rows: ExplanationRow[] } = $props();
   const ordered = $derived(orderedRows(rows));
@@ -58,6 +59,39 @@
             : 'Unknown'}
         </dd>
       </dl>
+      {#if row.execution || row.outcome}
+        <dl aria-label="Attempt execution and outcome">
+          {#if row.execution}
+            <dt>Delivery</dt>
+            <dd>
+              upstream {row.execution.upstream_state} · client {row.execution
+                .client_state} · {stateLabel(row.execution.plan_class)}
+            </dd>
+          {/if}
+          {#if row.outcome}
+            <dt>Native outcome</dt>
+            <dd>{row.outcome.native_status ?? 'None observed'}</dd>
+            {#if row.outcome.fault_origin}
+              <dt>Fault</dt>
+              <dd>
+                {stateLabel(row.outcome.fault_origin)} · {stateLabel(
+                  row.outcome.fault_scope
+                )} scope{#if row.outcome.fault_resource}
+                  · {row.outcome.fault_resource}{/if}
+              </dd>
+            {/if}
+            {#if row.outcome.limit_category}
+              <dt>Exhausted limit</dt>
+              <dd>
+                {stateLabel(row.outcome.limit_category)}{row.outcome.limit !=
+                null
+                  ? ` budget ${row.outcome.limit}`
+                  : ''}
+              </dd>
+            {/if}
+          {/if}
+        </dl>
+      {/if}
       <InteractionInspector
         inspection={row.interaction}
         incompatibility={row.incompatibility}

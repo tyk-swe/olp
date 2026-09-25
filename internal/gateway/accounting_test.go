@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -162,6 +163,76 @@ func TestAccountingEventIsAccountable(t *testing.T) {
 	}
 	if event.Attempts[0].Routing.StreamedOutputTokens != nil {
 		t.Fatal("an attempt that reported no usage streamed no tokens")
+	}
+}
+
+func TestAccountingAttemptCarriesRecordedOutcomeFacts(t *testing.T) {
+	envelope := accountingEnvelope(t)
+	fact := &envelope.Attempts[0]
+	fact.FaultOrigin, fact.FaultScope, fact.FaultResource = "proxy_capacity", "endpoint", "event_bytes"
+	fact.LimitCategory, fact.Limit = "bytes", 8388608
+	served := &envelope.Attempts[1]
+	served.NativeStatus = "completed"
+
+	event := accountingEvent(envelope)
+	if event == nil {
+		t.Fatal("no event for a served request")
+	}
+	if _, err := usage.Validate(event); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	rejected := event.Attempts[0].Routing.Outcome
+	if rejected == nil {
+		t.Fatal("recorded fault facts produced no outcome evidence")
+	}
+	if rejected.FaultOrigin == nil || *rejected.FaultOrigin != "proxy_capacity" ||
+		rejected.FaultScope == nil || *rejected.FaultScope != "endpoint" ||
+		rejected.FaultResource == nil || *rejected.FaultResource != "event_bytes" {
+		t.Fatalf("fault attribution = %+v", rejected)
+	}
+	if rejected.LimitCategory == nil || *rejected.LimitCategory != "bytes" ||
+		rejected.Limit == nil || *rejected.Limit != 8388608 {
+		t.Fatalf("exhausted limit = %+v", rejected)
+	}
+	if rejected.NativeStatus != nil {
+		t.Fatal("an attempt that observed no native terminal recorded one")
+	}
+	outcome := event.Attempts[1].Routing.Outcome
+	if outcome == nil || outcome.NativeStatus == nil || *outcome.NativeStatus != "completed" {
+		t.Fatalf("native status = %+v", outcome)
+	}
+	if outcome.FaultOrigin != nil || outcome.LimitCategory != nil || outcome.Limit != nil {
+		t.Fatalf("a clean attempt invented fault or limit facts: %+v", outcome)
+	}
+}
+
+func TestAccountingAttemptWithoutOutcomeFactsOmitsTheEvidence(t *testing.T) {
+	envelope := accountingEnvelope(t)
+	event := accountingEvent(envelope)
+	if event == nil {
+		t.Fatal("no event for a served request")
+	}
+	for index, attempt := range event.Attempts {
+		if attempt.Routing == nil || attempt.Routing.Outcome != nil {
+			t.Fatalf("attempt %d carried outcome evidence it never recorded", index)
+		}
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Attempts []struct {
+			Routing map[string]json.RawMessage `json:"routing"`
+		} `json:"attempts"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for index, attempt := range decoded.Attempts {
+		if _, present := attempt.Routing["outcome"]; present {
+			t.Fatalf("attempt %d serialized an outcome member it never recorded", index)
+		}
 	}
 }
 

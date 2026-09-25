@@ -12,6 +12,66 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AttemptFaultOrigin.
+const (
+	AttemptFaultOriginClientDelivery    AttemptFaultOrigin = "client_delivery"
+	AttemptFaultOriginContract          AttemptFaultOrigin = "contract"
+	AttemptFaultOriginNativeOutcome     AttemptFaultOrigin = "native_outcome"
+	AttemptFaultOriginProviderDeclared  AttemptFaultOrigin = "provider_declared"
+	AttemptFaultOriginProviderTransport AttemptFaultOrigin = "provider_transport"
+	AttemptFaultOriginProxyCapacity     AttemptFaultOrigin = "proxy_capacity"
+	AttemptFaultOriginProxyPersistence  AttemptFaultOrigin = "proxy_persistence"
+	AttemptFaultOriginProxyPolicy       AttemptFaultOrigin = "proxy_policy"
+)
+
+// Valid indicates whether the value is a known member of the AttemptFaultOrigin enum.
+func (e AttemptFaultOrigin) Valid() bool {
+	switch e {
+	case AttemptFaultOriginClientDelivery:
+		return true
+	case AttemptFaultOriginContract:
+		return true
+	case AttemptFaultOriginNativeOutcome:
+		return true
+	case AttemptFaultOriginProviderDeclared:
+		return true
+	case AttemptFaultOriginProviderTransport:
+		return true
+	case AttemptFaultOriginProxyCapacity:
+		return true
+	case AttemptFaultOriginProxyPersistence:
+		return true
+	case AttemptFaultOriginProxyPolicy:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttemptFaultScope.
+const (
+	AttemptFaultScopeContract   AttemptFaultScope = "contract"
+	AttemptFaultScopeCredential AttemptFaultScope = "credential"
+	AttemptFaultScopeEndpoint   AttemptFaultScope = "endpoint"
+	AttemptFaultScopeRequest    AttemptFaultScope = "request"
+)
+
+// Valid indicates whether the value is a known member of the AttemptFaultScope enum.
+func (e AttemptFaultScope) Valid() bool {
+	switch e {
+	case AttemptFaultScopeContract:
+		return true
+	case AttemptFaultScopeCredential:
+		return true
+	case AttemptFaultScopeEndpoint:
+		return true
+	case AttemptFaultScopeRequest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttemptInteractionMetadataClientState.
 const (
 	AttemptInteractionMetadataClientStateActionable        AttemptInteractionMetadataClientState = "actionable"
@@ -87,6 +147,30 @@ func (e AttemptInteractionMetadataUpstreamState) Valid() bool {
 	case AttemptInteractionMetadataUpstreamStateOutcomeUnknown:
 		return true
 	case AttemptInteractionMetadataUpstreamStateTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttemptOutcomeFactsNativeStatus.
+const (
+	AttemptOutcomeFactsNativeStatusCancelled  AttemptOutcomeFactsNativeStatus = "cancelled"
+	AttemptOutcomeFactsNativeStatusCompleted  AttemptOutcomeFactsNativeStatus = "completed"
+	AttemptOutcomeFactsNativeStatusFailed     AttemptOutcomeFactsNativeStatus = "failed"
+	AttemptOutcomeFactsNativeStatusIncomplete AttemptOutcomeFactsNativeStatus = "incomplete"
+)
+
+// Valid indicates whether the value is a known member of the AttemptOutcomeFactsNativeStatus enum.
+func (e AttemptOutcomeFactsNativeStatus) Valid() bool {
+	switch e {
+	case AttemptOutcomeFactsNativeStatusCancelled:
+		return true
+	case AttemptOutcomeFactsNativeStatusCompleted:
+		return true
+	case AttemptOutcomeFactsNativeStatusFailed:
+		return true
+	case AttemptOutcomeFactsNativeStatusIncomplete:
 		return true
 	default:
 		return false
@@ -314,16 +398,16 @@ func (e CreateManagementTokenRequestScopes) Valid() bool {
 
 // Defines values for CredentialRequirement.
 const (
-	Forbidden CredentialRequirement = "forbidden"
-	Required  CredentialRequirement = "required"
+	CredentialRequirementForbidden CredentialRequirement = "forbidden"
+	CredentialRequirementRequired  CredentialRequirement = "required"
 )
 
 // Valid indicates whether the value is a known member of the CredentialRequirement enum.
 func (e CredentialRequirement) Valid() bool {
 	switch e {
-	case Forbidden:
+	case CredentialRequirementForbidden:
 		return true
-	case Required:
+	case CredentialRequirementRequired:
 		return true
 	default:
 		return false
@@ -543,6 +627,27 @@ func (e InteractionInspectionStatus) Valid() bool {
 	case InteractionInspectionStatusNotEvaluated:
 		return true
 	case InteractionInspectionStatusNotInspected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OperationDialectModelBinding.
+const (
+	OperationDialectModelBindingNone     OperationDialectModelBinding = "none"
+	OperationDialectModelBindingOptional OperationDialectModelBinding = "optional"
+	OperationDialectModelBindingRequired OperationDialectModelBinding = "required"
+)
+
+// Valid indicates whether the value is a known member of the OperationDialectModelBinding enum.
+func (e OperationDialectModelBinding) Valid() bool {
+	switch e {
+	case OperationDialectModelBindingNone:
+		return true
+	case OperationDialectModelBindingOptional:
+		return true
+	case OperationDialectModelBindingRequired:
 		return true
 	default:
 		return false
@@ -804,6 +909,30 @@ func (e ProvisionUserRequestRole) Valid() bool {
 	case ProvisionUserRequestRoleOwner:
 		return true
 	case ProvisionUserRequestRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProxyLimitCategory.
+const (
+	Bytes       ProxyLimitCategory = "bytes"
+	EventWork   ProxyLimitCategory = "event_work"
+	Persistence ProxyLimitCategory = "persistence"
+	Time        ProxyLimitCategory = "time"
+)
+
+// Valid indicates whether the value is a known member of the ProxyLimitCategory enum.
+func (e ProxyLimitCategory) Valid() bool {
+	switch e {
+	case Bytes:
+		return true
+	case EventWork:
+		return true
+	case Persistence:
+		return true
+	case Time:
 		return true
 	default:
 		return false
@@ -1271,6 +1400,12 @@ type AppliedRoutingPolicy struct {
 	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
+// AttemptFaultOrigin The component that owns a failed attempt: a provider-declared native outcome, provider transport, the provider's own in-band error, the client's delivery, a proxy-local capacity or persistence fault, a routing policy, or a contract mismatch. Proxy-local origins never describe provider health.
+type AttemptFaultOrigin string
+
+// AttemptFaultScope How far a failed attempt may charge shared state: the provider endpoint, the credential, the contract layer, or only this request.
+type AttemptFaultScope string
+
 // AttemptInteractionMetadata Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
 type AttemptInteractionMetadata struct {
 	ClientState   AttemptInteractionMetadataClientState   `json:"client_state"`
@@ -1290,6 +1425,30 @@ type AttemptInteractionMetadataPlanClass string
 
 // AttemptInteractionMetadataUpstreamState defines model for AttemptInteractionMetadata.UpstreamState.
 type AttemptInteractionMetadataUpstreamState string
+
+// AttemptOutcomeFacts Separately observed outcome facts for one attempt. Every member is emitted explicitly; a null member means the fact was recorded as absent, and the whole object is absent when the attempt's record predates outcome facts.
+type AttemptOutcomeFacts struct {
+	// FaultOrigin Attributed owner of the attempt's failure; never inferred from the HTTP status or response content.
+	FaultOrigin nullable.Nullable[AttemptFaultOrigin] `json:"fault_origin"`
+
+	// FaultResource The bounded gateway resource a proxy-local capacity fault names, such as event bytes or continuation state.
+	FaultResource nullable.Nullable[string] `json:"fault_resource"`
+
+	// FaultScope The scope the failure may charge; only provider-owned endpoint and credential scopes feed shared provider health.
+	FaultScope nullable.Nullable[AttemptFaultScope] `json:"fault_scope"`
+
+	// Limit The configured ceiling of the exhausted bounded resource, in its own unit.
+	Limit nullable.Nullable[int64] `json:"limit"`
+
+	// LimitCategory The category of the bounded proxy-local limit the attempt exhausted.
+	LimitCategory nullable.Nullable[ProxyLimitCategory] `json:"limit_category"`
+
+	// NativeStatus The provider-declared native terminal status observed for this attempt. A value such as failed or cancelled is the provider's own terminal report, not automatically a transport or contract fault.
+	NativeStatus nullable.Nullable[AttemptOutcomeFactsNativeStatus] `json:"native_status"`
+}
+
+// AttemptOutcomeFactsNativeStatus defines model for AttemptOutcomeFacts.NativeStatus.
+type AttemptOutcomeFactsNativeStatus string
 
 // AttemptResponse defines model for AttemptResponse.
 type AttemptResponse struct {
@@ -1329,8 +1488,11 @@ type AttemptRoutingMetadata struct {
 	FirstOutputMs       nullable.Nullable[int64]              `json:"first_output_ms,omitempty"`
 
 	// Interaction Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
-	Interaction          *AttemptInteractionMetadata             `json:"interaction,omitempty"`
-	Mode                 nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
+	Interaction *AttemptInteractionMetadata      `json:"interaction,omitempty"`
+	Mode        nullable.Nullable[TransportMode] `json:"mode,omitempty"`
+
+	// Outcome Attempt outcome facts recorded with the routing provenance. Absent when the stored record predates outcome facts — never reconstructed from the HTTP status or finish reason.
+	Outcome              nullable.Nullable[AttemptOutcomeFacts]  `json:"outcome,omitempty"`
 	Policy               nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
 	PricingRevisionId    nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
 	ProviderRevisionId   openapi_types.UUID                      `json:"provider_revision_id"`
@@ -2174,7 +2336,10 @@ type InteractionInspection struct {
 	EgressDialect    *string                       `json:"egress_dialect,omitempty"`
 	Evidence         []string                      `json:"evidence"`
 	Fidelity         InteractionInspectionFidelity `json:"fidelity"`
-	IngressDialect   *string                       `json:"ingress_dialect,omitempty"`
+
+	// HostedTools Provider-hosted tool families this plan admitted, such as web_search, bounded by the caller's authorization and the bound profile's qualified lifecycle contracts. Admission is a planner fact — it never executed a tool — and it is distinct from provider-emitted effects or observations. Omitted when the plan admitted none.
+	HostedTools    *[]string `json:"hosted_tools,omitempty"`
+	IngressDialect *string   `json:"ingress_dialect,omitempty"`
 
 	// Obligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
 	Obligations *InteractionObligations `json:"obligations,omitempty"`
@@ -2478,18 +2643,28 @@ type OidcRoleMappingResponse struct {
 
 // OperationDialect defines model for OperationDialect.
 type OperationDialect struct {
-	Documentation     string                 `json:"documentation"`
-	Evidence          string                 `json:"evidence"`
-	Id                string                 `json:"id"`
-	Label             string                 `json:"label"`
-	Mode              string                 `json:"mode"`
-	Operation         string                 `json:"operation"`
-	OperationRevision string                 `json:"operation_revision"`
-	RequestSchema     map[string]interface{} `json:"request_schema"`
-	ResultSchema      map[string]interface{} `json:"result_schema"`
-	Revision          string                 `json:"revision"`
-	Surface           string                 `json:"surface"`
+	Documentation string `json:"documentation"`
+	Evidence      string `json:"evidence"`
+	Id            string `json:"id"`
+	Label         string `json:"label"`
+	Mode          string `json:"mode"`
+
+	// ModelBinding Whether this dialect's request schema names a serving model. required: every request must carry one; optional: the schema admits one but callers may rely on a deployment default; none: the dialect admits no model field and the model identifier travels only in the addressing path.
+	ModelBinding      OperationDialectModelBinding `json:"model_binding"`
+	Operation         string                       `json:"operation"`
+	OperationRevision string                       `json:"operation_revision"`
+
+	// RequestSchema The dialect's registered request body schema; null when the dialect registers no request schema.
+	RequestSchema nullable.Nullable[map[string]interface{}] `json:"request_schema,omitempty"`
+
+	// ResultSchema The dialect's registered result schema; null when the dialect registers no result schema.
+	ResultSchema nullable.Nullable[map[string]interface{}] `json:"result_schema,omitempty"`
+	Revision     string                                    `json:"revision"`
+	Surface      string                                    `json:"surface"`
 }
+
+// OperationDialectModelBinding Whether this dialect's request schema names a serving model. required: every request must carry one; optional: the schema admits one but callers may rely on a deployment default; none: the dialect admits no model field and the model identifier travels only in the addressing path.
+type OperationDialectModelBinding string
 
 // OperationDialectList defines model for OperationDialectList.
 type OperationDialectList struct {
@@ -3294,6 +3469,9 @@ type ProvisionUserRequest struct {
 // ProvisionUserRequestRole defines model for ProvisionUserRequest.Role.
 type ProvisionUserRequestRole string
 
+// ProxyLimitCategory Classification of the bounded proxy-local resource an exhaustion hit: a byte representation, aggregate admitted event work, a lifetime or deadline, or a durable persistence bound.
+type ProxyLimitCategory string
+
 // PublishPricingSourceRequest defines model for PublishPricingSourceRequest.
 type PublishPricingSourceRequest struct {
 	// EffectiveAt Defaults to now; must not be in the past.
@@ -3717,23 +3895,29 @@ type RoutingDecision struct {
 	Eligible             bool                                  `json:"eligible"`
 	EstimatedInputTokens nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
 
+	// Execution Delivery evidence of an attempt that ran under a strict plan: upstream acceptance is independent of client observation. Absent on planned rows and on executions that carried no strict interaction.
+	Execution nullable.Nullable[AttemptInteractionMetadata] `json:"execution,omitempty"`
+
 	// Incompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
 	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification.
-	Interaction           *InteractionInspection          `json:"interaction,omitempty"`
-	MaxOutputTokens       nullable.Nullable[int64]        `json:"max_output_tokens,omitempty"`
-	MetadataObservedAt    nullable.Nullable[time.Time]    `json:"metadata_observed_at,omitempty"`
-	Performance           nullable.Nullable[Measurement]  `json:"performance,omitempty"`
-	Price                 nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
-	Priority              int32                           `json:"priority"`
-	ProviderId            openapi_types.UUID              `json:"provider_id"`
-	Reason                nullable.Nullable[string]       `json:"reason,omitempty"`
-	RequestedOutputTokens nullable.Nullable[int64]        `json:"requested_output_tokens,omitempty"`
-	Strategy              RoutingStrategy                 `json:"strategy"`
-	TargetId              openapi_types.UUID              `json:"target_id"`
-	UpstreamModel         string                          `json:"upstream_model"`
-	VendorId              nullable.Nullable[string]       `json:"vendor_id,omitempty"`
+	Interaction        *InteractionInspection       `json:"interaction,omitempty"`
+	MaxOutputTokens    nullable.Nullable[int64]     `json:"max_output_tokens,omitempty"`
+	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
+
+	// Outcome Outcome facts of an attempt that ran, such as the provider-declared native terminal status or the fault attribution. Only an executed attempt row carries it; a planned or excluded row never does.
+	Outcome               nullable.Nullable[AttemptOutcomeFacts] `json:"outcome,omitempty"`
+	Performance           nullable.Nullable[Measurement]         `json:"performance,omitempty"`
+	Price                 nullable.Nullable[RoutingPrice]        `json:"price,omitempty"`
+	Priority              int32                                  `json:"priority"`
+	ProviderId            openapi_types.UUID                     `json:"provider_id"`
+	Reason                nullable.Nullable[string]              `json:"reason,omitempty"`
+	RequestedOutputTokens nullable.Nullable[int64]               `json:"requested_output_tokens,omitempty"`
+	Strategy              RoutingStrategy                        `json:"strategy"`
+	TargetId              openapi_types.UUID                     `json:"target_id"`
+	UpstreamModel         string                                 `json:"upstream_model"`
+	VendorId              nullable.Nullable[string]              `json:"vendor_id,omitempty"`
 }
 
 // RoutingPolicy defines model for RoutingPolicy.

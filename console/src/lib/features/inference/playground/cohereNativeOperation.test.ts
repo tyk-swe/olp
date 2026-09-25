@@ -3,16 +3,39 @@ import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
 import {
   nativeDialects,
   nativeOperationRequest,
-  runNativeOperation
+  runNativeOperation,
+  type OperationDialect
 } from './nativeOperation';
 import { rerankRows, vectorRows } from './operationPresentation';
 import { templateFor } from './templates';
 
+const dialect = (
+  id: string,
+  operation: string,
+  model_binding: OperationDialect['model_binding']
+): OperationDialect => ({
+  id,
+  operation,
+  model_binding,
+  revision: 'v1',
+  operation_revision: 'v1',
+  surface: 'native',
+  mode: 'unary',
+  label: id,
+  documentation: '',
+  evidence: ''
+});
+
+const catalog = [
+  dialect('cohere-embed-v2', 'embeddings', 'required'),
+  dialect('cohere-rerank-v2', 'rerank', 'required')
+];
+
 afterEach(() => vi.restoreAllMocks());
 
 it('offers native Cohere v2 tasks and retains typed vector groups without float conversion', async () => {
-  expect(nativeDialects('embeddings')).toContain('cohere-embed-v2');
-  expect(nativeDialects('rerank')).toContain('cohere-rerank-v2');
+  expect(nativeDialects(catalog, 'embeddings')).toContain('cohere-embed-v2');
+  expect(nativeDialects(catalog, 'rerank')).toContain('cohere-rerank-v2');
   const template = templateFor('cohere-typed-embeddings');
   expect(template?.nativeDialect).toBe('cohere-embed-v2');
   expect(template?.request).toMatchObject({
@@ -30,6 +53,7 @@ it('offers native Cohere v2 tasks and retains typed vector groups without float 
   const source =
     '{"model":"","input_type":"search_document","texts":["one"],"embedding_types":["float","int8","ubinary"],"truncate":"NONE"}';
   const result = await runNativeOperation(
+    catalog,
     'embeddings',
     'cohere-embed-v2',
     'cohere-route',
@@ -86,7 +110,7 @@ it('keeps Cohere native rerank result order, ties, and score spelling', () => {
   const request = nativeOperationRequest(
     '{"model":"","query":"q","documents":["first","second"],"top_n":2}',
     'cohere-route',
-    'cohere-rerank-v2'
+    'required'
   );
   const response = parseNativeJSON(
     '{"results":[{"index":1,"relevance_score":0.1000000000000000000001},{"index":0,"relevance_score":0.1000000000000000000001}]}'

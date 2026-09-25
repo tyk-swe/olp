@@ -7,6 +7,7 @@
     formatCost,
     formatDate,
     formatInteger,
+    stateLabel,
     statusLabel,
     statusTone
   } from '$lib/format';
@@ -329,6 +330,87 @@
                   </dd>
                 </div>
               </dl>
+              {#if attempt.routing.interaction}
+                <dl aria-label="Strict interaction evidence">
+                  <div>
+                    <dt>Fidelity</dt>
+                    <dd>{attempt.routing.interaction.fidelity}</dd>
+                  </div>
+                  <div>
+                    <dt>Plan class</dt>
+                    <dd>
+                      {stateLabel(attempt.routing.interaction.plan_class)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Upstream state</dt>
+                    <dd>{attempt.routing.interaction.upstream_state}</dd>
+                  </div>
+                  <div>
+                    <dt>Client state</dt>
+                    <dd>{attempt.routing.interaction.client_state}</dd>
+                  </div>
+                </dl>
+              {:else}
+                <p class="evidence-absent">
+                  Strict interaction evidence was not recorded for this attempt.
+                </p>
+              {/if}
+              {#if attempt.routing.outcome}
+                <dl aria-label="Attempt outcome facts">
+                  <div>
+                    <dt>Native status</dt>
+                    <dd>
+                      {attempt.routing.outcome.native_status ?? 'None observed'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Fault origin</dt>
+                    <dd>
+                      {attempt.routing.outcome.fault_origin
+                        ? stateLabel(attempt.routing.outcome.fault_origin)
+                        : 'None'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Fault scope</dt>
+                    <dd>
+                      {attempt.routing.outcome.fault_scope
+                        ? stateLabel(attempt.routing.outcome.fault_scope)
+                        : 'None'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Fault resource</dt>
+                    <dd>
+                      {attempt.routing.outcome.fault_resource ?? 'None'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Limit category</dt>
+                    <dd>
+                      {attempt.routing.outcome.limit_category
+                        ? stateLabel(attempt.routing.outcome.limit_category)
+                        : 'None'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Configured limit</dt>
+                    <dd>
+                      {attempt.routing.outcome.limit == null
+                        ? 'None'
+                        : formatInteger(attempt.routing.outcome.limit)}
+                    </dd>
+                  </div>
+                </dl>
+              {:else}
+                <p class="evidence-absent">
+                  Outcome facts were not recorded for this attempt; the HTTP
+                  status does not reconstruct them.
+                </p>
+              {/if}
+            {:else}
+              <p>No routing provenance was recorded for this attempt.</p>
             {/if}
             {#if attempt.charge_status == null}
               <p>No usage or pricing facts were recorded.</p>
@@ -437,6 +519,11 @@
   .partial-attempts {
     margin: 0.75rem 0 0;
     color: var(--warning);
+    font-size: var(--text-caption);
+  }
+  .evidence-absent {
+    margin: 0.75rem 0 0;
+    color: var(--foreground-muted);
     font-size: var(--text-caption);
   }
 

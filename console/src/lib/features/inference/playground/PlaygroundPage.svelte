@@ -29,10 +29,13 @@
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
   import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
   import {
+    nativeDialectEntry,
     nativeDialects,
     nativeOperationRequest,
     type NativeOperation
   } from './nativeOperation';
+  import { listOperationDialects } from '$lib/features/providers/api';
+  import { providerKeys } from '$lib/features/providers/providerKeys';
   import {
     playgroundTemplates,
     templateFor
@@ -87,6 +90,13 @@
     queryKey: apiKeyQueries.list(),
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
+  // The registered dialect catalog owns which dialects exist; the console
+  // never keeps a parallel list that could drift from the registry.
+  const dialects = createQuery(() => ({
+    queryKey: providerKeys.operationDialects,
+    queryFn: ({ signal }) => listOperationDialects(signal)
+  }));
+  const dialectCatalog = $derived(dialects.data ?? []);
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
   const selectedRoute = $derived(
     (routes.data ?? []).find((route) => route.slug === model.trim())
@@ -244,7 +254,7 @@
   }
 
   function currentNativeDialect(): string {
-    const options = nativeDialects(operation);
+    const options = nativeDialects(dialectCatalog, operation);
     return options.includes(nativeDialect) ? nativeDialect : (options[0] ?? '');
   }
 
@@ -277,7 +287,7 @@
       const registeredNative =
         strictSelected &&
         composer === 'advanced' &&
-        nativeDialects(operation).length > 0;
+        nativeDialects(dialectCatalog, operation).length > 0;
       const selectedDialect = registeredNative
         ? currentNativeDialect()
         : inspectDialect || undefined;
@@ -306,7 +316,11 @@
                 ? nativeOperationRequest(
                     rawJson,
                     model.trim(),
-                    selectedDialect!
+                    nativeDialectEntry(
+                      dialectCatalog,
+                      operation,
+                      selectedDialect!
+                    )!.model_binding
                   )
                 : advancedRequest(),
               dialect: selectedDialect as
@@ -707,17 +721,21 @@
           <label for="playground-inspect-dialect">Native request dialect</label>
           <select
             id="playground-inspect-dialect"
-            value={strictSelected && nativeDialects(operation).length
+            value={strictSelected &&
+            nativeDialects(dialectCatalog, operation).length
               ? currentNativeDialect()
               : inspectDialect}
             onchange={(event) => {
-              if (strictSelected && nativeDialects(operation).length)
+              if (
+                strictSelected &&
+                nativeDialects(dialectCatalog, operation).length
+              )
                 nativeDialect = event.currentTarget.value;
               else inspectDialect = event.currentTarget.value;
             }}
           >
             <option value="">Default for operation and surface</option>
-            {#each strictSelected && nativeDialects(operation).length ? nativeDialects(operation) : inspectionDialects(operation, surface) as dialect (dialect)}
+            {#each strictSelected && nativeDialects(dialectCatalog, operation).length ? nativeDialects(dialectCatalog, operation) : inspectionDialects(dialectCatalog, operation, surface, streamEnabled ? 'streaming' : 'unary') as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -939,12 +957,13 @@
     {#key model.trim()}
       <StrictToolPlayground route={model.trim()} requestText={rawJson} />
     {/key}
-  {:else if composer === 'advanced' && nativeDialects(operation).length}
+  {:else if composer === 'advanced' && nativeDialects(dialectCatalog, operation).length}
     {#key `${model.trim()}:${operation}:${templateKey}`}
       <NativeOperationPlayground
         route={model.trim()}
         operation={operation as NativeOperation}
         requestText={rawJson}
+        catalog={dialectCatalog}
         bind:dialect={nativeDialect}
       />
     {/key}

@@ -104,12 +104,14 @@ func Definitions() []operations.Dialect {
 		}
 		if id == "openai-embeddings" || id == "voyage-embeddings" || id == "cohere-embed-v2" {
 			d.BindModel = operations.ModelChanges
+			d.ModelBinding = operations.ModelRequired
 			if id != "cohere-embed-v2" {
 				d.BindResultModel = operations.ModelChanges
 			}
 		}
 		if id == "gemini-embeddings" || id == "gemini-batch-embeddings" {
 			d.BindModel = googleModels
+			d.ModelBinding = operations.ModelOptional
 			d.ValidateRoute = googleRoute
 		}
 		d.Defaults = defaults(id)
