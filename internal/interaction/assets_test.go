@@ -19,7 +19,7 @@ func TestNativeAssetIDsRequireOwnedServingAuthority(t *testing.T) {
 	} {
 		t.Run(fixture.profile, func(t *testing.T) {
 			compiled := template(t, configuration(t, fixture.profile))
-			_, err := compiled.Bind(request(t, fixture.family, fixture.body), Context{})
+			_, err := compiled.BindRequest(request(t, fixture.family, fixture.body), Context{})
 			assertReason(t, err, "resource_affinity")
 		})
 	}

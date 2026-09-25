@@ -242,7 +242,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		}
 		binding := context
 		binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
-		plan, err := template.Bind(parsed, binding)
+		plan, err := template.BindRequest(parsed, binding)
 		if err != nil {
 			return safeInspectionError(err)
 		}

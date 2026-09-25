@@ -1,6 +1,11 @@
 // Package interaction compiles and binds strict operation contracts. It owns
 // semantic admission; live authority, dispatch, retry and accounting remain with
 // their existing owners. No legacy encoder establishes a strict plan.
+//
+// Generation dialects are resolved through the operation-owned registry: the
+// planner never switches on provider families. A dialect registration owns its
+// grammar, admission, delivery and effects contracts; a mapping qualifies one
+// actual source/target pair.
 package interaction
 
 import (
@@ -14,6 +19,8 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/generation"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -21,14 +28,21 @@ const (
 	NativeIdentity       = "native_identity"
 	QualifiedInteraction = "qualified_interaction"
 	evidenceNative       = "codec-fixture/native-source-conservation/v1"
-	evidenceText         = "codec-fixture/chat-anthropic-stateless-text/v1"
 )
+
+// ContinuationV1 names the negotiated chat→anthropic tool contract for
+// compatibility with stored resources and tests.
+const ContinuationV1 = protocols.ChatAnthropicToolsV1
 
 type Config struct {
 	Provider                      connectors.Config
 	ProviderID, RevisionID, Model string
 	Policy                        *contentpolicy.Policy
 	MaxBodyBytes, MaxEventBytes   int
+	// Registry resolves generation dialect identities and qualified mappings;
+	// nil uses the built-in registrations. Runtime configuration supplies
+	// registered values only — no caller may install codecs here.
+	Registry *generation.Registry
 }
 type Context struct {
 	Headers             http.Header
@@ -51,29 +65,52 @@ type Disposition = oif.Disposition
 type Obligations = oif.Obligations
 type Receipt = oif.Receipt
 
+// Continuation and Delivery alias the operation-owned contract types so stored
+// resources and recovery endpoints share one wire shape.
+type Continuation = generation.Continuation
+type Delivery = generation.Delivery
+
+// ContinuationFrame wraps projected client JSON as one SSE data frame.
+func ContinuationFrame(raw []byte) []byte { return generation.ContinuationFrame(raw) }
+
+// ContinuationActionable marks a projected client frame carrying an actionable
+// tool-call delta.
+func ContinuationActionable(frame []byte) bool { return generation.ContinuationActionable(frame) }
+
+// SameSource verifies an invocation for delivery replay with exact numeric
+// lexemes and ordered arrays, allowing only insignificant JSON object order.
+func SameSource(a, b []byte) bool { return generation.SameSource(a, b) }
+
 type Template struct {
 	config   Config
 	profile  connectors.Profile
-	wire     openai.Family
+	target   generation.Dialect
+	registry *generation.Registry
 	policy   *contentpolicy.Compiled
 	defaults map[string]json.RawMessage
 	origins  []connectors.DefaultProvenance
 	serving  ServingIdentity
 }
 type Plan struct {
-	template     *Template
-	config       connectors.Config
-	prepared     oif.Prepared
-	effective    oif.Document
-	sourceFamily openai.Family
-	stream       bool
-	route        string
-	receipt      Receipt
+	template  *Template
+	config    connectors.Config
+	prepared  oif.Prepared
+	effective oif.Document
+	source    generation.Source
+	target    generation.Dialect
+	mapping   *generation.Mapping
+	stream    bool
+	route     string
+	receipt   Receipt
 }
 
 // Compile snapshots all caller-owned configuration. A template is immutable and
 // can be shared by the bounded published runtime across requests.
 func Compile(config Config) (*Template, error) {
+	registry := config.Registry
+	if registry == nil {
+		registry = defaultRegistry()
+	}
 	provider, err := copyConfig(config.Provider)
 	if err != nil {
 		return nil, incompatible("target_capability", "/profile", "profile_configuration", "The provider configuration cannot form a strict template.")
@@ -91,8 +128,8 @@ func Compile(config Config) (*Template, error) {
 	if !slices.Contains(profile.Operations, "generation") {
 		return nil, incompatible("target_capability", "/operation", "operation_contract", "This profile has no strict generation contract.")
 	}
-	wire, err := provider.TargetFamily(openai.FamilyChat)
-	if err != nil {
+	target, ok := registry.DialectLabel(profile.OperationDialect("generation"))
+	if !ok || target.Operation != generation.Contract() {
 		return nil, incompatible("target_capability", "/profile", "generation_dialect", "The profile has no implemented generation dialect.")
 	}
 	policy, err := copyPolicy(config.Policy)
@@ -129,7 +166,7 @@ func Compile(config Config) (*Template, error) {
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}
-	return &Template{config: config, profile: profile, wire: wire, policy: compiled, defaults: defaults, origins: origins, serving: serving}, nil
+	return &Template{config: config, profile: profile, target: target, registry: registry, policy: compiled, defaults: defaults, origins: origins, serving: serving}, nil
 }
 func copyConfig(config connectors.Config) (connectors.Config, error) {
 	out := config
@@ -200,8 +237,44 @@ func copyPolicy(policy *contentpolicy.Policy) (*contentpolicy.Policy, error) {
 }
 func (p *Plan) Prepared() oif.Prepared    { return p.prepared }
 func (p *Plan) Body() []byte              { return p.prepared.Document().Bytes() }
-func (p *Plan) Wire() openai.Family       { return p.template.wire }
 func (p *Plan) Config() connectors.Config { out, _ := copyConfig(p.config); return out }
+
+// Wire is the compatibility view of the target dialect's checked-in hosting
+// path; strict dispatch treats it as addressing only, never semantics.
+func (p *Plan) Wire() openai.Family { return openai.Family(p.target.Address.LegacyPath) }
+
+// TargetDialect is the registered destination contract this plan serves.
+func (p *Plan) TargetDialect() generation.Dialect { return p.target }
+
+// Source is the admitted caller source the plan bound.
+func (p *Plan) Source() generation.Source { return p.source }
+
+// Stream reports the bound incremental delivery selection.
+func (p *Plan) Stream() bool { return p.stream }
+
+// Effective is the admitted effective native request document.
+func (p *Plan) Effective() oif.Document { return p.effective }
+
+// Estimate is the dialect-owned reservation shape of the effective request.
+func (p *Plan) Estimate() generation.Estimate { return p.target.Estimate(p.effective) }
+
+// OutputLimit is the largest named output bound the effective request allowed.
+func (p *Plan) OutputLimit() *int64 { return p.target.Estimate(p.effective).Output }
+
+// Parameters are the effective request's routing-relevant control names.
+func (p *Plan) Parameters() []string { return p.target.Parameters(p.effective) }
+
+// ClientContract names the negotiated client contract this plan serves; empty
+// for native or stateless-qualified interactions.
+func (p *Plan) ClientContract() string {
+	if p.mapping == nil {
+		return ""
+	}
+	return p.mapping.ClientContract
+}
+
+// EffectiveRequest is the legacy envelope view of the effective request for
+// compatibility callers that still consume *openai.Request.
 func (p *Plan) EffectiveRequest() *openai.Request {
 	return openai.NewSourceEnvelope(p.Wire(), p.route, p.stream, p.effective)
 }

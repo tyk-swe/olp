@@ -1,4 +1,4 @@
-package protocols
+package protocols_test
 
 import (
 	"encoding/base64"
@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func parseEmbeddings(t *testing.T, body string) *openai.Request {
 	t.Helper()
-	r, err := Parse(openai.FamilyEmbeddings, []byte(body), "route")
+	r, err := protocols.Parse(openai.FamilyEmbeddings, []byte(body), "route")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +24,7 @@ func parseEmbeddings(t *testing.T, body string) *openai.Request {
 
 func encode(t *testing.T, r *openai.Request, kind, vendor, model string) (map[string]any, openai.Family) {
 	t.Helper()
-	data, wire, err := Encode(r, kind, vendor, model, nil)
+	data, wire, err := protocols.Encode(r, kind, vendor, model, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestGeminiEmbeddingEncode(t *testing.T) {
 		t.Fatalf("batch entry: %v", entry)
 	}
 	r := parseEmbeddings(t, `{"model":"route","input":[1,2,3]}`)
-	if _, _, err := Encode(r, "gemini", "google", "m", nil); err == nil {
+	if _, _, err := protocols.Encode(r, "gemini", "google", "m", nil); err == nil {
 		t.Fatal("native embeddings accepted token-array input")
 	}
 }
@@ -89,7 +90,7 @@ func TestVertexEmbeddingEncode(t *testing.T) {
 		long.WriteString(`"x"`)
 	}
 	long.WriteString(`]}`)
-	if _, _, err := Encode(parseEmbeddings(t, long.String()), "vertex_ai", "google-vertex", "m", nil); err == nil {
+	if _, _, err := protocols.Encode(parseEmbeddings(t, long.String()), "vertex_ai", "google-vertex", "m", nil); err == nil {
 		t.Fatal("vertex accepted more than 5 inputs")
 	}
 }
@@ -102,10 +103,10 @@ func TestBedrockEmbeddingEncode(t *testing.T) {
 	if body["inputText"] != "hello" || body["dimensions"] != float64(256) || body["normalize"] != true {
 		t.Fatalf("bedrock body: %v", body)
 	}
-	if _, _, err := Encode(parseEmbeddings(t, `{"model":"route","input":"hello"}`), "bedrock", "amazon-bedrock", "anthropic.claude-3", nil); err == nil {
+	if _, _, err := protocols.Encode(parseEmbeddings(t, `{"model":"route","input":"hello"}`), "bedrock", "amazon-bedrock", "anthropic.claude-3", nil); err == nil {
 		t.Fatal("unqualified bedrock model accepted")
 	}
-	if _, _, err := Encode(parseEmbeddings(t, `{"model":"route","input":["a","b"]}`), "bedrock", "amazon-bedrock", "amazon.titan-embed-text-v2:0", nil); err == nil {
+	if _, _, err := protocols.Encode(parseEmbeddings(t, `{"model":"route","input":["a","b"]}`), "bedrock", "amazon-bedrock", "amazon.titan-embed-text-v2:0", nil); err == nil {
 		t.Fatal("bedrock accepted more than one input")
 	}
 }
@@ -130,7 +131,7 @@ func TestNativeEmbeddingURLs(t *testing.T) {
 
 func decodeEmbedding(t *testing.T, wire openai.Family, body, encoding string, r *openai.Request) *openai.Completion {
 	t.Helper()
-	c, err := DecodeRequest(wire, openai.FamilyEmbeddings, []byte(body), "route", encoding, r)
+	c, err := protocols.DecodeRequest(wire, openai.FamilyEmbeddings, []byte(body), "route", encoding, r)
 	if err != nil {
 		t.Fatalf("decode %s: %v", wire, err)
 	}
@@ -167,7 +168,7 @@ func TestGeminiEmbeddingDecode(t *testing.T) {
 	if err != nil || len(raw) != 4 || float64(math.Float32frombits(binary.LittleEndian.Uint32(raw))) != 0.5 {
 		t.Fatalf("base64 embedding: %v %v", raw, err)
 	}
-	if _, err := DecodeRequest(openai.FamilyGeminiEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":{}}`), "route", "", nil); err == nil {
+	if _, err := protocols.DecodeRequest(openai.FamilyGeminiEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":{}}`), "route", "", nil); err == nil {
 		t.Fatal("missing values accepted")
 	}
 }
@@ -177,10 +178,10 @@ func TestVertexEmbeddingDecode(t *testing.T) {
 	if c.Usage == nil || c.Usage.InputTokens != 5 || c.Usage.TotalTokens != 5 {
 		t.Fatalf("vertex usage: %+v", c.Usage)
 	}
-	if _, err := DecodeRequest(openai.FamilyVertexEmbeddings, openai.FamilyEmbeddings, []byte(`{"predictions":[{"embeddings":{"values":[0.5],"statistics":{"token_count":"x"}}}]}`), "route", "", nil); err == nil {
+	if _, err := protocols.DecodeRequest(openai.FamilyVertexEmbeddings, openai.FamilyEmbeddings, []byte(`{"predictions":[{"embeddings":{"values":[0.5],"statistics":{"token_count":"x"}}}]}`), "route", "", nil); err == nil {
 		t.Fatal("invalid token count accepted")
 	}
-	if _, err := DecodeRequest(openai.FamilyVertexEmbeddings, openai.FamilyEmbeddings, []byte(`{"predictions":[{}]}`), "route", "", nil); err == nil {
+	if _, err := protocols.DecodeRequest(openai.FamilyVertexEmbeddings, openai.FamilyEmbeddings, []byte(`{"predictions":[{}]}`), "route", "", nil); err == nil {
 		t.Fatal("missing vector accepted")
 	}
 }
@@ -190,10 +191,10 @@ func TestBedrockEmbeddingDecode(t *testing.T) {
 	if c.Usage == nil || c.Usage.InputTokens != 7 {
 		t.Fatalf("bedrock usage: %+v", c.Usage)
 	}
-	if _, err := DecodeRequest(openai.FamilyBedrockEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":[0.5]}`), "route", "", nil); err == nil {
+	if _, err := protocols.DecodeRequest(openai.FamilyBedrockEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":[0.5]}`), "route", "", nil); err == nil {
 		t.Fatal("missing token count accepted")
 	}
-	if _, err := DecodeRequest(openai.FamilyBedrockEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":[0.5],"inputTextTokenCount":-1}`), "route", "", nil); err == nil {
+	if _, err := protocols.DecodeRequest(openai.FamilyBedrockEmbeddings, openai.FamilyEmbeddings, []byte(`{"embedding":[0.5],"inputTextTokenCount":-1}`), "route", "", nil); err == nil {
 		t.Fatal("negative token count accepted")
 	}
 }
@@ -237,7 +238,7 @@ func TestRerankVendorEncode(t *testing.T) {
 	if f["top_k"] != float64(1) || f["top_n"] != nil || f["truncation"] != true || f["model"] != "rerank-2" {
 		t.Fatalf("voyage body: %v", f)
 	}
-	if _, _, err := Encode(r, "openai_compatible", "cohere", "rerank-v3.5", nil); err == nil {
+	if _, _, err := protocols.Encode(r, "openai_compatible", "cohere", "rerank-v3.5", nil); err == nil {
 		t.Fatal("cohere accepted truncation")
 	}
 	r = parseRerank(t, `{"model":"route","query":"q","documents":["a","b"],"top_n":1}`)
@@ -245,7 +246,7 @@ func TestRerankVendorEncode(t *testing.T) {
 	if f["top_n"] != float64(1) || f["model"] != "rerank-v3.5" {
 		t.Fatalf("cohere body: %v", f)
 	}
-	if _, _, err := Encode(r, "openai_compatible", "mistral", "m", nil); err == nil {
+	if _, _, err := protocols.Encode(r, "openai_compatible", "mistral", "m", nil); err == nil {
 		t.Fatal("unreviewed vendor accepted for rerank")
 	}
 	cohere := connectors.Config{Kind: "openai_compatible", VendorID: "cohere", Endpoint: "https://api.cohere.ai/compatibility/v1"}
@@ -264,7 +265,7 @@ func TestRerankVendorEncode(t *testing.T) {
 
 func TestRerankDecode(t *testing.T) {
 	r := parseRerank(t, `{"model":"route","query":"q","documents":["a","b"],"return_documents":true}`)
-	c, err := DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"data":[{"index":1,"relevance_score":0.9,"document":"b"},{"index":0,"relevance_score":0.1}],"usage":{"total_tokens":11}}`), "route", "", r)
+	c, err := protocols.DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"data":[{"index":1,"relevance_score":0.9,"document":"b"},{"index":0,"relevance_score":0.1}],"usage":{"total_tokens":11}}`), "route", "", r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,14 +289,14 @@ func TestRerankDecode(t *testing.T) {
 		t.Fatalf("voyage usage: %+v %s", c.Usage, c.Body)
 	}
 	r = parseRerank(t, `{"model":"route","query":"q","documents":["a","b"]}`)
-	c, err = DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"data":[{"index":1,"relevance_score":0.9,"document":"b"}]}`), "route", "", r)
+	c, err = protocols.DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"data":[{"index":1,"relevance_score":0.9,"document":"b"}]}`), "route", "", r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(c.Body), `"document"`) {
 		t.Fatalf("unrequested document leaked: %s", c.Body)
 	}
-	c, err = DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"id":"r1","results":[{"index":0,"relevance_score":0.5}],"meta":{"billed_units":{"search_units":2}}}`), "route", "", r)
+	c, err = protocols.DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"id":"r1","results":[{"index":0,"relevance_score":0.5}],"meta":{"billed_units":{"search_units":2}}}`), "route", "", r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestRerankDecodeRejects(t *testing.T) {
 		`{"usage":{"total_tokens":-1},"data":[{"index":0,"relevance_score":0.5}]}`,
 		`not json`,
 	} {
-		if _, err := DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(body), "route", "", r); err == nil {
+		if _, err := protocols.DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(body), "route", "", r); err == nil {
 			t.Fatalf("invalid rerank response accepted: %s", body)
 		}
 	}

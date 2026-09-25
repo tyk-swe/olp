@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -23,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/generation"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -75,21 +75,26 @@ type execution struct {
 	request              request
 	family               openai.Family
 	parsed               *openai.Request
-	media                *media.Request
-	actor                string
-	keyID                string
-	budgetGroupID        *string
-	attribution          map[string]string
-	userID               string
-	affinity             []byte
-	authority            access.Authority
-	route                *runtime.Route
-	mode                 string
-	attempts             []runtime.Attempt
-	budget               int
-	preferences          *runtime.Preferences
-	decisions            []runtime.Decision
-	policy               runtime.EffectivePolicy
+	// source is the neutral lifted generation envelope; gen is its registered
+	// dialect, when the request is a generation admitted through the
+	// operation-owned registry. parsed remains the compatibility view.
+	source        generation.Source
+	gen           *generation.Dialect
+	media         *media.Request
+	actor         string
+	keyID         string
+	budgetGroupID *string
+	attribution   map[string]string
+	userID        string
+	affinity      []byte
+	authority     access.Authority
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
@@ -538,7 +543,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.parsed.Stream)
+	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.source.Stream)
+	// Generation addressing is declared by the registered target dialect;
+	// legacy-path dialects resolve to the same URL through the adapter.
+	if contract != nil {
+		endpoint, err = cfg.GenerationURL(contract.TargetDialect(), a.UpstreamModel, x.source.Stream)
+	}
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -550,7 +560,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
-	if x.parsed.Stream {
+	if x.source.Stream {
 		req.Header.Set("Accept", "text/event-stream")
 		if wire == "bedrock" || cfg.EventStream() {
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
@@ -616,7 +626,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	var completion *openai.Completion
 	committed := false
 	actionable := false
-	if x.parsed.Stream {
+	if x.source.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 		if mediaType != "text/event-stream" && !((wire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
@@ -637,11 +647,18 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 				frame = mapped
 			}
-			if wire == openai.FamilyResponses && (bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n"))) {
-				var err error
-				frame, err = redactFailedResponseFrame(frame, credentialValues)
-				if err != nil {
-					return err
+			if bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n")) {
+				var redactErr error
+				switch {
+				case x.gen != nil && x.gen.RedactEvent != nil:
+					// The registered source dialect owns which frames can carry
+					// credential material and how they are scrubbed.
+					frame, redactErr = x.gen.RedactEvent(frame, credentialValues)
+				case wire == openai.FamilyResponses:
+					frame, redactErr = redactFailedResponseFrame(frame, credentialValues)
+				}
+				if redactErr != nil {
+					return redactErr
 				}
 			}
 			if !committed {
@@ -665,9 +682,15 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					fact.Interaction.ClientState = usage.ClientActionable
 				}
 			}
-			if err == nil && fact.FirstOutput == nil && protocols.MeaningfulFrame(x.family, frame) {
-				elapsed := s.now().Sub(fact.StartedAt)
-				fact.FirstOutput = &elapsed
+			if err == nil && fact.FirstOutput == nil {
+				meaningful := protocols.MeaningfulFrame(x.family, frame)
+				if x.gen != nil && x.gen.MeaningfulFrame != nil {
+					meaningful = x.gen.MeaningfulFrame(frame)
+				}
+				if meaningful {
+					elapsed := s.now().Sub(fact.StartedAt)
+					fact.FirstOutput = &elapsed
+				}
 			}
 			return err
 		}
@@ -678,14 +701,20 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				if err := contract.ValidateEvent(event); err != nil {
 					return err
 				}
-				if x.strict() && x.family == openai.FamilyResponses {
-					if kind, present := event.Source().Root().Lookup("type"); present {
-						if text, ok := kind.Text(); ok && text == "response.incomplete" {
-							strictResponseIncomplete = true
+				if x.strict() {
+					if incomplete := contract.TargetDialect().IncompleteEvent; incomplete != "" {
+						if kind, present := event.Source().Root().Lookup("type"); present {
+							if text, ok := kind.Text(); ok && text == incomplete {
+								strictResponseIncomplete = true
+							}
 						}
 					}
 				}
-				actionable = actionable || eventActionable(event)
+				if f := contract.TargetDialect().EventActionable; f != nil {
+					actionable = actionable || f(event)
+				} else {
+					actionable = actionable || eventActionable(event)
+				}
 				return nil
 			}
 		}
@@ -693,7 +722,8 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			var projection *interaction.ToolProjection
 			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
 			if err == nil {
-				completion, err = protocols.StreamWithEvents(wire, wire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
+				var native *generation.Native
+				native, err = contract.TargetDialect().StreamNative(generation.StreamInput{Source: contract.Source(), Body: cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), MaxEventBytes: int(s.cfg.MaxEventBytes), Route: x.route.Slug, IncludeUsage: true}, func([]byte) error { return nil }, func(event oif.Event) error {
 					frames, e := projection.Observe(event)
 					if e != nil {
 						return e
@@ -709,6 +739,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					}
 					return nil
 				})
+				completion = protocols.CompletionFromNative(native)
 			}
 			if err == nil {
 				st.upstream.Store(3)
@@ -733,8 +764,15 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					}
 				}
 			}
+		} else if contract != nil && contract.TargetDialect().StreamNative != nil {
+			// Strict generation streams decode through the registered target
+			// dialect's native event grammar; emitted frames are already on the
+			// caller surface because a strict contract binds source to it.
+			var native *generation.Native
+			native, err = contract.TargetDialect().StreamNative(generation.StreamInput{Source: contract.Source(), Body: cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), MaxEventBytes: int(s.cfg.MaxEventBytes), Route: x.route.Slug, IncludeUsage: x.source.IncludeUsage}, emit, observe)
+			completion = protocols.CompletionFromNative(native)
 		} else {
-			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
+			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.source.IncludeUsage, emit, observe)
 		}
 		if err == nil && strictResponseIncomplete {
 			st.upstream.Store(3)
@@ -747,14 +785,19 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			err = readErr
 		} else {
 			if contract != nil {
-				var native *openai.Completion
-				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
+				var decoded *generation.Native
+				decoded, err = contract.TargetDialect().DecodeNative(generation.DecodeInput{Source: contract.Source(), Effective: contract.Effective(), Body: raw, Route: x.route.Slug, MaxBytes: int(s.cfg.MaxResponseBytes)})
+				native := protocols.CompletionFromNative(decoded)
 				if native != nil {
 					fact.Usage = native.Usage
 				}
 				if err == nil {
 					st.upstream.Store(3)
-					err = contract.ValidateResult(native.Native)
+					if native == nil {
+						err = &openai.ProtocolError{Detail: "dialect decoder returned no native result"}
+					} else {
+						err = contract.ValidateResult(native.Native)
+					}
 				}
 				if err == nil && contract.ToolContinuation() {
 					var state *interaction.Continuation
@@ -773,14 +816,16 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 				if err == nil && wire == x.family {
 					completion = native
-					if x.strict() && x.family == openai.FamilyResponses {
-						source := native.Native.Source()
-						if _, present := source.Lookup("/model"); present {
-							model, _ := json.Marshal(x.route.Slug)
-							source, err = oif.Apply(source, []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published response model"}})
-						}
-						if err == nil {
-							completion.Body = source.Bytes()
+					if x.strict() {
+						if bind := contract.TargetDialect().BindResultModel; bind != nil {
+							source := native.Native.Source()
+							var changes []oif.Change
+							if changes, err = bind(source, x.route.Slug); err == nil && len(changes) > 0 {
+								source, err = oif.Apply(source, changes)
+							}
+							if err == nil {
+								completion.Body = source.Bytes()
+							}
 						}
 					}
 				}
@@ -792,7 +837,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	if completion != nil {
 		fact.Usage = completion.Usage
-		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
+		if !x.source.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
 			err = errResponseTooLarge
 		}
 	}
@@ -819,7 +864,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	st.upstream.Store(3)
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamTerminal
-		if x.parsed.Stream {
+		if x.source.Stream {
 			fact.Interaction.ClientState = usage.ClientTerminal
 		}
 	}

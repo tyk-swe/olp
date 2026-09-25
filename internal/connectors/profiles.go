@@ -331,6 +331,11 @@ func (c Config) Supports(operation, surface, mode string) bool {
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
 			}
+			if operation == "generation" {
+				if supported, consulted := c.SupportsGenerationTarget(surface, mode); consulted {
+					return supported || Supports(c.Kind, c.VendorID, operation, surface, mode)
+				}
+			}
 			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
 				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
 					return true
@@ -455,13 +460,12 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 // WrapBody handles only documented hosting wrappers after semantic lowering.
 // Model and cloud revision construction precede authentication/signing.
 func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
-	hosting := c.Hosting()
-	if hosting != "vertex-anthropic" && hosting != "bedrock-anthropic-invoke" {
-		return body, nil
-	}
-	if wire != openai.FamilyAnthropic {
-		return nil, errors.New("Anthropic cloud profile requires the Messages dialect")
-	}
+	return c.WrapBodyDialect(body, openai.Descriptor(wire, false).Dialect)
+}
+
+// wrapAnthropicCloud writes the selected cloud tag before
+// authentication/signing. The dialect identity check lives in the callers.
+func (c Config) wrapAnthropicCloud(body []byte) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("cloud request must be a JSON object")
@@ -473,7 +477,7 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 	}
 	fields["anthropic_version"] = version
 	delete(fields, "model")
-	if hosting == "bedrock-anthropic-invoke" {
+	if c.Hosting() == "bedrock-anthropic-invoke" {
 		delete(fields, "stream")
 	}
 	return json.Marshal(fields)
@@ -574,6 +578,14 @@ func RegisterProfile(p Profile) error {
 	for _, operation := range p.Operations {
 		if !slices.Contains(template.Operations, operation) {
 			return errors.New("profile operation is incompatible")
+		}
+		// A profile publishes a generation dialect by label; when the
+		// registered generation contract table is linked, the label must name
+		// one of its registrations rather than an opaque string.
+		if operation == "generation" && len(operationregistry.Generation.Dialects()) > 0 {
+			if _, ok := operationregistry.Generation.DialectLabel(p.OperationDialect(operation)); !ok {
+				return errors.New("profile generation dialect is not a registered contract")
+			}
 		}
 	}
 	for _, header := range p.SemanticHeaders {

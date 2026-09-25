@@ -1,4 +1,4 @@
-package protocols
+package protocols_test
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -35,11 +36,11 @@ func TestEveryCompatibleVendorUsesItsReviewedOperationContract(t *testing.T) {
 							fields["max_output_tokens"] = 17
 						}
 						body, _ := json.Marshal(fields)
-						request, err := Parse(family, body, "")
+						request, err := protocols.Parse(family, body, "")
 						if err != nil {
 							t.Fatal(err)
 						}
-						encoded, wire, err := Encode(request, "openai_compatible", vendor, "wire-model", nil)
+						encoded, wire, err := protocols.Encode(request, "openai_compatible", vendor, "wire-model", nil)
 						if err != nil || wire != openai.FamilyChat {
 							t.Fatalf("%s stream=%v: %s %v", family, stream, wire, err)
 						}
@@ -51,11 +52,11 @@ func TestEveryCompatibleVendorUsesItsReviewedOperationContract(t *testing.T) {
 				}
 			}
 			if vendor == "cohere" || vendor == "voyage" {
-				request, err := Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":["hello","world"],"encoding_format":"base64"}`), "")
+				request, err := protocols.Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":["hello","world"],"encoding_format":"base64"}`), "")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, wire, err := Encode(request, "openai_compatible", vendor, "wire-model", nil); err != nil || wire != openai.FamilyEmbeddings {
+				if _, wire, err := protocols.Encode(request, "openai_compatible", vendor, "wire-model", nil); err != nil || wire != openai.FamilyEmbeddings {
 					t.Fatalf("embedding profile: %s %v", wire, err)
 				}
 			}
@@ -65,24 +66,24 @@ func TestEveryCompatibleVendorUsesItsReviewedOperationContract(t *testing.T) {
 
 func TestCohereAndVoyageKeepTheirDifferentEmbeddingRefusals(t *testing.T) {
 	for _, field := range []string{`"dimensions":32`, `"input_type":"query"`, `"truncate":true`} {
-		request, err := Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":"hello",`+field+`}`), "")
+		request, err := protocols.Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":"hello",`+field+`}`), "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Encode(request, "openai_compatible", "cohere", "wire-model", nil); err == nil {
+		if _, _, err := protocols.Encode(request, "openai_compatible", "cohere", "wire-model", nil); err == nil {
 			t.Fatalf("Cohere accepted %s", field)
 		}
 	}
-	request, _ := Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":[1,2,3]}`), "")
-	if _, _, err := Encode(request, "openai_compatible", "voyage", "wire-model", nil); err == nil {
+	request, _ := protocols.Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":[1,2,3]}`), "")
+	if _, _, err := protocols.Encode(request, "openai_compatible", "voyage", "wire-model", nil); err == nil {
 		t.Fatal("Voyage accepted tokenized non-text input")
 	}
-	request, _ = Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"previous_response_id":"owned-resource"}`), "")
+	request, _ = protocols.Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"previous_response_id":"owned-resource"}`), "")
 	if request == nil {
 		t.Fatal("Responses profile dropped the provider-state reference the gateway must resolve")
 	}
-	request, _ = Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"metadata":{"private":"value"}}`), "")
-	if _, _, err := Encode(request, "openai_compatible", "deepseek", "wire-model", nil); err == nil || !strings.Contains(err.Error(), "metadata") {
+	request, _ = protocols.Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"metadata":{"private":"value"}}`), "")
+	if _, _, err := protocols.Encode(request, "openai_compatible", "deepseek", "wire-model", nil); err == nil || !strings.Contains(err.Error(), "metadata") {
 		t.Fatalf("Responses-only extension was discarded: %v", err)
 	}
 }
