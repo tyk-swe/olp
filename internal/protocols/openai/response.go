@@ -392,15 +392,3 @@ func responseUsage(fields map[string]json.RawMessage) (*Usage, error) {
 	u.ReasoningTokens = nestedCount(usage, "output_tokens_details", "reasoning_tokens")
 	return u, nil
 }
-
-func rewriteModel(fields map[string]json.RawMessage, route string) error {
-	if _, present := fields["model"]; !present {
-		return nil
-	}
-	raw, err := json.Marshal(route)
-	if err != nil {
-		return err
-	}
-	fields["model"] = raw
-	return nil
-}
