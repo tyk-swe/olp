@@ -48,6 +48,13 @@ const (
 	classAmbiguous         = "ambiguous"
 	classLimitsUnavailable = "limits_unavailable"
 	classContextWindow     = "context_window"
+	// classResourceExhausted marks a bounded gateway-local resource reaching
+	// its ceiling: retained dependency bytes, projected delivery bytes,
+	// transient event memory, aggregate admitted event work, the stream
+	// lifetime, or a durable persistence bound. The provider produced work
+	// this proxy could not afford to keep — never provider ill health, so
+	// the class feeds no circuit or credential cooldown.
+	classResourceExhausted = "resource_exhausted"
 )
 
 // Canonical defaults retained by existing accounting fixtures.
@@ -167,12 +174,13 @@ type attemptFailure struct {
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *openai.UpstreamError
-	overall      bool   // the route deadline, not the attempt deadline, expired
-	dispatched   bool   // the request reached the upstream before the failure
-	quota        string // a quota this gateway enforces rejected the attempt
-	contractCode string // safe runtime interaction guard violation
-	policyCode   string // local output policy refusal after upstream completion
-	noRetry      bool   // strict outcome uncertainty must not suggest client retries
+	overall      bool                    // the route deadline, not the attempt deadline, expired
+	dispatched   bool                    // the request reached the upstream before the failure
+	quota        string                  // a quota this gateway enforces rejected the attempt
+	contractCode string                  // safe runtime interaction guard violation
+	policyCode   string                  // local output policy refusal after upstream completion
+	noRetry      bool                    // strict outcome uncertainty must not suggest client retries
+	exhausted    *interaction.Exhaustion // the bounded local resource that ran out
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -249,6 +257,12 @@ func (f *attemptFailure) toError() (result *Error) {
 		return serverError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
 	case classProtocol:
 		return serverError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
+	case classResourceExhausted:
+		resource, category := "stream_work_bytes", string(interaction.LimitEventWork)
+		if f.exhausted != nil {
+			resource, category = f.exhausted.Resource, string(f.exhausted.Category)
+		}
+		return serverError(http.StatusBadGateway, "resource_exhausted", "The provider result exceeded the gateway's bounded "+category+" budget: "+resource+".")
 	case classUpstreamClient, classContextWindow:
 		message := "The upstream provider rejected the request."
 		if f.upstream != nil && f.upstream.Message != "" {
@@ -366,15 +380,26 @@ func (st *attemptState) classify(err error, committed bool) string {
 			return classTimeout
 		}
 		return classCancelled
+	case st.reason.Load() == 3:
+		// The stream lifetime cap is a proxy-local bound: the provider
+		// delivered for a full hour, which is exhausted lifetime, not ill
+		// health.
+		return classResourceExhausted
 	case st.reason.Load() != 0:
 		return classTimeout
 	case errors.Is(err, errClientWrite):
 		return classCancelled
-	case committed:
-		return classProtocol
 	}
 	var pe *openai.ProtocolError
-	if errors.As(err, &pe) || errors.Is(err, openai.ErrEventTooLarge) {
+	var exhaustion *interaction.Exhaustion
+	switch {
+	case errors.As(err, &exhaustion) || errors.Is(err, openai.ErrEventTooLarge):
+		// A bounded byte/work budget is exhausted the same whether or not
+		// earlier frames were committed.
+		return classResourceExhausted
+	case errors.As(err, &pe):
+		return classProtocol
+	case committed:
 		return classProtocol
 	}
 	return classConnect
@@ -577,6 +602,14 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	if contract != nil && contract.ToolContinuation() {
 		if err := s.claimToolWork(actx, x, contract, a, slot); err != nil {
+			if errors.Is(err, resources.ErrPayloadTooLarge) {
+				return fail(classResourceExhausted, &attemptFailure{
+					noRetry: true,
+					exhausted: &interaction.Exhaustion{
+						Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes,
+					},
+				})
+			}
 			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true})
 		}
 	}
@@ -800,11 +833,22 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
 		var ue *openai.UpstreamError
 		var violation *interaction.Error
+		var exhausted *interaction.Exhaustion
 		switch {
+		case errors.As(err, &exhausted):
+			f.exhausted = exhausted
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, resources.ErrPayloadTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes}
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, errResponseTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "response_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxResponseBytes)}
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, openai.ErrEventTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "event_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxEventBytes)}
+			return fail(classResourceExhausted, f)
 		case errors.As(err, &violation):
 			f.contractCode = "fidelity_protocol_violation"
-			return fail(classProtocol, f)
-		case errors.Is(err, errResponseTooLarge):
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = ue
@@ -813,7 +857,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			f.status = status
 			return fail(class, f)
 		}
-		return fail(st.classify(err, committed), f)
+		class := st.classify(err, committed)
+		if class == classResourceExhausted && f.exhausted == nil {
+			f.exhausted = &interaction.Exhaustion{Resource: "stream_lifetime_seconds", Category: interaction.LimitTime, Limit: int(maxStreamDuration / time.Second)}
+		}
+		return fail(class, f)
 	}
 	fact.Class = classSuccess
 	st.upstream.Store(3)

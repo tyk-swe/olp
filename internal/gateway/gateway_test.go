@@ -489,7 +489,7 @@ func TestOversizedEventFailsBeforeCommit(t *testing.T) {
 		fmt.Fprintf(w, "data: {\"padding\":%q}\n\n", strings.Repeat("x", 5000))
 	})
 	resp, body := h.chat(fullKey, nil, `,"stream":true`)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "provider_protocol_error" {
+	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
@@ -498,7 +498,7 @@ func TestOversizedUnaryResponseRejected(t *testing.T) {
 	h := newHarness(t, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 512, MaxEventBytes: 256})
 	h.mock.set("a", completion(modelA, strings.Repeat("y", 1000)))
 	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "provider_protocol_error" {
+	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "resource_exhausted" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
 }
