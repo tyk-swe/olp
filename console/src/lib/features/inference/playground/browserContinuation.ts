@@ -762,15 +762,11 @@ export async function recoverTurn(
   const committedActions = recovery.actions;
   if (committedActions === 'unavailable') {
     if (completed.actions !== undefined)
-      throw new Error(
-        'Recovered actions do not match the committed delivery.'
-      );
+      throw new Error('Recovered actions do not match the committed delivery.');
   } else if (
     committedActions !== undefined &&
     !sameActions(actionsFrom(committedActions), completed.actions)
   )
-    throw new Error(
-      'Recovered actions do not match the committed delivery.'
-    );
+    throw new Error('Recovered actions do not match the committed delivery.');
   return completed;
 }

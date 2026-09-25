@@ -259,8 +259,8 @@
       <strong>Recoverable continuation ready</strong>
       {#if active.actions === undefined}
         <span
-          >This delivery predates the actionability record; it can be
-          inspected but exposes no tool actions.</span
+          >This delivery predates the actionability record; it can be inspected
+          but exposes no tool actions.</span
         >
       {:else if active.actions.tool_calls.length}
         <span
