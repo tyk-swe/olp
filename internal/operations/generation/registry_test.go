@@ -49,6 +49,7 @@ func fixtureDialect(id string, streaming bool) Dialect {
 			}
 			return &Native{Result: result, Body: in.Body, Route: in.Route, OutputText: "fixture"}, nil
 		},
+		Effects:    func(oif.Document, StateInput, *oif.Obligations) ([]string, error) { return nil, nil },
 		Estimate:   func(oif.Document) Estimate { return Estimate{Input: 1} },
 		Parameters: func(oif.Document) []string { return []string{"model"} },
 	}
@@ -141,6 +142,9 @@ func TestRegistryQualifiesMappingsAndContracts(t *testing.T) {
 		t.Fatal("unregistered contract reported known")
 	}
 	mapping.ClientContract = "test-contract-v1"
+	// A negotiated client contract on a streaming target must own its event
+	// projection; contractless mappings serve unary and stateless paths.
+	mapping.ProjectEvents = func(in ProjectInput) (Projection, error) { return nil, nil }
 	if err := registry.RegisterMapping(mapping); err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +206,17 @@ func TestRegistrySupportsTargetContracts(t *testing.T) {
 	}
 	if !registry.SupportsTarget(target.Identity, source.Surface, "unary") {
 		t.Fatal("qualified mapping surface not supported")
+	}
+	// A negotiated client-contract mapping serves its source surface too:
+	// strict binding still gates each request on the contract, but the
+	// capability declaration is honest.
+	contracted := Mapping{Source: source.Identity, Target: target.Identity, ClientContract: "surface-contract-v1", Evidence: "x", Lower: mapping.Lower, ProjectResult: mapping.ProjectResult,
+		ProjectEvents: func(in ProjectInput) (Projection, error) { return nil, nil }}
+	if err := registry.RegisterMapping(contracted); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.SupportsTarget(target.Identity, source.Surface, "streaming") {
+		t.Fatal("contracted mapping surface not supported")
 	}
 }
 

@@ -56,6 +56,11 @@ func validTuple(operation, surface, mode string) error {
 	if operationregistry.Default.Supports(operation, surface, mode) {
 		return nil
 	}
+	if operation == "generation" && operationregistry.Generation.SupportsSurface(surface, mode) {
+		// A registered generation dialect publishes surfaces outside the
+		// historical openai/anthropic/gemini enumeration.
+		return nil
+	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {
 		return access.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
 	}
@@ -154,7 +159,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, source, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -163,7 +168,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
+	accept, effective, inspections := inspectionAccept(route, parsed, source, context, demand)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
 	}
@@ -303,7 +308,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, source, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -314,8 +319,13 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	}
 	if parsed != nil {
 		options.Parameters = protocols.ParameterNames(parsed)
+	} else if source.Request.Document().Valid() {
+		// A registered generation source names its own request controls.
+		if d, ok := operationregistry.Generation.DialectLabel(input.Dialect); ok {
+			options.Parameters = d.Parameters(source.Request.Document())
+		}
 	}
-	accept, effective, inspections := inspectionAccept(route, parsed, context, options.TokenDemand)
+	accept, effective, inspections := inspectionAccept(route, parsed, source, context, options.TokenDemand)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, options.TokenDemand)
 	}

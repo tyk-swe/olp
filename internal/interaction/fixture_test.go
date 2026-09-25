@@ -51,6 +51,7 @@ func fixtureGenerationDialect(id, surface string, streaming bool) generation.Dia
 			}
 			return &generation.Native{Result: result, Body: in.Body, Route: in.Route, OutputText: "fixture", Usage: &generation.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}}, nil
 		},
+		Effects:    func(oif.Document, generation.StateInput, *oif.Obligations) ([]string, error) { return nil, nil },
 		Estimate:   func(oif.Document) generation.Estimate { return generation.Estimate{Input: 7} },
 		Parameters: func(oif.Document) []string { return []string{"model", "fixture-param"} },
 	}

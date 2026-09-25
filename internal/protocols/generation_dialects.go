@@ -208,6 +208,49 @@ func chatAdmit(effective oif.Document) error {
 	return nil
 }
 
+// probe encodes the dialect-owned certification request: a minimal native
+// request body the provider certification path binds through the registered
+// contract, so a dialect can never be certified by a grammar it does not own.
+func probe(fields map[string]any) func(model string, stream bool) []byte {
+	return func(model string, stream bool) []byte {
+		out := map[string]any{}
+		for name, value := range fields {
+			out[name] = value
+		}
+		if model != "" {
+			if _, present := out["model"]; present {
+				out["model"] = model
+			}
+		}
+		// A dialect that selects delivery in-body declares "stream" as a
+		// placeholder: "$stream" keeps the member unconditionally (the
+		// Responses probe carries an explicit false) while any other marker
+		// writes the member only for the streaming probe.
+		if marker, selected := out["stream"]; selected {
+			if marker == "$stream" {
+				out["stream"] = stream
+			} else if stream {
+				out["stream"] = true
+			} else {
+				delete(out, "stream")
+			}
+		}
+		body, _ := json.Marshal(out)
+		return body
+	}
+}
+
+var (
+	chatProbe      = probe(map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16, "stream": false})
+	responsesProbe = probe(map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": "$stream"})
+	anthropicProbe = probe(map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16, "stream": false})
+	// Gemini and Bedrock carry the model in their addressing contract, not in
+	// the request body, so a configured model value is never written into the
+	// document.
+	geminiProbe  = probe(map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []map[string]string{{"text": "Reply with OK."}}}}, "generationConfig": map[string]int{"maxOutputTokens": 16}})
+	bedrockProbe = probe(map[string]any{"messages": []any{map[string]any{"role": "user", "content": []map[string]string{{"text": "Reply with OK."}}}}, "inferenceConfig": map[string]int{"maxTokens": 16}})
+)
+
 var chatDialect = generation.Dialect{
 	Identity:  DialectChat,
 	Operation: generation.Contract(),
@@ -242,6 +285,7 @@ var chatDialect = generation.Dialect{
 	Admit:           chatAdmit,
 	InspectOutput:   inspectOutput(openai.FamilyChat),
 	MeaningfulFrame: meaningfulFrame(openai.FamilyChat),
+	Probe:           chatProbe,
 }
 
 var responsesDialect = generation.Dialect{
@@ -289,6 +333,7 @@ var responsesDialect = generation.Dialect{
 	InspectOutput:   inspectOutput(openai.FamilyResponses),
 	MeaningfulFrame: meaningfulFrame(openai.FamilyResponses),
 	IncompleteEvent: "response.incomplete",
+	Probe:           responsesProbe,
 }
 
 var anthropicDialect = generation.Dialect{
@@ -319,6 +364,7 @@ var anthropicDialect = generation.Dialect{
 	Parameters:      parametersFor(openai.FamilyAnthropic),
 	InspectOutput:   inspectOutput(openai.FamilyAnthropic),
 	MeaningfulFrame: meaningfulFrame(openai.FamilyAnthropic),
+	Probe:           anthropicProbe,
 }
 
 var geminiDialect = generation.Dialect{
@@ -350,6 +396,7 @@ var geminiDialect = generation.Dialect{
 	IdentityChanges: func(source generation.Source, model string) ([]oif.Change, error) {
 		return nil, nil
 	},
+	Probe: geminiProbe,
 }
 
 var bedrockDialect = generation.Dialect{
@@ -381,6 +428,7 @@ var bedrockDialect = generation.Dialect{
 	IdentityChanges: func(source generation.Source, model string) ([]oif.Change, error) {
 		return nil, nil
 	},
+	Probe: bedrockProbe,
 }
 
 // actionableEvent recognizes native tool representations before the admitted

@@ -14,6 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/operations/generation"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -125,18 +127,18 @@ func inspectionContext(headers, query map[string]string, allowState, allowHosted
 	return context, nil
 }
 
-func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*openai.Request, error) {
+func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*openai.Request, generation.Source, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, generation.Source{}, nil
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil || fields == nil {
-		return nil, access.Invalid("request", "Use a native request object.")
+		return nil, generation.Source{}, access.Invalid("request", "Use a native request object.")
 	}
 	if model, present := fields["model"]; present {
 		var name string
 		if json.Unmarshal(model, &name) != nil || name != slug {
-			return nil, access.Invalid("request.model", "The request must name the route being inspected.")
+			return nil, generation.Source{}, access.Invalid("request.model", "The request must name the route being inspected.")
 		}
 	}
 	tupleOnly := len(fields) > 0
@@ -144,17 +146,17 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 		tupleOnly = tupleOnly && (field == "route" || field == "model")
 	}
 	if tupleOnly {
-		return nil, nil
+		return nil, generation.Source{}, nil
 	}
 	if !strict && dialect == "" {
 		parsed, err := protocols.SimulationRequest(raw, operation, surface, mode, slug)
 		if err != nil {
-			return nil, access.Invalid("request", "The request is not valid for the selected operation and surface.")
+			return nil, generation.Source{}, access.Invalid("request", "The request is not valid for the selected operation and surface.")
 		}
-		return parsed, nil
+		return parsed, generation.Source{}, nil
 	}
 	if _, canonical := fields["route"]; canonical {
-		return nil, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
+		return nil, generation.Source{}, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
 	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank}
 	var family openai.Family
@@ -170,35 +172,54 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 			break
 		}
 	}
-	if family == "" {
-		return nil, access.Invalid("dialect", "Choose a dialect belonging to this operation, surface and mode.")
+	if family != "" {
+		parsed, err := protocols.Parse(family, raw, slug)
+		if err != nil {
+			return nil, generation.Source{}, access.Invalid("request", "The request is not valid for the selected native dialect.")
+		}
+		if parsed.Route != slug || parsed.Stream != (mode == "streaming") {
+			return nil, generation.Source{}, access.Invalid("request", "The native request must name the selected route and match the selected delivery mode.")
+		}
+		return parsed, generation.Source{}, nil
 	}
-	parsed, err := protocols.Parse(family, raw, slug)
-	if err != nil {
-		return nil, access.Invalid("request", "The request is not valid for the selected native dialect.")
+	// A registered generation dialect carries no wire family; its own Lift
+	// produces the neutral source contract inspection binds directly.
+	if operation == "generation" && dialect != "" {
+		if gen, ok := operationregistry.Generation.DialectLabel(dialect); ok && gen.Lift != nil {
+			if gen.Surface != surface && surface != "native" {
+				return nil, generation.Source{}, access.Invalid("dialect", "Choose a dialect belonging to this operation, surface and mode.")
+			}
+			source, err := gen.Lift(raw, slug, false, 1<<20)
+			if err != nil {
+				return nil, generation.Source{}, access.Invalid("request", "The request is not valid for the selected native dialect.")
+			}
+			if source.Route != slug || source.Stream != (mode == "streaming") {
+				return nil, generation.Source{}, access.Invalid("request", "The native request must name the selected route and match the selected delivery mode.")
+			}
+			return nil, source, nil
+		}
 	}
-	if parsed.Route != slug || parsed.Stream != (mode == "streaming") {
-		return nil, access.Invalid("request", "The native request must name the selected route and match the selected delivery mode.")
-	}
-	return parsed, nil
+	return nil, generation.Source{}, access.Invalid("dialect", "Choose a dialect belonging to this operation, surface and mode.")
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionAccept(route runtime.Route, parsed *openai.Request, source generation.Source, context interaction.Context, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
-	if parsed == nil {
+	if parsed == nil && !source.Request.Document().Valid() {
 		return nil, nil, inspections
 	}
 	fidelity := runtime.FidelityMode(route.Fidelity)
-	effectiveRequests := map[string]*openai.Request{}
+	effectivePlans := map[string]*interaction.Plan{}
 	var effective func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand)
 	if fidelity == runtime.FidelityStrict {
 		effective = func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
-			request := effectiveRequests[target.ID]
-			delete(effectiveRequests, target.ID)
-			if request == nil {
+			plan := effectivePlans[target.ID]
+			delete(effectivePlans, target.ID)
+			if plan == nil {
 				return nil, demand
 			}
-			output := runtime.EffectiveOutputLimit(request)
+			// The plan's dialect owns the effective request's reservation and
+			// routing shapes; a registration-only dialect has no legacy view.
+			output := plan.OutputLimit()
 			var resolved *runtime.TokenDemand
 			if demand != nil || output != nil {
 				resolved = &runtime.TokenDemand{MaxOutputTokens: output}
@@ -209,7 +230,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 					}
 				}
 			}
-			return protocols.ParameterNames(request), resolved
+			return plan.Parameters(), resolved
 		}
 	}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -221,6 +242,9 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			// never acquire a strict qualification class from a successful encode.
 			if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
 				return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
+			}
+			if parsed == nil {
+				return &inspectionDiagnostic{"target_capability", "/dialect", "registered_dialect", "A registration-only generation dialect inspects on an explicit strict route."}
 			}
 			invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
 			if err != nil {
@@ -242,7 +266,15 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		}
 		binding := context
 		binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
-		plan, err := template.BindRequest(parsed, binding)
+		var plan *interaction.Plan
+		if source.Request.Document().Valid() {
+			// A registered generation source binds through the neutral
+			// contract directly; only legacy family requests take the
+			// compatibility adapter.
+			plan, err = template.Bind(source, binding)
+		} else {
+			plan, err = template.BindRequest(parsed, binding)
+		}
 		if err != nil {
 			return safeInspectionError(err)
 		}
@@ -269,8 +301,8 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 				result.OmittedDispositions++
 			}
 		}
-		effectiveRequest := plan.EffectiveRequest()
-		summary := inspectRequest(effectiveRequest.OIF().Document(), plan.Prepared().Provenance())
+		effectiveRequest := plan.Effective()
+		summary := inspectRequest(effectiveRequest, plan.Prepared().Provenance())
 		result.EffectiveRequest = &summary
 		preparedConfig := plan.Config()
 		for name := range preparedConfig.SemanticHeaders {
@@ -296,7 +328,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			return safe
 		}
 		result.Status = "admitted"
-		effectiveRequests[target.ID] = effectiveRequest
+		effectivePlans[target.ID] = plan
 		return nil
 	}
 	return accept, effective, inspections
@@ -322,8 +354,8 @@ func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspe
 // fields. Inspection binds the same versioned planner without claiming a state
 // reservation, creating a handle, or dispatching an inference request.
 func inspectionClientContract(version string, context *interaction.Context, encrypted bool) error {
-	if version != "" && version != interaction.ContinuationV1 {
-		return access.Invalid("client_contract", "Use the tested chat-anthropic-tools-v1 client contract.")
+	if version != "" && !operationregistry.Generation.KnownContract(version) {
+		return access.Invalid("client_contract", "Use a registered generation client contract.")
 	}
 	context.ContinuationVersion = version
 	context.DurableContinuation = encrypted

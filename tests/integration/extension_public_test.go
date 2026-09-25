@@ -218,6 +218,7 @@ func TestRegisteredExtensionsPublic(t *testing.T) {
 			})
 		}
 	})
+	t.Run("registered generation dialect", registeredGenerationExtension)
 }
 
 func registerFixtureDialect(t *testing.T, operation, field, resultField, relativePath string) string {

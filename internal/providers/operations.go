@@ -28,6 +28,14 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	if _, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
+	if tuple.Operation == "generation" {
+		// A profile-published registered generation dialect owns its
+		// certifiability: the operation registry answers capability, not the
+		// kind/vendor compatibility table.
+		if _, ok := configuredGenerationDialect(cfg); ok {
+			return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		}
+	}
 	return certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple)
 }
 func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {

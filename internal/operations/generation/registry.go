@@ -64,22 +64,37 @@ func (r *Registry) Register(d Dialect) error {
 	if d.Identity.ID != d.Label {
 		return errors.New("generation dialect label must equal its identity ID")
 	}
-	if d.Lift == nil || d.IdentityChanges == nil || d.DecodeNative == nil || d.Estimate == nil || d.Parameters == nil || d.ValidateEvent == nil && d.Streaming {
-		return errors.New("generation dialect requires lift, identity, decode and reservation hooks")
+	if len(d.Surface) > 96 {
+		return errors.New("generation dialect requires a bounded served surface")
+	}
+	if d.Lift == nil || d.IdentityChanges == nil || d.DecodeNative == nil || d.Effects == nil || d.Estimate == nil || d.Parameters == nil {
+		return errors.New("generation dialect requires lift, identity, decode, effects and reservation hooks")
+	}
+	if d.ValidateEvent == nil && d.Streaming {
+		return errors.New("streaming dialect requires its event admission guard")
 	}
 	if d.Streaming && d.StreamNative == nil {
 		return errors.New("streaming dialect requires a native event grammar")
 	}
-	if !d.Streaming && d.StreamNative != nil {
+	if !d.Streaming && (d.StreamNative != nil || d.ValidateEvent != nil) {
 		return errors.New("unary dialect cannot claim a native event grammar")
 	}
 	if (d.Address.RelativePath == "") == (d.Address.LegacyPath == "") {
 		return errors.New("generation dialect requires exactly one addressing contract")
 	}
-	if d.Address.RelativePath != "" {
-		path := d.Address.RelativePath
-		if strings.ContainsAny(path, "?#\\") || strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+	if path := d.Address.RelativePath; path != "" {
+		if strings.ContainsAny(path, "?#\\") || strings.HasPrefix(path, "/") || strings.Contains(path, "..") || len(path) > 512 {
 			return errors.New("invalid registered generation path")
+		}
+	}
+	for _, rule := range d.IdentityRules {
+		switch rule.Origin {
+		case oif.IdentityBinding, oif.ResourceBinding, oif.TransportOption:
+		default:
+			return errors.New("identity rule cannot authorize semantic transformation")
+		}
+		if len(rule.Pointer) > 256 {
+			return errors.New("identity rule pointer exceeds bounds")
 		}
 	}
 	r.mu.Lock()
@@ -93,14 +108,16 @@ func (r *Registry) Register(d Dialect) error {
 	if _, ok := r.labels[d.Label]; ok {
 		return errors.New("duplicate generation dialect label")
 	}
-	r.dialects[d.Identity] = d
+	r.dialects[d.Identity] = cloneDialect(d)
 	r.labels[d.Label] = d.Identity
 	return r.rebuild()
 }
 
 // RegisterMapping qualifies one actual source/target pair. Both dialects must
 // already be registered; the contract version is part of the mapping identity
-// so a negotiated continuation contract never claims the stateless slot.
+// so a negotiated continuation contract never claims the stateless slot. A
+// mapping carrying a client contract must project results and, when the target
+// dialect streams, events.
 func (r *Registry) RegisterMapping(m Mapping) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -113,8 +130,16 @@ func (r *Registry) RegisterMapping(m Mapping) error {
 	if m.Source == m.Target {
 		return errors.New("identity mappings are not qualified mappings")
 	}
-	if len(m.ClientContract) > maxContract || m.Evidence == "" || m.Lower == nil || m.ProjectResult == nil {
-		return errors.New("mapping requires bounded contract, evidence, lowering and projection")
+	if m.Evidence == "" || m.Lower == nil || m.ProjectResult == nil {
+		return errors.New("mapping requires evidence, lowering and projection")
+	}
+	if m.ClientContract != "" {
+		if len(m.ClientContract) > maxContract || !Label.MatchString(m.ClientContract) {
+			return errors.New("generation client contract requires a bounded version")
+		}
+		if target := r.dialects[m.Target]; target.Streaming && m.ProjectEvents == nil {
+			return errors.New("client-contract mapping requires an event projection for a streaming target")
+		}
 	}
 	key := mappingKey{m.Source, m.Target, m.ClientContract}
 	if _, ok := r.mappings[key]; ok {
@@ -128,7 +153,7 @@ func (r *Registry) Dialect(identity oif.Identity) (Dialect, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	d, ok := r.dialects[identity]
-	return d, ok
+	return cloneDialect(d), ok
 }
 
 func (r *Registry) DialectLabel(label string) (Dialect, bool) {
@@ -139,7 +164,7 @@ func (r *Registry) DialectLabel(label string) (Dialect, bool) {
 		return Dialect{}, false
 	}
 	d, ok := r.dialects[identity]
-	return d, ok
+	return cloneDialect(d), ok
 }
 
 func (r *Registry) Dialects() []Dialect {
@@ -147,7 +172,7 @@ func (r *Registry) Dialects() []Dialect {
 	defer r.mu.RUnlock()
 	out := make([]Dialect, 0, len(r.dialects))
 	for _, d := range r.dialects {
-		out = append(out, d)
+		out = append(out, cloneDialect(d))
 	}
 	slices.SortFunc(out, func(a, b Dialect) int { return strings.Compare(a.Identity.ID, b.Identity.ID) })
 	return out
@@ -210,8 +235,10 @@ func (r *Registry) SourceContract(source oif.Identity, version string) bool {
 
 // SupportsTarget reports whether a registered target dialect can serve the
 // requested capability tuple. A native surface is the dialect itself; any
-// other surface requires a registered stateless mapping from a dialect on
-// that surface.
+// other surface requires a registered mapping — stateless or contracted —
+// from a dialect on that surface. A client-contract mapping still serves its
+// source surface: strict binding gates each request on the negotiated
+// contract, but the surface capability is real.
 func (r *Registry) SupportsTarget(target oif.Identity, surface, mode string) bool {
 	d, ok := r.Dialect(target)
 	if !ok {
@@ -226,12 +253,43 @@ func (r *Registry) SupportsTarget(target oif.Identity, surface, mode string) boo
 	if surface == "native" || surface == d.Surface {
 		return true
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for key := range r.mappings {
-		if key.target != target || key.contract != "" {
+		if key.target != target {
 			continue
 		}
 		if source, ok := r.dialects[key.source]; ok && source.Surface == surface {
 			return true
+		}
+	}
+	return false
+}
+
+// SupportsSurface reports whether any registered dialect can serve the
+// surface/mode tuple — as its own surface, on the generic native surface, or
+// through a qualified mapping. Capability declarations use it so a new
+// dialect's surfaces are declarable without a management-side enumeration.
+func (r *Registry) SupportsSurface(surface, mode string) bool {
+	if mode != "unary" && mode != "streaming" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, d := range r.dialects {
+		if mode == "streaming" && !d.Streaming {
+			continue
+		}
+		if surface == "native" || surface == d.Surface {
+			return true
+		}
+		for key := range r.mappings {
+			if key.target != d.Identity {
+				continue
+			}
+			if source, ok := r.dialects[key.source]; ok && source.Surface == surface {
+				return true
+			}
 		}
 	}
 	return false
@@ -247,4 +305,9 @@ func (r *Registry) PrepareIdentity(request oif.Request, destination oif.Descript
 		return oif.Prepared{}, errors.New("unregistered generation contract")
 	}
 	return r.oif.PrepareIdentity(request, destination, changes)
+}
+
+func cloneDialect(d Dialect) Dialect {
+	d.IdentityRules = slices.Clone(d.IdentityRules)
+	return d
 }
