@@ -41,6 +41,18 @@ func summarizeRequest(request *openai.Request) requestSummary {
 }
 
 func (x *execution) summarizeSource() requestSummary {
+	if x.parsed == nil {
+		// A registration-only dialect has no legacy request view; the
+		// registered source dialect still owns its reservation shape.
+		if x.sourceSummary == nil && x.gen != nil {
+			est := x.gen.Estimate(x.source.Request.Document())
+			x.sourceSummary = &requestSummary{parameters: x.gen.Parameters(x.source.Request.Document()), demand: &runtime.TokenDemand{EstimatedInputTokens: est.Input, MaxOutputTokens: est.Output}, estimate: est.Total()}
+		}
+		if x.sourceSummary == nil {
+			return requestSummary{}
+		}
+		return *x.sourceSummary
+	}
 	if x.sourceSummary == nil || x.sourceSummary.request != x.parsed {
 		summary := summarizeRequest(x.parsed)
 		x.sourceSummary = &summary
@@ -71,18 +83,20 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		if template == nil {
 			return preparedProvider{}, &interaction.Error{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 		}
-		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState}
+		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, AllowHostedTools: x.authority.Policy.AllowHostedTools, RequiredServing: x.serving, RetainedResponses: x.providerState, ResolvedAssets: x.resolvedAssets}
 		if x.continuation != nil {
 			binding.ContinuationVersion = x.continuation.version
 			binding.DurableContinuation = true
 			binding.Continuation = x.continuation.prior
 		}
-		plan, err := template.Bind(x.parsed, binding)
+		plan, err := template.Bind(x.source, binding)
 		if err != nil {
 			return preparedProvider{}, err
 		}
 		decisions, err := plan.CheckInput()
-		source, effective := x.summarizeSource(), summarizeRequest(plan.EffectiveRequest())
+		source := x.summarizeSource()
+		estimate := plan.Estimate()
+		effective := requestSummary{parameters: plan.Parameters(), demand: &runtime.TokenDemand{EstimatedInputTokens: estimate.Input, MaxOutputTokens: estimate.Output}, estimate: estimate.Total()}
 		prepared := preparedProvider{plan: plan, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, estimate: max(source.estimate, effective.estimate), parameters: effective.parameters, demand: effective.demand, policyDecisions: decisions}
 		if err != nil {
 			return prepared, err

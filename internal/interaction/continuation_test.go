@@ -77,7 +77,7 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, changed := range []string{strings.Replace(string(nextRaw), "sunny", "sunny", 1), strings.Replace(string(nextRaw), "Weather and time in Paris?", "edited", 1), strings.Replace(string(nextRaw), "call-weather", "tampered", 1)} {
-		_, err := toolsTemplate(t).Bind(request(t, openai.FamilyChat, changed), ctx)
+		_, err := toolsTemplate(t).BindRequest(request(t, openai.FamilyChat, changed), ctx)
 		if changed == string(nextRaw) {
 			if err != nil {
 				t.Fatal(err)
@@ -91,13 +91,13 @@ func TestNegotiatedToolGoldenReconstructsFullNativeNextTurn(t *testing.T) {
 func TestNegotiatedToolGuardsDependenciesAndVersion(t *testing.T) {
 	tpl := toolsTemplate(t)
 	for _, ctx := range []Context{{}, {ContinuationVersion: "future-v2", DurableContinuation: true}, {ContinuationVersion: ContinuationV1}} {
-		_, err := tpl.Bind(request(t, openai.FamilyChat, toolSource), ctx)
+		_, err := tpl.BindRequest(request(t, openai.FamilyChat, toolSource), ctx)
 		if err == nil {
 			t.Fatal("unqualified carrier accepted")
 		}
 	}
 	for _, change := range []string{strings.Replace(toolSource, `"stream":true`, `"stream":true,"reasoning_effort":"high"`, 1), strings.Replace(toolSource, `"stream":true`, `"stream":true,"max_tokens":2048`, 1)} {
-		_, err := tpl.Bind(request(t, openai.FamilyChat, change), toolContext())
+		_, err := tpl.BindRequest(request(t, openai.FamilyChat, change), toolContext())
 		assertReason(t, err, "reasoning_budget")
 	}
 	raw, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")

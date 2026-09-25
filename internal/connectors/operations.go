@@ -8,8 +8,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/generation"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
+
+// generationContract caches the registered operation identity generation
+// dialects declare; profiles validate against it, not a literal string.
+var generationContract = generation.Contract()
 
 func registerUnaryProfiles() {
 	for _, d := range operationregistry.Default.Dialects() {
@@ -34,13 +39,17 @@ func registerUnaryProfiles() {
 	}
 }
 
-// RegisterOperationProfile composes a trusted registered unary codec with an
-// existing hosting/authentication contract. No generation operation is implied.
+// RegisterOperationProfile composes a trusted registered codec — a unary
+// operation dialect or a registered generation dialect — with an existing
+// hosting/authentication contract.
 func RegisterOperationProfile(p Profile) error {
 	profileMu.Lock()
 	defer profileMu.Unlock()
 	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" || p.Transport != "http" || len(p.Operations) == 0 || len(profileRegistry) >= 4096 {
 		return errors.New("operation profile requires bounded identity and HTTP contracts")
+	}
+	if len(p.HostedTools) > 0 {
+		return errors.New("operation profiles do not carry hosted tool contracts")
 	}
 	var host *Profile
 	for i := range profileRegistry {
@@ -61,6 +70,19 @@ func RegisterOperationProfile(p Profile) error {
 		}
 	}
 	for _, op := range p.Operations {
+		if op == "generation" {
+			// Generation is served by the operation-owned generation registry;
+			// a fixture or built-in dialect label composes exactly like a unary
+			// codec label does.
+			d, ok := operationregistry.Generation.DialectLabel(p.OperationDialects[op])
+			if !ok || d.Operation != generationContract {
+				return errors.New("operation codec is not registered")
+			}
+			if d.Address.RelativePath != "" && p.Hosting != "direct-compatible" {
+				return errors.New("relative operation addressing requires compatible direct hosting")
+			}
+			continue
+		}
 		d, ok := operationregistry.Lookup(p.OperationDialects[op])
 		if !ok || d.Operation.ID != op {
 			return errors.New("operation codec is not registered")

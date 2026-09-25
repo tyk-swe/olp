@@ -505,7 +505,14 @@ func responsesRouteEligible(p *runtime.Provider, model string) bool {
 	return stateQualified(p, model, "generation", "unary")
 }
 
+// errResponseMapping marks provider frame data that is malformed or that
+// drifted from the identity the exchange already accepted; it is endpoint
+// evidence, distinct from the gateway's own projection defects.
 var errResponseMapping = errors.New("stored response mapping failed")
+
+// errResponsePersistence marks the gateway failing to durably record retained
+// response state — a proxy-local durability fault, not provider evidence.
+var errResponsePersistence = errors.New("stored response state could not be committed")
 
 func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact *AttemptFact, frame []byte) ([]byte, error) {
 	if s.Resources == nil || !responseStoreRequested(x.parsed) {
@@ -558,7 +565,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		}
 		stopCommit()
 		if err != nil {
-			return nil, errResponseMapping
+			return nil, errResponsePersistence
 		}
 		local = res.ID
 		fact.ResponseUsageDeferred = backgroundResponseRequested(x.parsed)
@@ -584,13 +591,13 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 			stopCommit()
 			if settleErr != nil {
 				s.log.Warn("retained response terminal persistence failed", "error", settleErr)
-				return nil, errResponseMapping
+				return nil, errResponsePersistence
 			}
 		}
 	}
 	encoded, err := json.Marshal(local)
 	if err != nil {
-		return nil, errResponseMapping
+		return nil, errFrameProjection
 	}
 	var mapped oif.Document
 	if x.strict() {
@@ -603,7 +610,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		mapped, err = oif.Apply(doc, []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}})
 	}
 	if err != nil {
-		return nil, errResponseMapping
+		return nil, errFrameProjection
 	}
 	body := mapped.Bytes()
 	out := make([]byte, 0, i+7+len(body)+2)

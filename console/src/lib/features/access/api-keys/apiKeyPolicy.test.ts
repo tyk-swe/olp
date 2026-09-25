@@ -32,6 +32,7 @@ const key = {
   },
   expires_at: '2027-01-01T12:30:00Z',
   allow_provider_state: false,
+  allow_hosted_tools: true,
   allowed_attribution_keys: ['team'],
   revoked_at: null,
   rotated_at: null,
@@ -56,6 +57,7 @@ describe('API key form state', () => {
       monthlyCostLimit: '',
       expiresAt: '',
       allowProviderState: false,
+      allowHostedTools: false,
       allowedAttributionKeys: []
     });
   });
@@ -69,7 +71,9 @@ describe('API key form state', () => {
       allowedAttributionKeys: ['team'],
       requestsPerMinute: '120',
       dailyCostLimit: '1.250000000001',
-      monthlyCostLimit: '20.00'
+      monthlyCostLimit: '20.00',
+      allowProviderState: false,
+      allowHostedTools: true
     });
     expect(buildApiKeyPolicyInput(state)).toMatchObject({
       name: 'production SDK',
@@ -77,7 +81,9 @@ describe('API key form state', () => {
       allowed_attribution_keys: ['team'],
       requests_per_minute: 120,
       daily_cost_limit: '1.250000000001',
-      monthly_cost_limit: '20.00'
+      monthly_cost_limit: '20.00',
+      allow_provider_state: false,
+      allow_hosted_tools: true
     });
   });
 

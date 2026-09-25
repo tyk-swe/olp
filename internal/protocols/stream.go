@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,20 +45,10 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 	var err error
 	switch wire {
 	case openai.FamilyChat, openai.FamilyResponses:
-		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, true, func(frame []byte) error {
-			if native && wire == openai.FamilyChat && !includeUsage {
-				var f Object
-				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
-				if json.Unmarshal([]byte(payload), &f) == nil {
-					if len(arr(f["choices"])) == 0 && present(f["usage"]) {
-						return nil
-					}
-					delete(f, "usage")
-					frame = eventFrame("", f)
-				}
-			}
-			return upstreamEmit(frame)
-		}, observe)
+		// The codec owns client usage presentation: filtering is field-scoped
+		// inside the chat emitter, and native envelopes reach upstreamEmit
+		// with their admitted framing intact.
+		c, err = openai.StreamMetadataEvents(wire, r, maxEvent, route, includeUsage, upstreamEmit, observe)
 	case openai.FamilyAnthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case openai.FamilyGemini:
@@ -84,6 +73,24 @@ func eventFrame(event string, v any) []byte {
 	}
 	return []byte(prefix + "data: " + string(raw(v)) + "\n\n")
 }
+
+// framedEventFrame prepends the admitted SSE id/retry framing so a native
+// forward keeps the provider's wire framing instead of silently dropping it.
+func framedEventFrame(f oif.Framing, event, data string) []byte {
+	var b strings.Builder
+	if f.HasID {
+		b.WriteString("id: " + f.ID + "\n")
+	}
+	if f.HasRetry {
+		b.WriteString("retry: " + strconv.FormatUint(f.RetryMillis, 10) + "\n")
+	}
+	if event != "" {
+		b.WriteString("event: " + event + "\n")
+	}
+	// A payload may span multiple data lines; preserve them verbatim.
+	b.WriteString("data: " + strings.ReplaceAll(data, "\n", "\ndata: ") + "\n\n")
+	return []byte(b.String())
+}
 func streamError(err error) error {
 	if errors.Is(err, sse.ErrEventTooLarge) {
 		return openai.ErrEventTooLarge
@@ -99,13 +106,15 @@ type contentBlock struct{ kind, args string }
 func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
 	return streamAnthropicEvents(r, limit, route, emit, nil)
 }
+
+// streamAnthropicEvents is a thin transport driver: decode SSE, lift each
+// frame to OIF, admit it through the dialect-owned AnthropicTrace reducer, and
+// forward the admitted source/framing. Native facts for the completion summary
+// come only from the trace; no Chat types or materialized response are
+// involved on the native path.
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
-	started, finished, done := false, false, false
-	blocks := map[int64]*contentBlock{}
-	next := int64(0)
-	usage := Object{}
-	retained := 0
+	trace := NewAnthropicTrace(limit)
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) error {
 		event, e := openai.LiftSSE(openai.FamilyAnthropic, frame, sequence, limit)
@@ -118,159 +127,47 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 				return e
 			}
 		}
-		f := event.Source().Fields()
-		if f == nil {
-			return protocolError("invalid Anthropic event")
+		tr, e := trace.Accept(event)
+		if e != nil {
+			return e
 		}
-		kind := str(f["type"])
-		if frame.Event != nil && *frame.Event != kind {
-			return protocolError("event name disagrees with type")
-		}
-		if kind == "error" {
-			if e := openai.ParseErrorBody([]byte(frame.Data)); e != nil {
+		switch tr.Kind {
+		case AnthropicPing:
+			return nil
+		case AnthropicError:
+			if e := openai.ParseErrorBody(event.Source().Bytes()); e != nil {
 				return e
 			}
 			return protocolError("invalid stream error")
 		}
-		switch kind {
-		case "ping":
-			return nil
-		case "message_start":
-			if started {
-				return protocolError("duplicate message start")
-			}
-			m, e := object(f["message"])
-			if e != nil || str(m["role"]) != "assistant" || str(m["type"]) != "message" {
-				return protocolError("invalid message start")
-			}
-			started = true
+		// Forward the admitted source bytes verbatim; message_start is the
+		// single authorized rewrite (the routed model replaces wire identity).
+		data := event.Source().Raw()
+		if tr.Kind == AnthropicMessageStart {
+			f := event.Source().Fields()
+			m, _ := object(f["message"])
 			c.UpstreamID = str(m["id"])
 			c.ProviderModel = str(m["model"])
-			if u, e := optionalObject(m["usage"]); e != nil {
-				return e
-			} else {
-				maps.Copy(usage, u)
-			}
 			m["model"] = raw(route)
 			f["message"] = raw(m)
-		case "content_block_start":
-			index, ok := count(f["index"])
-			if !started || finished || !ok || index != next {
-				return protocolError("invalid content block start sequence")
-			}
-			if len(blocks) >= max(1, limit/32) {
-				return protocolError("too many active content blocks")
-			}
-			next++
-			block, e := object(f["content_block"])
-			if e != nil {
-				return protocolError("invalid content block")
-			}
-			kind := str(block["type"])
-			if kind == "tool_use" && (str(block["id"]) == "" || str(block["name"]) == "") {
-				return protocolError("incomplete tool start")
-			}
-			state := &contentBlock{kind: kind}
-			if kind == "tool_use" {
-				input, err := object(block["input"])
-				if err != nil {
-					return protocolError("invalid tool input")
-				}
-				if len(input) > 0 {
-					state.args = string(block["input"])
-					retained += len(state.args)
-				}
-			} else if kind != "text" {
-				state.kind = ""
-			}
-			if retained > limit {
-				return openai.ErrEventTooLarge
-			}
-			blocks[index] = state
-		case "content_block_delta":
-			index, ok := count(f["index"])
-			block := blocks[index]
-			if !started || finished || !ok || block == nil {
-				return protocolError("delta outside an active content block")
-			}
-			delta, e := object(f["delta"])
-			if e != nil {
-				return protocolError("invalid content delta")
-			}
-			switch str(delta["type"]) {
-			case "text_delta":
-				if block.kind != "text" {
-					return protocolError("text delta for non-text block")
-				}
-				var text string
-				if json.Unmarshal(delta["text"], &text) != nil {
-					return protocolError("invalid text delta")
-				}
-			case "input_json_delta":
-				if block.kind != "tool_use" {
-					return protocolError("tool delta for non-tool block")
-				}
-				var part string
-				if json.Unmarshal(delta["partial_json"], &part) != nil {
-					return protocolError("invalid tool delta")
-				}
-				if retained+len(part) > limit {
-					return openai.ErrEventTooLarge
-				}
-				retained += len(part)
-				block.args += part
-			}
-		case "content_block_stop":
-			index, ok := count(f["index"])
-			block := blocks[index]
-			if !ok || block == nil || finished {
-				return protocolError("stop outside an active content block")
-			}
-			if block.kind == "tool_use" && block.args != "" {
-				if _, e := object([]byte(block.args)); e != nil {
-					return protocolError("incomplete tool arguments")
-				}
-			}
-			retained -= len(block.args)
-			delete(blocks, index)
-		case "message_delta":
-			if !started || finished || len(blocks) > 0 {
-				return protocolError("message delta before blocks finish")
-			}
-			delta, e := object(f["delta"])
-			if e != nil {
-				return protocolError("invalid message delta")
-			}
-			reason := str(delta["stop_reason"])
-			if reason == "" {
-				return protocolError("missing stop reason")
-			}
-			c.FinishReason = anthropicFinish(reason)
-			finished = true
-			if u, e := optionalObject(f["usage"]); e != nil {
-				return e
-			} else {
-				delete(usage, "output_tokens")
-				maps.Copy(usage, u)
-			}
-			c.Usage, e = nativeUsage(usage, "anthropic")
+			data = string(raw(f))
+		}
+		if tr.Usage.Kind() == oif.Object {
+			usage, e := nativeUsage(trace.Usage(), "anthropic")
 			if e != nil {
 				return e
 			}
-		case "message_stop":
-			if !finished || len(blocks) > 0 {
-				return protocolError("message stopped before completion")
-			}
-			done = true
-		default:
-			if !started {
-				return protocolError("event before message start")
+			if usage != nil {
+				c.Usage = usage
 			}
 		}
-		if e := emit(eventFrame(kind, f)); e != nil {
+		if reason, declared := trace.StopReason(); declared {
+			c.FinishReason = anthropicFinish(reason)
+		}
+		if e := emit(framedEventFrame(event.Framing(), tr.Type, data)); e != nil {
 			return e
 		}
-		if done {
+		if tr.Kind == AnthropicMessageStop {
 			return streamDone
 		}
 		return nil
@@ -278,7 +175,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 	if err != nil && !errors.Is(err, streamDone) {
 		return c, streamError(err)
 	}
-	if !done {
+	if !trace.Terminal() {
 		return c, &openai.ProtocolError{Detail: "stream ended before message_stop", Truncated: true}
 	}
 	return c, nil
@@ -375,12 +272,30 @@ type streamTranslator struct {
 	refused                   bool
 	sequence, nextBlock, size int
 	retained                  *int
+	trace                     *AnthropicTrace
+	lifted                    uint64
 }
 
 func (t *streamTranslator) send(event string, f Object) error {
 	if t.target == openai.FamilyResponses {
 		f["sequence_number"] = raw(t.sequence)
 		t.sequence++
+	}
+	if t.target == openai.FamilyAnthropic {
+		// Generated Anthropic output is admitted through the same
+		// authoritative reducer as provider streams: a translator defect
+		// fails closed instead of emitting an invalid native trace.
+		if t.trace == nil {
+			t.trace = NewAnthropicTrace(t.limit)
+		}
+		lifted, e := openai.LiftEvent(openai.FamilyAnthropic, string(raw(f)), event, t.lifted, t.limit)
+		if e != nil {
+			return e
+		}
+		t.lifted++
+		if _, e := t.trace.Accept(lifted); e != nil {
+			return e
+		}
 	}
 	return t.emit(eventFrame(event, f))
 }
@@ -616,6 +531,8 @@ func (t *streamTranslator) frame(frame []byte) error {
 						input = string(b["input"])
 					}
 					return t.toolDelta(int(index), str(b["id"]), str(b["name"]), input)
+				default:
+					return protocolError("untranslatable Anthropic block")
 				}
 			case "content_block_delta":
 				d, _ := object(f["delta"])
@@ -624,7 +541,16 @@ func (t *streamTranslator) frame(frame []byte) error {
 					return t.textDelta(str(d["text"]))
 				case "input_json_delta":
 					return t.toolDelta(int(index), "", "", str(d["partial_json"]))
+				default:
+					return protocolError("untranslatable Anthropic delta")
 				}
+			case "content_block_stop", "message_delta", "message_stop", "ping":
+				// The source reducer already validated these events and
+				// collected their native facts; the destination terminal is
+				// emitted by finish, never silently dropped here.
+				return nil
+			default:
+				return protocolError("untranslatable Anthropic event")
 			}
 		case openai.FamilyGemini:
 			if e := t.start(str(f["responseId"])); e != nil {

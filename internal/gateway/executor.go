@@ -3,8 +3,8 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/generation"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -48,7 +49,91 @@ const (
 	classAmbiguous         = "ambiguous"
 	classLimitsUnavailable = "limits_unavailable"
 	classContextWindow     = "context_window"
+	// classResourceExhausted marks a bounded gateway-local resource reaching
+	// its ceiling: retained dependency bytes, projected delivery bytes,
+	// transient event memory, aggregate admitted event work, the stream
+	// lifetime, or a durable persistence bound. The provider produced work
+	// this proxy could not afford to keep — never provider ill health, so
+	// the class feeds no circuit or credential cooldown.
+	classResourceExhausted = "resource_exhausted"
 )
+
+// Fault origins attribute one failed attempt to the component that owns the
+// failure, decided before the retry-taxonomy class feeds health accounting or
+// failover. The class alone cannot tell a provider outage from a proxy-local
+// defect, and only provider-owned origins may ever charge the shared endpoint
+// circuit.
+const (
+	// faultNativeOutcome is a faithfully delivered native terminal outcome
+	// that is itself the report, such as a provider-declared "failed"
+	// response; the provider exchange completed and answered.
+	faultNativeOutcome = "native_outcome"
+	// faultProviderTransport is a connect, deadline or wire-protocol failure
+	// of the provider exchange: refused connections, timeouts after dispatch,
+	// truncated or malformed provider data.
+	faultProviderTransport = "provider_transport"
+	// faultProviderDeclared is an error the provider itself declared: an HTTP
+	// error status or an in-band error envelope.
+	faultProviderDeclared = "provider_declared"
+	// faultClientDelivery is the caller's own connection failing; it is never
+	// evidence about the upstream.
+	faultClientDelivery = "client_delivery"
+	// faultProxyCapacity is a gateway-side resource bound — response body,
+	// event or continuation bytes — rejecting an otherwise valid exchange.
+	faultProxyCapacity = "proxy_capacity"
+	// faultProxyPersistence is the gateway failing to durably record its own
+	// retained state: response resources, continuations, claims.
+	faultProxyPersistence = "proxy_persistence"
+	// faultProxyPolicy is a local content-policy refusal after a complete
+	// provider exchange.
+	faultProxyPolicy = "proxy_policy"
+	// faultContract is an admitted contract/profile mismatch or projection
+	// defect; it quarantines contract evidence rather than the endpoint.
+	faultContract = "contract"
+)
+
+// Fault scopes bound how far one failure reaches. Only endpoint- and
+// credential-scoped provider faults may charge shared health state; request-
+// and contract-scoped faults stay local to the evidence that owns them.
+const (
+	scopeEndpoint   = "endpoint"
+	scopeCredential = "credential"
+	scopeContract   = "contract"
+	scopeRequest    = "request"
+)
+
+// defaultFault derives the fault origin and affected scope a retry-taxonomy
+// class implies when the failure carried no explicit attribution. The mapping
+// preserves the accounting each class already produced: nothing here widens or
+// narrows the health charge a class had before faults were structured.
+func defaultFault(class string) (origin, scope string) {
+	switch class {
+	case classConnect, classTimeout, classProtocol, classAmbiguous:
+		return faultProviderTransport, scopeEndpoint
+	case classUpstreamServer:
+		return faultProviderDeclared, scopeEndpoint
+	case classRateLimit, classCredential:
+		return faultProviderDeclared, scopeCredential
+	case classUpstreamClient, classContextWindow:
+		return faultProviderDeclared, scopeRequest
+	case classCancelled:
+		return faultClientDelivery, scopeRequest
+	case classPolicy:
+		return faultProxyPolicy, scopeRequest
+	case classLimitsUnavailable, classResourceExhausted:
+		return faultProxyCapacity, scopeRequest
+	}
+	return "", ""
+}
+
+// endpointScoped reports whether a transport failure actually reached the
+// provider; a deadline or refusal before dispatch is request-local evidence.
+func endpointScoped(dispatched bool) string {
+	if dispatched {
+		return scopeEndpoint
+	}
+	return scopeRequest
+}
 
 // Canonical defaults retained by existing accounting fixtures.
 const (
@@ -75,21 +160,26 @@ type execution struct {
 	request              request
 	family               openai.Family
 	parsed               *openai.Request
-	media                *media.Request
-	actor                string
-	keyID                string
-	budgetGroupID        *string
-	attribution          map[string]string
-	userID               string
-	affinity             []byte
-	authority            access.Authority
-	route                *runtime.Route
-	mode                 string
-	attempts             []runtime.Attempt
-	budget               int
-	preferences          *runtime.Preferences
-	decisions            []runtime.Decision
-	policy               runtime.EffectivePolicy
+	// source is the neutral lifted generation envelope; gen is its registered
+	// dialect, when the request is a generation admitted through the
+	// operation-owned registry. parsed remains the compatibility view.
+	source        generation.Source
+	gen           *generation.Dialect
+	media         *media.Request
+	actor         string
+	keyID         string
+	budgetGroupID *string
+	attribution   map[string]string
+	userID        string
+	affinity      []byte
+	authority     access.Authority
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
@@ -103,6 +193,9 @@ type execution struct {
 	pinnedSecret       []byte
 	providerState      bool
 	responseMap        map[string]string
+	// resolvedAssets are the resource-authority bindings verified during
+	// prepare(); strict binding consumes them, request JSON cannot mint them.
+	resolvedAssets map[string]interaction.AssetBinding
 
 	once       sync.Once
 	facts      []AttemptFact
@@ -167,12 +260,39 @@ type attemptFailure struct {
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *openai.UpstreamError
-	overall      bool   // the route deadline, not the attempt deadline, expired
-	dispatched   bool   // the request reached the upstream before the failure
-	quota        string // a quota this gateway enforces rejected the attempt
-	contractCode string // safe runtime interaction guard violation
-	policyCode   string // local output policy refusal after upstream completion
-	noRetry      bool   // strict outcome uncertainty must not suggest client retries
+	overall      bool                    // the route deadline, not the attempt deadline, expired
+	dispatched   bool                    // the request reached the upstream before the failure
+	quota        string                  // a quota this gateway enforces rejected the attempt
+	contractCode string                  // safe runtime interaction guard violation
+	policyCode   string                  // local output policy refusal after upstream completion
+	noRetry      bool                    // strict outcome uncertainty must not suggest client retries
+	origin       string                  // fault origin; empty falls back to the class default
+	scope        string                  // affected scope; empty falls back to the class default
+	resource     string                  // the constrained gateway resource a capacity fault names
+	exhausted    *interaction.Exhaustion // the bounded local resource that ran out
+}
+
+// attribute fills in fault origin and scope from the resolved class when the
+// failure site did not attribute them, then copies the fault evidence onto
+// the fact. A bounded-resource exhaustion names the budget that ran out.
+func (f *attemptFailure) attribute(fact *AttemptFact) {
+	if f.origin == "" || f.scope == "" {
+		origin, scope := defaultFault(f.class)
+		if f.origin == "" {
+			f.origin = origin
+		}
+		if f.scope == "" {
+			f.scope = scope
+		}
+	}
+	resource := f.resource
+	if resource == "" && f.exhausted != nil {
+		resource = f.exhausted.Resource
+	}
+	fact.FaultOrigin, fact.FaultScope, fact.FaultResource = f.origin, f.scope, resource
+	if f.exhausted != nil {
+		fact.LimitCategory, fact.Limit = string(f.exhausted.Category), int64(f.exhausted.Limit)
+	}
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -206,8 +326,43 @@ func (f *attemptFailure) toError() (result *Error) {
 			result.NoRetry = true
 		}
 	}()
+	// A quota this gateway enforces was never the upstream's decision, and
+	// saying so would send the caller looking at the wrong system.
+	switch f.quota {
+	case quotaConnection:
+		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
+	case quotaSlot:
+		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
+	}
+	// A bounded local resource names itself and its budget category rather
+	// than claiming the provider malfunctioned; exhaustion is explicit and
+	// never provider ill health.
+	if f.class == classResourceExhausted {
+		resource, category := "stream_work_bytes", string(interaction.LimitEventWork)
+		if f.exhausted != nil {
+			resource, category = f.exhausted.Resource, string(f.exhausted.Category)
+		}
+		return serverError(http.StatusBadGateway, "resource_exhausted", "The provider result exceeded the gateway's bounded "+category+" budget: "+resource+".")
+	}
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
+	// A proxy-local fault names the actual constrained resource or the
+	// durability step that failed; it never claims the provider returned
+	// malformed data.
+	switch f.origin {
+	case faultProxyCapacity:
+		resource := f.resource
+		if resource == "" {
+			resource = "resource"
+		}
+		return serverError(http.StatusServiceUnavailable, "proxy_resource_exhausted", "The provider exchange exceeded the gateway's "+resource+" limit.")
+	case faultProxyPersistence:
+		return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The gateway could not durably record the provider outcome.")
+	case faultContract:
+		if f.class == classProtocol && f.contractCode == "" {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider exchange could not be projected under the admitted contract.")
+		}
 	}
 	if f.policyCode != "" {
 		message := "The provider result was blocked by the route's content policy."
@@ -215,6 +370,11 @@ func (f *attemptFailure) toError() (result *Error) {
 			message = "The route's content policy cannot inspect this provider result."
 		}
 		return invalidRequest(f.policyCode, message, nil)
+	}
+	// A provider-declared failure delivered in-band is the provider's own
+	// outcome report, not malformed data this gateway failed to read.
+	if f.origin == faultProviderDeclared && f.class == classProtocol && f.upstream != nil {
+		return upstreamError(f)
 	}
 	switch f.class {
 	case classLimitsUnavailable:
@@ -230,14 +390,6 @@ func (f *attemptFailure) toError() (result *Error) {
 	case classConnect:
 		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
 	case classRateLimit:
-		// A quota this gateway enforces was never the upstream's decision, and
-		// saying so would send the caller looking at the wrong system.
-		switch f.quota {
-		case quotaConnection:
-			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
-		case quotaSlot:
-			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
-		}
 		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classUpstreamServer:
 		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
@@ -359,25 +511,70 @@ func (st *attemptState) trace() *httptrace.ClientTrace {
 	}
 }
 
-func (st *attemptState) classify(err error, committed bool) string {
+// classify attributes an in-flight attempt error before the retry taxonomy is
+// consulted. A deadline or refusal that never reached the provider is
+// request-local; the gateway's own byte, work and lifetime ceilings are
+// resource exhaustion, never provider ill health; a truncated or malformed
+// provider stream remains a provider transport fault.
+func (st *attemptState) classify(err error, committed bool) *attemptFailure {
 	switch {
 	case st.parent.Err() != nil:
 		if errors.Is(st.parent.Err(), context.DeadlineExceeded) {
-			return classTimeout
+			return &attemptFailure{class: classTimeout, origin: faultProviderTransport, scope: endpointScoped(st.dispatched.Load())}
 		}
-		return classCancelled
+		return &attemptFailure{class: classCancelled, origin: faultClientDelivery, scope: scopeRequest}
 	case st.reason.Load() != 0:
-		return classTimeout
+		if st.reason.Load() == 3 {
+			// The stream lifetime cap is a proxy-local bound: the provider
+			// delivered for a full hour, which is exhausted lifetime, not
+			// ill health.
+			return &attemptFailure{
+				class:  classResourceExhausted,
+				origin: faultProxyCapacity,
+				scope:  scopeRequest,
+				exhausted: &interaction.Exhaustion{
+					Resource: "stream_lifetime_seconds", Category: interaction.LimitTime, Limit: int(maxStreamDuration / time.Second),
+				},
+			}
+		}
+		// First-byte and idle deadlines measure an exchange this gateway
+		// already opened against the endpoint; both are endpoint evidence.
+		return &attemptFailure{class: classTimeout, origin: faultProviderTransport, scope: scopeEndpoint}
 	case errors.Is(err, errClientWrite):
-		return classCancelled
-	case committed:
-		return classProtocol
+		return &attemptFailure{class: classCancelled, origin: faultClientDelivery, scope: scopeRequest}
 	}
 	var pe *openai.ProtocolError
-	if errors.As(err, &pe) || errors.Is(err, openai.ErrEventTooLarge) {
-		return classProtocol
+	var exhaustion *interaction.Exhaustion
+	switch {
+	case errors.As(err, &exhaustion):
+		// A bounded byte/work budget is exhausted the same whether or not
+		// earlier frames were committed.
+		return &attemptFailure{class: classResourceExhausted, origin: faultProxyCapacity, scope: scopeRequest, exhausted: exhaustion}
+	case errors.Is(err, openai.ErrEventTooLarge):
+		return &attemptFailure{
+			class:     classResourceExhausted,
+			origin:    faultProxyCapacity,
+			scope:     scopeRequest,
+			exhausted: &interaction.Exhaustion{Resource: "event_bytes", Category: interaction.LimitBytes},
+		}
+	case errors.Is(err, errResponsePersistence):
+		// Retained-state durability failed locally; the provider exchange
+		// itself produced no fault evidence.
+		return &attemptFailure{class: classProtocol, origin: faultProxyPersistence, scope: scopeRequest}
+	case errors.Is(err, errResponseMapping):
+		// The provider's own frame data was malformed or drifted from the
+		// accepted identity; that is endpoint evidence, not a local defect.
+		return &attemptFailure{class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint}
+	case errors.Is(err, errFrameProjection):
+		// The gateway's own projection of a provider frame failed; that is
+		// contract evidence, never provider transport evidence.
+		return &attemptFailure{class: classProtocol, origin: faultContract, scope: scopeContract}
+	case errors.As(err, &pe):
+		return &attemptFailure{class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint}
+	case committed:
+		return &attemptFailure{class: classProtocol, origin: faultProviderTransport, scope: scopeEndpoint}
 	}
-	return classConnect
+	return &attemptFailure{class: classConnect, origin: faultProviderTransport, scope: scopeEndpoint}
 }
 
 func endpointPath(family openai.Family) string {
@@ -385,6 +582,33 @@ func endpointPath(family openai.Family) string {
 		return "/responses"
 	}
 	return "/chat/completions"
+}
+
+// responsesTerminalStatus returns the provider-declared terminal status a
+// client-facing Responses frame carries, or "" when the frame is not one of
+// the terminal lifecycle events.
+func responsesTerminalStatus(frame []byte) string {
+	const marker = "event: response."
+	i := bytes.Index(frame, []byte(marker))
+	if i < 0 {
+		return ""
+	}
+	rest := frame[i+len(marker):]
+	end := bytes.IndexByte(rest, '\n')
+	if end < 0 {
+		return ""
+	}
+	switch string(rest[:end]) {
+	case "completed":
+		return "completed"
+	case "incomplete":
+		return "incomplete"
+	case "failed":
+		return "failed"
+	case "cancelled":
+		return "cancelled"
+	}
+	return ""
 }
 
 // newFact opens the record of one attempt against one credential slot.
@@ -444,6 +668,7 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int, rejection *attemptFailure) AttemptFact {
 	fact := s.newFact(x, a, slot, ordinal)
 	fact.Class = rejection.class
+	rejection.attribute(&fact)
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	if rejection.retryAfter > 0 {
 		retry := rejection.retryAfter
@@ -488,6 +713,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
@@ -501,7 +727,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 
 	_, err := s.egress.ValidateEndpoint(provider.Endpoint)
 	if err != nil {
-		return fail(classConnect, nil)
+		// The egress policy refused the configured endpoint before any byte
+		// was sent; that is this gateway's configuration, not a signal the
+		// provider produced.
+		return fail(classConnect, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	cfg := provider.Connector()
 	var body []byte
@@ -524,12 +753,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		body, wire, err = providerinvoke.Encode(x.parsed, cfg, a.UpstreamModel, provider.ParameterDefaults)
 	}
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return fail(classTimeout, &attemptFailure{overall: true})
+		return fail(classTimeout, &attemptFailure{overall: true, origin: faultProxyCapacity, scope: scopeRequest, resource: "request deadline"})
 	}
 	timeout := min(a.Timeout, remaining)
 
@@ -538,19 +767,24 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.parsed.Stream)
+	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.source.Stream)
+	// Generation addressing is declared by the registered target dialect;
+	// legacy-path dialects resolve to the same URL through the adapter.
+	if contract != nil {
+		endpoint, err = cfg.GenerationURL(contract.TargetDialect(), a.UpstreamModel, x.source.Stream)
+	}
 	if err != nil {
-		return fail(classProtocol, nil)
+		return fail(classProtocol, &attemptFailure{origin: faultContract, scope: scopeContract})
 	}
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, st.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fail(classConnect, nil)
+		return fail(classConnect, &attemptFailure{origin: faultContract, scope: scopeRequest})
 	}
 	atr.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
-	if x.parsed.Stream {
+	if x.source.Stream {
 		req.Header.Set("Accept", "text/event-stream")
 		if wire == "bedrock" || cfg.EventStream() {
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
@@ -566,23 +800,39 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	credentialValues, err := s.auth.Apply(actx, req, cfg, secret, body)
 	if err != nil {
 		if actx.Err() != nil {
-			return fail(st.classify(err, false), nil)
+			f := st.classify(err, false)
+			return fail(f.class, f)
 		}
-		return fail(classCredential, nil)
+		// Signing the request is local machinery; the provider never saw it.
+		return fail(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 
 	client, err := s.providerClient(actx, x.request.release, provider, slot)
 	if err != nil {
-		return fail(classCredential, nil)
+		return fail(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	if contract != nil && contract.ToolContinuation() {
 		if err := s.claimToolWork(actx, x, contract, a, slot); err != nil {
-			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true})
+			if errors.Is(err, resources.ErrPayloadTooLarge) {
+				// The continuation payload itself overflowed its durable
+				// bound: a named local resource ceiling, not provider
+				// evidence.
+				return fail(classResourceExhausted, &attemptFailure{
+					noRetry: true,
+					origin:  faultProxyCapacity,
+					scope:   scopeRequest,
+					exhausted: &interaction.Exhaustion{
+						Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes,
+					},
+				})
+			}
+			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true, origin: faultProxyPersistence, scope: scopeRequest})
 		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fail(st.classify(err, false), nil)
+		f := st.classify(err, false)
+		return fail(f.class, f)
 	}
 	defer resp.Body.Close()
 	// The response status is the first thing the upstream sends back.
@@ -594,7 +844,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			st.upstream.Store(3)
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw)}
+		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), origin: faultProviderDeclared}
 		if f.upstream != nil {
 			f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
 		}
@@ -616,7 +866,8 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	var completion *openai.Completion
 	committed := false
 	actionable := false
-	if x.parsed.Stream {
+	nativeStatus := ""
+	if x.source.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 		if mediaType != "text/event-stream" && !((wire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
@@ -633,15 +884,43 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			if x.providerState {
 				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame)
 				if mapErr != nil {
-					return mapErr
+					// The mapping layer already owns its fault: malformed or
+					// drifting provider data is endpoint evidence, durability
+					// is proxy persistence, and only an otherwise unattributed
+					// failure is this gateway's projection defect.
+					switch {
+					case errors.Is(mapErr, errResponsePersistence),
+						errors.Is(mapErr, errResponseMapping),
+						errors.Is(mapErr, errFrameProjection):
+						return mapErr
+					default:
+						return fmt.Errorf("%w: %w", errFrameProjection, mapErr)
+					}
 				}
 				frame = mapped
 			}
-			if wire == openai.FamilyResponses && (bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n"))) {
-				var err error
-				frame, err = redactFailedResponseFrame(frame, credentialValues)
-				if err != nil {
-					return err
+			if x.family == openai.FamilyResponses {
+				// The provider's own terminal status is outcome evidence;
+				// "incomplete" is a valid terminal, never a fault.
+				if status := responsesTerminalStatus(frame); status != "" {
+					nativeStatus = status
+				}
+			}
+			if bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n")) {
+				var redactErr error
+				switch {
+				case x.gen != nil && x.gen.RedactEvent != nil:
+					// The registered source dialect owns which frames can carry
+					// credential material and how they are scrubbed.
+					frame, redactErr = x.gen.RedactEvent(frame, credentialValues)
+				case wire == openai.FamilyResponses:
+					frame, redactErr = redactFailedResponseFrame(frame, credentialValues)
+				}
+				if redactErr != nil {
+					// Credential redaction is the gateway's own projection
+					// machinery; its failure is contract evidence, never
+					// provider transport evidence.
+					return fmt.Errorf("%w: %v", errFrameProjection, redactErr)
 				}
 			}
 			if !committed {
@@ -665,27 +944,52 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					fact.Interaction.ClientState = usage.ClientActionable
 				}
 			}
-			if err == nil && fact.FirstOutput == nil && protocols.MeaningfulFrame(x.family, frame) {
-				elapsed := s.now().Sub(fact.StartedAt)
-				fact.FirstOutput = &elapsed
+			if err == nil && fact.FirstOutput == nil {
+				meaningful := protocols.MeaningfulFrame(x.family, frame)
+				if x.gen != nil && x.gen.MeaningfulFrame != nil {
+					meaningful = x.gen.MeaningfulFrame(frame)
+				}
+				if meaningful {
+					elapsed := s.now().Sub(fact.StartedAt)
+					fact.FirstOutput = &elapsed
+				}
 			}
 			return err
 		}
-		strictResponseIncomplete := false
 		var observe func(oif.Event) error
 		if contract != nil {
 			observe = func(event oif.Event) error {
 				if err := contract.ValidateEvent(event); err != nil {
 					return err
 				}
-				if x.strict() && x.family == openai.FamilyResponses {
-					if kind, present := event.Source().Root().Lookup("type"); present {
-						if text, ok := kind.Text(); ok && text == "response.incomplete" {
-							strictResponseIncomplete = true
+				if x.strict() {
+					if x.family == openai.FamilyResponses {
+						if kind, present := event.Source().Root().Lookup("type"); present {
+							// The provider's own terminal status is outcome
+							// evidence, never a protocol violation.
+							if text, ok := kind.Text(); ok {
+								switch text {
+								case "response.completed", "response.incomplete", "response.failed", "response.cancelled":
+									nativeStatus = strings.TrimPrefix(text, "response.")
+								}
+							}
+						}
+					} else if incomplete := contract.TargetDialect().IncompleteEvent; incomplete != "" {
+						if kind, present := event.Source().Root().Lookup("type"); present {
+							// The registered dialect's incomplete marker is an
+							// admitted native terminal: it records outcome
+							// evidence, not a protocol fault.
+							if text, ok := kind.Text(); ok && text == incomplete {
+								nativeStatus = "incomplete"
+							}
 						}
 					}
 				}
-				actionable = actionable || eventActionable(event)
+				if f := contract.TargetDialect().EventActionable; f != nil {
+					actionable = actionable || f(event)
+				} else {
+					actionable = actionable || eventActionable(event)
+				}
 				return nil
 			}
 		}
@@ -693,7 +997,8 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			var projection *interaction.ToolProjection
 			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
 			if err == nil {
-				completion, err = protocols.StreamWithEvents(wire, wire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
+				var native *generation.Native
+				native, err = contract.TargetDialect().StreamNative(generation.StreamInput{Source: contract.Source(), Body: cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), MaxEventBytes: int(s.cfg.MaxEventBytes), Route: x.route.Slug, IncludeUsage: true}, func([]byte) error { return nil }, func(event oif.Event) error {
 					frames, e := projection.Observe(event)
 					if e != nil {
 						return e
@@ -709,6 +1014,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					}
 					return nil
 				})
+				completion = protocols.CompletionFromNative(native)
 			}
 			if err == nil {
 				st.upstream.Store(3)
@@ -733,12 +1039,15 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					}
 				}
 			}
+		} else if contract != nil && contract.TargetDialect().StreamNative != nil {
+			// Strict generation streams decode through the registered target
+			// dialect's native event grammar; emitted frames are already on the
+			// caller surface because a strict contract binds source to it.
+			var native *generation.Native
+			native, err = contract.TargetDialect().StreamNative(generation.StreamInput{Source: contract.Source(), Body: cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), MaxEventBytes: int(s.cfg.MaxEventBytes), Route: x.route.Slug, IncludeUsage: x.source.IncludeUsage}, emit, observe)
+			completion = protocols.CompletionFromNative(native)
 		} else {
-			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
-		}
-		if err == nil && strictResponseIncomplete {
-			st.upstream.Store(3)
-			err = &openai.ProtocolError{Detail: "strict Responses stream ended incomplete"}
+			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.source.IncludeUsage, emit, observe)
 		}
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
@@ -747,14 +1056,26 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			err = readErr
 		} else {
 			if contract != nil {
-				var native *openai.Completion
-				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
+				var decoded *generation.Native
+				decoded, err = contract.TargetDialect().DecodeNative(generation.DecodeInput{Source: contract.Source(), Effective: contract.Effective(), Body: raw, Route: x.route.Slug, MaxBytes: int(s.cfg.MaxResponseBytes)})
+				native := protocols.CompletionFromNative(decoded)
 				if native != nil {
 					fact.Usage = native.Usage
+					if x.family == openai.FamilyResponses && native.Native.Source().Valid() {
+						if status, present := native.Native.Source().Lookup("/status"); present {
+							if text, ok := status.Text(); ok {
+								nativeStatus = text
+							}
+						}
+					}
 				}
 				if err == nil {
 					st.upstream.Store(3)
-					err = contract.ValidateResult(native.Native)
+					if native == nil {
+						err = &openai.ProtocolError{Detail: "dialect decoder returned no native result"}
+					} else {
+						err = contract.ValidateResult(native.Native)
+					}
 				}
 				if err == nil && contract.ToolContinuation() {
 					var state *interaction.Continuation
@@ -773,14 +1094,16 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 				if err == nil && wire == x.family {
 					completion = native
-					if x.strict() && x.family == openai.FamilyResponses {
-						source := native.Native.Source()
-						if _, present := source.Lookup("/model"); present {
-							model, _ := json.Marshal(x.route.Slug)
-							source, err = oif.Apply(source, []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published response model"}})
-						}
-						if err == nil {
-							completion.Body = source.Bytes()
+					if x.strict() {
+						if bind := contract.TargetDialect().BindResultModel; bind != nil {
+							source := native.Native.Source()
+							var changes []oif.Change
+							if changes, err = bind(source, x.route.Slug); err == nil && len(changes) > 0 {
+								source, err = oif.Apply(source, changes)
+							}
+							if err == nil {
+								completion.Body = source.Bytes()
+							}
 						}
 					}
 				}
@@ -790,9 +1113,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 		}
 	}
+	fact.NativeStatus = nativeStatus
 	if completion != nil {
 		fact.Usage = completion.Usage
-		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
+		if !x.source.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
 			err = errResponseTooLarge
 		}
 	}
@@ -800,26 +1124,47 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
 		var ue *openai.UpstreamError
 		var violation *interaction.Error
+		var exhausted *interaction.Exhaustion
 		switch {
-		case errors.As(err, &violation):
-			f.contractCode = "fidelity_protocol_violation"
-			return fail(classProtocol, f)
+		case errors.As(err, &exhausted):
+			f.exhausted = exhausted
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, resources.ErrPayloadTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "continuation_payload_bytes", Category: interaction.LimitPersistence, Limit: resources.MaxContinuationBytes}
+			return fail(classResourceExhausted, f)
 		case errors.Is(err, errResponseTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "response_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxResponseBytes)}
+			return fail(classResourceExhausted, f)
+		case errors.Is(err, openai.ErrEventTooLarge):
+			f.exhausted = &interaction.Exhaustion{Resource: "event_bytes", Category: interaction.LimitBytes, Limit: int(s.cfg.MaxEventBytes)}
+			return fail(classResourceExhausted, f)
+		case errors.As(err, &violation):
+			// The provider's exchange completed; the projection of its
+			// result broke the admitted contract, which is a defect of
+			// this gateway's contract layer, not provider evidence.
+			f.contractCode = "fidelity_protocol_violation"
+			f.origin, f.scope = faultContract, scopeContract
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = ue
 			ue.Message = redactCredentials(ue.Message, credentialValues)
 			class, status := inBandFailure(ue, committed)
 			f.status = status
+			// An in-band error envelope is the provider's own terminal
+			// report; the class still bounds which scope it may charge.
+			f.origin = faultProviderDeclared
 			return fail(class, f)
 		}
-		return fail(st.classify(err, committed), f)
+		f = st.classify(err, committed)
+		f.status = resp.StatusCode
+		f.committed = committed
+		return fail(f.class, f)
 	}
 	fact.Class = classSuccess
 	st.upstream.Store(3)
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamTerminal
-		if x.parsed.Stream {
+		if x.source.Stream {
 			fact.Interaction.ClientState = usage.ClientTerminal
 		}
 	}
@@ -841,6 +1186,10 @@ type countingReader struct {
 }
 
 var errResponseTooLarge = errors.New("upstream response exceeds byte limit")
+
+// errFrameProjection marks a failure in the gateway's own frame mapping or
+// credential redaction — a contract defect, not provider wire evidence.
+var errFrameProjection = errors.New("provider frame could not be projected faithfully")
 
 func (c *countingReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {

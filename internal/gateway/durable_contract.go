@@ -33,8 +33,22 @@ type durableAsset struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Endpoint    string `json:"endpoint"`
-	Size        int64  `json:"size"`
-	ItemCount   int    `json:"item_count"`
+	// Purpose is the native upload purpose committed with the file. Batch
+	// inputs carry "batch"; generation admission requires a purpose the
+	// provider profile lists as an inference-file purpose.
+	Purpose   string `json:"purpose,omitempty"`
+	Size      int64  `json:"size"`
+	ItemCount int    `json:"item_count"`
+}
+
+// durableOperation names the route operation a committed file contract was
+// admitted under. Inference files resolve through generation; every other
+// strict file remains on the batch path.
+func durableOperation(doc *durableDocument) string {
+	if doc != nil && doc.Asset != nil && doc.Asset.Purpose != "" && doc.Asset.Purpose != "batch" {
+		return "generation"
+	}
+	return "batch"
 }
 
 // The file is already staged by the bounded media owner. Inspection never

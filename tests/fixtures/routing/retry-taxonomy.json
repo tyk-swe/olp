@@ -96,5 +96,19 @@
     "class": "upstream_server",
     "response_committed": true,
     "allows_failover": false
+  },
+  {
+    "name": "local resource exhaustion is terminal",
+    "phase": "body",
+    "class": "resource_exhausted",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
+    "name": "local resource exhaustion after commit is terminal",
+    "phase": "body",
+    "class": "resource_exhausted",
+    "response_committed": true,
+    "allows_failover": false
   }
 ]

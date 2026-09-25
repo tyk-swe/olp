@@ -7,7 +7,8 @@
     streamTurn,
     submissionID,
     unaryTurn,
-    type ReadyTurn
+    type ReadyTurn,
+    type ToolCall
   } from './browserContinuation';
 
   let { route, requestText }: { route: string; requestText: string } = $props();
@@ -25,7 +26,19 @@
   let epoch = 0;
 
   const active = $derived(turns[activeIndex]);
-  const calls = $derived(active?.assistant.tool_calls ?? []);
+  // Only calls named by the committed actionability claim are actionable; an
+  // assistant tool call without a claim is an observation, never an action.
+  function actionableCalls(turn: ReadyTurn | undefined): ToolCall[] {
+    const claimed = turn?.actions?.tool_calls;
+    if (!claimed?.length) return [];
+    const known = new Map(
+      (turn?.assistant.tool_calls ?? []).map((call) => [call.id, call])
+    );
+    return claimed
+      .map((id) => known.get(id))
+      .filter((call): call is ToolCall => call !== undefined);
+  }
+  const calls = $derived(actionableCalls(active));
 
   function problem(reason: unknown) {
     return reason instanceof Error
@@ -48,7 +61,7 @@
   function addTurn(turn: ReadyTurn) {
     turns = [...turns, turn];
     activeIndex = turns.length - 1;
-    results = turn.assistant.tool_calls?.map(() => '') ?? [];
+    results = actionableCalls(turn).map(() => '');
     pending = null;
   }
 
@@ -146,7 +159,7 @@
 
   function select(index: number) {
     activeIndex = index;
-    results = turns[index]?.assistant.tool_calls?.map(() => '') ?? [];
+    results = actionableCalls(turns[index]).map(() => '');
     error = '';
   }
 
@@ -234,7 +247,7 @@
           class="button button-secondary"
           aria-pressed={activeIndex === index}
           onclick={() => select(index)}
-          >Turn {index + 1}{turn.assistant.tool_calls?.length
+          >Turn {index + 1}{turn.actions?.tool_calls.length
             ? ' · tools'
             : ' · final'}</button
         >
@@ -244,9 +257,18 @@
   {#if active}
     <div class="ready" role="status">
       <strong>Recoverable continuation ready</strong>
-      <span
-        >Tool actions became available after the encrypted state commit.</span
-      >
+      {#if active.actions === undefined}
+        <span
+          >This delivery predates the actionability record; it can be inspected
+          but exposes no tool actions.</span
+        >
+      {:else if active.actions.tool_calls.length}
+        <span
+          >Tool actions became available after the encrypted state commit.</span
+        >
+      {:else}
+        <span>The committed delivery completed with no tool actions.</span>
+      {/if}
     </div>
     {#if active.observations.length}
       <div>
@@ -274,7 +296,41 @@
     <div class="assistant-result">
       <h3>Assistant text</h3>
       <pre>{active.assistant.content || 'No ordinary text'}</pre>
-      <p>Finish reason: {active.finish}</p>
+      <dl class="terminal-facts">
+        <div>
+          <dt>Client finish reason</dt>
+          <dd>{active.finish}</dd>
+        </div>
+        <div>
+          <dt>Native terminal</dt>
+          <dd>
+            {#if active.nativeTerminal}
+              {active.nativeTerminal
+                .stop_reason}{#if 'stop_sequence' in active.nativeTerminal}{active
+                  .nativeTerminal.stop_sequence !== null
+                  ? ` · stop sequence ${active.nativeTerminal.stop_sequence}`
+                  : ' · stop sequence null'}{/if}
+            {:else}
+              Not recorded in this delivery
+            {/if}
+          </dd>
+        </div>
+        <div>
+          <dt>Actionability claim</dt>
+          <dd>
+            {#if active.actions === undefined}
+              Not recorded — this delivery predates the claim
+            {:else if active.actions.tool_calls.length}
+              {active.actions.tool_calls.length} tool call{active.actions
+                .tool_calls.length === 1
+                ? ''
+                : 's'} claimed
+            {:else}
+              Claimed no tool actions
+            {/if}
+          </dd>
+        </div>
+      </dl>
       {#if active.nativeUsageRaw}
         <details>
           <summary>Native provider usage categories</summary>
@@ -366,6 +422,19 @@
   }
   .observations {
     padding-left: 1.25rem;
+    margin: 0;
+  }
+  .terminal-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.5rem;
+    margin: 0.6rem 0 0;
+    font-size: var(--text-caption);
+  }
+  .terminal-facts dt {
+    color: var(--foreground-subtle);
+  }
+  .terminal-facts dd {
     margin: 0;
   }
   .observations li {

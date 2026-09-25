@@ -38,7 +38,15 @@ type Profile struct {
 	Operations        []string                   `json:"operations"`
 	SemanticHeaders   []string                   `json:"semantic_headers"`
 	QuerySettings     []string                   `json:"query_settings"`
-	Documentation     string                     `json:"documentation"`
+	HostedTools       []string                   `json:"hosted_tools"`
+	// FilePurposes are the native upload purposes this profile admits for
+	// gateway-managed inference files. An empty list is no file contract;
+	// batch files keep their own route/file contract and are not inferred here.
+	FilePurposes []string `json:"file_purposes,omitempty"`
+	// FileOptions are the additional native multipart fields forwarded
+	// verbatim on a managed inference-file upload.
+	FileOptions   []string `json:"file_options,omitempty"`
+	Documentation string   `json:"documentation"`
 }
 
 const ProfileRevision = "1"
@@ -48,7 +56,7 @@ var profileMu sync.RWMutex
 
 var profileRegistry = []Profile{
 	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
-	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
+	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai", HostedTools: []string{"web_search"}},
 	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
 	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
 	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
@@ -135,6 +143,13 @@ func init() {
 			p.Transport = "websocket"
 			p.Documentation = "https://ai.google.dev/api/live"
 		}
+		// The direct OpenAI Responses profile owns the only managed
+		// inference-file contract: native user_data uploads with the provider's
+		// expiry option forwarded verbatim.
+		if p.ID == "openai-responses" {
+			p.FilePurposes = []string{"user_data"}
+			p.FileOptions = []string{"expires_after[anchor]", "expires_after[seconds]"}
+		}
 		completeProfileMetadata(p)
 	}
 	registerUnaryProfiles()
@@ -163,6 +178,9 @@ func cloneProfile(p Profile) Profile {
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
 	p.QuerySettings = slices.Clone(p.QuerySettings)
+	p.HostedTools = slices.Clone(p.HostedTools)
+	p.FilePurposes = slices.Clone(p.FilePurposes)
+	p.FileOptions = slices.Clone(p.FileOptions)
 	return p
 }
 
@@ -331,6 +349,11 @@ func (c Config) Supports(operation, surface, mode string) bool {
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
 			}
+			if operation == "generation" {
+				if supported, consulted := c.SupportsGenerationTarget(surface, mode); consulted {
+					return supported || Supports(c.Kind, c.VendorID, operation, surface, mode)
+				}
+			}
 			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
 				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
 					return true
@@ -455,13 +478,12 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 // WrapBody handles only documented hosting wrappers after semantic lowering.
 // Model and cloud revision construction precede authentication/signing.
 func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
-	hosting := c.Hosting()
-	if hosting != "vertex-anthropic" && hosting != "bedrock-anthropic-invoke" {
-		return body, nil
-	}
-	if wire != openai.FamilyAnthropic {
-		return nil, errors.New("Anthropic cloud profile requires the Messages dialect")
-	}
+	return c.WrapBodyDialect(body, openai.Descriptor(wire, false).Dialect)
+}
+
+// wrapAnthropicCloud writes the selected cloud tag before
+// authentication/signing. The dialect identity check lives in the callers.
+func (c Config) wrapAnthropicCloud(body []byte) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("cloud request must be a JSON object")
@@ -473,7 +495,7 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 	}
 	fields["anthropic_version"] = version
 	delete(fields, "model")
-	if hosting == "bedrock-anthropic-invoke" {
+	if c.Hosting() == "bedrock-anthropic-invoke" {
 		delete(fields, "stream")
 	}
 	return json.Marshal(fields)
@@ -525,6 +547,9 @@ func completeProfileMetadata(p *Profile) {
 	if p.OperationDialects == nil {
 		p.OperationDialects = map[string]string{}
 	}
+	if p.HostedTools == nil {
+		p.HostedTools = []string{}
+	}
 	p.DefaultSchemas = map[string]json.RawMessage{}
 	for _, operation := range p.Operations {
 		dialect := p.OperationDialect(operation)
@@ -575,6 +600,14 @@ func RegisterProfile(p Profile) error {
 		if !slices.Contains(template.Operations, operation) {
 			return errors.New("profile operation is incompatible")
 		}
+		// A profile publishes a generation dialect by label; when the
+		// registered generation contract table is linked, the label must name
+		// one of its registrations rather than an opaque string.
+		if operation == "generation" && len(operationregistry.Generation.Dialects()) > 0 {
+			if _, ok := operationregistry.Generation.DialectLabel(p.OperationDialect(operation)); !ok {
+				return errors.New("profile generation dialect is not a registered contract")
+			}
+		}
 	}
 	for _, header := range p.SemanticHeaders {
 		if !slices.Contains(template.SemanticHeaders, header) {
@@ -586,8 +619,21 @@ func RegisterProfile(p Profile) error {
 			return errors.New("profile query setting is incompatible")
 		}
 	}
+	for _, family := range p.HostedTools {
+		if !slices.Contains(template.HostedTools, family) {
+			return errors.New("profile hosted tool is outside the qualified composition")
+		}
+	}
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
 		return errors.New("profile transport and capabilities are required")
+	}
+	// Managed provider-file contracts are reviewed compositions. A registered
+	// profile may omit them to inherit its template's contract, but it can
+	// never assert a different one.
+	if p.FilePurposes == nil && p.FileOptions == nil {
+		p.FilePurposes, p.FileOptions = template.FilePurposes, template.FileOptions
+	} else if !slices.Equal(p.FilePurposes, template.FilePurposes) || !slices.Equal(p.FileOptions, template.FileOptions) {
+		return errors.New("profile file contract is incompatible")
 	}
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))

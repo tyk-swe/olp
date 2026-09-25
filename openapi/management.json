@@ -72,6 +72,10 @@
       },
       "ApiKeyDetailResponse": {
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources (stored responses, background\njobs, previous_response_id chains) under this key. Provider state may\nretain user content.",
             "type": "boolean"
@@ -202,6 +206,7 @@
           "scopes",
           "allowed_routes",
           "allow_provider_state",
+          "allow_hosted_tools",
           "budget",
           "etag",
           "created_at",
@@ -519,6 +524,17 @@
           },
           "interaction": {
             "$ref": "#/components/schemas/AttemptInteractionMetadata"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptOutcomeFacts"
+              }
+            ],
+            "description": "Attempt outcome facts recorded with the routing provenance. Absent when the stored record predates outcome facts — never reconstructed from the HTTP status or finish reason."
           }
         },
         "required": [
@@ -1981,6 +1997,10 @@
       },
       "CreateApiKeyRequest": {
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control; defaults to false.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content; defaults to false.",
             "type": "boolean"
@@ -5915,6 +5935,13 @@
           "hosting": {
             "type": "string"
           },
+          "hosted_tools": {
+            "description": "Provider-hosted tool families with a qualified lifecycle contract on this profile composition.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -5971,7 +5998,8 @@
           "semantic_headers",
           "query_settings",
           "operation_dialects",
-          "default_schemas"
+          "default_schemas",
+          "hosted_tools"
         ],
         "type": "object"
       },
@@ -8182,6 +8210,28 @@
           },
           "interaction": {
             "$ref": "#/components/schemas/InteractionInspection"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptOutcomeFacts"
+              }
+            ],
+            "description": "Outcome facts of an attempt that ran, such as the provider-declared native terminal status or the fault attribution. Only an executed attempt row carries it; a planned or excluded row never does."
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptInteractionMetadata"
+              }
+            ],
+            "description": "Delivery evidence of an attempt that ran under a strict plan: upstream acceptance is independent of client observation. Absent on planned rows and on executions that carried no strict interaction."
           }
         },
         "required": [
@@ -8970,6 +9020,10 @@
       "UpdateApiKeyRequest": {
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
+          "allow_hosted_tools": {
+            "description": "Permits provider-hosted tool effects (provider-executed search or similar\nbuilt-in tools) under this key. Hosted tools perform work outside the\ncaller's control.",
+            "type": "boolean"
+          },
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
             "type": "boolean"
@@ -9801,6 +9855,100 @@
         ],
         "description": "Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions."
       },
+      "AttemptFaultOrigin": {
+        "type": "string",
+        "enum": [
+          "native_outcome",
+          "provider_transport",
+          "provider_declared",
+          "client_delivery",
+          "proxy_capacity",
+          "proxy_persistence",
+          "proxy_policy",
+          "contract"
+        ],
+        "description": "The component that owns a failed attempt: a provider-declared native outcome, provider transport, the provider's own in-band error, the client's delivery, a proxy-local capacity or persistence fault, a routing policy, or a contract mismatch. Proxy-local origins never describe provider health."
+      },
+      "AttemptFaultScope": {
+        "type": "string",
+        "enum": ["endpoint", "credential", "contract", "request"],
+        "description": "How far a failed attempt may charge shared state: the provider endpoint, the credential, the contract layer, or only this request."
+      },
+      "ProxyLimitCategory": {
+        "type": "string",
+        "enum": ["bytes", "event_work", "time", "persistence"],
+        "description": "Classification of the bounded proxy-local resource an exhaustion hit: a byte representation, aggregate admitted event work, a lifetime or deadline, or a durable persistence bound."
+      },
+      "AttemptOutcomeFacts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "native_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "enum": ["completed", "incomplete", "failed", "cancelled"]
+              }
+            ],
+            "description": "The provider-declared native terminal status observed for this attempt. A value such as failed or cancelled is the provider's own terminal report, not automatically a transport or contract fault."
+          },
+          "fault_origin": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptFaultOrigin"
+              }
+            ],
+            "description": "Attributed owner of the attempt's failure; never inferred from the HTTP status or response content."
+          },
+          "fault_scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptFaultScope"
+              }
+            ],
+            "description": "The scope the failure may charge; only provider-owned endpoint and credential scopes feed shared provider health."
+          },
+          "fault_resource": {
+            "type": ["string", "null"],
+            "description": "The bounded gateway resource a proxy-local capacity fault names, such as event bytes or continuation state."
+          },
+          "limit_category": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProxyLimitCategory"
+              }
+            ],
+            "description": "The category of the bounded proxy-local limit the attempt exhausted."
+          },
+          "limit": {
+            "format": "int64",
+            "minimum": 0,
+            "type": ["integer", "null"],
+            "description": "The configured ceiling of the exhausted bounded resource, in its own unit."
+          }
+        },
+        "required": [
+          "native_status",
+          "fault_origin",
+          "fault_scope",
+          "fault_resource",
+          "limit_category",
+          "limit"
+        ],
+        "description": "Separately observed outcome facts for one attempt. Every member is emitted explicitly; a null member means the fact was recorded as absent, and the whole object is absent when the attempt's record predates outcome facts."
+      },
       "InspectedEffectiveRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -10000,6 +10148,13 @@
               "transformed"
             ]
           },
+          "hosted_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider-hosted tool families this plan admitted, such as web_search, bounded by the caller's authorization and the bound profile's qualified lifecycle contracts. Admission is a planner fact — it never executed a tool — and it is distinct from provider-emitted effects or observations. Omitted when the plan admitted none."
+          },
           "ingress_dialect": {
             "type": "string"
           },
@@ -10096,7 +10251,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
+            "description": "Effect obligations such as inference, client_tool_call, hosted_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
           },
           "max_continuation_bytes": {
             "type": "integer",
@@ -10252,8 +10407,7 @@
           "surface",
           "mode",
           "label",
-          "request_schema",
-          "result_schema",
+          "model_binding",
           "documentation",
           "evidence"
         ],
@@ -10279,6 +10433,15 @@
           "label": {
             "type": "string"
           },
+          "model_binding": {
+            "type": "string",
+            "enum": [
+              "required",
+              "optional",
+              "none"
+            ],
+            "description": "Whether this dialect's request schema names a serving model. required: every request must carry one; optional: the schema admits one but callers may rely on a deployment default; none: the dialect admits no model field and the model identifier travels only in the addressing path."
+          },
           "documentation": {
             "type": "string"
           },
@@ -10286,12 +10449,28 @@
             "type": "string"
           },
           "request_schema": {
-            "type": "object",
-            "additionalProperties": true
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ],
+            "description": "The dialect's registered request body schema; null when the dialect registers no request schema."
           },
           "result_schema": {
-            "type": "object",
-            "additionalProperties": true
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ],
+            "description": "The dialect's registered result schema; null when the dialect registers no result schema."
           }
         }
       },
@@ -21732,7 +21911,7 @@
         "tags": [
           "providers"
         ],
-        "summary": "List registered unary operation dialects"
+        "summary": "List registered operation and generation dialects"
       }
     }
   }

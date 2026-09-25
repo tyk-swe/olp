@@ -10,7 +10,7 @@ import (
 
 func requestWithFormat(t *testing.T, format string, stream bool) *openai.Request {
 	t.Helper()
-	fields, _ := object([]byte(generationFixtures[openai.FamilyChat]))
+	fields, _ := object([]byte(`{"model":"team-model","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`))
 	if format != "" {
 		fields["response_format"] = json.RawMessage(format)
 	}
@@ -86,7 +86,7 @@ func TestAnthropicStructuredOutputTranslation(t *testing.T) {
 			t.Errorf("accepted %s", format)
 		}
 	}
-	fields, _ := object([]byte(generationFixtures[openai.FamilyChat]))
+	fields, _ := object([]byte(`{"model":"team-model","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`))
 	fields["seed"] = json.RawMessage("7")
 	r, err := Parse(openai.FamilyChat, raw(fields), "")
 	if err != nil {

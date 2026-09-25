@@ -46,6 +46,7 @@ type Plan struct {
 	prepared          oif.Prepared
 	receipt           oif.Receipt
 	mapping           *operations.Mapping
+	projected         []oif.Disposition
 	route             string
 	estimate          int64
 }
@@ -55,6 +56,9 @@ type Result struct {
 	Body      []byte
 	Usage     *operations.Usage
 	Decisions []contentpolicy.Decision
+	// Projected accounts for every change the result projection applied,
+	// in /result scope, derived from the projection's own declarations.
+	Projected []oif.Disposition
 }
 
 func fail(code, field, requirement, message string) error {
@@ -168,10 +172,19 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 		if !ok {
 			return nil, fail("target_capability", "/dialect", "qualified_mapping", "No complete qualified mapping links these operation dialects.")
 		}
-		document, provenance, err = m.Lower(source, sourceView)
+		var declared []oif.Change
+		document, declared, err = m.Lower(source, sourceView)
 		if err != nil {
 			return nil, err
 		}
+		// The mapping returns the destination and the declared changes that
+		// produce it; re-applying the declaration must reproduce the
+		// destination exactly, so the receipt cannot describe a different
+		// construction than the caller receives.
+		if err := declaredConstruction(source.Document(), document, declared, "/request"); err != nil {
+			return nil, err
+		}
+		provenance = changeProvenance(declared)
 		mapping = &m
 		class = "qualified_interaction"
 	}
@@ -180,7 +193,9 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	descriptor.Profile = oif.Identity{ID: t.profile.ID, Revision: t.profile.Revision}
 	effective, _ := oif.NewRequest(descriptor, document)
 	changes := []oif.Change{}
-	dispositions := []oif.Disposition{{Field: "/request", Disposition: "preserved", Rule: "native_source_identity", Evidence: t.codec.Evidence}}
+	// Dispositions account for the construction itself: per-member and
+	// per-change rows are derived below once defaults and bindings are applied.
+	dispositions := []oif.Disposition{}
 	for _, name := range slices.Sorted(maps.Keys(t.defaults)) {
 		if _, present := document.Root().Lookup(name); present {
 			continue
@@ -241,20 +256,39 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	}
 	origin := oif.IdentityBinding
 	reason := "registered native model binding and omission defaults"
+	mappingEvidence := t.codec.Evidence
 	if mapping != nil {
 		origin = oif.QualifiedMapping
 		reason = mapping.Evidence
+		mappingEvidence = mapping.Evidence
 	}
 	prepared, err := oif.PrepareDestination(source, descriptor, effective.Document(), origin, reason)
 	if err != nil {
 		return nil, err
 	}
-	prepared = prepared.WithProvenance(effective.Provenance()...).WithProvenance(provenance...)
+	// Provenance follows construction order: the qualified lowering first,
+	// then the absent-only defaults and identity bindings.
+	prepared = prepared.WithProvenance(provenance...).WithProvenance(effective.Provenance()...)
+	// The receipt describes the construction the caller actually receives:
+	// every declared change and every untouched member of the source, then
+	// the qualified projection contract declared for the result.
+	vocab := fieldVocabulary(t.codec)
+	for name := range fieldVocabulary(sourceCodec) {
+		vocab[name] = true
+	}
+	accounting := memberDispositions(source.Document(), effective.Document(), slices.Concat(provenance, effective.Provenance()), vocab, t.codec.Evidence, mappingEvidence)
+	var projected []oif.Disposition
+	if mapping != nil {
+		for _, declared := range mapping.Projected {
+			projected = append(projected, oif.Disposition{Field: declared.Field, Disposition: declared.Disposition, Rule: declared.Rule, Evidence: mapping.Evidence})
+		}
+	}
+	dispositions = compactDispositions(slices.Concat(accounting, dispositions, projected, semantic))
 	evidence := []string{t.codec.Evidence}
 	if mapping != nil {
 		evidence = append(evidence, mapping.Evidence)
 	}
-	receipt := oif.Receipt{Class: class, Operation: t.codec.Operation.ID, SourceDialect: sourceCodec.Identity.ID, TargetDialect: t.codec.Identity.ID, ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: append(dispositions, semantic...), Evidence: evidence, Obligations: oif.Obligations{Delivery: "unary", Lifetime: "request", Submission: "immediate", Continuation: "none", Effects: []string{"inference"}, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: t.config.MaxBodyBytes, RejectAmbiguousFailover: true, GuardResults: true}}
+	receipt := oif.Receipt{Class: class, Operation: t.codec.Operation.ID, SourceDialect: sourceCodec.Identity.ID, TargetDialect: t.codec.Identity.ID, ProfileID: t.profile.ID, ProfileRevision: t.profile.Revision, Serving: t.serving, Dispositions: dispositions, Evidence: evidence, Obligations: oif.Obligations{Delivery: "unary", Lifetime: "request", Submission: "immediate", Continuation: "none", Effects: []string{"inference"}, Retry: "before_dispatch_or_definitive_rejection", MaxBodyBytes: t.config.MaxBodyBytes, RejectAmbiguousFailover: true, GuardResults: true}}
 	var estimate int64
 	if sourceCodec.Estimate != nil {
 		estimate = sourceCodec.Estimate(sourceView)
@@ -262,7 +296,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if t.codec.Estimate != nil {
 		estimate = max(estimate, t.codec.Estimate(view))
 	}
-	return &Plan{template: t, config: config, source: source, effective: effective, view: view, prepared: prepared, receipt: receipt, mapping: mapping, route: ctx.Route, estimate: estimate}, nil
+	return &Plan{template: t, config: config, source: source, effective: effective, view: view, prepared: prepared, receipt: receipt, mapping: mapping, projected: projected, route: ctx.Route, estimate: estimate}, nil
 }
 func (p *Plan) Prepared() oif.Prepared       { return p.prepared }
 func (p *Plan) Body() []byte                 { return p.prepared.Document().Bytes() }
@@ -308,17 +342,37 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
 	output := doc
+	var declared []oif.Change
 	if p.mapping != nil {
-		output, err = p.mapping.Project(p.source, envelope, view, p.route)
+		output, declared, err = p.mapping.Project(p.source, envelope, view, p.route)
 	} else if p.template.codec.BindResultModel != nil {
-		var changes []oif.Change
-		changes, err = p.template.codec.BindResultModel(doc, p.route)
+		declared, err = p.template.codec.BindResultModel(doc, p.route)
 		if err == nil {
-			output, err = oif.Apply(doc, changes)
+			for _, change := range declared {
+				if change.Origin != oif.IdentityBinding || change.Remove {
+					err = fail("target_capability", "/result", "identity_binding", "The registered result binding is invalid.")
+					break
+				}
+			}
 		}
+		if err == nil {
+			output, err = oif.Apply(doc, declared)
+		}
+	}
+	if err == nil {
+		// Re-applying the declared changes must reproduce the projected
+		// document exactly — an empty declaration admits only identity.
+		err = declaredConstruction(doc, output, declared, "/result")
+	}
+	if err == nil && p.mapping != nil {
+		err = declaredProjection(p.projected, changeProvenance(declared))
 	}
 	if err != nil {
 		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
 	}
-	return Result{Envelope: envelope, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions}, nil
+	mappingEvidence := p.template.codec.Evidence
+	if p.mapping != nil {
+		mappingEvidence = p.mapping.Evidence
+	}
+	return Result{Envelope: envelope, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions, Projected: resultDispositions(doc, output, changeProvenance(declared), p.template.codec.Evidence, mappingEvidence)}, nil
 }

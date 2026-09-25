@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -56,10 +58,52 @@ func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
 		return nil, resources.ErrContract
 	}
 	var state storedContinuation
-	if err := json.Unmarshal(payload, &state); err != nil || state.Version != interaction.ContinuationV1 || len(state.Source) == 0 || state.Binding == "" {
+	if err := json.Unmarshal(payload, &state); err != nil || !operationregistry.Generation.KnownContract(state.Version) || len(state.Source) == 0 || state.Binding == "" {
 		return nil, resources.ErrContract
 	}
+	// The native terminal record is additive on this carrier. A stored record
+	// that fails the admitted grammar was never committed by this contract;
+	// an absent one stays a valid historical delivery that reads unavailable.
+	if state.Delivery.Terminal != nil && !state.Delivery.Terminal.Valid() {
+		return nil, resources.ErrContract
+	}
+	// The explicit actionability claim is additive the same way. A committed
+	// claim must satisfy its own grammar and correspond exactly to the
+	// retained assistant's ordered tool calls; a stored record claiming calls
+	// the assistant never contained — or omitting ones it did — was never
+	// committed by this contract.
+	if state.Delivery.Actions != nil {
+		if !state.Delivery.Actions.Valid() {
+			return nil, resources.ErrContract
+		}
+		if state.Interaction != nil && !correspondingActions(state.Delivery.Actions, state.Interaction.Assistant) {
+			return nil, resources.ErrContract
+		}
+	}
 	return &state, nil
+}
+
+// correspondingActions verifies the committed action claim names exactly the
+// ordered tool calls the retained assistant representation carries — no
+// invented identity and no silently dropped call.
+func correspondingActions(actions *interaction.ContinuationActions, assistant json.RawMessage) bool {
+	var committed struct {
+		ToolCalls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(assistant, &committed); err != nil {
+		return false
+	}
+	if len(committed.ToolCalls) != len(actions.ToolCalls) {
+		return false
+	}
+	for i, call := range committed.ToolCalls {
+		if call.ID == "" || call.ID != actions.ToolCalls[i] {
+			return false
+		}
+	}
+	return true
 }
 func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	values := x.semanticHeaders.Values(continuationHeader)
@@ -68,10 +112,10 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	if len(values) == 0 && len(submission) == 0 && len(handles) == 0 {
 		return nil
 	}
-	if len(values) != 1 || values[0] != interaction.ContinuationV1 || len(submission) != 1 || len(handles) > 1 || x.family != openai.FamilyChat {
+	if len(values) != 1 || !operationregistry.Generation.KnownContract(values[0]) || len(submission) != 1 || len(handles) > 1 || x.source.Descriptor().Dialect != protocols.DialectChat {
 		return invalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
 	}
-	route, ok := x.request.release.Snapshot.Routes[x.parsed.Route]
+	route, ok := x.request.release.Snapshot.Routes[x.source.Route]
 	if !ok || runtime.FidelityMode(route.Fidelity) != runtime.FidelityStrict {
 		return invalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
 	}
@@ -95,7 +139,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 			return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 		}
 		parentMatches := res.ParentID == nil && len(handles) == 0 || res.ParentID != nil && len(handles) == 1 && handles[0] == resources.LocalID(resources.KindContinuation, *res.ParentID)
-		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.parsed.OIF().Document().Bytes()) || res.RouteSlug != x.parsed.Route {
+		if !parentMatches || !reflect.DeepEqual(state.SemanticHeaders, continuationSemanticHeaders(x.semanticHeaders)) || !reflect.DeepEqual(state.Query, x.semanticQuery) || !interaction.SameSource(state.Source, x.source.Request.Document().Bytes()) || res.RouteSlug != x.source.Route {
 			return continuationError("continuation_mismatch", "This submission identity belongs to a different request.")
 		}
 		if e := s.authorizeContinuation(ctx, x, res, state); e != nil {
@@ -121,7 +165,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 		return continuationError("continuation_unavailable", "The continuation handle is expired, incomplete, or unavailable to this key.")
 	}
 	state, err := decodeStoredContinuation(payload)
-	if err != nil || state.Interaction == nil || res.RouteSlug != x.parsed.Route {
+	if err != nil || state.Interaction == nil || res.RouteSlug != x.source.Route {
 		return continuationError("continuation_mismatch", "The continuation handle does not belong to this route and contract.")
 	}
 	// The pinned planning boundary resolves and authorizes this historical
@@ -167,13 +211,13 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 		return resources.ErrTransition
 	}
 	expires := s.now().Add(resources.ContinuationLifetime - time.Second)
-	version := interaction.ContinuationV1
+	version := plan.ClientContract()
 	metadata, _ := json.Marshal(map[string]string{"upstream_model": a.UpstreamModel})
 	r := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, SlotID: slot.ID, CredentialID: slot.CredentialID, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version, SubmissionID: &c.submission}
 	if c.parent != nil {
 		r.ParentID = &c.parent.UUID
 	}
-	state := &storedContinuation{Version: version, Source: x.parsed.OIF().Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
+	state := &storedContinuation{Version: version, Source: x.source.Request.Document().Bytes(), Receipt: plan.Receipt(), Binding: a.UpstreamModel, SemanticHeaders: continuationSemanticHeaders(x.semanticHeaders), Query: x.semanticQuery}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -248,7 +292,7 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.release(r.Context())
 	x.authority = authority
-	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
+	if values := r.Header.Values(continuationHeader); len(values) != 1 || !operationregistry.Generation.KnownContract(values[0]) {
 		s.stateFail(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil), x.family)
 		return
 	}
@@ -290,8 +334,30 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Should-Retry", "false")
-	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
+	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery, "native_terminal": recoveredTerminal(state.Delivery), "actions": recoveredActions(state.Delivery)})
 	s.finish(x, nil, http.StatusOK)
+}
+
+// recoveredTerminal renders the committed native terminal observation for
+// recovery. Deliveries committed before the record existed on this carrier
+// keep their historical truth and report the literal "unavailable" marker —
+// the gateway never invents a matched sequence for them.
+func recoveredTerminal(delivery interaction.Delivery) any {
+	if delivery.Terminal != nil {
+		return delivery.Terminal
+	}
+	return "unavailable"
+}
+
+// recoveredActions renders the committed actionability claim for recovery.
+// Deliveries committed before the claim existed keep their historical truth:
+// they read back as the explicit "unavailable" marker, so a stored partial or
+// pre-claim outcome can never be upgraded into tool actions on replay.
+func recoveredActions(delivery interaction.Delivery) any {
+	if delivery.Actions != nil {
+		return delivery.Actions
+	}
+	return "unavailable"
 }
 
 // Only semantic controls enter encrypted correspondence, never authentication,

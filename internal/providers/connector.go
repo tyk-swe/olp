@@ -21,6 +21,9 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/operations/generation"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -351,6 +354,14 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	default:
 		return s.certifyNativeMedia(ctx, cfg, credential, model, tuple)
 	}
+	if tuple.Operation == "generation" {
+		// A profile-published generation dialect owns its own probe, bind and
+		// decode contracts; certification exercises the same registered
+		// grammar a strict route would admit.
+		if dialect, ok := configuredGenerationDialect(cfg); ok {
+			return s.certifyGeneration(ctx, cfg, credential, model, tuple, dialect, maxEventBytes)
+		}
+	}
 	family := openai.FamilyChat
 	payload := map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
 	switch tuple.Operation {
@@ -437,6 +448,99 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
 		}
+	}
+	return nil
+}
+
+// configuredGenerationDialect resolves the generation dialect the configured
+// connector profile publishes, when that label is a registered dialect. A
+// connector without a profile, or whose profile label predates registration,
+// keeps the legacy family certification path.
+func configuredGenerationDialect(cfg *Configuration) (generation.Dialect, bool) {
+	transport := cfg.transport()
+	if transport.ProfileID == "" {
+		return generation.Dialect{}, false
+	}
+	profile, err := transport.Profile()
+	if err != nil || !slices.Contains(profile.Operations, "generation") {
+		return generation.Dialect{}, false
+	}
+	return operationregistry.Generation.DialectLabel(profile.OperationDialect("generation"))
+}
+
+// certifyGeneration exercises a registered generation dialect end to end: the
+// dialect owns the certification payload, its own lift is the parse contract,
+// its identity rules bind the certified model, and the same native codec that
+// decodes strict traffic validates the upstream response. A grammar failure
+// anywhere rejects certification rather than relaxing the contract.
+func (s *Server) certifyGeneration(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, dialect generation.Dialect, maxEventBytes int) error {
+	stream := tuple.Mode == ModeStreaming
+	if stream && !dialect.Streaming {
+		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
+	}
+	if dialect.Probe == nil || dialect.Lift == nil || dialect.DecodeNative == nil || (stream && dialect.StreamNative == nil) {
+		return &probeError{Code: "capability_unavailable", Detail: "The configured generation dialect does not own certification hooks."}
+	}
+	transport := cfg.transport()
+	body := dialect.Probe(model, stream)
+	source, err := dialect.Lift(body, "certification", stream, probeBodyLimit)
+	if err != nil {
+		return &probeError{Code: "provider_protocol_error", Detail: err.Error()}
+	}
+	effective := source.Request.Document()
+	if dialect.IdentityChanges != nil {
+		changes, cerr := dialect.IdentityChanges(source, model)
+		if cerr != nil {
+			return &probeError{Code: "capability_unavailable", Detail: cerr.Error()}
+		}
+		if len(changes) > 0 {
+			prepared, perr := operationregistry.Generation.PrepareIdentity(source.Request, source.Request.Descriptor(), changes)
+			if perr != nil {
+				return &probeError{Code: "capability_unavailable", Detail: perr.Error()}
+			}
+			effective = prepared.Document()
+		}
+	}
+	body = effective.Bytes()
+	if body, err = transport.WrapBodyDialect(body, dialect.Identity); err != nil {
+		return &probeError{Code: "capability_unavailable", Detail: err.Error()}
+	}
+	endpoint, err := transport.GenerationURL(dialect, model, stream)
+	if err != nil {
+		return &probeError{Code: "capability_unavailable", Detail: err.Error()}
+	}
+	status, data, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, body)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return statusError(status)
+	}
+	if stream {
+		_, err = dialect.StreamNative(
+			generation.StreamInput{
+				Source:        source,
+				Body:          transport.StreamPayload(bytes.NewReader(data), maxEventBytes),
+				MaxEventBytes: maxEventBytes,
+				Route:         "certification",
+				IncludeUsage:  true,
+			},
+			func([]byte) error { return nil },
+			func(oif.Event) error { return nil },
+		)
+	} else {
+		_, err = dialect.DecodeNative(
+			generation.DecodeInput{
+				Source:    source,
+				Effective: effective,
+				Body:      data,
+				Route:     "certification",
+				MaxBytes:  probeBodyLimit,
+			},
+		)
+	}
+	if err != nil {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
 	}
 	return nil
 }

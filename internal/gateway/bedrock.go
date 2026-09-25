@@ -213,6 +213,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		}
 		f.class = class
 		fact.Class = class
+		f.attribute(&fact)
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
@@ -221,7 +222,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, finish(classConnect, &attemptFailure{origin: faultContract, scope: scopeRequest})
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -237,11 +238,12 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
-		return nil, finish(classCredential, nil)
+		// Signing the request is local machinery; the provider never saw it.
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
-		return nil, finish(classCredential, nil)
+		return nil, finish(classCredential, &attemptFailure{origin: faultContract, scope: scopeCredential})
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -386,6 +388,10 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	}
 	var usage *openai.Usage
 	truncated := false
+	// The truncation's leg decides whose fault it is: a wire error is
+	// provider evidence, the event bound is proxy capacity, and a failed
+	// write is the client's own connection.
+	class, origin, scope, resource := classUpstreamServer, faultProviderTransport, scopeEndpoint, ""
 	for {
 		message, err := protocols.ReadBedrockEvent(resp.Body, limit)
 		if errors.Is(err, io.EOF) {
@@ -393,17 +399,20 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		}
 		if err != nil {
 			truncated = true
+			if errors.Is(err, openai.ErrEventTooLarge) {
+				class, origin, scope, resource = classProtocol, faultProxyCapacity, scopeRequest, "event bytes"
+			}
 			break
 		}
 		if u := bedrockStreamUsage(&message); u != nil {
 			usage = u
 		}
 		if err := encoder.Encode(w, message); err != nil {
-			truncated = true
+			truncated, class, origin, scope = true, classCancelled, faultClientDelivery, scopeRequest
 			break
 		}
 		if err := rc.Flush(); err != nil {
-			truncated = true
+			truncated, class, origin, scope = true, classCancelled, faultClientDelivery, scopeRequest
 			break
 		}
 	}
@@ -413,7 +422,8 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	if len(x.facts) > 0 && (truncated || usage == nil) {
 		fact := &x.facts[len(x.facts)-1]
 		if truncated {
-			fact.Class = classUpstreamServer
+			fact.Class = class
+			fact.FaultOrigin, fact.FaultScope, fact.FaultResource = origin, scope, resource
 		}
 		fact.UsageComplete = false
 		fact.BillingUncertain = true

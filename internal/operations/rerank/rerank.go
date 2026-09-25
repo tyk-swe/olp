@@ -69,6 +69,7 @@ func Definitions() []operations.Dialect {
 		}
 		if id != "tei-rerank" {
 			d.BindModel = operations.ModelChanges
+			d.ModelBinding = operations.ModelRequired
 		}
 		if id != "tei-rerank" && id != "cohere-rerank-v2" {
 			d.BindResultModel = operations.ModelChanges

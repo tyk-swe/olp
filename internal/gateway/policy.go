@@ -50,7 +50,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 		return e
 	}
 	if compiled.HasOutput() {
-		if x.parsed.Stream {
+		if x.source.Stream {
 			return policyUnavailable("content_policy_streaming_requires_unary", "The model `"+x.route.Slug+"` enforces an output content policy, which requires a buffered unary response; send the request without streaming.")
 		}
 		if x.providerState {
@@ -151,7 +151,17 @@ func (s *Server) enforceContentOutput(x *execution, body []byte) ([]byte, *Error
 	for i := range compiled.Output {
 		rule := &compiled.Output[i]
 		matched, blocked := false, false
-		rewritten, err := protocols.InspectOutputText(x.family, current, func(text string) (string, bool) {
+		inspect := func(body []byte, f protocols.TextSlot) ([]byte, error) {
+			return protocols.InspectOutputText(x.family, body, f)
+		}
+		if x.gen != nil && x.gen.InspectOutput != nil {
+			// Output inspection is dialect-owned: registered dialects
+			// describe their own result text layout.
+			inspect = func(body []byte, f protocols.TextSlot) ([]byte, error) {
+				return x.gen.InspectOutput(body, f)
+			}
+		}
+		rewritten, err := inspect(current, func(text string) (string, bool) {
 			if !rule.Re.MatchString(text) {
 				return text, false
 			}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -40,35 +41,67 @@ type Field struct {
 // by the hosting owner; legacy path keys are adapters, never operation IR.
 type Address struct{ LegacyPath, RelativePath string }
 
+// ModelBinding is a dialect's registered model-identity contract: whether its
+// request names a serving model and how that identifier travels. It is
+// registry evidence — never inferred from a dialect's path or vendor.
+type ModelBinding string
+
+const (
+	// ModelRequired dialects carry the serving model in a named request
+	// member; the published model binding writes it.
+	ModelRequired ModelBinding = "required"
+	// ModelOptional dialects admit a serving-model member under dialect-owned
+	// identity rules, such as a nested models/ resource name; the model
+	// identifier may also travel only in the addressing path.
+	ModelOptional ModelBinding = "optional"
+	// ModelNone dialects admit no model member at all; the model identifier
+	// travels only in the addressing path.
+	ModelNone ModelBinding = "none"
+)
+
 // Dialect is the small unary contract. Optional hooks are absent where that
 // operation has no model-body identity, textual policy surface or usage record.
 type Dialect struct {
 	Identity, Operation           oif.Identity
 	Surface, Label, Documentation string
 	Address                       Address
-	RequestSchema, ResultSchema   json.RawMessage
-	Defaults                      map[string]Field
-	Request                       func(oif.Request) (oif.View, error)
-	Result                        func(oif.Request, oif.Result) (oif.View, error)
-	ValidateRoute                 func(oif.Request, string) error
-	BindModel                     func(oif.Document, string) ([]oif.Change, error)
-	BindResultModel               func(oif.Document, string) ([]oif.Change, error)
-	Estimate                      func(oif.View) int64
-	Usage                         func(oif.View) *Usage
-	RequiredClient                func(oif.View) string
-	InputText                     func(oif.Request) ([]Text, error)
-	OutputText                    func(oif.Result) ([]Text, error)
-	Probe                         func(string) []byte
-	Evidence                      string
+	// ModelBinding declares the dialect's model-identity contract. An empty
+	// value registers as ModelNone; a dialect that binds a serving model must
+	// declare required or optional so the claim is never inferred.
+	ModelBinding                ModelBinding
+	RequestSchema, ResultSchema json.RawMessage
+	Defaults                    map[string]Field
+	Request                     func(oif.Request) (oif.View, error)
+	Result                      func(oif.Request, oif.Result) (oif.View, error)
+	ValidateRoute               func(oif.Request, string) error
+	BindModel                   func(oif.Document, string) ([]oif.Change, error)
+	BindResultModel             func(oif.Document, string) ([]oif.Change, error)
+	Estimate                    func(oif.View) int64
+	Usage                       func(oif.View) *Usage
+	RequiredClient              func(oif.View) string
+	InputText                   func(oif.Request) ([]Text, error)
+	OutputText                  func(oif.Result) ([]Text, error)
+	Probe                       func(string) []byte
+	Evidence                    string
 }
 
 // Mapping qualifies one actual source/target pair. It owns both directions;
 // merely retaining foreign fields cannot establish target interpretation.
+//
+// Lower and Project co-construct each destination: they return the document
+// and the declared changes that produce it. The planner re-applies the
+// declaration and requires byte-identical construction, so a change missing
+// from the declaration or a declared change whose value differs from the
+// destination is a contract violation, not a silent drop. Projected declares
+// every result change Project may apply, using /result-scoped fields, so a
+// pre-dispatch receipt can advertise the projection contract; Decode rejects
+// realized result changes the declaration does not cover.
 type Mapping struct {
 	Source, Target    oif.Identity
-	Lower             func(oif.Request, oif.View) (oif.Document, []oif.Provenance, error)
+	Lower             func(oif.Request, oif.View) (oif.Document, []oif.Change, error)
 	ValidateEffective func(oif.Request, oif.Request) error
-	Project           func(oif.Request, oif.Result, oif.View, string) (oif.Document, error)
+	Project           func(oif.Request, oif.Result, oif.View, string) (oif.Document, []oif.Change, error)
+	Projected         []oif.Disposition
 	Evidence          string
 }
 
@@ -89,6 +122,17 @@ func (r *Registry) Register(d Dialect) error {
 	if d.Address.LegacyPath == "" && d.Address.RelativePath == "" || d.Address.LegacyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
 	}
+	if d.ModelBinding == "" {
+		d.ModelBinding = ModelNone
+	}
+	switch {
+	case d.ModelBinding != ModelNone && d.ModelBinding != ModelRequired && d.ModelBinding != ModelOptional:
+		return errors.New("unary dialect model binding must be required, optional or none")
+	case d.ModelBinding == ModelNone && d.BindModel != nil:
+		return errors.New("unary dialect binding a model must declare its model binding")
+	case d.ModelBinding != ModelNone && d.BindModel == nil:
+		return errors.New("unary dialect claims a model binding without a binding contract")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.dialects[d.Identity]; exists || len(r.dialects) >= 256 {
@@ -105,6 +149,16 @@ func (r *Registry) RegisterMapping(m Mapping) error {
 	b, bok := r.dialects[m.Target]
 	if !aok || !bok || a.Operation != b.Operation || m.Lower == nil || m.Project == nil || m.Evidence == "" || len(r.mappings) >= 1024 {
 		return errors.New("mapping requires registered matching operations and complete directions")
+	}
+	if len(m.Projected) > 64 {
+		return errors.New("mapping result declaration exceeds bounds")
+	}
+	for _, declared := range m.Projected {
+		// Declared result fields are /result-scoped registered-schema names;
+		// they describe what Project may do, never observed content.
+		if !strings.HasPrefix(declared.Field, "/result/") || len(declared.Field) > 256 || declared.Disposition == "" || declared.Rule == "" {
+			return errors.New("mapping result declaration requires bounded /result-scoped field, disposition and rule")
+		}
 	}
 	key := [2]oif.Identity{m.Source, m.Target}
 	if _, exists := r.mappings[key]; exists {

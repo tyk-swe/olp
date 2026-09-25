@@ -32,6 +32,22 @@ export type Assistant = {
   content: string;
   tool_calls?: ToolCall[];
 };
+/** The committed native terminal observation: the declared native
+ * stop_reason and matched stop_sequence (string, explicit null, or an absent
+ * member) beside the compatible client finish_reason. */
+export type NativeTerminal = {
+  stop_reason: string;
+  stop_sequence?: string | null;
+  finish_reason: string;
+};
+/** The committed explicit actionability claim: the ordered assistant tool
+ * call identities the admitted outcome lets the client answer. A ready handle
+ * means the delivery is recoverable; only this member exposes tool actions.
+ * Absent means the committed delivery predates the record — it stays
+ * inspectable but can never gain actions on replay. */
+export type ContinuationActions = {
+  tool_calls: string[];
+};
 export type ReadyTurn = {
   submission: string;
   handle: string;
@@ -40,6 +56,8 @@ export type ReadyTurn = {
   observations: Observation[];
   finish: string;
   nativeUsageRaw?: string;
+  nativeTerminal?: NativeTerminal;
+  actions?: ContinuationActions;
 };
 
 function nested(
@@ -123,6 +141,101 @@ function observationsFrom(value: unknown): Observation[] {
   });
 }
 
+function terminalFrom(value: unknown): NativeTerminal | undefined {
+  if (value === undefined) return undefined;
+  const terminal = record(value);
+  if (
+    typeof terminal.stop_reason !== 'string' ||
+    typeof terminal.finish_reason !== 'string'
+  )
+    throw new Error('Invalid native terminal record in continuation delivery.');
+  const sequence = terminal.stop_sequence;
+  if (
+    sequence !== undefined &&
+    sequence !== null &&
+    typeof sequence !== 'string'
+  )
+    throw new Error('Invalid native stop sequence in continuation delivery.');
+  return {
+    stop_reason: terminal.stop_reason,
+    ...(sequence !== undefined ? { stop_sequence: sequence } : {}),
+    finish_reason: terminal.finish_reason
+  };
+}
+
+function sameTerminal(
+  a: NativeTerminal | undefined,
+  b: NativeTerminal | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.stop_reason === b.stop_reason &&
+    a.finish_reason === b.finish_reason &&
+    Object.hasOwn(a, 'stop_sequence') === Object.hasOwn(b, 'stop_sequence') &&
+    a.stop_sequence === b.stop_sequence
+  );
+}
+
+function actionsFrom(value: unknown): ContinuationActions | undefined {
+  if (value === undefined || value === 'unavailable') return undefined;
+  const actions = record(value);
+  for (const member of Object.keys(actions))
+    if (member !== 'tool_calls')
+      throw new Error('Unknown continuation action in delivery.');
+  const claimed = actions.tool_calls;
+  if (
+    !Array.isArray(claimed) ||
+    claimed.length > 128 ||
+    claimed.some((id) => typeof id !== 'string' || !id)
+  )
+    throw new Error('Invalid continuation actions in delivery.');
+  return { tool_calls: [...claimed] };
+}
+
+function sameActions(
+  a: ContinuationActions | undefined,
+  b: ContinuationActions | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.tool_calls.length === b.tool_calls.length &&
+    a.tool_calls.every((id, index) => id === b.tool_calls[index])
+  );
+}
+
+// The committed claim must name exactly the ordered assistant calls; a claim
+// that adds, drops or reorders identities is an incomplete correspondence and
+// the delivery is rejected before any action is exposed.
+function checkActions(
+  actions: ContinuationActions | undefined,
+  calls: ToolCall[]
+): void {
+  if (actions === undefined) return;
+  if (
+    actions.tool_calls.length !== calls.length ||
+    actions.tool_calls.some((id, index) => id !== calls[index]?.id)
+  )
+    throw new Error(
+      'Continuation actions do not correspond to the assistant tool calls.'
+    );
+}
+
+// Argument JSON stays the original string; a call joins the canonical
+// assistant — and so any action claim — only when the string decodes to a
+// complete native object. A partial argument survives only inside the raw
+// recorded delivery.
+function completeArguments(source: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    throw new Error('Tool call arguments are not a complete JSON value.');
+  }
+  if (!nativeObject(parsed))
+    throw new Error('Tool call arguments are not a native object.');
+  return source;
+}
+
 function assistantFrom(value: unknown): Assistant {
   const source = record(value);
   if (source.role !== 'assistant' || typeof source.content !== 'string')
@@ -139,7 +252,10 @@ function assistantFrom(value: unknown): Assistant {
       return {
         id: string(call.id),
         type: 'function',
-        function: { name: string(fn.name), arguments: string(fn.arguments) }
+        function: {
+          name: string(fn.name),
+          arguments: completeArguments(string(fn.arguments))
+        }
       };
     });
   }
@@ -246,6 +362,8 @@ function assemble(frames: Chunk[]): {
   handle: string;
   finish: string;
   nativeUsageRaw?: string;
+  nativeTerminal?: NativeTerminal;
+  actions?: ContinuationActions;
 } {
   const observations: Observation[] = [];
   const calls = new Map<number, ToolCall>();
@@ -254,6 +372,8 @@ function assemble(frames: Chunk[]): {
   let finish = '';
   let terminal = false;
   let nativeUsageRaw: string | undefined;
+  let nativeTerminal: NativeTerminal | undefined;
+  let actions: ContinuationActions | undefined;
   for (const chunk of frames) {
     if (chunk.nativeUsageRaw !== undefined)
       nativeUsageRaw = chunk.nativeUsageRaw;
@@ -315,6 +435,17 @@ function assemble(frames: Chunk[]): {
         throw new Error('Terminal delivery has no committed continuation.');
       handle = validHandle(extension.handle);
       finish = string(selected.finish_reason);
+      nativeTerminal = terminalFrom(extension.native_terminal);
+      // The committed record's compatible finish reason must equal the
+      // delivered finish reason; a contradiction is a corrupt delivery.
+      if (
+        nativeTerminal !== undefined &&
+        nativeTerminal.finish_reason !== finish
+      )
+        throw new Error(
+          'Native terminal record does not match the delivered finish.'
+        );
+      actions = actionsFrom(extension.actions);
       terminal = true;
     }
   }
@@ -330,10 +461,12 @@ function assemble(frames: Chunk[]): {
         !call.function.arguments
       )
         throw new Error('Incomplete or reordered tool call.');
+      call.function.arguments = completeArguments(call.function.arguments);
       return call;
     });
   if ((finish === 'tool_calls') !== toolCalls.length > 0)
     throw new Error('Tool terminal does not match the observed calls.');
+  checkActions(actions, toolCalls);
   return {
     assistant: {
       role: 'assistant',
@@ -343,7 +476,9 @@ function assemble(frames: Chunk[]): {
     observations,
     handle,
     finish,
-    nativeUsageRaw
+    nativeUsageRaw,
+    nativeTerminal,
+    actions
   };
 }
 
@@ -431,8 +566,18 @@ export function nextTurn(
   completed: ReadyTurn,
   results: { tool_call_id: string; content: string }[]
 ): NativeObject {
-  const calls = completed.assistant.tool_calls;
-  if (!calls?.length || results.length !== calls.length)
+  // A ready handle means the delivery is recoverable; only the committed
+  // actions claim exposes tool calls, and it must correspond exactly to the
+  // assistant's ordered calls. A turn committed before the claim existed can
+  // be inspected but never yields executable calls here.
+  const actions = actionsFrom(completed.actions);
+  const calls = completed.assistant.tool_calls ?? [];
+  if (actions === undefined)
+    throw new Error('The completed turn has no actionability claim.');
+  checkActions(actions, calls);
+  if (!actions.tool_calls.length)
+    throw new Error('The completed turn exposes no tool actions.');
+  if (results.length !== calls.length)
     throw new Error('Provide one result for every ready tool call.');
   const messages = completed.request.messages;
   if (!Array.isArray(messages))
@@ -478,14 +623,28 @@ function completedUnary(
     extension.observations === undefined
       ? []
       : observationsFrom(extension.observations);
+  const finish = string(selected.finish_reason);
+  if (!finish) throw new Error('Incomplete continuation delivery.');
+  const nativeTerminal = terminalFrom(extension.native_terminal);
+  if (nativeTerminal !== undefined && nativeTerminal.finish_reason !== finish)
+    throw new Error(
+      'Native terminal record does not match the delivered finish.'
+    );
+  const actions = actionsFrom(extension.actions);
+  const calls = assistant.tool_calls ?? [];
+  if ((finish === 'tool_calls') !== calls.length > 0)
+    throw new Error('Tool terminal does not match the observed calls.');
+  checkActions(actions, calls);
   return {
     submission,
     handle: validHandle(extension.handle),
     request,
     assistant,
     observations,
-    finish: string(selected.finish_reason),
-    nativeUsageRaw
+    finish,
+    nativeUsageRaw,
+    nativeTerminal,
+    actions
   };
 }
 
@@ -581,5 +740,33 @@ export async function recoverTurn(
     throw new Error('Recovered assistant does not match the committed stream.');
   if (completed.handle !== validHandle(recovery.handle))
     throw new Error('Recovered handle does not match the committed stream.');
+  // A historical delivery committed before the terminal record existed reads
+  // back as the explicit "unavailable" marker; it is never re-invented from
+  // the replayed frames.
+  const committed = recovery.native_terminal;
+  if (committed === 'unavailable') {
+    if (completed.nativeTerminal !== undefined)
+      throw new Error(
+        'Recovered terminal does not match the committed delivery.'
+      );
+  } else if (
+    committed !== undefined &&
+    !sameTerminal(terminalFrom(committed), completed.nativeTerminal)
+  )
+    throw new Error(
+      'Recovered terminal does not match the committed delivery.'
+    );
+  // The same holds for the committed actionability claim: a historical
+  // delivery reads it back as "unavailable" and can never gain actions from
+  // the replayed frames.
+  const committedActions = recovery.actions;
+  if (committedActions === 'unavailable') {
+    if (completed.actions !== undefined)
+      throw new Error('Recovered actions do not match the committed delivery.');
+  } else if (
+    committedActions !== undefined &&
+    !sameActions(actionsFrom(committedActions), completed.actions)
+  )
+    throw new Error('Recovered actions do not match the committed delivery.');
   return completed;
 }

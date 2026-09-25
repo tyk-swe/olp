@@ -129,6 +129,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		},
 		Routing: &usage.Routing{
 			Interaction:         fact.Interaction,
+			Outcome:             accountingOutcome(fact),
 			Mode:                optionalText(fact.Mode),
 			CredentialSlotID:    optionalText(fact.SlotID),
 			CredentialVersionID: optionalText(fact.CredentialID),
@@ -161,6 +162,30 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		attempt.Routing.FirstOutputMS = &output
 	}
 	return attempt
+}
+
+// accountingOutcome carries the outcome facts one attempt established —
+// its provider-declared native status, attributed fault, and the bounded
+// proxy-local limit it exhausted — beside its routing provenance. Each fact
+// is emitted explicitly when recorded and stays null otherwise; the whole
+// evidence is omitted only when no outcome fact was recorded at all, which
+// is how records written before outcome facts remain distinguishable.
+func accountingOutcome(fact *AttemptFact) *usage.OutcomeEvidence {
+	if fact.NativeStatus == "" && fact.FaultOrigin == "" && fact.FaultScope == "" &&
+		fact.FaultResource == "" && fact.LimitCategory == "" && fact.Limit == 0 {
+		return nil
+	}
+	evidence := &usage.OutcomeEvidence{
+		NativeStatus:  optionalText(fact.NativeStatus),
+		FaultOrigin:   optionalText(fact.FaultOrigin),
+		FaultScope:    optionalText(fact.FaultScope),
+		FaultResource: optionalText(fact.FaultResource),
+		LimitCategory: optionalText(fact.LimitCategory),
+	}
+	if fact.Limit > 0 {
+		evidence.Limit = &fact.Limit
+	}
+	return evidence
 }
 
 // accountingTokens is the metering an attempt disclosed. A provider that
