@@ -45,6 +45,25 @@ func ValidateFidelityMigration(ctx context.Context, q access.Queryer, slug strin
 	return nil
 }
 
+// requireStatedFidelity refuses to publish a draft that omits its contract
+// once the route has published an explicit one. Storage enforces the same rule;
+// checking it here reports the draft as the caller's to fix.
+func requireStatedFidelity(ctx context.Context, q access.Queryer, slug string, raw json.RawMessage) error {
+	if len(raw) > 0 {
+		return nil
+	}
+	var explicit bool
+	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.route_id=r.id
+        WHERE r.slug=$1 AND v.fidelity IS NOT NULL)`, slug).Scan(&explicit)
+	if err != nil {
+		return err
+	}
+	if explicit {
+		return access.Fail(422, "route_fidelity_required", "This route has published an explicit contract; state the draft's fidelity mode.")
+	}
+	return nil
+}
+
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	f, err := runtime.DecodeFidelity(raw)
 	if err != nil {

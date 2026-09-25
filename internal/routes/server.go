@@ -445,6 +445,12 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if len(input.Fidelity) == 0 {
 		input.Fidelity = bytes.Clone(current.Fidelity)
 	}
+	if len(input.Fidelity) == 0 {
+		input.Fidelity, err = PublishedFidelity(r.Context(), tx, input.Slug, current.ProjectID)
+		if err != nil {
+			return access.Reply{}, err
+		}
+	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {
 		return access.Reply{}, err

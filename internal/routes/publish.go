@@ -84,6 +84,9 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
+	if err = requireStatedFidelity(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
 	etag := access.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
 		return access.Reply{}, err
@@ -138,6 +141,9 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if err = ValidateFidelityMigration(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
+		return access.Reply{}, err
+	}
+	if err = requireStatedFidelity(r.Context(), tx, current.Slug, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	for i := range current.Targets {
