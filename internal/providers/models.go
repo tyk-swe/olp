@@ -317,6 +317,12 @@ func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	seen := map[CapabilityInput]bool{}
 	for _, c := range inputs {
 		supported := operationregistry.Default.Supports(c.Operation, c.Surface, c.Mode)
+		if !supported && c.Operation == "generation" {
+			// Registered generation dialects publish their own surfaces; a
+			// declared tuple is honest when some dialect or qualified mapping
+			// serves it, so fixture dialects need no management enumeration.
+			supported = operationregistry.Generation.SupportsSurface(c.Surface, c.Mode)
+		}
 		for _, option := range CapabilityOptions {
 			supported = supported || option == c
 		}

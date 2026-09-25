@@ -425,6 +425,9 @@ type Dialect struct {
 	// MeaningfulFrame reports whether a projected client frame carries
 	// observable content (used for first-output accounting only).
 	MeaningfulFrame func(frame []byte) bool
+	// Probe, when set, produces the dialect-owned native request body provider
+	// certification binds and sends; a dialect without it cannot be certified.
+	Probe func(model string, stream bool) []byte
 }
 
 // Mapping qualifies one actual source/target generation dialect pair,
