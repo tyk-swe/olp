@@ -11,8 +11,6 @@ import (
 
 var identity = oif.Identity{ID: "token_count", Revision: operations.Revision}
 
-func Identity() oif.Identity { return identity }
-
 type CountRequest struct {
 	source         oif.Request
 	dialect, scope string

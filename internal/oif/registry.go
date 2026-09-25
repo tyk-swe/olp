@@ -87,9 +87,3 @@ func (r *Registry) Result(d Descriptor, source Document, outcome Outcome) (Resul
 	}
 	return NewResult(d, source, outcome)
 }
-func (r *Registry) Event(d Descriptor, source Document, name string, sequence uint64) (Event, error) {
-	if _, err := r.Binding(d.Dialect, d.Operation); err != nil {
-		return Event{}, err
-	}
-	return NewEvent(d, source, name, sequence)
-}

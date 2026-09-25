@@ -13,8 +13,6 @@ import (
 
 var identity = oif.Identity{ID: "rerank", Revision: operations.Revision}
 
-func Identity() oif.Identity { return identity }
-
 type Request struct {
 	source          oif.Request
 	dialect         string

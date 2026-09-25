@@ -16,8 +16,6 @@ import (
 
 var identity = oif.Identity{ID: "embeddings", Revision: operations.Revision}
 
-func Identity() oif.Identity { return identity }
-
 type Format struct {
 	Layout, DType, Encoding string
 	LogicalDimensions       int64
@@ -310,6 +308,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 	for _, text := range texts {
 		r.estimate += int64((len(text.Value) + 3) / 4)
 	}
+	r.estimate += tokenIDs(input)
 	dimension := operations.Member(root, "dimensions")
 	switch id {
 	case "voyage-embeddings":
@@ -330,6 +329,20 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		r.format.LogicalDimensions, r.format.DimensionsKnown = count, true
 	}
 	return r, nil
+}
+
+// tokenIDs counts pre-tokenized input, one reserved token per ID, because it
+// carries no text for the character estimate.
+func tokenIDs(value oif.Value) int64 {
+	var n int64
+	for _, item := range value.Elements() {
+		if item.Kind() == oif.Number {
+			n++
+		} else {
+			n += tokenIDs(item)
+		}
+	}
+	return n
 }
 
 func googleText(content oif.Value) ([]operations.Text, error) {

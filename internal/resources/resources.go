@@ -88,12 +88,6 @@ type Store struct {
 	keys         *secrets.KeyRing
 }
 
-func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
-
-func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
-	return s.pool.Begin(ctx)
-}
-
 const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id`
 
 func scan(row pgx.Row) (*Resource, error) {
@@ -161,10 +155,6 @@ func (s *Store) GetByUpstream(ctx context.Context, kind, apiKeyID, providerID, u
 		return nil, fmt.Errorf("provider resource get by upstream: %w", err)
 	}
 	return r, nil
-}
-
-func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.ListKinds(ctx, []string{kind}, apiKeyID, limit, afterID)
 }
 
 // ListKinds joins legacy and strict resource identities without changing

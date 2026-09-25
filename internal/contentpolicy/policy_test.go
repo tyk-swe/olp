@@ -186,3 +186,57 @@ func TestDecisionsJSON(t *testing.T) {
 		t.Fatalf("round trip: %v %s", err, encoded)
 	}
 }
+
+// Routes store json.Marshal(Decode(input)); drafts, simulation and
+// configuration Decode that form again while snapshots json.Unmarshal it.
+func TestExplicitEmptyReplacementSurvivesStorage(t *testing.T) {
+	stored, err := json.Marshal(decode(t, `{"rules":[{"id":"strip","phase":"output","pattern":"secret","action":"redact","replacement":""}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := json.Marshal(decode(t, string(stored)))
+	if err != nil || string(again) != string(stored) {
+		t.Fatalf("stored %s re-encoded as %s: %v", stored, again, err)
+	}
+	var snapshot Policy
+	if err = json.Unmarshal(stored, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if got := decode(t, string(stored)).Rules[0].Replacement; got != "" || snapshot.Rules[0].Replacement != "" {
+		t.Fatalf("stored %s: decoded replacement %q, snapshot replacement %q", stored, got, snapshot.Rules[0].Replacement)
+	}
+}
+
+// Published snapshot digests hash the encoded rules, so rules that did not come
+// from an explicit empty replacement keep their historical encoding.
+func TestRuleEncodingKeepsPublishedBytes(t *testing.T) {
+	type historical struct {
+		ID          string `json:"id"`
+		Phase       string `json:"phase"`
+		Pattern     string `json:"pattern"`
+		Action      string `json:"action"`
+		Replacement string `json:"replacement,omitempty"`
+	}
+	stored := `{"rules":[{"id":"a","phase":"input","pattern":"<a&b>","action":"block"},{"id":"b","phase":"output","pattern":"x","action":"redact"},{"id":"c","phase":"output","pattern":"y","action":"redact","replacement":"[REDACTED]"}]}`
+	var snapshot Policy
+	if err := json.Unmarshal([]byte(stored), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var want struct {
+		Rules []historical `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(stored), &want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, _ := json.Marshal(want)
+	if string(got) != string(expected) {
+		t.Fatalf("snapshot encoding changed: %s, want %s", got, expected)
+	}
+	if encoded, _ := json.Marshal(decode(t, stored)); !strings.Contains(string(encoded), `"id":"b","phase":"output","pattern":"x","action":"redact","replacement":"[REDACTED]"`) {
+		t.Fatalf("omitted replacement no longer defaults: %s", encoded)
+	}
+}

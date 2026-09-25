@@ -126,6 +126,20 @@ func TestOverlaysRetainSourceAndRejectAmbiguousArrayPointers(t *testing.T) {
 		t.Fatal("overlapping overlay accepted")
 	}
 }
+func TestApplyRejectsOverlapSeparatedBySortedSibling(t *testing.T) {
+	d := source(t, `{"a":{"b":1},"a-x":1}`)
+	for _, changes := range [][]oif.Change{
+		{{Pointer: "/a", Value: `{"b":2}`}, {Pointer: "/a-x", Value: `3`}, {Pointer: "/a/b", Value: `4`}},
+		{{Pointer: "", Value: `{}`}, {Pointer: "/a-x", Value: `3`}, {Pointer: "/a/b", Value: `4`}},
+	} {
+		for i := range changes {
+			changes[i].Origin, changes[i].Reason = oif.ExplicitTransform, "fixture"
+		}
+		if out, err := oif.Apply(d, changes); err == nil {
+			t.Fatalf("overlapping overlay accepted and a nested change dropped: %s", out.Raw())
+		}
+	}
+}
 func FuzzSourceRetainsValidNativeLexemes(f *testing.F) {
 	for _, s := range []string{`{"n":9007199254740993}`, `{"x":"\ud83d\ude00"}`, `[]`, `null`, `{"a":[false,0,""]}`} {
 		f.Add([]byte(s))
