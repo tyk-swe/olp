@@ -268,6 +268,9 @@ func TestGatewayEpochSupersededByANewProcessIsRecordedAsUnclean(t *testing.T) {
 		gaps[1].Certainty != "lower_bound" {
 		t.Fatalf("gap = %+v, want a lower bound of four lost events", gaps[1])
 	}
+	// They were accepted before the last checkpoint, at any time since the
+	// crashed process started, so the gap must cover that whole span.
+	acctSameInstant(t, gaps[1].First, started, "unclean shutdown gap start")
 }
 
 func TestGatewayEpochDetectionConfirmsEachStaleEpochOnce(t *testing.T) {

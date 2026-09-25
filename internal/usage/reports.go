@@ -381,7 +381,6 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 			return Breakdown{}, access.Fail(400, "invalid_filter",
 				"The attribution breakdown requires the attribution_key filter.")
 		}
-		expression = "attribution->>$attribution_key$"
 	default:
 		return Breakdown{}, access.Fail(400, "invalid_dimension",
 			"Dimension must be route, provider, model, api_key, operation, or attribution.")

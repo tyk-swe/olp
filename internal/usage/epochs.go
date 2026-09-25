@@ -118,6 +118,7 @@ type unclean struct {
 	accepted        int64
 	persisted       int64
 	abandoned       int64
+	startedAt       time.Time
 	lastCheckpoint  time.Time
 	detectedAt      time.Time
 }
@@ -132,8 +133,15 @@ func recordUnclean(ctx context.Context, tx pgx.Tx, epoch unclean) (int64, error)
 	if epoch.lastCheckpoint.After(lastObserved) {
 		lastObserved = epoch.lastCheckpoint
 	}
+	// Events counted at the last checkpoint were observed before it, at any
+	// point since the epoch started; only later, uncounted loss is confined to
+	// the time after the checkpoint.
+	firstObserved := epoch.lastCheckpoint
+	if lowerBound > 0 {
+		firstObserved = epoch.startedAt
+	}
 	if _, err := tx.Exec(ctx, uncleanGapSQL, gapID, epoch.gatewayInstance, lowerBound,
-		epoch.lastCheckpoint, lastObserved); err != nil {
+		firstObserved, lastObserved); err != nil {
 		return 0, fmt.Errorf("record unclean gateway epoch: %w", err)
 	}
 	if _, err := tx.Exec(ctx, markUncleanSQL, epoch.detectedAt, gapID,
@@ -171,7 +179,7 @@ const baselineSQL = `SELECT accepted, persisted, dropped, abandoned, writer_clos
     FROM olp_go.request_metadata_gateway_epochs
     WHERE gateway_instance = $1 AND process_epoch = $2 FOR UPDATE`
 
-const supersededSQL = `SELECT process_epoch::text, accepted, persisted, abandoned, updated_at
+const supersededSQL = `SELECT process_epoch::text, accepted, persisted, abandoned, started_at, updated_at
     FROM olp_go.request_metadata_gateway_epochs
     WHERE gateway_instance = $1 AND process_epoch <> $2
       AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL FOR UPDATE`
@@ -249,7 +257,7 @@ func supersededEpochs(ctx context.Context, tx pgx.Tx, instance, processEpoch str
 	for rows.Next() {
 		var epoch unclean
 		if err := rows.Scan(&epoch.processEpoch, &epoch.accepted, &epoch.persisted,
-			&epoch.abandoned, &epoch.lastCheckpoint); err != nil {
+			&epoch.abandoned, &epoch.startedAt, &epoch.lastCheckpoint); err != nil {
 			return nil, fmt.Errorf("load superseded gateway epochs: %w", err)
 		}
 		superseded = append(superseded, epoch)
@@ -445,7 +453,7 @@ type Detection struct {
 }
 
 const staleEpochsSQL = `SELECT gateway_instance, process_epoch::text, accepted, persisted, abandoned,
-        updated_at, stale_candidate_at
+        started_at, updated_at, stale_candidate_at
     FROM olp_go.request_metadata_gateway_epochs
     WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL AND updated_at < $1
     ORDER BY updated_at, gateway_instance, process_epoch
@@ -483,7 +491,7 @@ func DetectStaleEpochs(ctx context.Context, pool *pgxpool.Pool, now time.Time) (
 		var row candidate
 		if err := rows.Scan(&row.epoch.gatewayInstance, &row.epoch.processEpoch,
 			&row.epoch.accepted, &row.epoch.persisted, &row.epoch.abandoned,
-			&row.epoch.lastCheckpoint, &row.candidateAt); err != nil {
+			&row.epoch.startedAt, &row.epoch.lastCheckpoint, &row.candidateAt); err != nil {
 			rows.Close()
 			return Detection{}, fmt.Errorf("detect stale gateway epochs: %w", err)
 		}

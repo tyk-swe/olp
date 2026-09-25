@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -386,6 +387,88 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 	}
 	if hook.count() != 3 {
 		t.Fatalf("attempts = %d, want 3", hook.count())
+	}
+}
+
+// Every worker replica runs the delivery loop, and the advisory lock only
+// covers claiming. A replica whose pass starts while another replica is still
+// posting a delivery must not post it again.
+func TestBudgetAlertDeliveryIsPostedOnceAcrossReplicas(t *testing.T) {
+	h := newAccessHarness(t)
+	policy := alertPolicy()
+	h.Server.Egress = policy
+	owner := h.owner()
+	started, release := make(chan struct{}), make(chan struct{})
+	var posts atomic.Int32
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hold only the first post open; a duplicate returns immediately.
+		if posts.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hook.Close)
+
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := h.Pool.Exec(context.Background(), query, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	exec("INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	key := h.want(owner, "POST", "/api/v3/api-keys",
+		map[string]any{"name": "replicated key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	windows := limits.BudgetWindows(time.Now())
+	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	      VALUES ($1, 'day', $2, '9.000000000000', 0)`, key["id"], windows.DailyID)
+	destination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+		map[string]any{"name": "slow hook", "url": hook.URL + "/slow"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	rule := h.want(owner, "POST", "/api/v3/notifications/rules",
+		map[string]any{"name": "replicated rule", "subject_kind": "api_key", "subject_id": key["id"],
+			"window_kind": "day", "threshold_percent": 50, "destination_id": destination["id"]},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+
+	ring, err := secrets.ParseRing([]byte(h.Ring))
+	if err != nil {
+		t.Fatalf("key ring: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		usage.RunBudgetAlertDelivery(ctx, h.Pool, ring, alertInstallation(t, h), policy,
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+	stop := func() {
+		cancel()
+		<-done
+	}
+	select {
+	case <-started:
+	case <-time.After(20 * time.Second):
+		stop()
+		t.Fatal("the first replica never posted the delivery")
+	}
+
+	// A second replica completes a whole pass while the first is still posting.
+	alertPass(t, h, policy)
+	close(release)
+	var rows []map[string]any
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		rows = alertDeliveries(t, h, rule["id"].(string))
+		if len(rows) == 1 && rows[0]["status"] == "delivered" || time.Now().After(deadline) {
+			break
+		}
+	}
+	stop()
+	if n := posts.Load(); n != 1 {
+		t.Fatalf("delivery posted %d times across replicas, want 1", n)
+	}
+	if len(rows) != 1 || rows[0]["status"] != "delivered" || rows[0]["attempts"].(float64) != 1 {
+		t.Fatalf("delivery = %v", rows)
 	}
 }
 

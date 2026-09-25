@@ -10,7 +10,6 @@ const (
 	AttributionHeaderBytes = 4096
 	AttributionMaxKeys     = 4
 	AttributionMaxBytes    = 1024
-	AttributionKeyMax      = 8
 )
 
 var (

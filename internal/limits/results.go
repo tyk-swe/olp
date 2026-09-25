@@ -146,14 +146,8 @@ func parseReconciliation(value any) (bool, bool, error) {
 		version != scriptResponseVersion {
 		return false, false, ErrUnexpectedResponse
 	}
-	switch {
-	case status == 1 && detail == "ok" &&
-		(daily == 0 || daily == 1) && (monthly == 0 || monthly == 1):
-		return daily == 1, monthly == 1, nil
-	case status == -1 && daily == 0 && monthly == 0 &&
-		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state"):
-		return false, false, ErrMalformedState
-	default:
+	if status != 1 || detail != "ok" || daily < 0 || daily > 1 || monthly < 0 || monthly > 1 {
 		return false, false, ErrUnexpectedResponse
 	}
+	return daily == 1, monthly == 1, nil
 }

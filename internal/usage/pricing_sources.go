@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -490,14 +491,26 @@ func samePrice(a, b Price) bool {
 		{a.UnitPrice, b.UnitPrice},
 	}
 	for _, pair := range rates {
-		if (pair[0] == nil) != (pair[1] == nil) {
-			return false
-		}
-		if pair[0] != nil && *pair[0] != *pair[1] {
+		if !sameRate(pair[0], pair[1]) {
 			return false
 		}
 	}
 	return a.Currency == b.Currency
+}
+
+// sameRate compares rates by value: a published rate reads back from its
+// numeric(24,12) column with twelve fractional digits, while a fetched source
+// keeps the spelling its document used.
+func sameRate(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	left, leftErr := decimal.NewFromString(*a)
+	right, rightErr := decimal.NewFromString(*b)
+	if leftErr != nil || rightErr != nil {
+		return *a == *b
+	}
+	return left.Equal(right)
 }
 
 func (s *Server) listPricingSourceSnapshots(r *http.Request) (access.Reply, error) {
