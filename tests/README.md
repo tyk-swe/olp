@@ -63,11 +63,11 @@ CI. Set `OLP_LIVE_PROVIDER` and run
 main-branch `live-providers` workflow. Its configuration lists required secrets
 and cloud identity variables. Live calls consume provider quota.
 
-## Qualification evidence
+## Contract and browser coverage
 
-The integration registration check walks the **current embedded contract**. A
-named test's existence does not prove execution; use current CI results for
-current code. Browser journeys cover accounting, cloud configuration, bulk
-certification, grouped routes, pools, policy exclusions, preview, publication,
-playground, and replacement recovery through deterministic local providers, not
-paid accounts.
+The release contract test, run inside the process suite, checks that every
+operation in the embedded OpenAPI contract reaches a handler. A test's existence
+does not prove it ran; use CI results for the commit you are checking. Browser
+journeys cover accounting, cloud configuration, bulk certification, grouped
+routes, pools, policy exclusions, preview, publication, playground, and
+replacement recovery through deterministic local providers, not paid accounts.

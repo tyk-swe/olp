@@ -207,8 +207,8 @@ allowlists never relax OIDC issuer or Vertex token endpoint checks.
 ## Test and harness variables
 
 Loopback OIDC is available only in an explicitly compiled `-tags=oidctest` test
-binary. Release binaries reject `OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER` and
-`OLP_OIDC_ALLOW_PRIVATE_NETWORK`; there is no environment-controlled bypass.
+binary; release binaries have no environment variable that relaxes OIDC
+transport checks.
 
 The e2e and console integration harnesses point providers at loopback mock
 upstreams through the ordinary egress allowlists
@@ -218,29 +218,26 @@ compiled-in escape hatch.
 
 Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
-support local suites; `OLP_E2E_*` supports the HA contract harness;
-`OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL` support operations
-scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
+support local suites; `OLP_BACKUP_*`, `OLP_RESTORE_*`, and `OLP_PSQL` support
+operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
 `OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and `OLP_BEDROCK_LIVE_*` opt
 into live-provider tests. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
 [`docs/operations.md`](operations.md) for command-specific requirements.
 
 ## Mounted connectors
 
-`OLP_CONNECTOR_CONFIG_FILE` accepts the 3.0 `providers` list shown in
+`OLP_CONNECTOR_CONFIG_FILE` accepts the `providers` list shown in
 [`deploy/connectors.example.json`](../deploy/connectors.example.json). Each
 entry identifies a provider, uses the same nested `configuration` as the
 management API, and references an optional `credential_file`. Vertex entries
 also select a probe `model`. Credential files must have restricted permissions;
-ADC and the AWS default chain reject stored credentials. The former separate
-vendor lists are not accepted by 3.0.
+ADC and the AWS default chain reject stored credentials.
 
 Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
 default credential slot and enforces its slot and connection limits. Releases
 with enabled named slots require the master key so each attempt can use its
-published credential version. The published default-slot ID is required;
-republish older Go releases before enabling mounted mode. Database-encrypted
-revisions remain authoritative when the master key is configured.
+published credential version. Database-encrypted revisions remain authoritative
+when the master key is configured.
 
 Production Compose can generate database credentials and their encoded URL using
 `scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).
@@ -264,11 +261,14 @@ credential authority export a stable `credential_ref` of
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
-Routes may carry a fidelity declaration.
-Historical legacy omission stays omitted in exports. Importing an old artifact
-without this field preserves an existing staged or published contract; explicit
-mode changes remain visible in revision history. Configuration staging never
-activates a strict route or bypasses its policy checks.
+Every exported route carries an explicit
+[fidelity](provider-routing.md#route-fidelity) mode. A route entry without
+fidelity, or with `null` or `{}`, is strict; plan and apply never inherit the
+destination's current mode, so an export applied elsewhere reproduces its routes
+exactly. An invalid mode fails validation on `routes.N.fidelity`, and a strict
+route with a `redact` content-policy rule fails the plan with
+`fidelity_policy_conflict`. Configuration staging never activates a strict route
+or bypasses its policy checks.
 
 `POST /api/v1/configuration/plan` validates an artifact and reports
 `{digest, actions, conflicts, blockers}` without mutating. Validation rejects
@@ -323,5 +323,5 @@ semantic headers, serving bindings and secure per-connection proxy/TLS settings.
 Network secrets use provider-owned encrypted references, independently from API
 credential slots. See [provider profiles](provider-profiles.md) for the public
 configuration shape, cloud endpoint differences, inheritance rules, network bounds,
-credential lifecycle and qualification scope. Omitting the new configuration fields
-preserves existing published legacy behavior and snapshot digests.
+credential lifecycle and qualification scope. A provider that omits the profile
+fields is an Automatic provider, whose endpoints follow from its provider kind.

@@ -13,7 +13,10 @@ body:
     id: version
     attributes:
       label: Version
-      placeholder: e.g. v0.1.0 — see CHANGELOG.md
+      description: >-
+        The 0.x release from `olp --version` or the image tag, or the commit
+        you built from.
+      placeholder: e.g. 0.1.0
     validations:
       required: true
   - type: dropdown
@@ -34,6 +37,7 @@ body:
         - OpenAI-compatible API (/v1)
         - Anthropic-compatible API (/anthropic/v1)
         - Gemini-compatible API (/gemini/v1 or /gemini/v1beta)
+        - Bedrock-compatible API (/bedrock)
         - Management API (/api/v1)
         - Console
         - Worker / background jobs

@@ -1,10 +1,16 @@
 # Own recoverable continuation with provider resources
 
-Negotiated continuation and strict retained Responses use the existing resource
-authority with versioned, encrypted payloads in the existing secret authority.
-Full dependency state commits before actionable translated tool bytes; separate
-strict resource kinds prevent older readers from interpreting new contracts as
-legacy mappings. Ordinary native complete-history requests remain stateless.
+Negotiated continuation and strict retained Responses, files and batches live in
+the provider resource authority, as versioned payloads encrypted by the secret
+authority. Full dependency state commits before any actionable translated tool
+bytes reach the client. Ordinary native complete-history requests stay
+stateless.
+
+Strict and transformed stored resources are separate kinds because their storage
+contracts differ. A strict resource stores an encrypted payload under a contract
+version; a transformed resource stores only a metadata mapping to the
+provider-owned object. Separate kinds mean a reader never has to infer which
+contract a row holds.
 
 An owner-scoped submission identity distinguishes delivery replay from another
 inference request. Ready snapshots are immutable; a permitted next interaction

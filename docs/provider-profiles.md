@@ -3,15 +3,16 @@
 A versioned provider profile selects an API dialect, hosting wrapper,
 authentication combination and operation schemas. It is separate from a model
 binding and credential slot. Profile selection does not certify an entire model
-interaction or establish quality parity; published legacy routes keep their
-legacy interaction contract until explicitly migrated.
+interaction or establish quality parity.
 
-Existing configurations that omit `profile_id` and `profile_revision` retain
-legacy addressing, defaults and snapshot digests. Select both fields to opt into
-a profile. Unknown revisions, incompatible connector/auth combinations, a wrong
-Vertex publisher path, and undeclared operations fail validation. OpenAI Chat
-and Responses are separate generation dialects; a Responses profile cannot fall
-back to the Chat endpoint.
+A provider that omits `profile_id` and `profile_revision` is an Automatic
+provider: its endpoints follow from its provider kind, including the
+Responses-to-Chat fallback for chat-only vendors, and only
+[transformed routes](provider-routing.md#route-fidelity) can use it. Select
+both fields to use a profile, which strict routes require. Unknown revisions,
+incompatible connector/auth combinations, a wrong Vertex publisher path, and
+undeclared operations fail validation. OpenAI Chat and Responses are separate
+generation dialects; a Responses profile cannot fall back to the Chat endpoint.
 
 `GET /api/v1/provider-profiles` returns profile revisions, operation dialects,
 allowed semantic headers/query settings and JSON schemas for operation defaults.
@@ -41,12 +42,13 @@ Live require their own operation/lifecycle implementations and profiles; neither
 is represented by GenerateContent here.
 
 Azure v1 accepts a resource origin or a base ending in `/openai/v1`. The Entra
-scope for this profile is `https://ai.azure.com/.default`; legacy Azure retains
-`https://cognitiveservices.azure.com/.default`. Vertex endpoints must match the
-configured project, location and profile publisher. Bedrock signing happens only
-after the final URL, body and semantic headers have been constructed. Anthropic
-Invoke streaming unwraps bounded AWS event envelopes into native Anthropic events;
-it does not decode the stream as Converse or manufacture terminal events.
+scope for this profile is `https://ai.azure.com/.default`; the `azure-legacy-*`
+profiles use `https://cognitiveservices.azure.com/.default`. Vertex endpoints
+must match the configured project, location and profile publisher. Bedrock
+signing happens only after the final URL, body and semantic headers have been
+constructed. Anthropic Invoke streaming unwraps bounded AWS event envelopes into
+native Anthropic events; it does not decode the stream as Converse or
+manufacture terminal events.
 
 The `cohere-embed-v2` and `cohere-rerank-v2` profiles compose the existing
 `openai_compatible` direct HTTP hosting and API-key authentication with distinct
@@ -54,8 +56,8 @@ The `cohere-embed-v2` and `cohere-rerank-v2` profiles compose the existing
 [Rerank v2](https://docs.cohere.com/reference/rerank) operation codecs. Choose the
 `cohere-native-v2` preset at `https://api.cohere.ai/v2`, or a trusted custom
 v2-compatible base; native requests use `/native/cohere-embed-v2/models/{route}`
-or `/native/cohere-rerank-v2/models/{route}`. The older `cohere` preset stays at
-`/compatibility/v1` for existing routes. Selecting either native profile with
+or `/native/cohere-rerank-v2/models/{route}`. The `cohere` preset uses the
+`/compatibility/v1` endpoint instead. Selecting either native profile with
 that official compatibility endpoint fails configuration validation instead of
 silently calling `/compatibility/v1/embed` or `/rerank`.
 
@@ -119,10 +121,11 @@ is rejected before typed decoding can erase the distinction.
 extensions belong in `native_options`; they remain data and cannot replace model,
 input envelope, destination, authentication, routing or durable-resource authority.
 Shared/native member collisions are errors, including collisions across provider
-and binding layers. Legacy `parameter_defaults` cannot be mixed with explicit
-profiles. Prepared invocation provenance records which omissions were actually
-filled and where the configured default came from. Shared token admission uses
-the same prepared bounds sent upstream; it does not shrink requested controls.
+and binding layers. `parameter_defaults` belong to Automatic providers and
+cannot be mixed with explicit profiles. Prepared invocation provenance records
+which omissions were actually filled and where the configured default came from.
+Shared token admission uses the same prepared bounds sent upstream; it does not
+shrink requested controls.
 
 For Gemini embeddings, native defaults such as `taskType` and
 `outputDimensionality` apply to each native batch member, preserving input order.
@@ -221,11 +224,12 @@ First-party contract references consulted for these compositions:
 [Bedrock Converse](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
 [Bedrock Invoke](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html).
 
-A gateway using `OLP_CONNECTORS_FILE` without database decryption keys may supply
-`network_credential_file` beside `credential_file` in each mounted provider entry.
-The network file contains the same private JSON shape as the creation API. Its
-configured credential UUID must match the published provider's network reference;
-mounting a file cannot create authority. For an explicit profile the mounted
-configuration must match the published model-significant and network settings;
-only secret material is supplied locally. Current revocation still applies, and
-mounted secret values are excluded from serialization and diagnostic formatting.
+A gateway using `OLP_CONNECTOR_CONFIG_FILE` without database decryption keys may
+supply `network_credential_file` beside `credential_file` in each mounted
+provider entry. The network file contains the same private JSON shape as the
+creation API. Its configured credential UUID must match the published provider's
+network reference; mounting a file cannot create authority. For an explicit
+profile the mounted configuration must match the published model-significant
+and network settings; only secret material is supplied locally. Current
+revocation still applies, and mounted secret values are excluded from
+serialization and diagnostic formatting.

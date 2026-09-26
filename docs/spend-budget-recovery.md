@@ -42,9 +42,8 @@ before enabling budgeted traffic; repeated timeouts are not successful repair.
 
 The reconciler does not lower inflated but otherwise valid counters. Correcting
 those requires a reviewed data repair; do not edit migration history, suppress
-checksum validation, or reset counters to zero. Go requires a fresh
-installation; subsequent [migrations](../internal/database/migrations/) are
-forward-only.
+checksum validation, or reset counters to zero.
+[Migrations](../internal/database/migrations/) are forward-only.
 
 Resume budgeted traffic after authoritative initialization and reconciliation
 are healthy. Concurrent admitted work may exceed a budget, and unpriced attempts

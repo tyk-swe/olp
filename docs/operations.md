@@ -1,42 +1,8 @@
 # Operations runbook
 
-Availability, monitoring, recovery, upgrade, incident, and key-rotation
+Availability, monitoring, recovery, version, incident, and key-rotation
 procedures for production OpenLLMProxy. Keep this runbook with the deployed
 release; deployment topology is in [`deployment.md`](deployment.md).
-
-For the provider-pool and routing-policy schema upgrade, follow the
-[coordinated 3.x procedure](provider-routing.md#coordinated-3x-upgrade). Drain
-older gateways before migrating; mixed binaries cannot enforce the same policy
-and release format.
-
-## Strict route cutover
-
-A route slug is a published contract identity. To move a legacy or transformed
-route to strict, fetch its current ETag and create a review draft with
-`POST /api/v1/routes/{route_id}/migration-draft`, `If-Match`, an idempotency key,
-and a body such as `{"slug":"new-route","fidelity":{"mode":"strict"}}`. The
-destination slug must never have been published, including as a retired route.
-The response is an editable draft that copies the current revision, targets,
-content policy and routing policy. Creation and plan inspection perform no
-inference. Resolve any strict policy or provider-profile incompatibility,
-validate the draft, then activate it. Reusing the original slug for this change
-returns `route_fidelity_migration_required` before publication; configuration
-plan/apply report the same boundary.
-
-Provision an API key or update its allowed routes for the new slug, verify the
-new gateway serves the strict route, and deliberately change clients to that
-slug. Existing clients continue on the original non-strict route until their
-cutover. Older live gateways reject the new release and retain their last
-supported snapshot; they cannot dispatch a slug absent from that snapshot.
-Drain them before retiring the old route. A newly started old binary refuses
-the forward schema and is not a rollback mechanism. Rollback uses a compatible
-binary and the retained legacy route, while keeping current key and credential
-revocations. A database restore needs its own reviewed cutover plan that
-reapplies those revocations; never restore deleted credentials as a shortcut.
-
-The database also rejects an old writer that omits strictness from a new
-revision or release. Migration 0027 refuses a pre-existing strict slug with
-non-strict publication history because its identity cannot be proven safe.
 
 ## Objectives and monitoring
 
@@ -102,10 +68,10 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   restart and hand off between workers.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
-  persists each event once, then acknowledges and deletes it. Unsupported wire
-  versions remain pending. Malformed/invalid payloads and missing deliveries
-  become explicit gaps before drainage. An acknowledgement is not an fsync
-  guarantee.
+  persists each event once, then acknowledges and deletes it. Events without
+  the current wire version, malformed or invalid payloads, and missing
+  deliveries become explicit gaps before drainage. An acknowledgement is not an
+  fsync guarantee.
 - **Gateway epoch detection:** records an unclean gateway exit as a completeness
   gap after two confirming passes.
 - **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and
@@ -267,6 +233,12 @@ metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT` (30
 seconds by default). Forced closure records uncertainty instead of extending the
 deployment termination budget.
 
+Delivery and replay evidence is retained for seven days plus five minutes of
+clock-skew grace. A late entry is recorded as uncertain completeness, never
+silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
+* 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
+within seven days; do not extend the window by suspending maintenance.
+
 ## Shared state in Valkey
 
 Every key is prefixed with the installation namespace
@@ -361,7 +333,7 @@ script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
 Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
 empty Valkey service, and mount the original master and auth key files. The
 restore role needs CREATEDB: the command first restores to a disposable staging
-database, verifies the manifest/checksum/history/identity, applies supported Go
+database, verifies the manifest/checksum/history/identity, applies the binary's
 migrations, and authenticates every encrypted record with `olp doctor`. Only
 then does one transaction recheck and populate the empty destination. Failure
 removes staging and leaves the destination unchanged. Set `OLP_MAINTENANCE_BIN`
@@ -370,33 +342,28 @@ installation with its original keys and a fresh Valkey service. A restored
 installation retains its namespace; run it as a replacement, or isolate its
 Valkey service from the source installation.
 
-## Installation and upgrades
+## Installation and versions
 
-Go does not upgrade Rust 2.x or Rust 3.x storage. Back up the existing
-installation with its own version, provision independent Go storage and secrets,
-and verify providers, routes, permissions, SDK requests, usage, and recovery
-before redirecting traffic. Rust schemas are refused before any Go objects are
-created.
+Each installation starts from an empty PostgreSQL database and uses its own
+Valkey namespace. During 0.x, OLP makes no compatibility, upgrade,
+mixed-version or rollback promises: any release may change the management API,
+configuration and storage, and a release may require a fresh installation. See
+[ADR 0004](adr/0004-no-compatibility-promises-during-0x.md).
 
-For subsequent 3.x releases, review forward-only migrations, rehearse against an
-isolated 3.0 backup, quiesce new inference and mutations, and drain accounting.
-Take the final snapshot while workers still supply a fresh checkpoint, then stop
-workers for migration. Run `olp migrate` once and roll out all process modes
-before resuming admission. Verify readiness, generation convergence, backlog,
-usage completeness, provider probes, and latency. Restore the saved database and
-keys into a replacement installation if rollback requires an older schema.
-
-Delivery and replay evidence is retained for seven days plus five minutes of
-clock-skew grace. A late entry is recorded as uncertain completeness, never
-silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
-* 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
-within seven days; do not extend the window by suspending maintenance.
-
-Migrations are forward-only; never edit migration history or checksums.
+Run one version across every process mode. To run a new release against an
+existing database, take a [drained backup](#backup-and-restore), stop every
+process, run `olp migrate` once with the new binary, and start all process
+modes on that version. With Helm, scale the gateway, control and worker
+Deployments to zero before `helm upgrade`; its pre-upgrade hook runs the
+migration Job before the new pods start. Verify readiness, generation
+convergence, backlog, usage completeness, provider probes, and latency before
+resuming admission. There is no rollback: a binary refuses a database whose
+schema is newer than its own, and migrations never run in reverse. Never edit
+migration history or checksums.
 
 ## Database deadlines and privileges
 
-Go pool connections set a ten-second statement deadline, ten-second lock wait
+Pool connections set a ten-second statement deadline, ten-second lock wait
 and fifteen-second idle-transaction deadline. Commands additionally obey the
 startup/dependency deadlines in the configuration reference. Backup should use a
 dedicated read role with access to migration history and all backed-up tables

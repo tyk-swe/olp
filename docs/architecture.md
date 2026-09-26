@@ -19,8 +19,8 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Strict generation admission, continuation and semantic obligations | `internal/interaction/` |
 | Registered non-generation strict operation contracts | `internal/operationplan/`, `internal/operationregistry/` |
 | Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
-| Legacy provider preparation and wire defaults | `internal/providerinvoke/` |
-| OpenAI, Anthropic, Gemini, Bedrock codecs and legacy adapters | `internal/protocols/` |
+| Transformed provider preparation and wire defaults | `internal/providerinvoke/` |
+| OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
 | Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
@@ -59,11 +59,11 @@ before dispatch. Compatibility request accessors return copies; resource and
 content-policy changes create overlays without replacing the caller source.
 Unary results retain their native source before model rewriting. Stream codecs
 lift bounded native events before projection, including framing metadata, and
-keep no unbounded event history. Existing protocol validators continue to own
-terminal grammar, while the gateway retains cancellation and response commitment.
+keep no unbounded event history. Protocol validators own terminal grammar, while
+the gateway owns cancellation and response commitment.
 
-`protocols.PrepareTarget` records the existing legacy mapper's destination and
-the defaults it actually applied. Explicit destination dialects cannot fall
+`protocols.PrepareTarget` records the transformed mapper's destination and the
+defaults it actually applied. Explicit destination dialects cannot fall
 back to another API. `protocols.PrepareIdentity` preserves native subtrees and
 allows only registered model/resource/transport changes; it does not normalize
 Responses input strings, rename token controls, or qualify an interaction by
@@ -72,8 +72,10 @@ owns generation admission, `internal/operationplan` and the `internal/operationr
 composition root own the other unary operations, and `internal/mediacontract`,
 `internal/durablecontract`, `internal/realtimecontract` and `internal/geminilifecycle`
 own their surfaces. The planner still owns policy coverage, profile compatibility,
-source requirements and client continuation; `internal/providerinvoke` retains the
-legacy admission path. See [the source decision](adr/0001-immutable-operation-sources.md).
+source requirements and client continuation; `internal/providerinvoke` owns the
+transformed admission path. See
+[the source decision](adr/0001-immutable-operation-sources.md) and
+[route fidelity](adr/0002-strict-or-transformed-route-fidelity.md).
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
 events; retries and deduplication support recovery. Durable media jobs and
@@ -88,4 +90,4 @@ development uses Vite with configured API proxies.
 See [gateway execution](gateway.md), [access control](access.md), and the
 [worker runbook](operations.md#replicated-worker-health) for their operational
 contracts. See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks,
-integration, and the fresh-installation contract.
+integration, and releases.

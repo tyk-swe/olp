@@ -11,11 +11,11 @@ Vite proxying, private secret files, and the one-time owner bootstrap token.
 
 ## Deployment and database roles
 
-Use a fresh, separate database. Go owns schema `olp` and its checksum
-history; it rejects Rust schemas and preexisting public tables before writing.
-The installation UUID survives repeated and concurrent migrations. Valkey uses
-the [installation namespace](operations.md#shared-state-in-valkey)
-`olp:<installation UUID>:`. Never share a Rust installation's storage.
+Use an empty, separate database for each installation. OLP owns schema `olp`
+and its checksum history. The installation UUID survives repeated and
+concurrent migrations. Valkey uses the
+[installation namespace](operations.md#shared-state-in-valkey)
+`olp:<installation UUID>:`.
 
 Provision a migration owner and a separate, existing runtime login with neither
 superuser nor ownership privileges. Using the migration connection, run:
@@ -122,7 +122,8 @@ A later verified mapped login restores external authorization (not an
 administratively disabled account); old sessions and invitations stay revoked.
 Locally managed accounts retain their locally assigned role on OIDC sign-in.
 OIDC-managed accounts must keep a usable linked identity so self-service unlink
-cannot sever their authorization source.
+cannot sever their authorization source. Role ownership is internal and cannot
+be changed by self-service credential operations.
 
 Local sign-in is usable only when both `OLP_LOCAL_LOGIN_ENABLED` and
 `auth.local_login_enabled` permit it. Capabilities, invitation issuance and
@@ -132,24 +133,10 @@ disabled: issue/accept returns actionable guidance before account creation or
 token consumption. Use mapped OIDC provisioning for SSO-only onboarding; email
 matching never implicitly links an existing account.
 
-Migration `0010_authentication_ownership.sql` classifies legacy accounts using
-provisioning evidence. Setup/accepted-invitation audit events or accepted
-invitation records preserve local ownership; remaining accounts with linked OIDC
-identities become OIDC-managed, including ambiguous mixed-method accounts whose
-original provisioning evidence has expired. Review these ambiguous accounts and
-ensure appropriate provider mappings before upgrading. The migration cannot
-infer ownership from a password added through enrollment. Accounts without OIDC
-identities remain locally managed. Role ownership is internal and cannot be
-changed by self-service credential operations.
-
 Owner protection evaluates proposed mappings against the latest verified email
 and group inputs stored privately for each identity. These inputs never appear
-in identity responses or audit. Run `olp migrate` before starting an updated
-binary; migration `0003_oidc_role_claims.sql` preserves existing identities
-without inventing verified inputs. Complete an OIDC sign-in before relying on an
-upgraded identity as the only owner sign-in method. Changing claim names
-requires another verified owner path or an owner with enabled local password
-sign-in.
+in identity responses or audit. Changing claim names requires another verified
+owner path or an owner with enabled local password sign-in.
 
 Replacing or removing the OIDC client secret requires an active owner with
 enabled local password sign-in. A changed secret invalidates prior OIDC sign-in
@@ -176,9 +163,9 @@ authentication. Enrollment/link/unlink proofs expire after five minutes, are
 purpose/resource-bound, and are consumed once. Authentication-method changes
 rotate the current session and revoke prior sessions.
 
-Production builds reject insecure OIDC environment switches. Only the explicit
-`oidctest` build tag permits a loopback HTTP issuer, and the integration runner
-builds a separate test binary; release images never enable that tag.
+Only the explicit `oidctest` build tag permits a loopback HTTP issuer; no
+environment variable relaxes OIDC transport checks. The integration runner
+builds a separate test binary, and release images never enable that tag.
 
 ## Projects and budget groups
 
@@ -306,5 +293,5 @@ existing session, purpose, resource, and exact identity bindings still apply.
 Session inventory labels `last_seen_at` as **Last session verification**
 (updated at most once a minute by session verification). A coarse browser/device
 hint helps distinguish sessions without retaining raw user agents. It is
-untrusted display metadata, not authentication evidence; legacy sessions show
-Unknown browser.
+untrusted display metadata, not authentication evidence; an unrecognized user
+agent shows Unknown browser.
