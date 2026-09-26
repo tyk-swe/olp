@@ -46,7 +46,7 @@ workers are not supported during schema changes.
 
 The release workflow publishes the multi-architecture image to
 `ghcr.io/tyk-swe/olp` and the chart to
-`oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 3.x version and
+`oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 0.x version and
 pin its image digest for production. When testing this source tree before
 publication, build `deploy/Dockerfile` and package `deploy/helm` locally.
 Publication depends on the tagged commit passing check, dependency policy and
@@ -70,7 +70,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  tag: "3.0.0"
+  tag: "0.1.0"
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
@@ -214,7 +214,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.tag=3.0.0 \
+  --set-string image.tag=0.1.0 \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -225,9 +225,9 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 3.0.0 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 0.1.0 \
   --namespace olp --create-namespace \
-  --set-string image.tag=3.0.0 \
+  --set-string image.tag=0.1.0 \
   --values production-values.yaml --timeout 20m --wait
 ```
 

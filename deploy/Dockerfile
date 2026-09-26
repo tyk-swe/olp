@@ -6,8 +6,7 @@ ARG BUILDKIT_SBOM_SCAN_STAGE=true
 WORKDIR /src
 ENV CGO_ENABLED=1 GOTOOLCHAIN=local
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
-# GLIDE links the archive shipped in its pinned Go module; no Rust tools exist.
-RUN test "$(go env GOARCH)" = "$TARGETARCH" && ! command -v cargo && ! command -v rustc
+RUN test "$(go env GOARCH)" = "$TARGETARCH"
 COPY go.mod go.sum package.json ./
 RUN go mod download
 COPY cmd ./cmd
@@ -37,13 +36,11 @@ COPY openapi/management.json ./openapi/management.json
 RUN pnpm --dir console api:generate && pnpm --dir console build
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
-ARG OLP_VERSION=3.0.0
+ARG OLP_VERSION=0.1.0
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.title="OpenLLMProxy" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.version="$OLP_VERSION" \
-      io.openllmproxy.storage="olp-go-v1" \
-      io.openllmproxy.fresh-install="required-for-rust-replacement"
+      org.opencontainers.image.version="$OLP_VERSION"
 COPY --from=go-build /out/olp /usr/local/bin/olp
 COPY --from=go-build /out/*LICENSE* /out/*txt /usr/share/doc/openllmproxy/
 COPY --from=go-build /out/native/ /usr/share/doc/openllmproxy/native/

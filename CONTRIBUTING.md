@@ -90,7 +90,7 @@ concrete incompatibility or regression and a stated removal condition.
 
 ## Release evidence
 
-Root `package.json` owns the stable 3.x version. The console package, chart
+Root `package.json` owns the 0.x version. The console package, chart
 version/appVersion, binary linker value, image label and release tag must agree;
 `scripts/check-release-version.mjs` enforces this. Build images natively on
 amd64 and arm64. Dependency layers are cached independently of application
@@ -100,7 +100,7 @@ CA libraries ship in a nonroot distroless image.
 Candidate platform digests form one multi-architecture index. Packaged browser,
 SDK and recovery qualification consumes that exact index; promotion only tags
 and attests it and never rebuilds. A manual release-workflow dispatch qualifies
-a candidate without publishing stable version tags. Only a `v3.*` push can
+a candidate without publishing stable version tags. Only a `v0.*` push can
 promote. A missing platform result or missed build target keeps that
 candidate's release gate open.
 

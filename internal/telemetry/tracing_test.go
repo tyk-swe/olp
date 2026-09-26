@@ -36,7 +36,7 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 	if err := os.WriteFile(file, []byte(`{"Authorization":"Bearer collector-secret"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h, err := Install(Config{Endpoint: collector.URL + "/collect", HeadersFile: file, SampleRatio: 1, AcceptInbound: true, PropagateUpstream: true, Mode: "gateway", Version: "3.0.0"})
+	h, err := Install(Config{Endpoint: collector.URL + "/collect", HeadersFile: file, SampleRatio: 1, AcceptInbound: true, PropagateUpstream: true, Mode: "gateway", Version: "0.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 	for part := range payloads {
 		payload = append(payload, part...)
 	}
-	for _, required := range []string{"request", "attempt", "safe-route", "safe-key-id", "openllmproxy", "3.0.0"} {
+	for _, required := range []string{"request", "attempt", "safe-route", "safe-key-id", "openllmproxy", "0.1.0"} {
 		if !bytes.Contains(payload, []byte(required)) {
 			t.Errorf("export omitted %s", required)
 		}

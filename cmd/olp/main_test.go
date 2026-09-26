@@ -2,9 +2,39 @@ package main
 
 import (
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/process"
 )
+
+func TestVersionPrintsBuildVersion(t *testing.T) {
+	previous := process.Version
+	process.Version = "0.1.0"
+	t.Cleanup(func() { process.Version = previous })
+	for _, arg := range []string{"version", "--version"} {
+		t.Run(arg, func(t *testing.T) {
+			read, write, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout := os.Stdout
+			os.Stdout = write
+			err = run(context.Background(), []string{arg})
+			os.Stdout = stdout
+			write.Close()
+			output, readErr := io.ReadAll(read)
+			if err != nil || readErr != nil {
+				t.Fatal(err, readErr)
+			}
+			if string(output) != "olp 0.1.0\n" {
+				t.Fatalf("version output = %q", output)
+			}
+		})
+	}
+}
 
 func TestAccountResetPasswordArguments(t *testing.T) {
 	for name, args := range map[string][]string{

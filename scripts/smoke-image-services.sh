@@ -32,7 +32,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 "${compose[@]}" up -d --wait --wait-timeout 90
 version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
-[[ $(docker run --rm "$image" --version) == "olp $version Go" ]]
+[[ $(docker run --rm "$image" --version) == "olp $version" ]]
 [[ $(docker image inspect --format '{{.Config.User}}' "$image") == '65532:65532' ]]
 # Use the already pulled PostgreSQL image only to assign disposable volume ownership.
 docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 sh -c 'chown 65532:65532 /secrets/* && chmod 0440 /secrets/*'

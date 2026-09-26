@@ -43,7 +43,7 @@ docker compose --env-file .env \
 Visit the configured `OLP_PUBLIC_ORIGIN` and use
 `deploy/secrets/olp_bootstrap_token` for first-owner setup. After setup,
 [recreate the application without the bootstrap overlay and retire the token](deploy/secrets/README.md#bootstrap-token-lifecycle).
-To use a published 3.x image, set `OLP_IMAGE` and omit the build overlay and
+To use a published 0.x image, set `OLP_IMAGE` and omit the build overlay and
 `--build`.
 
 In the console, connect a provider, discover and certify models, and activate

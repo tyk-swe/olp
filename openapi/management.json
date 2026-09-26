@@ -10339,16 +10339,17 @@
   },
   "info": {
     "contact": {
-      "email": "juha7kukkonen@gmail.com",
-      "name": "Juha Kukkonen"
+      "email": "support@mail.tyk.sh",
+      "name": "OpenLLMProxy",
+      "url": "https://github.com/tyk-swe/olp"
     },
-    "description": "Utoipa's axum bindings for seamless integration for the two",
+    "description": "Manage OpenLLMProxy access, providers, routes, usage and operations.",
     "license": {
-      "identifier": "MIT OR Apache-2.0",
-      "name": "MIT OR Apache-2.0"
+      "identifier": "AGPL-3.0-only",
+      "name": "AGPL-3.0-only"
     },
     "title": "OpenLLMProxy Management API",
-    "version": "3.0.0"
+    "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {

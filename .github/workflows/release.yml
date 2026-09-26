@@ -2,7 +2,7 @@ name: Release
 on:
   workflow_dispatch:
   push:
-    tags: ['v3.*']
+    tags: ['v0.*']
 permissions:
   contents: read
 defaults:
@@ -153,7 +153,7 @@ jobs:
             console/test-results
           if-no-files-found: warn
   promote:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v3.')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v0.')
     needs: [candidate, packaged]
     runs-on: ubuntu-latest
     permissions:
@@ -181,8 +181,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
-          docker buildx imagetools create --tag "$IMAGE:${RELEASE_TAG#v}" --tag "$IMAGE:3" "$IMAGE@$DIGEST"
-          published=$(docker buildx imagetools inspect "$IMAGE:${RELEASE_TAG#v}" --format '{{json .Manifest}}' | jq -r .digest)
+          version=${RELEASE_TAG#v}
+          docker buildx imagetools create --tag "$IMAGE:$version" --tag "$IMAGE:${version%.*}" "$IMAGE@$DIGEST"
+          published=$(docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' | jq -r .digest)
           test "$published" = "$DIGEST"
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm package deploy/helm --destination /tmp/chart
