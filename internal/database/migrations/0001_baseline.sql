@@ -352,9 +352,7 @@ CREATE TABLE olp.route_drafts (
     project_id uuid REFERENCES olp.projects,
     content_policy jsonb,
     fidelity jsonb NOT NULL CHECK (
-        jsonb_typeof(fidelity) = 'object'
-        AND fidelity->>'mode' IN ('strict', 'transformed')
-        AND fidelity - 'mode' = '{}'::jsonb
+        fidelity IN ('{"mode": "strict"}'::jsonb, '{"mode": "transformed"}'::jsonb)
     )
 );
 
@@ -390,9 +388,7 @@ CREATE TABLE olp.route_revisions (
     routing_policy jsonb NOT NULL,
     content_policy jsonb,
     fidelity jsonb NOT NULL CHECK (
-        jsonb_typeof(fidelity) = 'object'
-        AND fidelity->>'mode' IN ('strict', 'transformed')
-        AND fidelity - 'mode' = '{}'::jsonb
+        fidelity IN ('{"mode": "strict"}'::jsonb, '{"mode": "transformed"}'::jsonb)
     ),
     UNIQUE (route_id, revision)
 );

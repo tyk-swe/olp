@@ -4,6 +4,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -125,5 +127,46 @@ func TestMigrationAndStartupRefuseANewerSchema(t *testing.T) {
 	}
 	if _, err := Installation(t.Context(), pool); err == nil || err.Error() != "database schema is newer than this olp binary" {
 		t.Fatalf("Installation = %v; want the newer schema refusal", err)
+	}
+}
+
+func TestStoredRouteFidelityStatesStrictOrTransformed(t *testing.T) {
+	pool := scratchPool(t)
+	if err := Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	user, route := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,'owner@example.com','Owner','owner',$2)", user, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag) VALUES($1,'route',$2,1,$3,$4)", route, user, uuid.NewString(), uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	revision := 0
+	store := map[string]func(fidelity string) error{
+		"route_drafts": func(fidelity string) error {
+			_, err := pool.Exec(t.Context(), `INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,etag,created_by,fidelity)
+                VALUES($1,'route','draft','[]',1,1,'[]',$2,$3,$4::jsonb)`, uuid.NewString(), uuid.NewString(), user, fidelity)
+			return err
+		},
+		"route_revisions": func(fidelity string) error {
+			revision++
+			_, err := pool.Exec(t.Context(), `INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity)
+                VALUES($1,$2,$3,'route','[]',1,1,'[]',$4,$5,'{}',$6::jsonb)`, uuid.NewString(), route, revision, uuid.NewString(), user, fidelity)
+			return err
+		},
+	}
+	for table, insert := range store {
+		for _, fidelity := range []string{`{"mode":"strict"}`, `{"mode":"transformed"}`} {
+			if err := insert(fidelity); err != nil {
+				t.Fatalf("%s refused %s: %v", table, fidelity, err)
+			}
+		}
+		for _, fidelity := range []string{`{}`, `{"mode":null}`, `{"mode":""}`, `{"mode":"legacy"}`, `{"mode":["strict"]}`, `{"mode":"strict","other":true}`, `[]`, `"strict"`, `null`} {
+			var refused *pgconn.PgError
+			if err := insert(fidelity); !errors.As(err, &refused) || refused.Code != "23514" {
+				t.Fatalf("%s stored fidelity %s without an explicit strict or transformed mode: %v", table, fidelity, err)
+			}
+		}
 	}
 }
