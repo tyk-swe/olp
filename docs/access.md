@@ -1,101 +1,11 @@
-# Installation and access control
+# Access control
 
 The control plane manages installation setup, identity, projects, API keys,
-management tokens, provisioning, settings, and metadata-only audit records. See
-[gateway execution](gateway.md) for inference and limit enforcement.
-
-## Local development
-
-Follow [CONTRIBUTING](../CONTRIBUTING.md#local-development) for local services,
-Vite proxying, private secret files, and the one-time owner bootstrap token.
-
-## Deployment and database roles
-
-Use an empty, separate database for each installation. OLP owns schema `olp`
-and its checksum history. The installation UUID survives repeated and
-concurrent migrations. Valkey uses the
-[installation namespace](operations.md#shared-state-in-valkey)
-`olp:<installation UUID>:`.
-
-Provision a migration owner and a separate, existing runtime login with neither
-superuser nor ownership privileges. Using the migration connection, run:
-
-```sh
-olp migrate --runtime-role olp_runtime
-```
-
-The command grants schema usage and feature-table DML to that role, with
-read-only migration history. It neither creates login roles nor grants DDL
-privileges. Supply the runtime connection to `olp all` or `olp control`
-afterward. Startup requires the complete, unchanged migration history and never
-migrates implicitly. Other process modes also require an initialized
-installation. Queries have statement/lock deadlines; access mutations take the
-installation row lock so ownership checks and resulting writes commit together.
-Password hashing, OIDC discovery, and token verification run outside that lock.
-
-Set `OLP_PUBLIC_ORIGIN` to the exact browser origin. Unsafe browser management
-requests require that Origin; authenticated browser writes also require
-`X-CSRF-Token`. [Management tokens](#management-tokens-and-provisioning) use
-separate bearer authentication. Use HTTPS outside local loopback development.
-Cookies are Secure, Path=/, SameSite=Lax, with HttpOnly session and
-recent-authentication cookies. Private health and metrics endpoints belong on a
-private listener/network.
-
-## Mounted secrets
-
-Use private regular files with mode 0400, 0440, 0600, or 0640; group-write and
-world permissions are rejected.
-[Configuration](configuration.md#file-based-secrets) identifies which modes
-require each file and the mounted-connector exception:
-
-| Environment variable | File contents |
-| --- | --- |
-| `OLP_AUTH_HMAC_KEY_FILE` | 32 random bytes, encoded as hex or standard base64 |
-| `OLP_MASTER_KEY_FILE` | JSON master-key ring shown below |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | A random 32–256-byte token, needed for initial setup |
-
-Database and Valkey URLs also support their corresponding `_FILE` options.
-Inline and file-based URL settings are mutually exclusive. The local/test helper
-`source scripts/secrets.sh <private-directory>` creates missing secret files
-without printing their contents; production secret distribution remains the
-operator's responsibility.
-
-```json
-{
-  "active_version": 1,
-  "keys": [{ "version": 1, "key": "<32 random bytes encoded as hex or base64>" }]
-}
-```
-
-A ring holds 1–32 distinct positive versions. Keep the authentication HMAC key
-stable: its installation fingerprint prevents accidental replacement. Passwords
-use salted Argon2id with fixed 64 MiB/3-iteration parameters and bounded local
-concurrency. Session, API-key, invitation, and admission lookups use
-installation- and purpose-separated HMAC digests. OIDC client secrets, pending
-flows, and one-time mutation replies use AES-256-GCM with installation, record,
-and purpose authenticated as associated data.
-
-## Master-key rotation and recovery
-
-1. Retain every key version still in use, add a higher version, and select it as
-   `active_version` in the private ring file. Take a
-   [drained database backup](operations.md#backup-and-restore) and retain its
-   required key material separately.
-2. Stop management writers for a controlled maintenance window, mount the new
-   ring, and run `olp master-key reencrypt` using the same database and auth key.
-3. Rerun the command after an interruption. It commits batches of 100 records;
-   authenticated old records remain readable with the retained keys. A stale
-   process cannot write ciphertext using the retired active version. Keep the
-   same key material for each version: every run authenticates existing
-   destination-version records before committing any batches.
-4. Run `olp master-key status` and `olp doctor`. They authenticate stored
-   ciphertext and emit only installation/version/count metadata. Remove an old
-   key only after `olp master-key verify-retirement VERSION` succeeds and backup
-   retention permits removal. `olp master-key reencrypt --dry-run` authenticates
-   records without changing them.
-5. Restart all processes that decrypt credentials with the new ring. Existing
-   sessions and API credentials retain their HMAC identity; encrypted replays retain
-   their original response. Rotation records a metadata-only audit event.
+management tokens, provisioning, settings, and metadata-only audit records.
+Administrators belong to one trusted installation. See
+[deployment](deployment.md) for installation,
+[configuration](configuration.md#file-based-secrets) for secret files, and
+[operations](operations.md#master-key-rotation-and-recovery) for key rotation.
 
 ## Access and OIDC
 
@@ -187,7 +97,7 @@ limit, uses the installation currency, and belongs to one project or the
 unassigned boundary. Attach a key through `budget_group_id`; key and group must
 share that boundary. Writes require key-management permission and project write
 access. Group limits supplement individual key limits and share their
-[initialization and recovery rules](spend-budget-recovery.md).
+[initialization and recovery rules](operations.md#spend-budget-reconciliation).
 
 ## Management tokens and provisioning
 
@@ -248,9 +158,12 @@ recovery error that does not confirm whether the address exists.
 
 ## Mutation and audit boundaries
 
-Protected writes reauthorize inside their feature transaction. Versioned updates
-require a strong quoted `If-Match`; stale edits return 412. The console retains
-the ETag from the edit baseline and offers an explicit reload after a conflict.
+Protected writes reauthorize inside their feature transaction. Access mutations
+take the installation row lock so ownership checks and writes commit together;
+password hashing, OIDC discovery, and token verification run outside that lock.
+Versioned updates require a strong quoted `If-Match`; stale edits return 412.
+The console retains the ETag from the edit baseline and offers an explicit
+reload after a conflict.
 Key creation/revocation/rotation and invitation creation/retirement require
 `Idempotency-Key`. Replays bind actor, method, path, precondition, and request
 body, are reauthorized before reading, and encrypt responses for 24 hours.
@@ -273,7 +186,22 @@ credential ciphertext, raw identity claims, or full user agents. Audit stores
 explicit actor/resource/action/outcome, time, direct peer IP, and a coarse user
 agent family. Automatic role synchronization uses no invented human actor.
 
+Passwords use salted Argon2id with fixed 64 MiB/3-iteration parameters and
+bounded local concurrency. Session, API-key, invitation, and admission lookups use
+installation- and purpose-separated HMAC digests. OIDC client secrets, pending
+flows, and one-time mutation replies use AES-256-GCM with installation, record,
+and purpose authenticated as associated data.
+
 ## Console authentication
+
+Set `OLP_PUBLIC_ORIGIN` to the exact browser origin. Unsafe browser management
+requests require that Origin; authenticated browser writes also require
+`X-CSRF-Token`. [Management tokens](#management-tokens-and-provisioning) use
+separate bearer authentication. Use HTTPS outside local loopback development.
+Cookies are Secure, Path=/, SameSite=Lax, with HttpOnly session and
+recent-authentication cookies. Private health and metrics endpoints belong on a
+private listener/network. API responses use `no-store`; public static assets
+remain separate.
 
 Session verification and sign-in capabilities requests have a 10-second console
 deadline, including response bodies. Navigation cancellation stays separate from

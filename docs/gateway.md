@@ -3,8 +3,8 @@
 The gateway serves OpenAI, Anthropic, Gemini, and Bedrock clients with shared
 authentication, project boundaries, admission, routing policy, and accounting.
 Canonical generation, media, retained resources, and realtime use the execution
-paths appropriate to their lifecycle. See [Access](access.md) for installation
-and identity.
+paths appropriate to their lifecycle. See [Access](access.md) for identity and
+[Deployment](deployment.md) for installation.
 
 The [compatibility matrix](compatibility.md) owns endpoint support and
 translation limits. [Provider connections and routing](provider-routing.md)
@@ -29,8 +29,8 @@ or stale.
 ## Configuration
 
 Use the [configuration reference](configuration.md) for flags, defaults, bounds,
-egress, and mounted connectors, and [access control](access.md) for secret files
-and maintenance commands. Local mock providers need explicit loopback and HTTP
+egress, mounted connectors, and secret files. [Operations](operations.md) covers
+maintenance commands. Local mock providers need explicit loopback and HTTP
 [egress exceptions](configuration.md#test-and-harness-variables).
 
 ## Runtime publication and authority
@@ -55,9 +55,14 @@ with, and its owner can always list, delete or cancel it; see
 
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older
-than 60 seconds, measured from the start of the last successful read, is stale:
-new requests are rejected with `503 authority_unavailable` while requests
-already admitted keep the snapshot and policy they were pinned to.
+than 60 seconds, measured from the start of the last successful read with a
+monotonic clock, is stale: new requests are rejected with
+`503 authority_unavailable` while requests
+already admitted keep the snapshot and policy they were pinned to. Ordinary
+streams may finish; realtime sessions recheck key authority every five seconds.
+Credential-version revocation applies to retained releases too: selection
+refuses a revoked version even when the request already pins it. See
+[authority and replica tests](../tests/integration/replica_fleet_test.go).
 
 ## Request path
 
@@ -270,7 +275,7 @@ windows and exact decimals. A request must satisfy both its key and any assigned
 budget group. Concurrent accepted work can exceed a threshold; unpriced attempts
 accrue zero. Exhaustion returns `429 budget_exhausted`. Missing, malformed, or
 wrong-window snapshots return `503 distributed_limits_unavailable` until
-[authoritative initialization](spend-budget-recovery.md) completes.
+[authoritative initialization](operations.md#spend-budget-reconciliation) completes.
 
 When Valkey is configured but unreachable, `limits.valkey_unavailable` controls
 rate/concurrency-only keys: `fail_closed` returns

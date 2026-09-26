@@ -6,12 +6,9 @@ static `build/` output with `index.html` as the SPA fallback. Start with the
 
 ## Local development
 
-After `make setup`, run `make dev` from the repository root and open
-http://127.0.0.1:5173. Use `.local/secrets/bootstrap.token` for first-owner
-setup. Console edits hot reload; restart after backend changes.
-
-Vite proxies `/api/`, `/v1/`, `/anthropic/`, `/gemini/`, and `/v1beta/` to Go
-on port 8082 under `make dev`, preserving the browser origin and cookies.
+The [development workflow](../CONTRIBUTING.md#local-development) starts Vite
+with `make dev`. It proxies `/api/`, `/v1/`, `/anthropic/`, `/gemini/`, and
+`/v1beta/` to Go on port 8082, preserving the browser origin and cookies.
 The checked-in proxy does not include `/bedrock/` or enable WebSocket proxying;
 use the Go listener directly for Bedrock and realtime clients.
 
@@ -22,13 +19,10 @@ Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 Run from the repository root after setup:
 
-| Command                     | Purpose                                              |
-| --------------------------- | ---------------------------------------------------- |
-| `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest   |
-| `make test-console`         | Console unit and component tests                     |
-| `pnpm --dir console build`  | Static assets and asset manifest                     |
-| `make api`                  | Generate Go and TypeScript management contract types |
-| `make integration`          | Service suites and Chromium journeys                 |
+| Command                    | Purpose                                          |
+| -------------------------- | ------------------------------------------------ |
+| `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest |
+| `pnpm --dir console build`  | Static assets and asset manifest                 |
 
 Management requests use the generated `openapi-fetch` client. Update
 `openapi/management.json` alongside Go handlers and run `make api`; never edit
@@ -44,16 +38,5 @@ Keep the application client-only: do not add server routes, server hooks,
 
 ## Testing
 
-Vitest uses `TZ=America/New_York` to exercise local-time and daylight-saving
-behavior. Component tests use jsdom and browser exports. Tests synchronize
-SvelteKit themselves; no prior build is needed. Focused `.only` tests fail
-validation. Filter runs instead:
-
-```sh
-make test-console CONSOLE_TEST_ARGS='--project unit src/lib/format.test.ts'
-```
-
-`make integration` supplies disposable services and secrets for Chromium
-journeys at both packaged and Vite origins, including replacement restore.
-See [the testing guide](../tests/README.md) for suite selection and qualification
-limits; standalone `pnpm --dir console test:e2e` requires that service setup.
+See the [testing guide](../tests/README.md) for Vitest configuration, focused
+runs, and Chromium service setup.

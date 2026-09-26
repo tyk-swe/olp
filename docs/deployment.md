@@ -20,10 +20,37 @@ before installing (names and keys are configurable through `config`):
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
-Provision an empty PostgreSQL database for each installation and a JSON
-master-key ring. A new installation also needs a 32-byte base64 bootstrap-token
-Secret mounted only into control pods. Keep all secret values out of values
-files and shell history; the chart schema validates configured names and keys.
+Use the [secret-file formats](configuration.md#file-based-secrets) for the
+master-key ring and authentication key. A new installation also needs a 32-byte
+base64 bootstrap-token Secret mounted only into control pods. Keep all secret
+values out of values files and shell history; the chart schema validates
+configured names and keys.
+
+### Database roles
+
+Use an empty, separate database for each installation. OLP owns schema `olp`
+and its checksum history; the installation UUID survives repeated and
+concurrent migrations. Provision a migration owner and a separate, existing
+runtime login with neither superuser nor ownership privileges. Using the
+migration connection, run:
+
+```sh
+olp migrate --runtime-role olp_runtime
+```
+
+The command grants schema usage and feature-table DML, including
+installation-row updates, with read-only migration history. It neither creates
+login roles nor grants DDL privileges. Alternatively, run
+`scripts/grant-runtime-database-role.sql` as the owner with
+`psql -v runtime_role=olp_runtime`. Reapply grants after migrations; never give
+the runtime role migration-owner membership or CREATE privileges.
+
+Supply the runtime connection to application processes. Serving and worker
+processes require an initialized installation; startup checks the complete,
+unchanged migration history and never migrates implicitly. Production Helm
+needs separate runtime and migration URL Secrets. See
+[database deadlines](operations.md#database-deadlines-and-privileges) for query
+limits and backup roles.
 
 ### Shared Valkey and workers
 
@@ -115,9 +142,33 @@ management pools to 32. Each permit lasts through streaming completion or
 cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
 queueing.
 
-Size deployments with representative unary and streaming workloads, including
-accounting ingestion and worker recovery. CPU, memory, upstream latency, and
-stream duration determine the concurrency a replica can sustain.
+### Capacity qualification
+
+The production Helm example starts at 32 in-flight inference requests per
+gateway. At a 16 MiB response cap this permits 512 MiB of response bytes before
+parser expansion, copies, request bodies, streams and other memory. The default
+evaluation chart's 256-request limit can permit 4 GiB of response bytes alone;
+it is unsuitable for simultaneous maximum-size buffered responses under a 2 GiB
+memory limit. Measure maximum-size unary, streaming and media traffic, slow
+readers, mass disconnects, accounting ingestion and worker recovery before
+increasing concurrency.
+
+Helm's media spool is disk-backed `emptyDir`. The production gateway requests
+2 GiB and limits 3 GiB of ephemeral storage for a 1 GiB application spool inside
+a 2 GiB volume. Compose uses tmpfs, which consumes memory; its production
+overlay allows 4 GiB for the process and spool. Monitor reserved bytes,
+filesystem free space, evictions and worker recovery. These reservations are
+not measured memory or disk-reliability guarantees, and the node-local spool
+does not replace durable provider job references. Keep analytics in control
+processes and ingestion in workers, with database CPU/I/O headroom for both.
+
+Successful mock suites qualify their tested behavior, not a production SLO,
+live-provider certification, invoice accuracy, or disaster-recovery RPO.
+Validate capacity and failure behavior on the actual deployment; use the
+[testing guide](../tests/README.md) for qualification scope and
+[backup and restore](operations.md#backup-and-restore) for recovery requirements.
+
+### Tracing
 
 Tracing is disabled by default. To export request and provider-attempt spans,
 set the full OTLP/HTTP traces endpoint and an optional Secret containing a JSON
@@ -283,9 +334,6 @@ password, place it in `deploy/secrets/olp_database_password` with mode 0600
 before running the command. Existing database passwords must not be regenerated
 without an explicit database rotation. The overlay increases memory to include
 tmpfs spooling but remains a single-host deployment, not an HA profile.
-
-The operational assumptions and evidence are in
-[production-guarantees.md](production-guarantees.md).
 
 The image includes SPDX attestations for the runtime plus Go and console build
 stages. Inspect them with

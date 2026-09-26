@@ -57,24 +57,15 @@ make dev
 ## Tests and changes
 
 Keep feature types, validation, SQL, handlers and workflows together. See the
-[architecture map](docs/architecture.md). Unit tests live beside their owners;
-service suites live under `tests/integration` or beside their owners with the
-`integration` build tag. Run `make test` after setup for all container-free
-behavioral checks; `make check` adds contract generation and static checks.
-Neither command installs dependencies or starts services. Go-only targets need
-Go and its native prerequisites, without Node or pnpm. See
-[tests/README.md](tests/README.md) for focused runs, timeouts, and coverage.
+[architecture map](docs/architecture.md) for ownership and the
+[testing guide](tests/README.md) for suite layout, focused runs, timeouts,
+coverage, and SDK/live-provider qualification.
 
 Run `make integration` for persistence, authentication, inference, runtime
-publication, limits, or browser changes. It provisions disposable
-TLS/authenticated services and runs the full console journey and replacement
-restore at packaged and Vite origins. Install Chromium with
-`pnpm --dir console exec playwright install --with-deps chromium`. Preserve
-meaningful fixture expectations. Include validation and screenshots for visible
-console changes in PRs.
-
-See [SDK and live-provider tests](tests/README.md#sdk-and-live-provider-tests)
-for deterministic JavaScript/Python checks and opt-in paid qualification.
+publication, limits, or browser changes; follow the
+[integration prerequisites](tests/README.md#integration). Preserve meaningful
+fixture expectations. Include validation and screenshots for visible console
+changes in PRs.
 
 ## Dependency policy
 

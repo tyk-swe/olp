@@ -80,9 +80,8 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   invitations, replays, and OIDC flows under stored `retention.*` settings.
   Closing the session after each pass releases the lock.
 - **Cost reconciliation:** every 60 seconds, repairs current UTC spend windows
-  from durable facts using a detached leadership session held between passes.
-  Followers record skips; failure, cancellation, or the 120-second pass deadline
-  closes the leader session. See [spend recovery](spend-budget-recovery.md).
+  from durable facts. See [spend-budget reconciliation](#spend-budget-reconciliation)
+  for initialization, leadership and recovery.
 - **Budget alert delivery:** every 60 seconds under a transaction advisory
   lock, evaluates enabled budget alert rules against the exact accrued window
   totals and posts each crossed threshold once per rule and window to its
@@ -133,20 +132,45 @@ process.
 
 ### Spend-budget reconciliation
 
-PostgreSQL is the spend authority; Valkey holds the admission snapshots for keys
-and budget groups. The consumer applies cumulative totals, and the worker
-reconciles them every minute without lowering valid counters. See
-[spend recovery](spend-budget-recovery.md) for initialization, malformed-state
-repair, window boundaries, and leader ownership.
+PostgreSQL is the spend authority; Valkey holds admission snapshots for each
+configured key and budget-group daily/monthly window. The terminal accounting
+consumer and the reconciliation worker publish cumulative PostgreSQL totals.
+Only these paths initialize cost hashes; admission never creates a zero counter.
+
+New keys, expired UTC windows, missing hashes and malformed or wrong-window
+state return `503 distributed_limits_unavailable` until an authoritative
+snapshot arrives. With a healthy worker, initialization normally waits for the
+next minute's reconciliation pass. Known exhausted windows return HTTP 429
+`budget_exhausted`. Cost budgets always fail closed, including during Valkey
+outages with `limits.valkey_unavailable=fail_open`; rate/concurrency-only keys
+keep their configured outage behavior. Never remove a budget or insert
+synthetic zero spend to bypass initialization.
+
+Reconciliation replaces malformed hashes (including non-integer `unpriced`
+fields or non-hash values) from matching authoritative snapshots, without
+lowering the other window's valid counter. Stale or future snapshots cannot
+initialize a different current UTC window. Daily aggregation uses
+`[daily_start, daily_end)`, so accepted clock-skewed events for tomorrow do not
+exhaust today. Inflated but otherwise valid counters require reviewed data
+repair; never reset them to zero or bypass migration-history/checksum checks.
+
+One dedicated PostgreSQL session holds the reconciliation advisory lock between
+minute ticks and performs monthly reconstruction on that same session. Followers
+record skipped passes. Error, shutdown, cancellation or the 120-second pass
+deadline closes the leader session, releasing leadership; a connection holding
+that session lock is never returned to the pool. Repeated timeouts require
+addressing scan/application load before enabling budgeted traffic. A follower's
+skip is not evidence of successful reconciliation.
 
 Monitor `olp_worker_task_healthy{task="cost_reconciliation"}` and
 `olp_worker_task_runs_total{task="cost_reconciliation",outcome=...}`. Rejections
 use `olp_key_budget_rejections_total{window="daily|monthly"}`; there is no
 per-key Prometheus spend gauge.
 
-1. If reported spend exceeds a limit while requests continue, inspect the
-   consumer, PostgreSQL, Valkey, and reconciliation checkpoint. Revoke the
-   affected key when continued admission risks overspend.
+1. For persistent initialization 503s or spend exceeding a limit while requests
+   continue, inspect the consumer, PostgreSQL, Valkey, their clocks, and the
+   reconciliation checkpoint. Revoke the affected key when continued admission
+   risks overspend.
 2. After Valkey loss or malformed state, keep budgeted traffic stopped until
    a successful reconciliation checkpoint and authoritative accrued values
    confirm recovery. Restore the worker; never lower or delete a valid counter.
@@ -155,9 +179,12 @@ per-key Prometheus spend gauge.
 4. Review `unpriced_attempts`. Missing usage or prices means budgets cannot
    account for all spend; repair coverage and retain provider-side quotas.
 
-Key and group budgets always fail closed during Valkey outages, even with
-`limits.valkey_unavailable=fail_open`. Do not remove a budget or insert
-synthetic zero spend to bypass initialization.
+These are accrued-cost thresholds using exact decimal arithmetic and UTC
+boundaries, not reserved invoice caps. Concurrent accepted work can exceed a
+threshold, and unpriced attempts accrue no money. A current-window hash does not
+prove attribution is current; no maximum lag or monetary overshoot is measured.
+See the [limits](../tests/integration/limits_test.go) and
+[fleet recovery](../tests/integration/fleet_recovery_test.go) tests for evidence.
 
 ### Budget threshold notifications
 
@@ -194,7 +221,16 @@ playground traffic has no key and is not accounted for. Inference processes
 buffer up to 8192 events and write them to the installation stream; the buffer
 never blocks a request, and an overflow is counted as loss rather than paid for
 in latency. Events carry identifiers, timing, token counts, and per-attempt
-evidence only — never prompts, outputs, tool data, or headers.
+evidence only — never prompts, outputs, tool data, headers, credentials,
+cookies, or uploads. Provider names, route slugs and labels are metadata; keep
+secrets out of them.
+[Provider-retained content](compatibility.md#files-batches-realtime-and-provider-retained-state)
+is governed separately from diagnostics.
+
+The stream carries JSON in one `event` field with `version: 1`. Missing or
+different versions, malformed payloads and permanently invalid records become
+`malformed_stream_event` gaps instead of being interpreted as another format.
+See [metadata tests](../internal/usage/) for the persistence contract.
 
 Management processes serve the results: the usage summary, breakdown, time
 series, and completeness endpoints under `/api/v1/usage/`, request listing and
@@ -239,6 +275,21 @@ silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
 * 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
 within seven days; do not extend the window by suspending maintenance.
 
+### Queue durability
+
+A Valkey acknowledgement is not an fsync guarantee. Compose AOF `everysec` may
+lose roughly one second of recently acknowledged metadata on power/storage
+loss; replication and failover can add loss. Surviving epochs, gaps and pending
+counts expose known incompleteness, but cannot reconstruct lost facts from
+counters or enumerate facts lost with their evidence.
+
+Treat a suspected disaster interval as incomplete, stop budgeted traffic at the
+edge, and reconcile provider billing before declaring accounting complete. For a
+tighter RPO, qualify synchronous persistence and the actual replica/failover
+policy on the deployment's storage; changing fsync alone is not a fleet
+guarantee. See [Valkey persistence](https://valkey.io/topics/persistence/) and
+the [replica and recovery suites](../tests/integration/).
+
 ## Shared state in Valkey
 
 Every key is prefixed with the installation namespace
@@ -263,7 +314,8 @@ balance.
 
 1. Confirm pod readiness and one nonzero runtime generation across gateways.
 2. Check PostgreSQL replication, WAL archiving, disk headroom, and backup age;
-   check Valkey latency, memory and AOF durability (it holds metadata awaiting database ingestion).
+   check Valkey latency, memory and AOF durability (it holds metadata awaiting
+   database ingestion).
 3. Review usage completeness and pricing coverage before exporting costs.
    Missing upstream usage is incomplete and unpriced, never zero.
 4. Review provider health, authentication, role/key changes, credential
@@ -271,9 +323,10 @@ balance.
    narrows a page by `action`, `resource_type`, `resource_id`,
    `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
    each category can be reviewed on its own. Session-driven actions also
-   record the direct peer address and a coarse user-agent family. Authentication admission resolves trusted proxy headers,
-   while audit retains the direct peer. The full user-agent is never stored, and
-   background maintenance and reconciliation events leave both empty.
+   record the direct peer address and a coarse user-agent family. Authentication
+   admission resolves trusted proxy headers, while audit retains the direct
+   peer. The full user-agent is never stored, and background maintenance and
+   reconciliation events leave both empty.
 5. Offboarding requires rotating or revoking installation-scoped keys;
    deactivating a user alone does not revoke them.
 6. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Watch
@@ -308,7 +361,7 @@ gateway admission failures when investigating an incident.
 
 ## Backup and restore
 
-For a production recovery point:
+### Create a backup
 
 1. Stop new inference admission and control writes, leave workers running,
    and wait for admitted work, pending acknowledgements, and Stream lag to
@@ -317,30 +370,90 @@ For a production recovery point:
    run `scripts/backup.sh` with `OLP_DATABASE_URL` and
    `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
 
-The script requires a zero, at-most-30-second-old durable checkpoint and an
-explicit quiescence assertion. It exports one PostgreSQL snapshot and creates a
-manifest with format and schema markers `olp`, the checksum, installation
-identity, migration count, and runtime generation. Only the `olp` schema is
-backed up.
+The script requires a zero, at-most-30-second-old durable checkpoint. The
+quiescence flag is an operator assertion, not a server admission fence: verify
+the load balancer/ingress configuration and all replicas. A fresh zero backlog
+alone does not prove quiescence.
 
-The dump contains password hashes, session and API-key digests, and encrypted
-provider/OIDC credentials. Keep master-key rings and authentication HMAC files
-in the secret manager and back them up separately. Retain historical master-key
-versions while records still reference them.
+The script exports one PostgreSQL snapshot of the `olp` schema. Its manifest
+records format/schema markers `olp`, dump checksum, installation identity,
+migration count and versions/checksums, runtime generation, and the script
+checkout's application version. Set `OLP_BACKUP_APP_VERSION` and
+`OLP_BACKUP_IMAGE_DIGEST` for the producing deployment when it differs from that
+checkout. Export has bounded database waits and a dump timeout
+(`OLP_BACKUP_TIMEOUT_SECONDS`, default 600). Dump and manifest publish together
+by atomic directory rename; hidden partial directories are incomplete.
+
+The dump contains password hashes, session/API-key digests and encrypted
+provider/OIDC credentials. Store it with authenticated encryption, independent
+off-site retention and audited access. Back up master-key rings and
+authentication HMAC files separately through a secret manager and tested key
+holders; retain historical key versions while records or backups need them.
+Checksums detect corruption, not malicious replacement of both dump and
+manifest. Rehearse restoration from the actual off-site store.
+
+### Restore a replacement
 
 Run `scripts/restore.sh BACKUP` using the dump path printed by the backup
 script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
 Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
-empty Valkey service, and mount the original master and auth key files. The
-restore role needs CREATEDB: the command first restores to a disposable staging
-database, verifies the manifest/checksum/history/identity, applies the binary's
-migrations, and authenticates every encrypted record with `olp doctor`. Only
-then does one transaction recheck and populate the empty destination. Failure
-removes staging and leaves the destination unchanged. Set `OLP_MAINTENANCE_BIN`
-to the qualified binary when using a nondefault path. Start the restored
-installation with its original keys and a fresh Valkey service. A restored
-installation retains its namespace; run it as a replacement, or isolate its
-Valkey service from the source installation.
+empty Valkey service, and mount the original master and auth key files. Set
+`OLP_MAINTENANCE_BIN` to the qualified binary when using a nondefault path.
+
+The restore role needs CREATEDB. The command restores to a disposable staging
+database, verifies the manifest/checksum/history/identity and included migration
+hashes against local files, applies the binary's migrations, and authenticates
+every encrypted record with `olp doctor`. Only then does one transaction recheck
+and populate the empty destination. Failure removes staging and leaves the
+destination unchanged.
+
+Start the replacement with its original keys and isolated Valkey service.
+Recovery preserves the installation UUID, namespace and historical references;
+never let a rehearsal consume the source's streams or leases. An independently
+writable database clone is unsupported. For independent use, create a fresh
+installation and recreate nonsecret configuration through
+[configuration promotion](configuration.md#configuration-promotion-artifacts).
+
+### Recovery qualification
+
+For PostgreSQL point-in-time recovery, use the managed service's tested PITR
+procedure or
+[continuous WAL archiving](https://www.postgresql.org/docs/18/continuous-archiving.html)
+with base backups, a restore target and verified WAL continuity. Record the
+service's measured RPO/RTO; neither this repository nor a logical dump promises
+one. Fence traffic first, restore to an isolated replacement, preserve the
+installation identity/keyring, and use isolated Valkey. Reconcile external
+provider/media outcomes and database/queue time skew before reopening budgeted
+traffic; see [queue durability](#queue-durability).
+
+`make integration` performs a logical restore, authenticates, decrypts a retained
+provider credential by making a request, and verifies historical accounting was
+preserved and new accounting added. It does not simulate storage power loss or
+certify a managed service's PITR implementation. See the
+[recovery journey](../console/tests/journeys/recovery.spec.ts) and
+[process suites](../tests/integration/).
+
+## Master-key rotation and recovery
+
+1. Retain every key version still in use, add a higher version, and select it as
+   `active_version` in the private ring file. Take a
+   [drained database backup](#backup-and-restore) and retain its
+   required key material separately.
+2. Stop management writers for a controlled maintenance window, mount the new
+   ring, and run `olp master-key reencrypt` using the same database and auth key.
+3. Rerun the command after an interruption. It commits batches of 100 records;
+   authenticated old records remain readable with the retained keys. A stale
+   process cannot write ciphertext using the retired active version. Keep the
+   same key material for each version: every run authenticates existing
+   destination-version records before committing any batches.
+4. Run `olp master-key status` and `olp doctor`. They authenticate stored
+   ciphertext and emit only installation/version/count metadata. Remove an old
+   key only after `olp master-key verify-retirement VERSION` succeeds and backup
+   retention permits removal. `olp master-key reencrypt --dry-run` authenticates
+   records without changing them.
+5. Restart all processes that decrypt credentials with the new ring. Existing
+   sessions and API credentials retain their HMAC identity; encrypted replays retain
+   their original response. Rotation records a metadata-only audit event.
 
 ## Installation and versions
 
@@ -359,7 +472,9 @@ migration Job before the new pods start. Verify readiness, generation
 convergence, backlog, usage completeness, provider probes, and latency before
 resuming admission. There is no rollback: a binary refuses a database whose
 schema is newer than its own, and migrations never run in reverse. Never edit
-migration history or checksums.
+migration history or checksums. The runner requires a sequential history prefix
+with matching checksums and rolls back failed migration transactions;
+[integration tests](../tests/integration/) interrupt DDL to verify recovery.
 
 ## Database deadlines and privileges
 
@@ -372,14 +487,8 @@ should use their own role and explicitly chosen deadlines, not an unlimited
 interactive account. PostgreSQL classifies statement cancellation as `57014` and
 lock expiry as `55P03`; a timeout does not imply a committed mutation.
 
-Use separate migration-owner and runtime logins as described in
-[database roles](access.md#deployment-and-database-roles). After migration,
-grant runtime access with `olp migrate --runtime-role olp_runtime` or run
-`scripts/grant-runtime-database-role.sql` as the owner with
-`psql -v runtime_role=olp_runtime`. The runtime role receives feature-table DML,
-including installation-row updates, and read-only migration history. Reapply
-grants after migrations; never give it migration-owner membership or CREATE
-privileges. Production Helm needs both runtime and migration URL Secrets.
+Provision separate migration-owner and runtime logins, and reapply runtime
+grants after migrations, following [database roles](deployment.md#database-roles).
 
 ## Metric aggregation and incidents
 
@@ -427,48 +536,3 @@ cancellations must be reported separately, with an explicit inclusion/exclusion
 policy. Refusals and missing usage need distinct product/accounting indicators.
 Cost totals are estimates from recorded priced usage; always read their
 unpriced, incomplete, pending and loss coverage alongside the total.
-
-## Recovery assurance
-
-Compose AOF `everysec` may lose roughly one second of recently acknowledged
-metadata on power/storage loss. Surviving epoch/gap records report known
-uncertainty, but cannot enumerate facts that disappeared with their evidence.
-Treat a suspected disaster interval as incomplete, stop budgeted traffic at the
-edge, and reconcile provider billing before declaring accounting complete. For a
-tighter RPO, qualify synchronous persistence and the actual replica/failover
-policy on the deployment's storage; changing fsync alone is not a fleet
-guarantee.
-
-Logical backup requires externally stopping new inference and control writes,
-waiting for admitted work and accounting to drain, then retaining that fence
-until export completes. The environment flag is an operator assertion, not a
-server admission fence. Verify the load balancer/ingress configuration and all
-replicas; a fresh zero backlog alone does not prove quiescence. Export has
-bounded database waits and a dump timeout (`OLP_BACKUP_TIMEOUT_SECONDS`, default
-600). New backups publish their dump and manifest together by atomic directory
-rename; hidden partial directories are incomplete. Manifests record migration
-versions/checksums and the script checkout's application version. Supply
-`OLP_BACKUP_APP_VERSION` and `OLP_BACKUP_IMAGE_DIGEST` for the producing
-deployment when it differs from that checkout. Restore verifies included
-migration hashes against the local migration files before writing the empty
-destination.
-
-Store backups with authenticated encryption, independent off-site retention and
-audited access. Keep master-key recovery material in a separate recovery process
-with tested key holders. Checksums detect corruption, not malicious replacement
-of both a dump and its manifest. Rehearse restoration from the actual off-site
-store, not just a local copy.
-
-For PostgreSQL point-in-time recovery, use the managed service's tested PITR
-procedure or
-[continuous WAL archiving](https://www.postgresql.org/docs/18/continuous-archiving.html)
-with base backups, a restore target and verified WAL continuity. Record the
-service's measured RPO/RTO; neither this repository nor a logical dump promises
-one. Fence traffic first, restore to an isolated replacement, preserve the
-installation identity/keyring, and use isolated Valkey. Reconcile external
-provider/media outcomes and the database/queue time skew before reopening
-budgeted traffic. Never let a rehearsal consume the source's streams or leases.
-`make integration` performs a logical restore, authenticates, decrypts a
-retained provider credential by making a request, and verifies historical
-accounting was preserved and new accounting added. It does not simulate storage
-power loss or certify a managed service's PITR implementation.

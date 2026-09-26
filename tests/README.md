@@ -1,18 +1,23 @@
 # Behavioral validation
 
 After `make setup`, `make test` runs all container-free behavioral suites: Go
-unit tests and the language-neutral protocol corpus under `fixtures/`, console
-unit/component tests, and `scripts/*.test.mjs`. Failures return a nonzero exit
-status. Keep valid expectations for unary/streaming replies, malformed input,
-cancellation, timeouts, failover, egress, media and pricing.
+unit tests beside their features and the language-neutral protocol corpus under
+`fixtures/`, console unit/component tests, and `scripts/*.test.mjs`. Failures
+return a nonzero exit status. Keep valid expectations for unary/streaming
+replies, malformed input, cancellation, timeouts, failover, egress, media and
+pricing.
 
 `make check` generates contracts, checks formatting, vet, console types and
 lint, then runs these same suites once. `make test-race` runs uncached Go tests
 with race detection and is also required by CI. Normal Go runs retain caching.
-Go-only targets require Go and the native prerequisites from
-[CONTRIBUTING.md](../CONTRIBUTING.md); console tests also need Node.js 26 and
-the installed pnpm workspace. Console tests synchronize SvelteKit themselves, so
-no prior console build is required. Focused `.only` tests fail validation.
+Neither `make test` nor `make check` installs dependencies or starts services.
+Go-only targets need Go and its native prerequisites, without Node or pnpm; see
+[CONTRIBUTING.md](../CONTRIBUTING.md). Console tests also need Node.js 26 and
+the installed pnpm workspace. They synchronize SvelteKit themselves, so no
+prior console build is required. Focused `.only` tests fail validation.
+
+Vitest uses `TZ=America/New_York` to exercise local-time and daylight-saving
+behavior. Component tests use jsdom and browser exports.
 
 ## Focused runs
 
@@ -33,6 +38,9 @@ and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
 
 ## Integration
 
+Install Chromium with
+`pnpm --dir console exec playwright install --with-deps chromium`.
+
 `make integration` provisions disposable TLS/authenticated PostgreSQL and
 Valkey, then runs race-enabled process/service/provider/media scenarios,
 official JavaScript SDKs, and Chromium journeys at packaged and Vite origins.
@@ -40,10 +48,14 @@ Both origins run replacement recovery into an empty database with a separate
 Valkey service. Failure-path restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
 
-Service-dependent Go tests require the `integration` build tag, even when they
-live beside feature code. They fail with setup guidance when their required
-service or recovery configuration is missing. Ordinary `make test` does not
-select them, including when service environment variables are set.
+Service-dependent Go tests live in `tests/integration/` or beside feature code
+and require the `integration` build tag. They fail with setup guidance when
+their required service or recovery configuration is missing. Ordinary
+`make test` does not select them, including when service environment variables
+are set.
+
+Standalone `pnpm --dir console test:e2e` requires the same service and secret
+setup; use `make integration` to provision it automatically.
 
 ## SDK and live-provider tests
 

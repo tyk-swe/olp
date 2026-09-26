@@ -47,7 +47,7 @@ intentionally bootstrap a fresh database, remove
 ## Master-key rotation
 
 Follow the
-[master-key rotation procedure](../../docs/access.md#master-key-rotation-and-recovery)
+[master-key rotation procedure](../../docs/operations.md#master-key-rotation-and-recovery)
 in a controlled maintenance window. Retain every referenced key version and keep
 the authentication HMAC key unchanged. Reencrypt and authenticate records before
 removing an old version; the retirement command takes a positional version, for

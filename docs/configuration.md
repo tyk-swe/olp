@@ -104,17 +104,32 @@ setup. Workers require both the HMAC and master keys, including with mounted
 connectors. Inline `OLP_AUTH_HMAC_KEY`, `OLP_MASTER_KEY`, and
 `OLP_BOOTSTRAP_TOKEN` values are rejected.
 
-| Variable | Required by | Purpose |
+| Variable | Required by | File contents |
 | --- | --- | --- |
-| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
-| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | Session and authentication HMAC key. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | One-time owner-setup token. |
+| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below. |
+| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
-Generate Compose files with the [secret helper](../deploy/secrets/README.md);
-follow [Access](access.md#master-key-rotation-and-recovery) for rotation.
-Preserve the HMAC key when restoring an installation; replacing it invalidates
-stored API-key and bootstrap-token digests.
+```json
+{
+  "active_version": 1,
+  "keys": [{ "version": 1, "key": "<32 random bytes encoded as hex or base64>" }]
+}
+```
+
+A ring holds 1–32 distinct positive versions. Keep the authentication HMAC key
+stable: its installation fingerprint prevents accidental replacement, and
+replacing it invalidates stored API-key and bootstrap-token digests. Preserve
+both files for recovery; follow the
+[key rotation procedure](operations.md#master-key-rotation-and-recovery)
+before retiring any master-key version.
+
+Generate Compose files with the [secret helper](../deploy/secrets/README.md).
+For local/test scripts, `source scripts/secrets.sh <private-directory>` creates
+missing secret files without printing their contents. Production secret
+distribution remains the operator's responsibility. Database and Valkey URLs
+also accept `_FILE` settings, mutually exclusive with their inline values.
 
 ## Compose-only variables
 
@@ -203,6 +218,10 @@ whenever either list is non-empty. Transports refuse redirects, use TLS 1.2 or
 newer, bound dial and handshake timeouts, and cap response headers at 32 KiB.
 Probes and inference use the same normalized endpoint and egress policy. The
 allowlists never relax OIDC issuer or Vertex token endpoint checks.
+These exceptions are installation-wide administrative trust decisions;
+they do not provide origin-specific tenant isolation. See the
+[egress](../internal/egress/) and [OIDC](../tests/integration/oidc_test.go) tests
+for boundary coverage.
 
 ## Test and harness variables
 

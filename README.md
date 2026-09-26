@@ -21,12 +21,8 @@ make dev
 ```
 
 Open http://127.0.0.1:5173 and use `.local/secrets/bootstrap.token` to create
-the first owner. Vite serves the console with hot reload and proxies the
-configured API paths to Go. Restart after backend edits.
-
-`make test` runs local Go, console, and script tests. `make check` adds contract
-generation and static checks; `make integration` runs service, SDK, browser, and
-recovery suites. See [Contributing](CONTRIBUTING.md) for the full workflow.
+the first owner. See [Contributing](CONTRIBUTING.md#local-development) for the
+development workflow and [Testing](tests/README.md) for checks and suite selection.
 
 ## Install
 
@@ -105,23 +101,14 @@ upstream.
 | --- | --- |
 | [Concepts](docs/concepts.md) | Projects, routes, revisions, keys, budgets, and privacy |
 | [Provider routing](docs/provider-routing.md) | Onboarding, credential pools, model facts, and selection policy |
+| [Provider profiles](docs/provider-profiles.md) | API dialects, defaults, bindings, and connection security |
 | [Compatibility](docs/compatibility.md) | Endpoints, supported providers, and translation limits |
-| [Deployment](docs/deployment.md) | Production topology, secrets, capacity, and edge routing |
-| [Configuration](docs/configuration.md) | Variables, CLI settings, and configuration promotion |
+| [Deployment](docs/deployment.md) | Database setup, topology, capacity, qualification limits, and edge routing |
+| [Configuration](docs/configuration.md) | Variables, secret files, CLI settings, and configuration promotion |
 | [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
-| [Operations](docs/operations.md) | Monitoring, recovery, and versions |
-| [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
+| [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |
 | [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
-
-## Operations
-
-Follow the [backup and restore procedure](docs/operations.md#backup-and-restore)
-for drained backups, original-key recovery, and isolated replacement storage.
-See [spend recovery](docs/spend-budget-recovery.md) for budget initialization
-and reconciliation, and
-[key rotation](docs/access.md#master-key-rotation-and-recovery) for
-encryption-key maintenance.
 
 OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities through
 [the security policy](SECURITY.md); community participation follows the

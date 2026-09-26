@@ -72,7 +72,7 @@ An API-key secret is shown once; only its HMAC digest is stored. Replace a lost
 secret. Revocation reaches gateways through authority refresh: polls run every
 five seconds and new admissions stop when authority is 60 seconds old. Already
 admitted ordinary streams may finish; realtime sessions recheck the key during
-the session. See [production contracts](production-guarantees.md).
+the session. See [gateway authority](gateway.md#runtime-publication-and-authority).
 
 `inference` authorizes provider operations, including generation, token
 counting, embeddings, rerank, moderation, media, batches, and realtime.
@@ -102,7 +102,8 @@ Unpriced attempts accrue no money and remain visible separately.
 For rate/concurrency-only keys, an explicit `fail_open` setting can bypass
 limits during a configured Valkey outage. See
 [gateway limits](gateway.md#limits-and-budgets) and
-[spend recovery](spend-budget-recovery.md) for enforcement and initialization.
+[spend recovery](operations.md#spend-budget-reconciliation) for enforcement and
+initialization.
 
 ## Attempts, usage, pricing
 
