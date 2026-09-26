@@ -28,9 +28,10 @@ authentication mechanism.
    route slugs. An explicitly assigned canonical model identity can group
    connections automatically. Other models start with distinct connection
    suffixes; assigning the same slug explicitly creates multiple targets.
-   Generated drafts are strict; declare a draft transformed when its targets
-   need translation or have no provider profile. Review the generated drafts
-   before publishing them individually or in bulk.
+   Choose the route fidelity for the generated drafts. Strict is preselected;
+   choose transformed when the targets need translation or are Automatic
+   providers (providers without a provider profile). Review the generated
+   drafts before publishing them individually or in bulk.
 
 ![Reviewed models grouped under one published route name](assets/screenshots/provider-model-comparison.png)
 

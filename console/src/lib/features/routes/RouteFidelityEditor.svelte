@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { RouteDraftEditorState } from './routeDraftEditor.svelte';
-  import type { components } from '$lib/api/schema';
-  type Mode = NonNullable<components['schemas']['RouteFidelity']['mode']>;
+  import { fidelityOptions, type FidelityMode } from './routeFidelity';
   let { editor }: { editor: RouteDraftEditorState } = $props();
-  const mode = $derived<Mode>(editor.fidelity.mode ?? 'strict');
+  const mode = $derived<FidelityMode>(editor.fidelity.mode ?? 'strict');
   const saved = $derived(editor.draft.data?.fidelity?.mode);
   const changed = $derived(
     !editor.isNew && saved !== undefined && mode !== saved
@@ -13,7 +12,7 @@
       editor.policyRules.some((rule) => rule.action === 'redact')
   );
   function change(value: string) {
-    editor.fidelity = { mode: value as Mode };
+    editor.fidelity = { mode: value as FidelityMode };
     editor.touch();
   }
 </script>
@@ -30,10 +29,9 @@
       onchange={(event) => change(event.currentTarget.value)}
       aria-describedby="route-fidelity-help"
     >
-      <option value="strict">Strict · preserve the native invocation</option>
-      <option value="transformed"
-        >Transformed · translate or redact deliberately</option
-      >
+      {#each fidelityOptions as option (option.value)}<option
+          value={option.value}>{option.label}</option
+        >{/each}
     </select>
     <small id="route-fidelity-help"
       >Routes are strict unless you declare them transformed. Native identity
