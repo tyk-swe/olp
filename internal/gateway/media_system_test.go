@@ -611,7 +611,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 	reserved, err := media.ReserveJob(ctx, f.pool, media.Reservation{
 		ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
 		APIKeyID: f.apiKeyID, ProviderID: f.providerID, UpstreamModel: mediaVideoModel,
-		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: &f.slotID,
+		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: f.slotID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -823,7 +823,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 		reserved, err := media.ReserveJob(ctx, f.pool, media.Reservation{
 			ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
 			APIKeyID: f.apiKeyID, ProviderID: f.providerID, UpstreamModel: mediaVideoModel,
-			RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: &f.slotID,
+			RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: f.slotID,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -920,7 +920,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 	reserved, err := media.ReserveJob(ctx, f.pool, media.Reservation{
 		ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
 		APIKeyID: f.apiKeyID, ProviderID: f.providerID, UpstreamModel: mediaVideoModel,
-		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: &f.slotID,
+		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: f.slotID,
 		CredentialVersionID: f.credentialID,
 	})
 	if err != nil {
@@ -957,7 +957,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 	expired, err := media.ReserveJob(ctx, f.pool, media.Reservation{
 		ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
 		APIKeyID: f.apiKeyID, ProviderID: f.providerID, UpstreamModel: mediaVideoModel,
-		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: &f.slotID,
+		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: f.slotID,
 		CredentialVersionID: f.credentialID,
 	})
 	if err != nil {

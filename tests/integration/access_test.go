@@ -523,17 +523,6 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	if database.Migrate(t.Context(), pool) == nil {
 		t.Fatal("accepted changed checksum")
 	}
-	foreign, _ := accessDatabase(t)
-	if _, err = foreign.Exec(t.Context(), "CREATE TABLE public._sqlx_migrations(version bigint)"); err != nil {
-		t.Fatal(err)
-	}
-	if database.Migrate(t.Context(), foreign) == nil {
-		t.Fatal("accepted reference installation")
-	}
-	var wrote bool
-	if err = foreign.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp')").Scan(&wrote); err != nil || wrote {
-		t.Fatal("wrote before rejection", err)
-	}
 	h := newAccessHarness(t)
 	owner := h.owner()
 	created := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "survives rotation"}, map[string]string{"Idempotency-Key": "retained"}, 201)
@@ -584,7 +573,8 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	if created["secret"] != replayed["secret"] {
 		t.Fatal("rotation lost encrypted replay")
 	}
-	if err = h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.secrets WHERE key_version<>2)").Scan(&wrote); err != nil || wrote {
+	var stale bool
+	if err = h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.secrets WHERE key_version<>2)").Scan(&stale); err != nil || stale {
 		t.Fatal("rotation left old records", err)
 	}
 	// Runtime privileges allow feature transactions but cannot alter migrations.

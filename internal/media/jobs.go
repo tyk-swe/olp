@@ -133,7 +133,7 @@ type JobRecord struct {
 	RuntimeGenerationID    string
 	ProviderRevisionID     string
 	CredentialVersionID    *string
-	SlotID                 *string
+	SlotID                 string
 	ReconciliationClaimID  *string
 	ReconciliationAttempts int
 	NextReconciliationAt   time.Time
@@ -157,7 +157,7 @@ type Reservation struct {
 	Operation           string
 	Surface             string
 	CredentialVersionID *string
-	SlotID              *string
+	SlotID              string
 }
 
 // JobUpdate carries one upstream poll result.
@@ -467,9 +467,11 @@ func DecodeCursor(value string) (*Cursor, error) {
 // revision, the pinned credential version remains attached to that revision,
 // and the model still certifies the full video lifecycle surface.
 func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (JobRecord, error) {
-	if _, err := uuid.Parse(input.ID); err != nil || input.UpstreamModel == "" || input.RouteSlug == "" {
+	_, idErr := uuid.Parse(input.ID)
+	_, slotErr := uuid.Parse(input.SlotID)
+	if idErr != nil || slotErr != nil || input.UpstreamModel == "" || input.RouteSlug == "" {
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid,
-			Message: "reservation ID, provider model, route, and operation are required"}
+			Message: "reservation ID, slot, provider model, route, and operation are required"}
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -524,10 +526,10 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 			      IS NOT DISTINCT FROM current.configuration->>'api_version'
 			  AND pinned_revision.configuration->>'auth_mode'
 			      IS NOT DISTINCT FROM current.configuration->>'auth_mode'
-			  AND ($11::uuid IS NULL OR EXISTS (
+			  AND EXISTS (
 			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
-			       WHERE slot->>'id' = $11::text
-			         AND slot->>'credential_id' IS NOT DISTINCT FROM $9::text))
+			       WHERE slot->>'id' = $11::uuid::text
+			         AND slot->>'credential_id' IS NOT DISTINCT FROM $9::text)
 			  AND ($9::uuid IS NULL OR EXISTS (
 			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
 			       WHERE slot->>'credential_id' = $9::text))

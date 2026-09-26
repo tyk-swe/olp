@@ -99,7 +99,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		Operation:           media.OpVideoCreate,
 		Surface:             "openai",
 		CredentialVersionID: slot.CredentialID,
-		SlotID:              &slot.ID,
+		SlotID:              slot.ID,
 	})
 	if jobErr != nil {
 		// A local persistence failure before dispatch refunds the quota

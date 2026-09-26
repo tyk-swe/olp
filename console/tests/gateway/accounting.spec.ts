@@ -499,14 +499,16 @@ test('retained media records expose metadata, filters, and accessible details', 
     WITH refs AS (
       SELECT p.id AS provider_id, p.active_revision_id AS revision_id,
         (SELECT id FROM olp.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
-        (SELECT id FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id
+        (SELECT id FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id,
+        (SELECT id FROM olp.provider_slots WHERE provider_id=p.id AND is_default) AS slot_id
       FROM olp.providers p WHERE p.name='Accounting upstream'
     )
     INSERT INTO olp.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
       route_slug,operation,state,lifecycle_state,progress_percent,completed_at,deleted_at,
-      etag,runtime_generation_id,provider_revision_id)
+      etag,runtime_generation_id,provider_revision_id,slot_id,strict_contract)
     SELECT v.id::uuid,'terminal-fixture-'||v.id,key_id,provider_id,'archived-video-model',
-      v.route,'video_create',v.state,'deleted',100,now(),now(),gen_random_uuid(),generation_id,revision_id
+      v.route,'video_create',v.state,'deleted',100,now(),now(),gen_random_uuid(),generation_id,revision_id,
+      slot_id,false
     FROM refs CROSS JOIN (VALUES
       ('${succeeded}','retained-video-success','succeeded'),
       ('${failed}','retained-video-failure','failed')

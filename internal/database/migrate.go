@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 
 	"github.com/google/uuid"
@@ -18,8 +19,12 @@ var migrations embed.FS
 
 // Migrate takes a transaction-scoped installation lock. PostgreSQL rolls back
 // both DDL and history on failure; rerunning the same migration is the recovery
-// path. Rust's migration files and schema are never written by this runner.
+// path.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return migrate(ctx, pool, migrations)
+}
+
+func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -28,17 +33,14 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(726419823071)"); err != nil {
 		return errors.New("migration lock unavailable")
 	}
-	if err = rejectReference(ctx, tx); err != nil {
-		return err
-	}
 	if _, err = tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS olp;
         REVOKE ALL ON SCHEMA olp FROM PUBLIC;
         CREATE TABLE IF NOT EXISTS olp.migrations (
             version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
         )`); err != nil {
-		return errors.New("migration role cannot initialize Go schema")
+		return errors.New("migration role cannot initialize the olp schema")
 	}
-	entries, err := migrations.ReadDir("migrations")
+	entries, err := fs.ReadDir(history, "migrations")
 	if err != nil {
 		return err
 	}
@@ -47,7 +49,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		known = append(known, name)
-		sql, err := migrations.ReadFile("migrations/" + name)
+		sql, err := fs.ReadFile(history, "migrations/"+name)
 		if err != nil {
 			return err
 		}
@@ -56,7 +58,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		err = tx.QueryRow(ctx, "SELECT checksum FROM olp.migrations WHERE version=$1", name).Scan(&stored)
 		if err == nil {
 			if missingSeen {
-				return errors.New("Go migration history is not a sequential prefix")
+				return errors.New("olp migration history is not a sequential prefix")
 			}
 			if !slices.Equal(stored, checksum[:]) {
 				return fmt.Errorf("migration checksum mismatch: %s", name)
@@ -79,7 +81,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if unknown {
-		return errors.New("database requires a newer Go binary")
+		return errors.New("database requires a newer olp binary")
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.installation(singleton,id,authority_id) VALUES(true,$1,$2) ON CONFLICT DO NOTHING", uuid.NewString(), uuid.NewString()); err != nil {
 		return err
@@ -87,41 +89,24 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return tx.Commit(ctx)
 }
 
-type queryer interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}
-
-func rejectReference(ctx context.Context, q queryer) error {
-	var foreign bool
-	err := q.QueryRow(ctx, `SELECT EXISTS (
-        SELECT 1 FROM pg_namespace WHERE nspname IN ('olp_v3','olp_v2')
-        UNION ALL SELECT 1 FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid
-        WHERE n.nspname='public' AND c.relkind IN ('r','p')
-    )`).Scan(&foreign)
-	if err != nil {
-		return errors.New("cannot inspect installation storage")
-	}
-	if foreign {
-		return errors.New("reference or foreign database detected; use a fresh, separate Go database")
-	}
-	return nil
-}
-
+// Installation returns the installation identity once the database holds
+// exactly this binary's migration history.
 func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
-	if err := rejectReference(ctx, pool); err != nil {
-		return "", err
-	}
+	return installation(ctx, pool, migrations)
+}
+
+func installation(ctx context.Context, pool *pgxpool.Pool, history fs.FS) (string, error) {
 	var id string
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton").Scan(&id); err != nil {
-		return "", errors.New("Go installation is not initialized; run olp migrate using the migration role")
+		return "", errors.New("olp installation is not initialized; run olp migrate using the migration role")
 	}
-	entries, err := migrations.ReadDir("migrations")
+	entries, err := fs.ReadDir(history, "migrations")
 	if err != nil {
 		return "", err
 	}
 	rows, err := pool.Query(ctx, "SELECT version,checksum FROM olp.migrations")
 	if err != nil {
-		return "", errors.New("cannot read Go migration history")
+		return "", errors.New("cannot read olp migration history")
 	}
 	defer rows.Close()
 	count := 0
@@ -129,23 +114,23 @@ func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 		var version string
 		var stored []byte
 		if err = rows.Scan(&version, &stored); err != nil {
-			return "", errors.New("cannot read Go migration history")
+			return "", errors.New("cannot read olp migration history")
 		}
-		data, err := migrations.ReadFile("migrations/" + version)
+		data, err := fs.ReadFile(history, "migrations/"+version)
 		if err != nil {
-			return "", errors.New("database schema is newer than this Go binary")
+			return "", errors.New("database schema is newer than this olp binary")
 		}
 		checksum := sha256.Sum256(data)
 		if !slices.Equal(stored, checksum[:]) {
-			return "", errors.New("Go migration checksum mismatch")
+			return "", errors.New("olp migration checksum mismatch")
 		}
 		count++
 	}
 	if err = rows.Err(); err != nil {
-		return "", errors.New("cannot read Go migration history")
+		return "", errors.New("cannot read olp migration history")
 	}
 	if count != len(entries) {
-		return "", errors.New("Go migrations are pending; run olp migrate using the migration role")
+		return "", errors.New("olp migrations are pending; run olp migrate using the migration role")
 	}
 	return id, nil
 }

@@ -988,8 +988,8 @@ func repSeedExpiring(f *repFixture, now time.Time) {
 	f.exec(`INSERT INTO olp.request_metadata_event_receipts (event_id, request_id, event_sha256,
 	        status, observed_at, recorded_at) VALUES ($1, $2, $3, 'pending', $4, $4)`,
 		access.NewID(), access.NewID(), make([]byte, 32), now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp.sessions (id, user_id, digest, expires_at)
-	    VALUES ($1, $2, $3, $4)`, access.NewID(), f.OwnerID, []byte("expired session digest "),
+	f.exec(`INSERT INTO olp.sessions (id, user_id, digest, expires_at, browser_hint)
+	    VALUES ($1, $2, $3, $4, 'Unknown browser')`, access.NewID(), f.OwnerID, []byte("expired session digest "),
 		now.Add(-time.Hour))
 	f.exec(`INSERT INTO olp.invitations (id, email, role, digest, invited_by, expires_at)
 	    VALUES ($1, 'stale@example.test', 'viewer', $2, $3, $4)`,

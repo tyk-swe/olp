@@ -271,10 +271,10 @@ func (f *claimFixture) insertJob(t *testing.T, seed claimJobSeed) JobRecord {
 			id, upstream_job_id, api_key_id, provider_id, provider_model, route_slug,
 			operation, surface, state, lifecycle_state, progress_percent, content_available,
 			expires_at, error_class, completed_at, last_polled_at, deleted_at,
-			runtime_generation_id, provider_revision_id, slot_id, etag,
+			runtime_generation_id, provider_revision_id, slot_id, strict_contract, etag,
 			next_reconciliation_at, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,'video-default','video_create','openai',$6,$7,$8::real::numeric,$9,
-			$10,NULL,$11,$12,$13,$14,$15,$16,$17,
+			$10,NULL,$11,$12,$13,$14,$15,$16,false,$17,
 			COALESCE($18, now()), COALESCE($19, now()), COALESCE($20, now()))`,
 		id, seed.UpstreamID, f.apiKeyID, f.providerID, claimVideoModel,
 		string(seed.State), string(seed.Lifecycle), seed.Progress, seed.Content,

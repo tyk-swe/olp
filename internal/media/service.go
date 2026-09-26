@@ -244,7 +244,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 
 	var selected *runtime.Slot
 	for i := range provider.Slots {
-		if record.SlotID != nil && provider.Slots[i].ID == *record.SlotID {
+		if provider.Slots[i].ID == record.SlotID {
 			selected = &provider.Slots[i]
 			break
 		}

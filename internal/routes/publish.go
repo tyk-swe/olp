@@ -170,15 +170,12 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	}
 	operations, _ := json.Marshal(current.Operations)
 	targets, _ := json.Marshal(current.Targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,fidelity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), current.ContentPolicy, current.Fidelity); err != nil {
-		return access.Reply{}, err
-	}
 	policy, _, err := loadPolicy(r.Context(), tx, "route-draft", current.ID, false)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	encodedPolicy, _ := json.Marshal(policy)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_revisions SET routing_policy=$2 WHERE id=$1", revisionID, encodedPolicy); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), encodedPolicy, current.ContentPolicy, current.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
