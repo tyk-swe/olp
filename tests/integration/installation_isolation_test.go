@@ -13,16 +13,16 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// TestM4SharedValkeyIsolatesInstallations proves that two installations may be
+// TestSharedValkeyIsolatesInstallations proves that two installations may be
 // given the identical Valkey and stay strangers: the namespace each derives from
 // its own identity keeps their streams, their consumer groups and their
 // admission counters apart, so one installation's traffic can neither be
 // accounted for by the other nor spend the other's budget.
-func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
+func TestSharedValkeyIsolatesInstallations(t *testing.T) {
 	// Both installations read OLP_TEST_VALKEY_URL, so they share one Valkey by
 	// construction; what they must not share is anything inside it.
-	first := m4Provisioned(t)
-	second := m4Installation(t)
+	first := fleetProvisioned(t)
+	second := fleetInstallation(t)
 	if first.prefix == second.prefix {
 		t.Fatalf("two installations derived the same Valkey namespace %q", first.prefix)
 	}
@@ -38,19 +38,19 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 	// Every task checkpoints once as it starts and then on its own interval, so
 	// the instant the planes are measured against is taken before they exist.
 	started := time.Now().UTC()
-	firstWorker := first.worker("m4-isolation-first-worker")
-	secondWorker := second.worker("m4-isolation-second-worker")
-	m4AwaitWorkerPlane(t, first, started)
-	m4AwaitWorkerPlane(t, second, started)
-	replica := first.replica("m4-isolation-first-gateway")
+	firstWorker := first.worker("fleet-isolation-first-worker")
+	secondWorker := second.worker("fleet-isolation-second-worker")
+	fleetAwaitWorkerPlane(t, first, started)
+	fleetAwaitWorkerPlane(t, second, started)
+	replica := first.replica("fleet-isolation-first-gateway")
 
 	const requests = 3
 	for range requests {
-		if status, code, _ := m4Chat(t, replica.PublicOrigin, secret); status != 200 {
+		if status, code, _ := fleetChat(t, replica.PublicOrigin, secret); status != 200 {
 			t.Fatalf("inference: %d %s", status, code)
 		}
 	}
-	m4Eventually(t, "the first installation to account for its own traffic", 60*time.Second,
+	fleetEventually(t, "the first installation to account for its own traffic", 60*time.Second,
 		func() bool {
 			return first.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 		})
@@ -63,17 +63,17 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 			t.Fatalf("installation B holds %d rows in %s that installation A produced", total, table)
 		}
 	}
-	if processed, _, _ := m4Counters(t, second.h.Pool); processed != 0 {
+	if processed, _, _ := fleetCounters(t, second.h.Pool); processed != 0 {
 		t.Fatalf("installation B's consumer processed %d events, all of them A's", processed)
 	}
-	if processed, _, _ := m4Counters(t, first.h.Pool); processed != requests {
+	if processed, _, _ := fleetCounters(t, first.h.Pool); processed != requests {
 		t.Fatalf("installation A's consumer processed %d events, want %d", processed, requests)
 	}
 
 	// Each group is served by exactly the consumer of its own installation, so
 	// no pending entry of one was ever owned or acknowledged by the other.
-	firstConsumers := m4Consumers(t, first.valkey, first.stream)
-	secondConsumers := m4Consumers(t, second.valkey, second.stream)
+	firstConsumers := fleetConsumers(t, first.valkey, first.stream)
+	secondConsumers := fleetConsumers(t, second.valkey, second.stream)
 	if len(firstConsumers) != 1 || len(secondConsumers) != 1 {
 		t.Fatalf("consumers: A %v, B %v; each group must be served by its own worker",
 			firstConsumers, secondConsumers)
@@ -84,8 +84,8 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 
 	// Every key either installation created carries its own namespace, which is
 	// what makes the identical lookup identifier below two separate counters.
-	firstKeys := m4Keys(t, first.valkey, first.prefix)
-	secondKeys := m4Keys(t, second.valkey, second.prefix)
+	firstKeys := fleetKeys(t, first.valkey, first.prefix)
+	secondKeys := fleetKeys(t, second.valkey, second.prefix)
 	if len(firstKeys) == 0 || len(secondKeys) == 0 {
 		t.Fatalf("namespaced keys: A %v, B %v", firstKeys, secondKeys)
 	}
@@ -149,14 +149,14 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 	}
 }
 
-// m4AwaitWorkerPlane waits until every worker task of one installation has
+// fleetAwaitWorkerPlane waits until every worker task of one installation has
 // checkpointed since the given instant, which is what proves the plane started
 // by this scenario is the one running.
-func m4AwaitWorkerPlane(t *testing.T, in *m4Install, since time.Time) {
+func fleetAwaitWorkerPlane(t *testing.T, in *fleetInstall, since time.Time) {
 	t.Helper()
 	tasks := []usage.Task{usage.TaskRequestMetadataConsumer, usage.TaskMaintenance,
 		usage.TaskCostReconciliation, usage.TaskEpochDetection}
-	m4Eventually(t, "the worker plane to check in", 40*time.Second, func() bool {
+	fleetEventually(t, "the worker plane to check in", 40*time.Second, func() bool {
 		for _, task := range tasks {
 			if in.count(`SELECT count(*) FROM olp.worker_task_health
                 WHERE task = $1 AND checked_at >= $2`, string(task), since) == 0 {

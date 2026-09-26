@@ -69,14 +69,14 @@ func TestPostgresTransactionsCancellationAuthenticationAndTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(t.Context(), "CREATE TEMP TABLE foundation_test (id integer PRIMARY KEY)"); err != nil {
+	if _, err := tx.Exec(t.Context(), "CREATE TEMP TABLE service_probe (id integer PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(t.Context(), "INSERT INTO foundation_test VALUES ($1)", 42); err != nil {
+	if _, err := tx.Exec(t.Context(), "INSERT INTO service_probe VALUES ($1)", 42); err != nil {
 		t.Fatal(err)
 	}
 	var id int
-	if err := tx.QueryRow(t.Context(), "SELECT id FROM foundation_test").Scan(&id); err != nil || id != 42 {
+	if err := tx.QueryRow(t.Context(), "SELECT id FROM service_probe").Scan(&id); err != nil || id != 42 {
 		t.Fatalf("query: %d %v", id, err)
 	}
 	if err := tx.Rollback(t.Context()); err != nil {

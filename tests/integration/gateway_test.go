@@ -553,7 +553,8 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 		t.Fatalf("playground %v", play)
 	}
 	// Health reads durable attempt facts. Drain this fixture's accounting
-	// events directly into PostgreSQL; distributed delivery is covered by M4.
+	// events directly into PostgreSQL; the replica fleet tests cover
+	// distributed delivery.
 	h.Gateway.Sink = originalSink
 	emitter.Close()
 	flush, cancel := context.WithTimeout(t.Context(), 5*time.Second)

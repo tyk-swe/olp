@@ -189,7 +189,7 @@ afterEach(async () => {
 });
 
 describe('basic composer', () => {
-  it('submits the legacy input form and renders the reply', async () => {
+  it('submits the basic input form and renders the reply', async () => {
     vi.mocked(runPlayground).mockResolvedValue(unaryReply);
     await establish();
     fill('#playground-model', 'chat-route');

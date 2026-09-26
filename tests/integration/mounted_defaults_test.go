@@ -80,7 +80,7 @@ func TestMountedDefaultsServeWithoutMasterKeyAndKeepPublishedOwnership(t *testin
 	serving.Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	path, body, _ := parityRequest(openai.FamilyChat, false)
+	path, body, _ := surfaceRequest(openai.FamilyChat, false)
 	payload, _ := json.Marshal(body)
 	request, _ := http.NewRequestWithContext(t.Context(), "POST", server.URL+path, bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")

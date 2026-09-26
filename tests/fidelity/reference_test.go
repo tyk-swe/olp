@@ -102,7 +102,7 @@ func TestIndependentStreamOracleRequiresStateIdentityAndTerminal(t *testing.T) {
 	}
 }
 
-func TestFrozenVersionOneReferences(t *testing.T) {
+func TestVersionOneReferencesMatchTheirPinnedDigests(t *testing.T) {
 	manifest, err := fixtures.Files.ReadFile("v1/manifest.json")
 	if err != nil {
 		t.Fatal(err)

@@ -82,7 +82,7 @@ func newNativeToolProvider(t *testing.T, d nativeToolDocuments) *nativeToolProvi
 		if !p.measured.Load() {
 			var fields map[string]json.RawMessage
 			json.Unmarshal(body, &fields)
-			parityGeneration(w, "anthropic", string(fields["stream"]) == "true")
+			kindGeneration(w, "anthropic", string(fields["stream"]) == "true")
 			return
 		}
 		if fidelity.Compare(d.initial, body) == nil {

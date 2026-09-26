@@ -295,7 +295,7 @@ func TestStrictMediaActivationRejectsUnqualifiedLifecycleAndPolicy(t *testing.T)
 	}
 }
 
-func TestStrictMultipartRejectsLegacyNormalizationBeforeDispatch(t *testing.T) {
+func TestStrictMultipartRefusesNormalizationBeforeDispatch(t *testing.T) {
 	for _, tc := range []struct {
 		name, prompt string
 		omitType     bool

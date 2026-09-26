@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('console hydrates and uses the Go origin through packaged assets and Vite', async ({
+test('console hydrates and uses the olp origin through packaged assets and Vite', async ({
   page,
   request
 }, testInfo) => {

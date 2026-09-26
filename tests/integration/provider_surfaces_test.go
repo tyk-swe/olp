@@ -22,9 +22,11 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
-// This is a deterministic real-management/real-gateway matrix. Cloud identity
-// requests use local metadata and SigV4 fixtures, never paid provider accounts.
-func TestProviderAndNativeSurfaceParity(t *testing.T) {
+// TestProviderKindsServeTheirCertifiedNativeSurfaces is a deterministic
+// real-management/real-gateway matrix: every provider kind serves each client
+// surface it certifies and refuses the rest. Cloud identity requests use local
+// metadata and SigV4 fixtures, never paid provider accounts.
+func TestProviderKindsServeTheirCertifiedNativeSurfaces(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,7 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			h := newAccessHarness(t)
 			owner := h.owner()
-			up := parityProvider(t, kind)
+			up := kindVendor(t, kind)
 			cfg := map[string]any{"kind": kind, "auth_mode": "api_key", "endpoint": up.URL + "/v1"}
 			credential := any(vendorSecret)
 			switch kind {
@@ -75,7 +77,7 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 				cfg["auth_mode"] = "static"
 				credential = `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789","session_token":"bedrock-session-token"}`
 			}
-			create := map[string]any{"name": "Parity " + kind, "configuration": cfg, "model": vendorModel}
+			create := map[string]any{"name": "Native " + kind, "configuration": cfg, "model": vendorModel}
 			if credential != nil {
 				create["credential"] = credential
 			}
@@ -119,17 +121,17 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 					if stream && family.Operation() != "generation" {
 						continue
 					}
-					path, body, transport := parityRequest(family, stream)
+					path, body, transport := surfaceRequest(family, stream)
 					for _, version := range []string{"v1beta", "v1"} {
 						if family.Surface() != "gemini" && version == "v1" {
 							continue
 						}
 						clientPath := strings.ReplaceAll(path, "v1beta", version)
-						status, _, _ := parityCall(t, h, read["secret"].(string), clientPath, body, family.Surface())
+						status, _, _ := surfaceCall(t, h, read["secret"].(string), clientPath, body, family.Surface())
 						if status != 403 {
 							t.Fatalf("model-read key gained %s: %d", family.Operation(), status)
 						}
-						status, data, _ := parityCall(t, h, key["secret"].(string), clientPath, body, family.Surface())
+						status, data, _ := surfaceCall(t, h, key["secret"].(string), clientPath, body, family.Surface())
 						certified := slices.Contains(operations, family.Operation()) &&
 							connectors.Supports(kind, "", family.Operation(), family.Surface(), map[bool]string{false: "unary", true: "streaming"}[stream])
 						if !certified {
@@ -170,7 +172,7 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 	}
 }
 
-func parityRequest(family openai.Family, stream bool) (string, map[string]any, openai.Family) {
+func surfaceRequest(family openai.Family, stream bool) (string, map[string]any, openai.Family) {
 	body := map[string]any{"model": routeSlug}
 	path := "/v1/chat/completions"
 	transport := family
@@ -222,7 +224,7 @@ func parityRequest(family openai.Family, stream bool) (string, map[string]any, o
 	}
 	return path, body, transport
 }
-func parityCall(t *testing.T, h *accessHarness, key, path string, body any, surface string) (int, []byte, http.Header) {
+func surfaceCall(t *testing.T, h *accessHarness, key, path string, body any, surface string) (int, []byte, http.Header) {
 	t.Helper()
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(t.Context(), "POST", h.HTTP.URL+path, bytes.NewReader(data))
@@ -250,7 +252,7 @@ func parityCall(t *testing.T, h *accessHarness, key, path string, body any, surf
 	}
 	return reply.StatusCode, data, reply.Header
 }
-func parityProvider(t *testing.T, kind string) *httptest.Server {
+func kindVendor(t *testing.T, kind string) *httptest.Server {
 	t.Helper()
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-OLP-Routing") != "" {
@@ -329,12 +331,12 @@ func parityProvider(t *testing.T, kind string) *httptest.Server {
 			writeResponsesFixture(w, vendorModel, vendorAnswer, stream)
 			return
 		}
-		parityGeneration(w, kind, stream)
+		kindGeneration(w, kind, stream)
 	}))
 	t.Cleanup(up.Close)
 	return up
 }
-func parityGeneration(w http.ResponseWriter, kind string, stream bool) {
+func kindGeneration(w http.ResponseWriter, kind string, stream bool) {
 	if stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 	}

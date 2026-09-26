@@ -25,7 +25,7 @@ import (
 func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 	binary := required(t, "OLP_TEST_BINARY")
 	assets := t.TempDir()
-	if err := os.WriteFile(filepath.Join(assets, "index.html"), []byte("<html>foundation shell</html>"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(assets, "index.html"), []byte("<html>console shell</html>"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"all", "gateway", "control", "worker"} {

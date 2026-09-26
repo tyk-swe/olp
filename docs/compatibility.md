@@ -186,7 +186,7 @@ such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
 `tests/fixtures/protocols/selected-operation-families.json` covers every
 operation family and surface. Keep these tables aligned with the
-[Go protocol suites](../internal/protocols/parity_test.go) when semantics
+[protocol suites](../internal/protocols/translation_test.go) when semantics
 change.
 
 ### Anthropic providers
@@ -267,7 +267,7 @@ attempt. Other Bedrock models, and every edit/variation/audio/video operation,
 remain refused.
 
 The [image-input tests](../internal/protocols/bedrock_test.go) and
-[stream bounds tests](../internal/protocols/stream_parity_test.go) cover these
+[stream bounds tests](../internal/protocols/stream_translation_test.go) cover these
 rules.
 
 The [Go Converse encoder](../internal/protocols/bedrock.go) refuses, with an

@@ -83,7 +83,7 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 	}
 	update(keyPath, map[string]any{"constraints": map[string]any{"ignore": []string{"provider:" + fixture.provider}}})
 	h.refresh()
-	status, data, _ := parityCall(t, h, secret, "/v1/chat/completions", body, "openai")
+	status, data, _ := surfaceCall(t, h, secret, "/v1/chat/completions", body, "openai")
 	if status != 503 {
 		t.Fatalf("request expanded key restriction: %d %s", status, data)
 	}
@@ -91,7 +91,7 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 	h.refresh()
 	update(installationPath, map[string]any{"allowed_strategies": []string{"weighted"}})
 	h.refresh()
-	status, data, _ = parityCall(t, h, secret, "/v1/chat/completions", body, "openai")
+	status, data, _ = surfaceCall(t, h, secret, "/v1/chat/completions", body, "openai")
 	if status != 400 {
 		t.Fatalf("request expanded allowed strategies: %d %s", status, data)
 	}

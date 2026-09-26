@@ -123,14 +123,14 @@ async function observedGatewayResponses(
   });
 }
 
-test.describe('Go-hosted console integration', () => {
+test.describe('Hosted console integration', () => {
   test.describe.configure({ mode: 'serial' });
   test.skip(
     process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
     'The restored database has already completed setup.'
   );
 
-  test('Go serves the console and enforces the real setup/session/management boundary', async ({
+  test('olp serves the console and enforces the real setup/session/management boundary', async ({
     page,
     context
   }) => {
@@ -315,8 +315,8 @@ test.describe('Go-hosted console integration', () => {
       page.getByText(vertical.deployment, { exact: true }).first()
     ).toBeVisible();
 
-    // Discovery now seeds native suggestions. Review exactly the same four
-    // tuples as the frozen journey, replacing suggestions before certification.
+    // Discovery seeds native suggestions. Replace them with exactly four
+    // reviewed tuples before certification.
     const suggestions = page.getByRole('button', {
       name: /^Remove capability /
     });

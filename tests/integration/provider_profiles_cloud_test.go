@@ -135,7 +135,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				if profile.ID == "bedrock-anthropic-invoke" && stream {
 					w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 					native := httptest.NewRecorder()
-					parityGeneration(native, "anthropic", true)
+					kindGeneration(native, "anthropic", true)
 					for _, line := range strings.Split(native.Body.String(), "\n") {
 						if !strings.HasPrefix(line, "data: ") {
 							continue
@@ -154,7 +154,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				if profile.Dialect == "anthropic-messages" {
 					kind = "anthropic"
 				}
-				parityGeneration(w, kind, stream)
+				kindGeneration(w, kind, stream)
 			}))
 			defer upstream.Close()
 			cfg := map[string]any{"kind": profile.Kind, "profile_id": profile.ID, "profile_revision": profile.Revision, "auth_mode": "api_key", "endpoint": upstream.URL + "/v1"}

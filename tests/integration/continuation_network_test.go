@@ -46,7 +46,7 @@ func TestContinuationHandleRechecksHistoricalNetworkCredentialRevocation(t *test
 		var request map[string]json.RawMessage
 		_ = json.Unmarshal(body, &request)
 		if !bytes.Contains(body, []byte("Weather and time in Paris?")) {
-			parityGeneration(w, "anthropic", string(request["stream"]) == "true")
+			kindGeneration(w, "anthropic", string(request["stream"]) == "true")
 			return
 		}
 		accepted.Add(1)

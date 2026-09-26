@@ -96,11 +96,11 @@ func newStrictProviderFixture(t *testing.T, profile string) *strictProviderFixtu
 		case "compatible-responses", "azure-v1-responses":
 			writeResponsesFixture(nativeWriter, vendorModel, vendorAnswer, stream)
 		case "anthropic-messages":
-			parityGeneration(nativeWriter, "anthropic", stream)
+			kindGeneration(nativeWriter, "anthropic", stream)
 		case "gemini-generation":
-			parityGeneration(nativeWriter, "gemini", stream)
+			kindGeneration(nativeWriter, "gemini", stream)
 		default:
-			parityGeneration(nativeWriter, "openai", stream)
+			kindGeneration(nativeWriter, "openai", stream)
 		}
 		if buffered != nil {
 			var result map[string]json.RawMessage

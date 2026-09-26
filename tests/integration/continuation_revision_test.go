@@ -39,7 +39,7 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 		if !bytes.Contains(body, []byte("Weather and time in Paris?")) {
 			var probe map[string]json.RawMessage
 			_ = json.Unmarshal(body, &probe)
-			parityGeneration(w, "anthropic", string(probe["stream"]) == "true")
+			kindGeneration(w, "anthropic", string(probe["stream"]) == "true")
 			return
 		}
 		if r.Header.Get("X-Api-Key") != vendorSecret || r.Header.Get("Anthropic-Version") != "2023-06-01" {
@@ -73,7 +73,7 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 		replacementCalls.Add(1)
 		var probe map[string]json.RawMessage
 		_ = json.NewDecoder(r.Body).Decode(&probe)
-		parityGeneration(w, "anthropic", string(probe["stream"]) == "true")
+		kindGeneration(w, "anthropic", string(probe["stream"]) == "true")
 	}))
 	t.Cleanup(replacement.Close)
 	options := map[string]any{"bindings": map[string]any{vendorModel: map[string]any{"model": "fixture-model"}}, "operation_defaults": map[string]any{"generation": map[string]any{"dialect": "anthropic-messages", "values": map[string]any{"max_tokens": 2048, "thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}}}}

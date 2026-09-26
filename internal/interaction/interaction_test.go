@@ -177,7 +177,7 @@ func TestNativeDefaultsRespectPresenceAndBindingAtoms(t *testing.T) {
 	}
 }
 
-func TestQualifiedTextMatchesIndependentFrozenBenchmark(t *testing.T) {
+func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
 	config := configuration(t, "anthropic-messages")
 	config.Model = "model-a"
 	source := request(t, openai.FamilyChat, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)

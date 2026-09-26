@@ -13,7 +13,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,foundation,gateway}/**/*.spec.ts',
+  testMatch: '**/{access,basics,gateway}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/access',
   workers: 1,

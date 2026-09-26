@@ -34,7 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// m4 scenarios run the real binary: every gateway replica and every worker
+// Fleet scenarios run the real binary: every gateway replica and every worker
 // plane below is a separate operating system process started against one shared
 // database and one shared Valkey, so the behaviour under test is the behaviour
 // the fleet has and not the behaviour a single in-process composition has.
@@ -44,9 +44,9 @@ import (
 // lets a scenario provision an installation and read its accounting back
 // without a browser session against a second listener.
 
-// m4Install is one provisioned installation together with the shared state its
+// fleetInstall is one provisioned installation together with the shared state its
 // processes coordinate through.
-type m4Install struct {
+type fleetInstall struct {
 	t *testing.T
 	// h is the console surface: access, the catalogue, routes, and the usage,
 	// pricing and recovery reports the processes never serve themselves here.
@@ -67,11 +67,11 @@ type m4Install struct {
 	path      string
 }
 
-// m4Console rebuilds the harness surface with everything the console owns,
+// fleetConsole rebuilds the harness surface with everything the console owns,
 // including the usage, pricing and recovery reports the accounting scenarios
 // read back. The harness composes the catalogue itself, so it is rebuilt here
-// against the same access server rather than reached through the old mux.
-func m4Console(t *testing.T) *accessHarness {
+// against the same access server rather than reached through the harness mux.
+func fleetConsole(t *testing.T) *accessHarness {
 	t.Helper()
 	h := newAccessHarness(t)
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
@@ -91,12 +91,12 @@ func m4Console(t *testing.T) *accessHarness {
 	return h
 }
 
-// m4Installation creates an installation nothing else shares: its own database,
+// fleetInstallation creates an installation nothing else shares: its own database,
 // its own identity, and therefore its own Valkey namespace on the Valkey every
 // installation in these scenarios shares.
-func m4Installation(t *testing.T) *m4Install {
+func fleetInstallation(t *testing.T) *fleetInstall {
 	t.Helper()
-	h := m4Console(t)
+	h := fleetConsole(t)
 	installation, err := database.Installation(t.Context(), h.Pool)
 	if err != nil {
 		t.Fatalf("read installation identity: %v", err)
@@ -105,23 +105,23 @@ func m4Installation(t *testing.T) *m4Install {
 	valkey := client(t, required(t, "OLP_TEST_VALKEY_URL"), 5*time.Second)
 	// Registered after the client's own cleanup, so the keys are removed while
 	// the connection that has to remove them is still open.
-	t.Cleanup(func() { m4Purge(t, valkey, prefix) })
+	t.Cleanup(func() { fleetPurge(t, valkey, prefix) })
 	dir := t.TempDir()
 	for name, value := range map[string]string{"auth": h.AuthHex, "ring": h.Ring} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0600); err != nil {
 			t.Fatalf("write %s key material: %v", name, err)
 		}
 	}
-	return &m4Install{t: t, h: h, owner: h.owner(), valkey: valkey,
+	return &fleetInstall{t: t, h: h, owner: h.owner(), valkey: valkey,
 		binary: required(t, "OLP_TEST_BINARY"), secrets: dir, prefix: prefix,
 		stream: usage.StreamName(prefix), namespace: prefix + "limits"}
 }
 
-// m4Provisioned is an installation that can serve inference: one activated
+// fleetProvisioned is an installation that can serve inference: one activated
 // provider in front of the fixture vendor and one published route.
-func m4Provisioned(t *testing.T) *m4Install {
+func fleetProvisioned(t *testing.T) *fleetInstall {
 	t.Helper()
-	in := m4Installation(t)
+	in := fleetInstallation(t)
 	in.vendor = newVendor(t)
 	created := in.h.want(in.owner, http.MethodPost, "/api/v1/providers", map[string]any{
 		"name": "Fixture vendor", "model": vendorModel, "credential": vendorSecret,
@@ -159,7 +159,7 @@ func m4Provisioned(t *testing.T) *m4Install {
 // key mints one inference key carrying the given policy. Keys are minted before
 // the replicas start: a replica loads its authority once at startup and then
 // polls, so provisioning first is what keeps a scenario free of that delay.
-func (in *m4Install) key(name string, policy map[string]any) (string, string) {
+func (in *fleetInstall) key(name string, policy map[string]any) (string, string) {
 	in.t.Helper()
 	body := map[string]any{"name": name, "scopes": []string{"inference"},
 		"allowed_routes": []string{routeSlug}}
@@ -175,7 +175,7 @@ func (in *m4Install) key(name string, policy map[string]any) (string, string) {
 // HOSTNAME is set explicitly because it is the gateway instance identity an
 // epoch is recorded against and the prefix of a consumer's name: two replicas
 // sharing one host must still be two producers and two consumers.
-func (in *m4Install) env(hostname string) map[string]string {
+func (in *fleetInstall) env(hostname string) map[string]string {
 	return map[string]string{
 		"OLP_DATABASE_URL":             in.h.DBURL,
 		"OLP_DATABASE_MAX_CONNECTIONS": "6",
@@ -195,25 +195,25 @@ func (in *m4Install) env(hostname string) map[string]string {
 
 // replica starts one inference process: admission, dispatch and the request
 // metadata it emits, with no management surface and no worker plane.
-func (in *m4Install) replica(hostname string) *testutil.Process {
+func (in *fleetInstall) replica(hostname string) *testutil.Process {
 	in.t.Helper()
 	return testutil.StartProcess(in.t, in.binary, "gateway", in.env(hostname))
 }
 
 // worker starts one recovery plane: the metadata consumer, epoch detection,
 // maintenance and the cost reconciliation leader.
-func (in *m4Install) worker(hostname string) *testutil.Process {
+func (in *fleetInstall) worker(hostname string) *testutil.Process {
 	in.t.Helper()
 	return testutil.StartProcess(in.t, in.binary, "worker", in.env(hostname))
 }
 
 // count runs one scalar query against the installation's database.
-func (in *m4Install) count(query string, args ...any) int64 {
+func (in *fleetInstall) count(query string, args ...any) int64 {
 	in.t.Helper()
-	return m4Count(in.t, in.h.Pool, query, args...)
+	return fleetCount(in.t, in.h.Pool, query, args...)
 }
 
-func m4Count(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int64 {
+func fleetCount(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int64 {
 	t.Helper()
 	var count int64
 	if err := pool.QueryRow(t.Context(), query, args...).Scan(&count); err != nil {
@@ -222,9 +222,9 @@ func m4Count(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int64 
 	return count
 }
 
-// m4Chat sends one unary inference request to a replica and reports the status,
+// fleetChat sends one unary inference request to a replica and reports the status,
 // the error code an OpenAI-shaped refusal carries, and the response headers.
-func m4Chat(t *testing.T, origin, secret string) (int, string, http.Header) {
+func fleetChat(t *testing.T, origin, secret string) (int, string, http.Header) {
 	t.Helper()
 	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]}`
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
@@ -257,9 +257,9 @@ func m4Chat(t *testing.T, origin, secret string) (int, string, http.Header) {
 	return resp.StatusCode, problem.Error.Code, resp.Header
 }
 
-// m4Stream runs one streaming request against a replica to completion. Errors
+// fleetStream runs one streaming request against a replica to completion. Errors
 // are returned rather than failed on: the caller runs it in its own goroutine.
-func m4Stream(ctx context.Context, origin, secret string) (int, error) {
+func fleetStream(ctx context.Context, origin, secret string) (int, error) {
 	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}],"stream":true}`
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		origin+"/v1/chat/completions", strings.NewReader(body))
@@ -277,9 +277,9 @@ func m4Stream(ctx context.Context, origin, secret string) (int, error) {
 	return resp.StatusCode, err
 }
 
-// m4Eventually waits for a condition something outside the request path decides:
+// fleetEventually waits for a condition something outside the request path decides:
 // a worker pass, a settled reservation, a drained stream.
-func m4Eventually(t *testing.T, what string, timeout time.Duration, check func() bool) {
+func fleetEventually(t *testing.T, what string, timeout time.Duration, check func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
@@ -297,8 +297,8 @@ func m4Eventually(t *testing.T, what string, timeout time.Duration, check func()
 	}
 }
 
-// m4RetryAfter reads the whole number of seconds a refusal advertised.
-func m4RetryAfter(t *testing.T, header http.Header) int {
+// fleetRetryAfter reads the whole number of seconds a refusal advertised.
+func fleetRetryAfter(t *testing.T, header http.Header) int {
 	t.Helper()
 	raw := header.Get("Retry-After")
 	seconds, err := strconv.Atoi(raw)
@@ -308,10 +308,10 @@ func m4RetryAfter(t *testing.T, header http.Header) int {
 	return seconds
 }
 
-// m4Purge removes everything this installation left in the shared Valkey. The
+// fleetPurge removes everything this installation left in the shared Valkey. The
 // stream and the limiter counters outlive the database that named them, so a
 // scenario that does not clean up leaks keys into every later run.
-func m4Purge(t *testing.T, c *coordination.Client, prefix string) {
+func fleetPurge(t *testing.T, c *coordination.Client, prefix string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -339,20 +339,20 @@ func m4Purge(t *testing.T, c *coordination.Client, prefix string) {
 	}
 }
 
-// m4Keys lists the shared Valkey keys an installation owns.
-func m4Keys(t *testing.T, c *coordination.Client, prefix string) []string {
+// fleetKeys lists the shared Valkey keys an installation owns.
+func fleetKeys(t *testing.T, c *coordination.Client, prefix string) []string {
 	t.Helper()
-	items := m4List(t, do(t, c, "KEYS", prefix+"*"), "KEYS "+prefix+"*")
+	items := fleetList(t, do(t, c, "KEYS", prefix+"*"), "KEYS "+prefix+"*")
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		keys = append(keys, m4Text(t, item))
+		keys = append(keys, fleetText(t, item))
 	}
 	return keys
 }
 
-// m4List reads a Valkey reply that is a list, treating the empty reply a
+// fleetList reads a Valkey reply that is a list, treating the empty reply a
 // missing key produces as an empty list rather than a protocol error.
-func m4List(t *testing.T, reply any, command string) []any {
+func fleetList(t *testing.T, reply any, command string) []any {
 	t.Helper()
 	if reply == nil {
 		return nil
@@ -364,8 +364,8 @@ func m4List(t *testing.T, reply any, command string) []any {
 	return items
 }
 
-// m4Text reads one Valkey reply value that must be a string.
-func m4Text(t *testing.T, value any) string {
+// fleetText reads one Valkey reply value that must be a string.
+func fleetText(t *testing.T, value any) string {
 	t.Helper()
 	switch text := value.(type) {
 	case string:
@@ -378,17 +378,17 @@ func m4Text(t *testing.T, value any) string {
 	}
 }
 
-// m4Fields reads a field container. Depending on the protocol in force these
+// fleetFields reads a field container. Depending on the protocol in force these
 // arrive as a map, as a flat name/value list, or as a list of name/value pairs,
 // and every stream entry and XINFO row is read through one of those shapes.
-func m4Fields(t *testing.T, value any) map[string]string {
+func fleetFields(t *testing.T, value any) map[string]string {
 	t.Helper()
 	fields := map[string]string{}
 	container, ok := value.([]any)
 	if !ok {
 		if mapped, ok := value.(map[string]any); ok {
 			for name, item := range mapped {
-				fields[name] = m4Scalar(item)
+				fields[name] = fleetScalar(item)
 			}
 			return fields
 		}
@@ -401,7 +401,7 @@ func m4Fields(t *testing.T, value any) map[string]string {
 				if !ok || len(pair) != 2 {
 					t.Fatalf("field pair %#v is not a name and a value", item)
 				}
-				fields[m4Scalar(pair[0])] = m4Scalar(pair[1])
+				fields[fleetScalar(pair[0])] = fleetScalar(pair[1])
 			}
 			return fields
 		}
@@ -410,14 +410,14 @@ func m4Fields(t *testing.T, value any) map[string]string {
 		t.Fatalf("field list %#v has an odd length", container)
 	}
 	for index := 0; index+1 < len(container); index += 2 {
-		fields[m4Scalar(container[index])] = m4Scalar(container[index+1])
+		fields[fleetScalar(container[index])] = fleetScalar(container[index+1])
 	}
 	return fields
 }
 
-// m4Scalar renders one reply value as text. A field container mixes strings and
+// fleetScalar renders one reply value as text. A field container mixes strings and
 // counters, and every caller here compares or parses their text.
-func m4Scalar(value any) string {
+func fleetScalar(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
@@ -428,30 +428,30 @@ func m4Scalar(value any) string {
 	}
 }
 
-// m4Payloads reads the event payloads currently queued on the request metadata
+// fleetPayloads reads the event payloads currently queued on the request metadata
 // stream, oldest first. Acknowledged deliveries are deleted from the stream, so
 // this is what no consumer has retired yet.
-func m4Payloads(t *testing.T, c *coordination.Client, stream string) []string {
+func fleetPayloads(t *testing.T, c *coordination.Client, stream string) []string {
 	t.Helper()
 	entries := map[string]string{}
 	reply := do(t, c, "XRANGE", stream, "-", "+")
 	if mapped, ok := reply.(map[string]any); ok {
 		for id, fields := range mapped {
-			entries[id] = m4Event(t, id, fields)
+			entries[id] = fleetEvent(t, id, fields)
 		}
 	} else {
-		for _, item := range m4List(t, reply, "XRANGE "+stream) {
+		for _, item := range fleetList(t, reply, "XRANGE "+stream) {
 			tuple, ok := item.([]any)
 			if !ok || len(tuple) != 2 {
 				t.Fatalf("stream entry %#v is not an identifier and a field list", item)
 			}
-			id := m4Text(t, tuple[0])
-			entries[id] = m4Event(t, id, tuple[1])
+			id := fleetText(t, tuple[0])
+			entries[id] = fleetEvent(t, id, tuple[1])
 		}
 	}
 	// A map reply loses the server's order, so the entries are sorted by the
 	// stream identifier they were appended under, which is that order.
-	ids := slices.SortedFunc(maps.Keys(entries), m4CompareStreamIDs)
+	ids := slices.SortedFunc(maps.Keys(entries), fleetCompareStreamIDs)
 	payloads := make([]string, 0, len(ids))
 	for _, id := range ids {
 		payloads = append(payloads, entries[id])
@@ -459,19 +459,19 @@ func m4Payloads(t *testing.T, c *coordination.Client, stream string) []string {
 	return payloads
 }
 
-// m4Event reads the event payload one stream entry carries.
-func m4Event(t *testing.T, id string, fields any) string {
+// fleetEvent reads the event payload one stream entry carries.
+func fleetEvent(t *testing.T, id string, fields any) string {
 	t.Helper()
-	payload, ok := m4Fields(t, fields)["event"]
+	payload, ok := fleetFields(t, fields)["event"]
 	if !ok {
 		t.Fatalf("stream entry %s carries no event field", id)
 	}
 	return payload
 }
 
-// m4CompareStreamIDs orders stream identifiers by their milliseconds and
+// fleetCompareStreamIDs orders stream identifiers by their milliseconds and
 // sequence rather than as text, so entry 10-0 follows entry 9-0.
-func m4CompareStreamIDs(a, b string) int {
+func fleetCompareStreamIDs(a, b string) int {
 	firstMillis, firstSequence, errA := usage.ParseStreamID(a)
 	secondMillis, secondSequence, errB := usage.ParseStreamID(b)
 	if errA != nil || errB != nil {
@@ -483,14 +483,14 @@ func m4CompareStreamIDs(a, b string) int {
 	return cmp.Compare(firstSequence, secondSequence)
 }
 
-// m4Consumers names every consumer registered in the installation's persistence
+// fleetConsumers names every consumer registered in the installation's persistence
 // group.
-func m4Consumers(t *testing.T, c *coordination.Client, stream string) []string {
+func fleetConsumers(t *testing.T, c *coordination.Client, stream string) []string {
 	t.Helper()
-	items := m4List(t, do(t, c, "XINFO", "CONSUMERS", stream, usage.Group), "XINFO CONSUMERS "+stream)
+	items := fleetList(t, do(t, c, "XINFO", "CONSUMERS", stream, usage.Group), "XINFO CONSUMERS "+stream)
 	names := make([]string, 0, len(items))
 	for _, item := range items {
-		fields := m4Fields(t, item)
+		fields := fleetFields(t, item)
 		name, ok := fields["name"]
 		if !ok {
 			t.Fatalf("consumer %#v has no name", item)
@@ -500,24 +500,24 @@ func m4Consumers(t *testing.T, c *coordination.Client, stream string) []string {
 	return names
 }
 
-// m4Window is the fixed minute the shared limiter is counting in and how much of
+// fleetWindow is the fixed minute the shared limiter is counting in and how much of
 // it is left, measured on Valkey's clock because that is the only clock the
 // admission scripts consult.
-func m4Window(t *testing.T, c *coordination.Client) (int64, time.Duration) {
+func fleetWindow(t *testing.T, c *coordination.Client) (int64, time.Duration) {
 	t.Helper()
 	parts, ok := do(t, c, "TIME").([]any)
 	if !ok || len(parts) != 2 {
 		t.Fatalf("TIME = %#v", parts)
 	}
-	seconds, err := strconv.ParseInt(m4Text(t, parts[0]), 10, 64)
+	seconds, err := strconv.ParseInt(fleetText(t, parts[0]), 10, 64)
 	if err != nil {
 		t.Fatalf("TIME seconds: %v", err)
 	}
 	return seconds / 60, time.Duration(60-seconds%60) * time.Second
 }
 
-// m4Counters reads the durable worker counters of one installation.
-func m4Counters(t *testing.T, pool *pgxpool.Pool) (processed, duplicates, reclaimed int64) {
+// fleetCounters reads the durable worker counters of one installation.
+func fleetCounters(t *testing.T, pool *pgxpool.Pool) (processed, duplicates, reclaimed int64) {
 	t.Helper()
 	err := pool.QueryRow(t.Context(), `SELECT request_metadata_processed_total,
             request_metadata_duplicates_total, request_metadata_reclaimed_total
@@ -528,20 +528,20 @@ func m4Counters(t *testing.T, pool *pgxpool.Pool) (processed, duplicates, reclai
 	return processed, duplicates, reclaimed
 }
 
-// TestM4ReplicasShareOneAdmissionDecision proves that two inference processes
+// TestReplicasShareOneAdmissionDecision proves that two inference processes
 // admitting the same key are one gateway, not two: the request window is spent
 // across replicas, and a concurrency slot one replica holds is a slot the other
 // cannot take until it comes back.
-func TestM4ReplicasShareOneAdmissionDecision(t *testing.T) {
-	in := m4Provisioned(t)
+func TestReplicasShareOneAdmissionDecision(t *testing.T) {
+	in := fleetProvisioned(t)
 	_, throttled := in.key("rpm", map[string]any{"requests_per_minute": 2})
 	_, spare := in.key("rpm-retry", map[string]any{"requests_per_minute": 2})
 	_, exclusive := in.key("concurrency", map[string]any{"max_concurrency": 1})
-	a := in.replica("m4-admission-a")
-	b := in.replica("m4-admission-b")
+	a := in.replica("fleet-admission-a")
+	b := in.replica("fleet-admission-b")
 	// The worker plane is part of the topology under test: nothing here depends
 	// on it, but the metadata these replicas emit must have a consumer.
-	in.worker("m4-admission-worker")
+	in.worker("fleet-admission-worker")
 	origins := []string{a.PublicOrigin, b.PublicOrigin, a.PublicOrigin, b.PublicOrigin}
 
 	t.Run("a request window is spent across replicas", func(t *testing.T) {
@@ -550,14 +550,14 @@ func TestM4ReplicasShareOneAdmissionDecision(t *testing.T) {
 			// with most of one left is what keeps the count deterministic, and
 			// a burst that still straddled a boundary is retried on a key whose
 			// window is untouched rather than asserted against.
-			if _, remaining := m4Window(t, in.valkey); remaining < 20*time.Second {
+			if _, remaining := fleetWindow(t, in.valkey); remaining < 20*time.Second {
 				time.Sleep(remaining)
 			}
-			window, _ := m4Window(t, in.valkey)
+			window, _ := fleetWindow(t, in.valkey)
 			dispatched := in.vendor.chats.Load()
 			admitted, refused := 0, 0
 			for _, origin := range origins {
-				status, code, header := m4Chat(t, origin, secret)
+				status, code, header := fleetChat(t, origin, secret)
 				switch status {
 				case http.StatusOK:
 					admitted++
@@ -566,14 +566,14 @@ func TestM4ReplicasShareOneAdmissionDecision(t *testing.T) {
 					if code != "rate_limit_exceeded" {
 						t.Fatalf("refusal from %s: %s", origin, code)
 					}
-					if retry := m4RetryAfter(t, header); retry < 1 || retry > 60 {
+					if retry := fleetRetryAfter(t, header); retry < 1 || retry > 60 {
 						t.Fatalf("Retry-After %d is outside the window it refers to", retry)
 					}
 				default:
 					t.Fatalf("%s answered %d %s", origin, status, code)
 				}
 			}
-			if current, _ := m4Window(t, in.valkey); current != window {
+			if current, _ := fleetWindow(t, in.valkey); current != window {
 				if attempt == 0 {
 					continue
 				}
@@ -596,36 +596,36 @@ func TestM4ReplicasShareOneAdmissionDecision(t *testing.T) {
 		served := in.vendor.chats.Load()
 		streamed := make(chan int, 1)
 		go func() {
-			status, _ := m4Stream(t.Context(), a.PublicOrigin, exclusive)
+			status, _ := fleetStream(t.Context(), a.PublicOrigin, exclusive)
 			streamed <- status
 		}()
-		m4Eventually(t, "the upstream to take the request the first replica dispatched",
+		fleetEventually(t, "the upstream to take the request the first replica dispatched",
 			15*time.Second, func() bool { return in.vendor.chats.Load() > served })
-		status, code, header := m4Chat(t, b.PublicOrigin, exclusive)
+		status, code, header := fleetChat(t, b.PublicOrigin, exclusive)
 		if status != http.StatusTooManyRequests || code != "rate_limit_exceeded" {
 			t.Fatalf("the second replica answered %d %s while the slot was held", status, code)
 		}
-		if retry := m4RetryAfter(t, header); retry < 1 || retry > 5 {
+		if retry := fleetRetryAfter(t, header); retry < 1 || retry > 5 {
 			t.Fatalf("Retry-After %d for a slot that frees as soon as the request ends", retry)
 		}
 		if status := <-streamed; status != http.StatusOK {
 			t.Fatalf("the streamed request ended %d", status)
 		}
-		m4Eventually(t, "the second replica to admit once the slot came back", 20*time.Second,
+		fleetEventually(t, "the second replica to admit once the slot came back", 20*time.Second,
 			func() bool {
-				status, _, _ := m4Chat(t, b.PublicOrigin, exclusive)
+				status, _, _ := fleetChat(t, b.PublicOrigin, exclusive)
 				return status == http.StatusOK
 			})
 	})
 }
 
-// TestM4AccountingIsDurableAcrossReplicas proves that requests served by
+// TestAccountingIsDurableAcrossReplicas proves that requests served by
 // different processes become one ledger: every request is recorded once with the
 // tokens the upstream reported and the cost the revision in force priced them
 // at, the console reports the same totals, and a delivery that arrives twice
 // changes neither.
-func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
-	in := m4Provisioned(t)
+func TestAccountingIsDurableAcrossReplicas(t *testing.T) {
+	in := fleetProvisioned(t)
 	// Pricing is published before any traffic, so every attempt is priced at
 	// ingestion against a revision that was already in force when it was made.
 	effective := time.Now().UTC().Add(-time.Hour)
@@ -637,27 +637,27 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 	}, map[string]string{"Idempotency-Key": "pricing"}, 201)
 	_, secret := in.key("accounted", nil)
 
-	a := in.replica("m4-ledger-a")
-	b := in.replica("m4-ledger-b")
+	a := in.replica("fleet-ledger-a")
+	b := in.replica("fleet-ledger-b")
 	const requests = 6
 	for i := range requests {
 		origin := a.PublicOrigin
 		if i%2 == 1 {
 			origin = b.PublicOrigin
 		}
-		if status, code, _ := m4Chat(t, origin, secret); status != http.StatusOK {
+		if status, code, _ := fleetChat(t, origin, secret); status != http.StatusOK {
 			t.Fatalf("request %d to %s: %d %s", i, origin, status, code)
 		}
 	}
 	// Nothing consumes yet, so the stream holds exactly what the replicas
 	// emitted and one payload can be captured for the duplicate delivery below.
-	m4Eventually(t, "both replicas to publish their request metadata", 30*time.Second,
-		func() bool { return len(m4Payloads(t, in.valkey, in.stream)) == requests })
-	replay := m4Payloads(t, in.valkey, in.stream)[0]
+	fleetEventually(t, "both replicas to publish their request metadata", 30*time.Second,
+		func() bool { return len(fleetPayloads(t, in.valkey, in.stream)) == requests })
+	replay := fleetPayloads(t, in.valkey, in.stream)[0]
 
-	in.worker("m4-ledger-worker")
+	in.worker("fleet-ledger-worker")
 	priced := "0.000004200000"
-	m4Eventually(t, "every served request to become an accounted fact", 60*time.Second, func() bool {
+	fleetEventually(t, "every served request to become an accounted fact", 60*time.Second, func() bool {
 		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 	})
 	if rows := in.count("SELECT count(*) FROM olp.requests"); rows != requests {
@@ -684,12 +684,12 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 
 	// A delivery that arrives a second time is the shape a crash before
 	// acknowledgement leaves behind: it must be retired, never re-accounted.
-	_, duplicates, _ := m4Counters(t, in.h.Pool)
+	_, duplicates, _ := fleetCounters(t, in.h.Pool)
 	if id := do(t, in.valkey, "XADD", in.stream, "*", "event", replay); id == nil {
 		t.Fatal("republishing a delivered event produced no stream entry")
 	}
-	m4Eventually(t, "the consumer to retire the repeated delivery", 60*time.Second, func() bool {
-		_, repeated, _ := m4Counters(t, in.h.Pool)
+	fleetEventually(t, "the consumer to retire the repeated delivery", 60*time.Second, func() bool {
+		_, repeated, _ := fleetCounters(t, in.h.Pool)
 		return repeated > duplicates
 	})
 	if rows := in.count("SELECT count(*) FROM olp.attempt_usage_facts"); rows != requests {
@@ -706,7 +706,7 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 
 // summary reads the console usage report over a range that starts before the
 // first priced attempt and ends after the last.
-func (in *m4Install) summary(from time.Time) map[string]any {
+func (in *fleetInstall) summary(from time.Time) map[string]any {
 	in.t.Helper()
 	query := "?start=" + url.QueryEscape(from.Add(-time.Hour).Format(time.RFC3339)) +
 		"&end=" + url.QueryEscape(time.Now().UTC().Add(time.Hour).Format(time.RFC3339))

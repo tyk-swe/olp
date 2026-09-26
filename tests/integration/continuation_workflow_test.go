@@ -51,7 +51,7 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 			return
 		}
 		if !bytes.Contains(body, []byte("Weather and time in Paris?")) {
-			parityGeneration(w, "anthropic", string(input["stream"]) == "true")
+			kindGeneration(w, "anthropic", string(input["stream"]) == "true")
 			return
 		}
 		calls.Add(1)

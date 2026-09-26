@@ -57,9 +57,9 @@ func TestStrictNativeResultsKeepCitationRefusalAndCandidateStructure(t *testing.
 					stream := string(probe["stream"]) == "true" || strings.HasSuffix(r.URL.Path, ":streamGenerateContent")
 					switch tc.profile {
 					case "anthropic-messages":
-						parityGeneration(w, "anthropic", stream)
+						kindGeneration(w, "anthropic", stream)
 					case "gemini-generation":
-						parityGeneration(w, "gemini", stream)
+						kindGeneration(w, "gemini", stream)
 					case "openai-responses":
 						writeResponsesFixture(w, vendorModel, vendorAnswer, stream)
 					}
