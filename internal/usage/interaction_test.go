@@ -15,8 +15,8 @@ func TestInteractionEvidenceSurvivesMetadataWireRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, kind, err := Decode(raw)
-	if err != nil || kind != DecodedEvent || !reflect.DeepEqual(decoded.Attempts[0].Routing.Interaction, evidence) {
+	decoded, err := Decode(raw)
+	if err != nil || !reflect.DeepEqual(decoded.Attempts[0].Routing.Interaction, evidence) {
 		t.Fatalf("acceptance evidence lost on wire: %v %+v", err, decoded)
 	}
 	if _, err := Validate(decoded); err != nil {
@@ -39,7 +39,7 @@ func TestInteractionEvidenceRejectsUnknownAndImpossibleStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Decode(raw); err == nil {
+		if _, err := Decode(raw); err == nil {
 			t.Fatalf("invalid evidence decoded: %+v", evidence)
 		}
 	}

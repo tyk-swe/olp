@@ -3,6 +3,7 @@ package usage
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -274,30 +275,43 @@ func TestValidateAcceptsEmptyPreAttemptEventsOnlyWithoutTargetOrUsage(t *testing
 	}
 }
 
-func TestDecodeReadsCurrentEventsAndRetainsOtherVersions(t *testing.T) {
+func TestDecodeRejectsPayloadsWithoutTheCurrentVersion(t *testing.T) {
+	payload, err := Encode(metadataEvent())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var envelope map[string]json.RawMessage
+	if err = json.Unmarshal(payload, &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	withVersion := func(version string) string {
+		changed := maps.Clone(envelope)
+		if version == "" {
+			delete(changed, "version")
+		} else {
+			changed["version"] = json.RawMessage(version)
+		}
+		return string(marshalForTest(t, changed))
+	}
 	cases := []struct {
 		name    string
 		payload string
-		state   Decoded
-		wantErr bool
 	}{
-		{"legacy payload", `{"request_id":"legacy"}`, DecodedEvent, true},
-		{"current version without fields", `{"version":1,"future_optional_field":true}`, DecodedEvent, true},
-		{"future version", `{"version":2,"request_id":"anything"}`, DecodedUnsupported, false},
-		{"zero version", `{"version":0}`, DecodedUnsupported, false},
-		{"non-numeric version", `{"version":"1"}`, DecodedEvent, true},
-		{"negative version", `{"version":-1}`, DecodedEvent, true},
-		{"invalid json", `invalid json`, DecodedEvent, true},
-		{"json array", `[]`, DecodedEvent, true},
+		{"missing version", withVersion("")},
+		{"null version", withVersion("null")},
+		{"other version", withVersion("2")},
+		{"zero version", withVersion("0")},
+		{"non-numeric version", withVersion(`"1"`)},
+		{"negative version", withVersion("-1")},
+		{"current version without fields", `{"version":1,"future_optional_field":true}`},
+		{"invalid json", `invalid json`},
+		{"json array", `[]`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			event, state, err := Decode([]byte(tc.payload))
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
-			}
-			if err == nil && state != tc.state {
-				t.Fatalf("state = %d, want %d", state, tc.state)
+			event, err := Decode([]byte(tc.payload))
+			if err == nil {
+				t.Fatal("decoded a payload without the current version and contract")
 			}
 			if event != nil {
 				t.Fatalf("event = %+v, want none", event)
@@ -336,12 +350,9 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 	if event.Version != 0 || event.Attempts == nil {
 		t.Error("encode mutated the caller's event")
 	}
-	decoded, state, err := Decode(payload)
+	decoded, err := Decode(payload)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
-	}
-	if state != DecodedEvent {
-		t.Fatalf("state = %d, want DecodedEvent", state)
 	}
 	event.Version = WireVersion
 	if !decodedMatches(t, event, decoded) {
@@ -382,7 +393,7 @@ func TestEncodePreAttemptEventCarriesAnEmptyAttemptList(t *testing.T) {
 	if !strings.Contains(string(payload), `"attempts":[]`) {
 		t.Errorf("payload = %s, want an empty attempt list", payload)
 	}
-	decoded, _, err := Decode(payload)
+	decoded, err := Decode(payload)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -477,7 +488,7 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 		{"missing event id", func(m map[string]json.RawMessage) { delete(m, "event_id") }},
 		{"null event id", func(m map[string]json.RawMessage) { m["event_id"] = json.RawMessage(`null`) }},
 		{"event id is not a uuid", func(m map[string]json.RawMessage) {
-			m["event_id"] = json.RawMessage(`"legacy"`)
+			m["event_id"] = json.RawMessage(`"not-a-uuid"`)
 		}},
 		{"missing attempts", func(m map[string]json.RawMessage) { delete(m, "attempts") }},
 		{"null attempts", func(m map[string]json.RawMessage) { m["attempts"] = json.RawMessage(`null`) }},
@@ -540,9 +551,9 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 				candidate[key] = value
 			}
 			tc.mutate(candidate)
-			event, state, err := Decode(marshalForTest(t, candidate))
+			event, err := Decode(marshalForTest(t, candidate))
 			if err == nil {
-				t.Fatalf("accepted %s (state %d, event %+v)", tc.name, state, event)
+				t.Fatalf("accepted %s (event %+v)", tc.name, event)
 			}
 			if errors.Is(err, ErrInvalidEvent) {
 				t.Error("a malformed payload must not read as an invalid event")

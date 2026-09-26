@@ -80,7 +80,7 @@ func TestStrictAudioTranslationPreservesNativeFormatsAndAccounting(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			decoded, _, err := usage.Decode(encoded)
+			decoded, err := usage.Decode(encoded)
 			if err != nil || decoded.Operation != "translation" {
 				t.Fatalf("translation usage roundtrip: %v", err)
 			}

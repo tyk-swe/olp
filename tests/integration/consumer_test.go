@@ -266,6 +266,18 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 
 	// A payload that is not an event at all.
 	acctPublish(t, valkey, stream, []byte("{not json"))
+	// Payloads from another envelope version, or without one, are not events
+	// this build can account for.
+	acctPublish(t, valkey, stream, []byte(`{"version":99,"event_id":"unknown"}`))
+	versioned, err := usage.Encode(acctBillableEvent(t, fixture))
+	if err != nil {
+		t.Fatalf("encode unversioned event: %v", err)
+	}
+	unversioned := strings.Replace(string(versioned), `"version":1,`, "", 1)
+	if unversioned == string(versioned) {
+		t.Fatal("encoded event carries no version to remove")
+	}
+	acctPublish(t, valkey, stream, []byte(unversioned))
 	// An entry carrying no payload, and the marker the reclaim writes when
 	// Valkey reports a pending delivery whose entry has been destroyed.
 	do(t, valkey, "XADD", stream, "*", "junk", "x")
@@ -294,8 +306,8 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 		return acctStreamLength(t, valkey, stream) == 0
 	})
 
-	if count := acctGapCount(t, fixture, "malformed_stream_event"); count != 1 {
-		t.Fatalf("malformed gaps = %d, want one", count)
+	if count := acctGapCount(t, fixture, "malformed_stream_event"); count != 3 {
+		t.Fatalf("malformed gaps = %d, want three", count)
 	}
 	// One for the entry without a payload, one for the destroyed entry the
 	// reclaim marker named.
@@ -308,44 +320,6 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
         WHERE event_count <> 1 OR certainty <> 'exact'`); count != 0 {
 		t.Fatalf("%d gaps did not count exactly one lost event", count)
-	}
-}
-
-func TestRequestMetadataConsumerLeavesUnsupportedVersionsPending(t *testing.T) {
-	t.Parallel()
-	fixture := acctSeed(t, acctPool(t))
-	acctPriceGPT4o(t, fixture)
-	valkey, _, stream := acctKeyspace(t)
-
-	// A build that does not know this shape must not decide what it means.
-	acctPublish(t, valkey, stream, []byte(`{"version":99,"event_id":"unknown"}`))
-	good := acctBillableEvent(t, fixture)
-	payload, err := usage.Encode(good)
-	if err != nil {
-		t.Fatalf("encode event: %v", err)
-	}
-	acctPublish(t, valkey, stream, payload)
-
-	acctConsumer(t, fixture.Pool, valkey, stream, "current-build", nil, usage.ReclaimIdle)
-	acctEventually(t, "the supported delivery to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == 1
-	})
-	acctEventually(t, "the supported delivery to be acknowledged", func() bool {
-		return acctStreamLength(t, valkey, stream) == 1
-	})
-
-	// The future delivery is still there, still owed to whoever can read it.
-	time.Sleep(500 * time.Millisecond)
-	if length := acctStreamLength(t, valkey, stream); length != 1 {
-		t.Fatalf("stream length = %d, want the unsupported delivery to remain", length)
-	}
-	if count := acctCount(t, fixture, `SELECT count(*)
-        FROM olp_go.request_metadata_ingestion_gaps`); count != 0 {
-		t.Fatalf("gaps = %d, want an unsupported delivery to be kept, not admitted as lost", count)
-	}
-	pending := fmt.Sprint(do(t, valkey, "XPENDING", stream, usage.Group))
-	if !strings.Contains(pending, "1") {
-		t.Fatalf("XPENDING = %s, want the unsupported delivery held", pending)
 	}
 }
 

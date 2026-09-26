@@ -160,9 +160,6 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if envErr != nil {
 		return c, envErr
 	}
-	if getenv("OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER") != "" || getenv("OLP_OIDC_ALLOW_PRIVATE_NETWORK") != "" {
-		return c, errors.New("OIDC egress cannot be weakened by environment flags; use an explicit oidctest build for local issuer tests")
-	}
 	for origin := range strings.SplitSeq(corsOrigins, ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
 			c.GatewayCORSAllowedOrigins = append(c.GatewayCORSAllowedOrigins, origin)

@@ -14,9 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
-// WireVersion is the envelope version this build writes and accepts. A reader
-// that meets another version leaves the delivery pending rather than guessing
-// at a shape it does not know.
+// WireVersion is the envelope version this build writes and accepts. Every
+// event carries it; any other version is malformed.
 const WireVersion = 1
 
 // Event is one request's content-free metadata. Every optional field is
@@ -124,40 +123,27 @@ func Encode(e *Event) ([]byte, error) {
 	return payload, nil
 }
 
-// Decoded says what a payload turned out to be.
-type Decoded int
-
-const (
-	// DecodedEvent is a payload this build understands.
-	DecodedEvent Decoded = iota
-	// DecodedUnsupported is a payload written by another version. The delivery
-	// is left pending for a build that knows the shape; dropping it would lose
-	// usage, and guessing at it would invent usage.
-	DecodedUnsupported
-)
-
-// Decode parses a stream payload. Parsing is strict: every field the event
-// contract requires must be present and well formed, because the alternative is
-// a zero value silently entering an account.
-func Decode(payload []byte) (*Event, Decoded, error) {
+// Decode parses a stream payload. Parsing is strict: the envelope version and
+// every field the event contract requires must be present and well formed,
+// because the alternative is a zero value silently entering an account.
+func Decode(payload []byte) (*Event, error) {
 	var probe struct {
 		Version *uint64 `json:"version"`
 	}
 	if err := json.Unmarshal(payload, &probe); err != nil {
-		return nil, DecodedEvent, fmt.Errorf("decode request metadata envelope: %w", err)
+		return nil, fmt.Errorf("decode request metadata envelope: %w", err)
 	}
-	if probe.Version != nil && *probe.Version != WireVersion {
-		return nil, DecodedUnsupported, nil
+	if probe.Version == nil {
+		return nil, errors.New("request metadata version is missing")
+	}
+	if *probe.Version != WireVersion {
+		return nil, fmt.Errorf("request metadata version %d is not supported", *probe.Version)
 	}
 	var wire wireEvent
 	if err := json.Unmarshal(payload, &wire); err != nil {
-		return nil, DecodedEvent, fmt.Errorf("decode request metadata event: %w", err)
+		return nil, fmt.Errorf("decode request metadata event: %w", err)
 	}
-	event, err := wire.decode()
-	if err != nil {
-		return nil, DecodedEvent, err
-	}
-	return event, DecodedEvent, nil
+	return wire.decode()
 }
 
 // The wire types mirror the event shape with every required field behind a

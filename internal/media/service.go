@@ -244,19 +244,9 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 
 	var selected *runtime.Slot
 	for i := range provider.Slots {
-		slot := &provider.Slots[i]
-		if record.SlotID != nil {
-			if slot.ID == *record.SlotID {
-				selected = slot
-				break
-			}
-		} else if (slot.CredentialID == nil && record.CredentialVersionID == nil) ||
-			(slot.CredentialID != nil && record.CredentialVersionID != nil && *slot.CredentialID == *record.CredentialVersionID) {
-			// Legacy jobs can recover a slot only when the identity is unique.
-			if selected != nil {
-				return nil, 0, "media_job_slot_unavailable"
-			}
-			selected = slot
+		if record.SlotID != nil && provider.Slots[i].ID == *record.SlotID {
+			selected = &provider.Slots[i]
+			break
 		}
 	}
 	if selected == nil {
