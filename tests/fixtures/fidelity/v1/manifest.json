@@ -1,8 +1,5 @@
 {
   "version": 1,
-  "source_revision": "8580b39905dc4da9278de8e53ceac7d2412ad6a5",
-  "authored_at": "2026-09-22",
-  "provenance": "Independently hand-authored synthetic native contracts. No paid provider captures. No production encoder generated reference expectations. Legacy target outputs are explicitly defective characterizations, not acceptance references.",
   "contracts": {
     "openai": "fixture-openai-chat-v1 (checked-in OpenAI 7.4.0 JS client contract)",
     "anthropic": "fixture-messages-v1; anthropic-version 2023-06-01; checked-in Anthropic JS 0.116.0",
@@ -11,7 +8,7 @@
   "files": {
     "anthropic-tool-next-request.json": "81062860b3b9d324f122027adaa141280a665e710df452277cb3cb4ebbb08c07",
     "anthropic-tool-workflow.sse": "8989d7c7b79e0cf1a79b84bef0e9a023b176cb58259df6aabc37a0de3a8197ac",
-    "counterexamples.json": "f92611665652449273e5d7716df8a15c0a136e1fbfda475e9d3474e9b76190c7",
-    "inventory.json": "c13728040b091bf511f01733f38039cb0717dc5c8f1b8fae9e71c3ce0bf90ffd"
+    "counterexamples.json": "02526c4e75940cfb3d794346f9a9e1b78aba501dbc1340e095a65ba6c90fd18f",
+    "inventory.json": "5c8746173d02ded1798e87fc0f48f8f599eccaf1b2c3b2c7864164e6eb24afbb"
   }
 }

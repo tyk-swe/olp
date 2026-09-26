@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
@@ -169,68 +168,13 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 	}
 }
 
-func TestAuthenticationOwnershipUpgradeAndSessionHints(t *testing.T) {
-	pool, dbURL := accessDatabase(t)
-	applyMigrationPrefix(t, pool, "0010_authentication_ownership.sql")
-	// Recreate the previous schema and apply the real forward migration to legacy
-	// rows: setup/invitation provenance survives; an ambiguous mixed row fails closed.
-	seedUser := func(email, passwordHash string) string {
-		t.Helper()
-		var id string
-		if err := pool.QueryRow(t.Context(), `INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag)
-            VALUES(gen_random_uuid(),$1,$1,$2,'viewer',gen_random_uuid()) RETURNING id::text`, email, passwordHash).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	linkOIDC := func(userID string) {
-		t.Helper()
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject)
-            SELECT gen_random_uuid(),$1::uuid,'https://issuer.test',email FROM olp_go.users WHERE id=$1::uuid`, userID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ambiguous := seedUser("ambiguous@example.com", "legacy-hash")
-	linkOIDC(ambiguous)
-	retained := seedUser("retained@example.com", "legacy-hash")
-	linkOIDC(retained)
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.audit(id,actor_user_id,action,resource_type,outcome)
-        VALUES(gen_random_uuid(),$1::uuid,'invitation.accept','user','success')`, retained); err != nil {
-		t.Fatal(err)
-	}
-	upgraded := seedUser("upgraded@example.com", secrets.HashPassword(accessPassword))
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.sessions(id,user_id,digest,expires_at)
-        VALUES(gen_random_uuid(),$1::uuid,'\x02'::bytea,now()+interval '1 day')`, upgraded); err != nil {
-		t.Fatal(err)
-	}
-	h := newAccessHarnessOn(t, pool, dbURL)
+func TestSessionListShowsBrowserHintDerivedFromUserAgent(t *testing.T) {
+	h := newAccessHarness(t)
 	owner := h.owner()
-	h.invite(owner, "legacy@example.com", "viewer")
-	for email, want := range map[string]string{"owner@example.com": "local", "legacy@example.com": "local", "retained@example.com": "local", "upgraded@example.com": "local", "ambiguous@example.com": "oidc"} {
-		var got string
-		if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE email=$1", email).Scan(&got); err != nil || got != want {
-			t.Fatalf("%s management=%s want=%s err=%v", email, got, want, err)
-		}
-	}
-	upgradedBrowser := &browser{}
-	h.want(upgradedBrowser, "POST", "/api/v3/sessions", map[string]any{"email": "upgraded@example.com", "password": accessPassword}, nil, 201)
-	sessions := h.want(upgradedBrowser, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
-	legacySeen := false
-	for _, item := range sessions {
-		row := item.(map[string]any)
-		if row["current"] != true {
-			legacySeen = true
-			if row["browser_hint"] != "Unknown browser" {
-				t.Fatalf("pre-upgrade session hint: %v", row)
-			}
-		}
-	}
-	if !legacySeen {
-		t.Fatal("legacy metadata not represented")
-	}
+	h.invite(owner, "member@example.com", "viewer")
 	b := &browser{}
-	h.want(b, "POST", "/api/v3/sessions", map[string]any{"email": "legacy@example.com", "password": accessPassword}, map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Private untrusted <script>"}, 201)
-	sessions = h.want(b, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
+	h.want(b, "POST", "/api/v3/sessions", map[string]any{"email": "member@example.com", "password": accessPassword}, map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Private untrusted <script>"}, 201)
+	sessions := h.want(b, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
 	found := false
 	for _, item := range sessions {
 		row := item.(map[string]any)

@@ -222,7 +222,7 @@ timeout. Supported operations also include `token_count`, `embeddings`,
 `speech`, `transcription`, the `video_*` operations, `batch`, `realtime`, and
 `bedrock_invoke`; see the [compatibility matrix](compatibility.md).
 
-The optional [route fidelity declaration](qualification/fidelity/route-contracts.md)
+The optional route fidelity declaration
 selects legacy, strict, or transformed behavior. Existing routes retain legacy
 semantics until an explicit transition; old-client edits preserve a configured
 contract. Strict drafts reject redaction, and activation requires the complete

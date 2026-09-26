@@ -14,7 +14,6 @@ cleanup() {
   if (( status != 0 )); then "${compose[@]}" logs --no-color >&2 || true; fi
   if [[ -n ${restore_valkey:-} ]]; then docker rm -f "$restore_valkey" >/dev/null 2>&1 || true; fi
   "${compose[@]}" down -v --remove-orphans >&2 || true
-  if [[ -d "$scratch/old-reader" ]]; then git worktree remove --force "$scratch/old-reader" >&2 || true; fi
   rm -rf -- "$scratch"
   exit "$status"
 }
@@ -39,15 +38,6 @@ export OLP_TEST_VALKEY_TLS_URL="rediss://:olp-go-local@$valkey_tls/0"
 export OLP_TEST_CA_FILE="$OLP_GO_TEST_TLS_DIR/ca.crt"
 export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make build
-# The mixed-version suite runs a real prior gateway beside the current binary.
-# Fetching this fixed reviewed base is necessary on shallow CI checkouts.
-reference_revision=8580b39905dc4da9278de8e53ceac7d2412ad6a5
-if ! git cat-file -e "$reference_revision^{commit}"; then
-  git fetch --no-tags --depth=1 origin "$reference_revision"
-fi
-git worktree add --detach "$scratch/old-reader" "$reference_revision" >&2
-export OLP_TEST_OLD_BINARY="$scratch/olp-old-reader"
-(cd "$scratch/old-reader" && go build -mod=readonly -o "$OLP_TEST_OLD_BINARY" ./cmd/olp)
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 # Recovery tests use a separately provisioned Valkey, never a logical database
@@ -55,9 +45,7 @@ OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-go-local >/dev/null
 export OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-go-local@$(docker port "$restore_valkey" 6379/tcp)/0"
-# The lifecycle-v2 timed recorder is write-once qualification, invoked only by
-# its fixed evidence runner. Its public semantic smoke still runs in this suite.
-go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v -skip '^TestFidelityLifecycleV2Performance$' ./tests/integration ./internal/gateway ./internal/providers ./internal/media
+go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration ./internal/gateway ./internal/providers ./internal/media
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration

@@ -3,9 +3,6 @@
 ## Project Structure & Module Organization
 
 OpenLLMProxy combines a Go gateway with a client-only SvelteKit console.
-Independent conformance inputs live in `tests/fixtures/reference-inventory.json`
-and `tests/release-behaviors.json`; `docs/roadmap/README.md` retains dated
-qualification provenance.
 
 - `internal/`: backend feature packages (`access/`, `providers/`, `routes/`, `gateway/`, `media/`, `observability/`); keep types, SQL, handlers and workflows together. `cmd/olp` is the binary entrypoint; `openapi/management.json` owns the management contract and `openapi/document.go` embeds it.
 - `console/src/lib/features/`: matching console features; shared UI lives in `console/src/lib/components/`, pages in `console/src/routes/`, and static assets in `console/static/`.

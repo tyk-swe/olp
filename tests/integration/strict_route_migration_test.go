@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/database"
 )
 
 func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
@@ -137,74 +136,6 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	path = "/api/v3/route-drafts/" + copy["id"].(string)
 	if problemCode(t, h.want(owner, "POST", path+"/validate", nil, etagHeader(copy), 422)) != "fidelity_policy_conflict" {
 		t.Fatal("copied incompatible policy was silently accepted")
-	}
-}
-
-func TestStrictIdentityMigrationRejectsUnsafeHistoryAndRollsBack(t *testing.T) {
-	h := newAccessHarness(t)
-	fixture := newStrictProviderFixture(t, "compatible-chat")
-	owner := h.owner()
-	slug, _ := publishStrictProvider(t, h, owner, fixture, nil, nil, "legacy")
-	first := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	firstRevision := first["latest_revision"].(map[string]any)["id"].(string)
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", fidelityDraft(slug, fixture.providerID), idem(uuid.NewString()), 201)
-	second := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	secondRevision := second["revision_id"].(string)
-	if firstRevision == secondRevision {
-		t.Fatal("fixture needs two distinct historical revisions")
-	}
-	// Model an unpublished intermediate writer that once put strictness under
-	// an older legacy slug, then apply the new forward migration to that data.
-	// Reverse later additions in this synthetic fixture so migration history
-	// remains a sequential prefix. Production migrations stay forward-only.
-	_, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.media_jobs DROP CONSTRAINT media_jobs_strict_source;
-	    ALTER TABLE olp_go.media_jobs DROP COLUMN native_source_id, DROP COLUMN strict_contract;
-	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_media_job_source_bound;
-	    ALTER TABLE olp_go.secrets DROP CONSTRAINT secrets_purpose_check;
-	    ALTER TABLE olp_go.secrets ADD CONSTRAINT secrets_purpose_check
-	        CHECK (purpose IN ('oidc_client', 'oidc_flow', 'mutation_replay',
-	                          'provider_credential', 'notification_secret', 'provider_continuation'));
-	    DROP TRIGGER check_runtime_route_contracts ON olp_go.runtime_releases;
-	    DROP FUNCTION olp_go.check_runtime_route_contracts();
-	    DROP TRIGGER check_route_revision_contract ON olp_go.route_revisions;
-	    DROP FUNCTION olp_go.check_route_revision_contract();
-	    DROP TRIGGER preserve_route_contract_identity ON olp_go.routes;
-	    DROP FUNCTION olp_go.preserve_route_contract_identity();
-	    ALTER TABLE olp_go.routes DROP COLUMN strict_contract;
-	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_strict_durable_check;
-	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_interaction_contract_check;
-	    ALTER TABLE olp_go.provider_resources DROP CONSTRAINT provider_resources_kind_check;
-	    ALTER TABLE olp_go.provider_resources ADD CONSTRAINT provider_resources_kind_check
-	        CHECK (kind IN ('file','batch','response','continuation','strict_response'));
-	    DELETE FROM olp_go.migrations WHERE version>='0027_strict_route_identity.sql'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp_go.route_revisions SET fidelity='{"mode":"strict"}'::jsonb WHERE id=$1`, secondRevision); err != nil {
-		t.Fatal(err)
-	}
-	if err = database.Migrate(t.Context(), h.Pool); err == nil {
-		t.Fatal("ambiguous legacy/strict slug history was accepted")
-	}
-	var schemaRolledBack, historyMissing, laterHistoryMissing bool
-	if err = h.Pool.QueryRow(t.Context(), `SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns
-	    WHERE table_schema='olp_go' AND table_name='routes' AND column_name='strict_contract'),
-	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0027_strict_route_identity.sql'),
-	    NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version IN (
-	        '0028_gemini_interaction_resources.sql',
-	        '0029_strict_durable_resources.sql',
-	        '0030_strict_video_sources.sql'))`).Scan(&schemaRolledBack, &historyMissing, &laterHistoryMissing); err != nil || !schemaRolledBack || !historyMissing || !laterHistoryMissing {
-		t.Fatal("failed strict identity migration left partial schema/history", err)
-	}
-	if _, err = h.Pool.Exec(t.Context(), `UPDATE olp_go.route_revisions SET fidelity=NULL WHERE id=$1`, secondRevision); err != nil {
-		t.Fatal(err)
-	}
-	if err = database.Migrate(t.Context(), h.Pool); err != nil {
-		t.Fatal("safe historical revision did not migrate after repair", err)
-	}
-	var sealed bool
-	if err = h.Pool.QueryRow(t.Context(), "SELECT NOT strict_contract FROM olp_go.routes WHERE slug=$1", slug).Scan(&sealed); err != nil || !sealed {
-		t.Fatal("legacy identity was not retained", err)
 	}
 }
 

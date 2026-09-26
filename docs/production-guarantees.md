@@ -55,10 +55,3 @@ replacement for provider-owned asynchronous job references.
 
 Keep analytics in control processes and ingestion in workers, with database
 CPU/I/O headroom for both. Qualify optimizations with measured workloads.
-
-The September 18, 2026 candidate qualification contains resource observations
-for maximum-size concurrent uploads, slow reads, mass disconnects, connection
-aging and shutdown. Those fixture measurements are reproducible bounds checks,
-not a throughput target or a production availability guarantee. See
-[historical qualification](roadmap/README.md), not a qualification of newer
-source.

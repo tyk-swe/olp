@@ -43,15 +43,14 @@ only when it validates and every referenced credential can be decrypted; a
 release that fails either check is skipped and the previous one stays active.
 Repeated publication is harmless.
 
-Route revisions carry an optional [fidelity declaration](qualification/fidelity/route-contracts.md).
+Route revisions carry an optional fidelity declaration.
 Historical omission remains legacy and retains its original snapshot encoding.
 Explicit transformed routes declare their intentional policy changes. Strict
 drafts reject redaction, and strict publication compiles each target's admitted
-[interaction contract](qualification/fidelity/strict-planning.md) during draft
-validation, activation and release installation; a target without an admitted
-contract fails closed. A published slug keeps its strict or non-strict
-identity: moving across that boundary requires a reviewed migration draft under
-a previously unpublished slug.
+interaction contract during draft validation, activation and release
+installation; a target without an admitted contract fails closed. A published
+slug keeps its strict or non-strict identity: moving across that boundary
+requires a reviewed migration draft under a previously unpublished slug.
 
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older

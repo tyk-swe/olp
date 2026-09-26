@@ -206,7 +206,6 @@ wrappers and signing; full public mTLS/credential rotation/revocation and portab
 configuration round trips; HTTP/HTTPS/SOCKS destination protection and pool
 isolation; media/resource/realtime TLS transport; and preserve-or-reject defaults.
 They are deterministic fixture evidence, not live-provider or quality evidence.
-Existing frozen reference fixtures and the performance baseline remain unchanged.
 
 A trusted in-process `connectors.RegisterProfile` can add a provider using an
 existing component composition and model bindings. The registry validates the

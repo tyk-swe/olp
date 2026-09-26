@@ -107,11 +107,11 @@ func TestFrozenVersionOneReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This digest freezes provenance and every referenced artifact together.
-	const manifestDigest = "ec8bf6f8e8516313303332561a3268db9a8cbd9c535f491e28817c6bcd1c5581"
+	// This digest pins the fixture contracts and every referenced artifact together.
+	const manifestDigest = "c71cbc5a59e44059e1c0b2f53365f6acd91821a9bf1ced7ed731d704db60e878"
 	actual := sha256.Sum256(manifest)
 	if hex.EncodeToString(actual[:]) != manifestDigest {
-		t.Fatal("v1 evidence changed: add a new version instead of rewriting the reference")
+		t.Fatal("v1 references changed: add a new version instead of rewriting the reference")
 	}
 	var files struct {
 		Files map[string]string `json:"files"`

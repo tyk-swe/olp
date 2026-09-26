@@ -13,9 +13,7 @@ not inherit the official OpenAI media discovery contract.
 
 The [gateway](gateway.md) applies shared admission and response bounds to these
 surfaces. Current protocol, connector, SDK, and media tests are described in
-[tests/README.md](../tests/README.md). The
-[dated completion record](roadmap/README.md) links historical qualification; it
-does not qualify newer source.
+[tests/README.md](../tests/README.md).
 
 ## Legend
 
@@ -187,9 +185,8 @@ such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
 `tests/fixtures/protocols/selected-operation-families.json` covers every
 operation family and surface. Keep these tables aligned with the
-[Go protocol suites](../internal/protocols/parity_test.go) and the
-[frozen certification check](../internal/providers/frozen_capabilities_test.go)
-when semantics change.
+[Go protocol suites](../internal/protocols/parity_test.go) when semantics
+change.
 
 ### Anthropic providers
 

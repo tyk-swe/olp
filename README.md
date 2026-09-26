@@ -110,7 +110,6 @@ upstream.
 | [Operations](docs/operations.md) | Monitoring, recovery, and upgrades |
 | [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
 | [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
-| [Completion record](docs/roadmap/README.md) | Historical rewrite qualification and evidence |
 
 ## Operations
 

@@ -1,7 +1,5 @@
 {
   "version": 1,
-  "authorship": "Hand-authored native expectations and legacy characterizations; no production encoder used to produce expected values.",
-  "baseline_revision": "8580b39905dc4da9278de8e53ceac7d2412ad6a5",
   "native_allowed_adaptations": [
     "Configured route model becomes fixture-model; no other changes allowed in these unary cases."
   ],

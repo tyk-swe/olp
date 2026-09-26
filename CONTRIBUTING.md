@@ -26,7 +26,6 @@ Required CI includes `check`, `integration`, `dependencies`, and both native
 image jobs. Contract generation is reproducible; `openapi/management.json` is
 the checked-in source of truth. Update it alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
-`scripts/without-rust.sh COMMAND` catches accidental Cargo/rustc invocations.
 
 ## Local development
 
@@ -102,16 +101,8 @@ Candidate platform digests form one multi-architecture index. Packaged browser,
 SDK and recovery qualification consumes that exact index; promotion only tags
 and attests it and never rebuilds. A manual release-workflow dispatch qualifies
 a candidate without publishing stable version tags. Only a `v3.*` push can
-promote. Fresh storage requirements are recorded in release metadata.
-
-The [dated completion record](docs/roadmap/README.md) preserves qualification of
-the September 18, 2026 candidate, not newer source. Current inventories are
-`deploy/release-inventory.json`, `deploy/release-dependencies.json`, and
-`deploy/release-module-graph.txt`; regenerate them with
-`node scripts/release-inventory.mjs`. The frozen reference is never regenerated
-from the application being tested. CI checks these generated paths;
-qualification runs remain separate. A missing platform result or missed build
-target keeps that candidate's release gate open.
+promote. A missing platform result or missed build target keeps that
+candidate's release gate open.
 
 A provider, protocol or media feature is not release-ready until its review
 includes native conformance, unsupported/lossy semantics, body/time/admission

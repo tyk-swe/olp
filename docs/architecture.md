@@ -73,8 +73,7 @@ composition root own the other unary operations, and `internal/mediacontract`,
 `internal/durablecontract`, `internal/realtimecontract` and `internal/geminilifecycle`
 own their surfaces. The planner still owns policy coverage, profile compatibility,
 source requirements and client continuation; `internal/providerinvoke` retains the
-legacy admission path. See [the source decision](adr/0001-immutable-operation-sources.md)
-and [OIF conservation checks](qualification/fidelity/oif-source.md).
+legacy admission path. See [the source decision](adr/0001-immutable-operation-sources.md).
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
 events; retries and deduplication support recovery. Durable media jobs and

@@ -264,7 +264,7 @@ credential authority export a stable `credential_ref` of
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
-Routes may carry a [fidelity declaration](qualification/fidelity/route-contracts.md).
+Routes may carry a fidelity declaration.
 Historical legacy omission stays omitted in exports. Importing an old artifact
 without this field preserves an existing staged or published contract; explicit
 mode changes remain visible in revision history. Configuration staging never

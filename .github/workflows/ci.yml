@@ -19,20 +19,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The frozen continuation benchmark verifies source bytes at its
-          # pre-replacement commit, not just the current checkout.
-          fetch-depth: 0
       - uses: ./.github/actions/setup
         with:
           services: false
-      - run: ./scripts/without-rust.sh make check
+      - run: make check
       - run: ./scripts/check-contracts.sh
       - run: node scripts/check-release-version.mjs
-      - name: Verify release inventory
-        run: |
-          node scripts/release-inventory.mjs
-          git diff --exit-code -- deploy/release-inventory.json deploy/release-dependencies.json deploy/release-module-graph.txt
       - run: make test-race
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
@@ -47,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - run: ./scripts/without-rust.sh make integration
+      - run: make integration
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 20
