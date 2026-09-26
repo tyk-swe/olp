@@ -294,3 +294,36 @@ func TestRouteFidelityConfigurationTreatsOmissionAsStrict(t *testing.T) {
 		t.Fatal("staging a draft changed serving behavior")
 	}
 }
+
+func TestStrictRealtimeActivationTellsTheAuthorToDeclareTransformed(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fixture := newStrictRealtimeFixture(t, "openai")
+	// An Automatic provider (no provider profile) certified for realtime.
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Automatic realtime", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1"}, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), http.StatusCreated)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), http.StatusOK); probe["succeeded"] != true {
+		t.Fatalf("provider probe: %v", probe)
+	}
+	modelID := h.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"].([]any)[0].(map[string]any)["id"].(string)
+	provider = h.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "realtime", "surface": "openai", "mode": "realtime"}}}, etagHeader(provider), http.StatusOK)
+	if certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(provider), http.StatusOK); certified["status"] != "certified" {
+		t.Fatalf("realtime certification: %v", certified)
+	}
+	provider = h.want(owner, "GET", path, nil, nil, http.StatusOK)
+	h.want(owner, "POST", path+"/activate", nil, withMatch(provider, idem(uuid.NewString())), http.StatusOK)
+
+	slug := "realtime-" + uuid.NewString()[:8]
+	body := fidelityDraft(slug, provider["id"])
+	body["operations"] = []string{"realtime"}
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), http.StatusCreated)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
+	for _, action := range []string{"validate", "activate"} {
+		problem := h.want(owner, "POST", draftPath+"/"+action, nil, withMatch(draft, idem(uuid.NewString())), http.StatusUnprocessableEntity)
+		if problemCode(t, problem) != "target_capability" || !strings.Contains(problem["detail"].(string), "Declare the route transformed") {
+			t.Fatalf("strict realtime %s did not guide the author to a transformed route: %v", action, problem)
+		}
+	}
+	draft = h.want(owner, "PUT", draftPath, transformed(body), etagHeader(draft), http.StatusOK)
+	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(draft, idem(uuid.NewString())), http.StatusOK)
+}

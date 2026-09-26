@@ -61,26 +61,10 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 		}
 	}
 	if err = snapshot.CompileRouteExecution(route); err != nil {
-		var failure interface {
-			Incompatibility() (code, field, requirement, message string)
-		}
-		if errors.As(err, &failure) {
-			code, _, requirement, message := failure.Incompatibility()
-			return access.Fail(422, code, message+transformedGuidance[requirement])
+		if refusal := runtime.StrictRefusal(err); refusal != nil {
+			return refusal
 		}
 		return err
 	}
 	return nil
-}
-
-// transformedGuidance completes strict refusals that exist only because a
-// target lacks a provider profile or needs translation. A transformed route
-// serves such a target, so the author learns which declaration to make.
-var transformedGuidance = map[string]string{
-	"explicit_profile":         " Declare the route transformed to use a provider without a profile.",
-	"operation_contract":       " Declare the route transformed to translate for this target.",
-	"generation_dialect":       " Declare the route transformed to translate for this target.",
-	"native_media_contract":    " Declare the route transformed to translate for this target.",
-	"native_batch_contract":    " Declare the route transformed to translate for this target.",
-	"native_realtime_contract": " Declare the route transformed to translate for this target.",
 }

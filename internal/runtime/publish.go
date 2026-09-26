@@ -88,10 +88,8 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	now := time.Now().UTC()
 	snapshot.Generation = Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
 	if err = snapshot.Validate(); err != nil {
-		var incompatible incompatibilityError
-		if errors.As(err, &incompatible) {
-			code, _, _, message := incompatible.Incompatibility()
-			return Published{}, access.Fail(422, code, message)
+		if refusal := StrictRefusal(err); refusal != nil {
+			return Published{}, refusal
 		}
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
@@ -106,6 +104,25 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	p := Published{ID: snapshot.Generation.ID, Sequence: sequence}
 	_, err = tx.Exec(ctx, "INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at) VALUES($1,$2,$3,$4,$5,$6,$6)", p.ID, sequence, digest, encoded, actor, now)
 	return p, err
+}
+
+// StrictRefusal reports an obligation a strict route's target cannot meet as a
+// 422, or returns nil when err is not such an obligation. A refusal that exists
+// only because the target has no provider profile or needs translation tells
+// the author to declare the route transformed.
+func StrictRefusal(err error) error {
+	var incompatible incompatibilityError
+	if !errors.As(err, &incompatible) {
+		return nil
+	}
+	code, _, requirement, message := incompatible.Incompatibility()
+	switch requirement {
+	case "explicit_profile":
+		message += " Declare the route transformed to use a provider without a profile."
+	case "operation_contract", "native_media_contract", "native_batch_contract", "native_realtime_contract":
+		message += " Declare the route transformed to translate for this target."
+	}
+	return access.Fail(422, code, message)
 }
 
 // Compile reads the serving configuration without recording a release. Draft

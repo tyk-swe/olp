@@ -3,11 +3,14 @@ package runtime
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -106,5 +109,26 @@ func TestUnsetOrUnknownFidelityFailsClosedAsStrict(t *testing.T) {
 	}
 	if (RouteFidelity{Mode: FidelityTransformed}).Strict() {
 		t.Fatal("an explicit transformed route kept the strict promise")
+	}
+}
+
+func TestStrictRefusalTellsTheAuthorWhichDeclarationServesTheTarget(t *testing.T) {
+	for requirement, guidance := range map[string]string{
+		"explicit_profile":         "Refused. Declare the route transformed to use a provider without a profile.",
+		"operation_contract":       "Refused. Declare the route transformed to translate for this target.",
+		"native_media_contract":    "Refused. Declare the route transformed to translate for this target.",
+		"native_batch_contract":    "Refused. Declare the route transformed to translate for this target.",
+		"native_realtime_contract": "Refused. Declare the route transformed to translate for this target.",
+		"bounded_buffering":        "Refused.",
+	} {
+		// Publication wraps a route's refusal with the route and operation.
+		err := fmt.Errorf("route %q realtime: %w", "route", &oif.Incompatibility{Code: "target_capability", Requirement: requirement, Message: "Refused."})
+		var problem *access.Problem
+		if !errors.As(StrictRefusal(err), &problem) || problem.Status != 422 || problem.Code != "target_capability" || problem.Detail != guidance {
+			t.Fatalf("%s refusal = %+v", requirement, problem)
+		}
+	}
+	if StrictRefusal(errors.New("route is malformed")) != nil {
+		t.Fatal("an error without an unmet obligation became a strict refusal")
 	}
 }
