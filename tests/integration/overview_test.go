@@ -58,7 +58,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	want(overview(), 1, 0, 1, false)
 
 	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
-		"slug": "overview-chat", "overall_timeout_ms": 20000, "max_attempts": 1,
+		"slug": "overview-chat", "overall_timeout_ms": 20000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_id": provider, "provider_model": vendorModel,
 			"priority": 0, "weight": 1, "timeout_ms": 15000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)

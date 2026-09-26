@@ -74,7 +74,7 @@ func (s *Server) strictBedrockConverse(w http.ResponseWriter, r *http.Request) b
 		return false
 	}
 	route, ok := release.Snapshot.Routes[r.PathValue("model")]
-	if !ok || runtime.FidelityMode(route.Fidelity) != runtime.FidelityStrict {
+	if !ok || !route.Fidelity.Strict() {
 		return false
 	}
 	r = r.Clone(r.Context())
@@ -131,7 +131,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	x.route = &route
 	if x.strict() {
 		// A release may have changed between the dispatch wrapper and begin.
-		// Never let that race serve strict work through the legacy resource path.
+		// Never let that race serve strict work through the transformed resource path.
 		fail(invalidRequest("target_capability", "This interaction requires the compiled generation runner; retry against the current route.", nil))
 		return
 	}

@@ -5,6 +5,7 @@ import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
   certifiedCapabilities,
+  fidelityLabel,
   eligibleTargetTuples,
   hasOutputRules,
   missingTargetOperations,
@@ -37,7 +38,8 @@ const validEditor: RouteEditorValues = {
   overallTimeoutMs: 120_000,
   maxAttempts: 1,
   targets: [target],
-  contentPolicyRules: []
+  contentPolicyRules: [],
+  fidelity: { mode: 'strict' }
 };
 
 const modelOptions: RouteModelOption[] = [
@@ -273,6 +275,7 @@ describe('Route Studio API payloads', () => {
       overall_timeout_ms: 120_000,
       max_attempts: 2,
       content_policy: null,
+      fidelity: { mode: 'strict' },
       targets: [
         {
           provider_id: 'provider-a',
@@ -299,6 +302,7 @@ describe('Route Studio API payloads', () => {
       overall_timeout_ms: 120_000,
       max_attempts: 2,
       content_policy: null,
+      fidelity: { mode: 'strict' },
       targets: [
         {
           provider_model_id: 'model-a',
@@ -526,13 +530,8 @@ describe('Route Studio content policy', () => {
   });
 });
 
-describe('route fidelity migration', () => {
-  it('preserves historical omissions during unrelated edits', () => {
-    expect(
-      buildReplaceRouteDraftInput({ ...validEditor, fidelity: null })
-    ).not.toHaveProperty('fidelity');
-  });
-  it.each(['legacy', 'strict', 'transformed'] as const)(
+describe('route fidelity', () => {
+  it.each(['strict', 'transformed'] as const)(
     'persists an explicit %s choice on create and edit',
     (mode) => {
       const values = { ...validEditor, fidelity: { mode } };
@@ -542,4 +541,9 @@ describe('route fidelity migration', () => {
       expect(buildReplaceRouteDraftInput(values).fidelity).toEqual({ mode });
     }
   );
+  it('labels an omitted fidelity as strict', () => {
+    expect(fidelityLabel(undefined)).toBe('Strict');
+    expect(fidelityLabel({ mode: 'strict' })).toBe('Strict');
+    expect(fidelityLabel({ mode: 'transformed' })).toBe('Transformed');
+  });
 });

@@ -159,6 +159,9 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 		return notFoundError("not_found", "The stored provider resource is unavailable to this key.")
 	}
+	if !current.Fidelity.Strict() {
+		return strictRouteChanged()
+	}
 	p, _, e := s.resolveResource(ctx, x, authority, r, operation)
 	if e != nil {
 		return e

@@ -41,7 +41,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if raw := parsed.Field("store"); raw != nil {
 		_ = json.Unmarshal(raw, &store)
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() {
 		if parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null")) {
 			// Native Responses omission requests provider retention. Strict admission
 			// cannot silently inject store:false to avoid the caller's state policy.
@@ -77,7 +77,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if s.Resources == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && !s.Resources.Encrypted() {
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() && !s.Resources.Encrypted() {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Strict retained Responses requires encrypted resource authority.")
 	}
 	x.providerState = true
@@ -96,7 +96,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must reference a response created under this model.", &param)
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && contract == nil {
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() && contract == nil {
 		return invalidRequest("state_carrier", "This retained response has no historical strict interaction contract.", nil)
 	}
 	if contract != nil {

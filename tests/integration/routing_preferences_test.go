@@ -28,7 +28,7 @@ func TestRoutingSimulationsHonorAvailablePreferences(t *testing.T) {
 		h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": fmt.Sprintf("activate-%d", i)}), 200)
 		targets = append(targets, map[string]any{"provider_id": created["id"], "provider_model": vendorModel, "priority": i, "weight": 1, "timeout_ms": 2000})
 	}
-	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 2, "targets": targets}, map[string]string{"Idempotency-Key": "draft"}, 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 2, "fidelity": map[string]any{"mode": "transformed"}, "targets": targets}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)

@@ -46,7 +46,7 @@ func TestNoAuthPublicationIgnoresRetainedRevokedCredential(t *testing.T) {
 	}
 	certifyAndActivate("activate-authenticated")
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "route"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)

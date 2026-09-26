@@ -28,7 +28,7 @@ func TestInteractionEvidenceRejectsUnknownAndImpossibleStates(t *testing.T) {
 	for _, evidence := range []InteractionEvidence{
 		{Fidelity: "strict", PlanClass: "native_identity", UpstreamState: "assumed-success", ClientState: ClientUnobserved},
 		{Fidelity: "strict", PlanClass: "native_identity", UpstreamState: UpstreamNotSent, ClientState: ClientActionable},
-		{Fidelity: "legacy", PlanClass: "native_identity", UpstreamState: UpstreamTerminal, ClientState: ClientTerminal},
+		{Fidelity: "transformed", PlanClass: "native_identity", UpstreamState: UpstreamTerminal, ClientState: ClientTerminal},
 	} {
 		event := metadataEvent()
 		event.Attempts[0].Routing = &Routing{ProviderRevisionID: uuid.NewString(), Interaction: &evidence}

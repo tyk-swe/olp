@@ -115,6 +115,13 @@ func pinUnavailable() *Error {
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
 
+// strictRouteChanged refuses a retained strict resource once its route is
+// transformed: the route no longer promises the contract the resource keeps.
+func strictRouteChanged() *Error {
+	return serverError(http.StatusConflict, "provider_resource_unavailable",
+		"This strict resource is unavailable because its route is now transformed.")
+}
+
 func (s *Server) resolveResource(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, operation string) (*pin, *runtime.Route, *Error) {
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")

@@ -57,7 +57,7 @@ func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, t
 		timeout = targetTimeout[0]
 	}
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": timeout}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)

@@ -199,7 +199,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			if profile.ID == "bedrock-invoke" {
 				operation = "bedrock_invoke"
 			}
-			routeInput := map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+			routeInput := map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 			if strict {
 				routeInput["fidelity"] = map[string]any{}
 			}

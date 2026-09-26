@@ -335,3 +335,46 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 		t.Fatal("retired master key read rotated source")
 	}
 }
+
+func TestStrictVideoJobIsRefusedOnceItsRouteIsTransformed(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	upstream := newStrictVideoUpstream(t)
+	slug, key := publishStrictVideo(t, h, owner, upstream)
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	form.WriteField("model", slug)
+	form.WriteField("prompt", "retain the strict job")
+	form.Close()
+	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
+	if status != http.StatusCreated {
+		t.Fatalf("strict video create=%d %s", status, raw)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	providerID := route["latest_revision"].(map[string]any)["targets"].([]any)[0].(map[string]any)["provider_id"]
+	draft := transformed(fidelityDraft(slug, providerID))
+	draft["operations"] = []string{"video_create", "video_get", "video_content", "video_delete"}
+	draft = h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	h.refresh()
+	_, getsBefore, contentsBefore, deletesBefore, _, _ := upstream.snapshot()
+	for _, request := range []struct{ method, path string }{
+		{"GET", "/v1/videos/" + created.ID},
+		{"GET", "/v1/videos/" + created.ID + "/content"},
+		{"DELETE", "/v1/videos/" + created.ID},
+	} {
+		status, raw, _ = h.gatewayRaw(request.method, request.path, key, nil, nil)
+		if status != http.StatusConflict || !strings.Contains(string(raw), "now transformed") {
+			t.Fatalf("%s %s served a strict job on a transformed route: %d %s", request.method, request.path, status, raw)
+		}
+	}
+	if _, gets, contents, deletes, _, _ := upstream.snapshot(); gets != getsBefore || contents != contentsBefore || deletes != deletesBefore {
+		t.Fatal("refused strict video job reached the provider")
+	}
+}

@@ -178,6 +178,9 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 			RevisionID:     uuid.NewString(),
 			Revision:       1,
 			PublishedAt:    now,
+			// The official SDK surfaces reach providers without profiles and
+			// across dialects, which only a transformed route permits.
+			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
 		}},
 	}
 	secrets := map[string][]byte{credentialID: []byte(credential)}

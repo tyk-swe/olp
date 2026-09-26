@@ -447,7 +447,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 
 	// Route drafts: invalid targets cannot publish, stale edits cannot overwrite.
 	target := map[string]any{"provider_id": pid, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}
-	draftInput := map[string]any{"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 2, "targets": []any{target}}
+	draftInput := map[string]any{"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 2, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{target}}
 	unknown := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": "bad", "overall_timeout_ms": 5000, "max_attempts": 2, "targets": []any{map[string]any{"provider_id": pid, "provider_model": "missing", "priority": 0, "weight": 1, "timeout_ms": 2000}}}, map[string]string{"Idempotency-Key": "draft-unknown"}, 422)
 	if problemCode(t, unknown) != "validation_failed" {
 		t.Fatalf("unknown model %v", unknown)

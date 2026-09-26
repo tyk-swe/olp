@@ -305,6 +305,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 			ID: routeID, Slug: "video-default", RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
 			Operations:     []string{media.OpVideoCreate, media.OpVideoList, media.OpVideoGet, media.OpVideoContent, media.OpVideoDelete},
 			OverallTimeout: 8000, MaxAttempts: 1, RoutingID: routeID,
+			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
 			Targets: []runtime.Target{{
 				ID: uuid.NewString(), ProviderID: f.providerID, ProviderModel: mediaVideoModel,
 				Priority: 0, Weight: 1, Timeout: 6000, RoutingID: uuid.NewString(),

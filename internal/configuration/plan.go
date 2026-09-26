@@ -93,7 +93,6 @@ type existingRoute struct {
 	ID        string
 	ProjectID *string
 	State     string
-	Fidelity  json.RawMessage
 }
 
 type existingDraft struct {
@@ -180,7 +179,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = slots.Err(); err != nil {
 		return nil, err
 	}
-	routes, err := q.Query(ctx, "SELECT r.id::text,r.slug,r.project_id::text,r.state,v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id")
+	routes, err := q.Query(ctx, "SELECT id::text,slug,project_id::text,state FROM olp.routes")
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +187,10 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	for routes.Next() {
 		var id, slug, state string
 		var projectID *string
-		var fidelity []byte
-		if err = routes.Scan(&id, &slug, &projectID, &state, &fidelity); err != nil {
+		if err = routes.Scan(&id, &slug, &projectID, &state); err != nil {
 			return nil, err
 		}
-		v.routes[slug] = &existingRoute{ID: id, ProjectID: projectID, State: state, Fidelity: fidelity}
+		v.routes[slug] = &existingRoute{ID: id, ProjectID: projectID, State: state}
 	}
 	if err = routes.Err(); err != nil {
 		return nil, err
@@ -438,6 +436,9 @@ func (s *Server) validateDocument(doc *Document) error {
 	}
 	for i, rt := range doc.Routes {
 		prefix := "routes." + strconv.Itoa(i)
+		if _, err := runtime.DecodeFidelity(rt.Fidelity); err != nil {
+			return access.Invalid(prefix+".fidelity", err.Error())
+		}
 		if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
 			return err
 		}
@@ -649,25 +650,6 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			}
 		}
 		draft, staged := state.drafts[routeKey(rt.Slug, rt.Project)]
-		if !staged && len(rt.Fidelity) == 0 {
-			if existing, ok := state.routes[rt.Slug]; ok && lower(state.projectOf(existing.ProjectID)) == lower(rt.Project) {
-				rt.Fidelity = existing.Fidelity
-			}
-		}
-		if !staged {
-			if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
-				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
-				continue
-			}
-			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
-				var failure *access.Problem
-				if !errors.As(err, &failure) {
-					return nil, err
-				}
-				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
-				continue
-			}
-		}
 		switch {
 		case !staged:
 			result.item("route", rt.Slug, "stage", "route_draft")
@@ -675,21 +657,6 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			current, err := s.currentRouteEntry(ctx, q, draft.ID, rt, state)
 			if err != nil {
 				return nil, err
-			}
-			if len(rt.Fidelity) == 0 {
-				rt.Fidelity = current.Fidelity
-			}
-			if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
-				result.conflict("route", rt.Slug, "fidelity_policy_conflict")
-				continue
-			}
-			if err := routes.ValidateFidelityMigration(ctx, q, rt.Slug, rt.Fidelity); err != nil {
-				var failure *access.Problem
-				if !errors.As(err, &failure) {
-					return nil, err
-				}
-				result.conflict("route", rt.Slug, "route_fidelity_migration_required")
-				continue
 			}
 			if canonicalEqualRoute(rt, current) {
 				result.item("route", rt.Slug, "noop", "")

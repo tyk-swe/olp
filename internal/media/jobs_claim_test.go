@@ -198,6 +198,7 @@ func seedClaimFixture(t *testing.T) *claimFixture {
 			ID: routeID, Slug: "video-default", RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
 			Operations:     []string{OpVideoCreate, OpVideoList, OpVideoGet, OpVideoContent, OpVideoDelete},
 			OverallTimeout: 8000, MaxAttempts: 1, RoutingID: routeID,
+			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
 			Targets: []runtime.Target{{
 				ID: uuid.NewString(), ProviderID: f.providerID, ProviderModel: claimVideoModel,
 				Priority: 0, Weight: 1, Timeout: 6000, RoutingID: uuid.NewString(),

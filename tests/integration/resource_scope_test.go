@@ -237,12 +237,12 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 	}, idem("provider-viewer"), 403)
 
 	draftB := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": "beta-route", "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
+		"slug": "beta-route", "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets":    []any{map[string]any{"provider_id": providerB["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		"project_id": projectB,
 	}, idem("draft-beta"), 201)
 	draft := h.want(op, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": "alpha-route", "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
+		"slug": "alpha-route", "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets":    []any{map[string]any{"provider_id": providerAID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		"project_id": projectA,
 	}, idem("draft-alpha"), 201)
@@ -428,7 +428,7 @@ func TestGatewayKeyProjectIsolation(t *testing.T) {
 		provider := createScopedProvider(h, owner, slug, up.URL+"/v1", project, 201)
 		activateScopedProvider(h, owner, provider)
 		draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-			"slug": slug, "project_id": project, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
+			"slug": slug, "project_id": project, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 			"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		}, idem("draft-"+slug), 201)
 		h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-"+slug)), 200)

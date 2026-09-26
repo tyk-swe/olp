@@ -388,7 +388,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 		return nil
 	}
 	if !strict && !bytes.Contains(data, []byte("response.done")) && bytes.IndexByte(data, '\\') < 0 {
-		// Legacy sessions do not promise terminal response tracking. They
+		// Transformed sessions do not promise terminal response tracking. They
 		// observe only response.done usage, and that exact type must appear
 		// literally or contain a JSON escape. Other native frames still pass
 		// through byte-for-byte without decoding or changed failure behavior.

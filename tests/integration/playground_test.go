@@ -60,7 +60,7 @@ func provisionPlaygroundRoute(t *testing.T, h *accessHarness, b *browser, cfg ma
 	detail = h.want(b, "GET", path, nil, nil, 200)
 	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("pg-activate-"+detail["id"].(string))), 200)
 	slug := "pg-" + uuid.NewString()[:8]
-	draft := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	draft := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	if projectID != nil {
 		draft["project_id"] = projectID
 	}

@@ -38,7 +38,7 @@ func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.T
 	if err != nil {
 		return nil, nil, err
 	}
-	if FidelityMode(route.Fidelity) != FidelityStrict {
+	if !route.Fidelity.Strict() {
 		return nil, policy, nil
 	}
 	if !slices.Contains(route.Operations, "generation") {
@@ -96,7 +96,7 @@ func EffectiveOutputLimit(request *openai.Request) *int64 {
 }
 
 func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
-	if FidelityMode(route.Fidelity) != FidelityStrict {
+	if !route.Fidelity.Strict() {
 		return nil, nil
 	}
 	templates := map[string]*operationplan.Template{}
@@ -120,7 +120,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 }
 
 func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Template, error) {
-	if FidelityMode(route.Fidelity) != FidelityStrict || !slices.Contains(route.Operations, "realtime") {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
 	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
@@ -154,7 +154,7 @@ func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Temp
 }
 
 func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template, error) {
-	if FidelityMode(route.Fidelity) != FidelityStrict {
+	if !route.Fidelity.Strict() {
 		return nil, nil
 	}
 	templates := map[string]*mediacontract.Template{}
@@ -183,7 +183,7 @@ func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract
 }
 
 func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Template, error) {
-	if FidelityMode(route.Fidelity) != FidelityStrict || !slices.Contains(route.Operations, "batch") {
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "batch") {
 		return nil, nil
 	}
 	templates := make(map[string]*durablecontract.Template, len(route.Targets))

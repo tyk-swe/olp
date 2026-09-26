@@ -12,49 +12,14 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-// PublishedFidelity inherits a same-project contract for omission-safe edits
-// that begin by creating another draft for an existing slug.
-func PublishedFidelity(ctx context.Context, q access.Queryer, slug string, project *string) (json.RawMessage, error) {
-	var raw []byte
-	err := q.QueryRow(ctx, `SELECT v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
-        WHERE r.slug=$1 AND r.project_id IS NOT DISTINCT FROM $2::uuid`, slug, project).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return raw, err
-}
-
-// ValidateFidelityMigration keeps the contract advertised by a published slug
-// consistent even while unsupported readers retain an older runtime snapshot.
-func ValidateFidelityMigration(ctx context.Context, q access.Queryer, slug string, raw json.RawMessage) error {
-	fidelity, err := runtime.DecodeFidelity(raw)
-	if err != nil {
-		return access.Invalid("fidelity", err.Error())
-	}
-	var strict bool
-	err = q.QueryRow(ctx, "SELECT strict_contract FROM olp.routes WHERE slug=$1", slug).Scan(&strict)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if strict != (runtime.FidelityMode(fidelity) == runtime.FidelityStrict) {
-		return access.Fail(422, "route_fidelity_migration_required", "Changing a published route's strict contract requires a migration draft with a new slug.")
-	}
-	return nil
-}
-
+// normalizedFidelity stores every draft with an explicit mode. Omission, null
+// and an empty object declare a strict route; nothing is inherited on edit.
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	f, err := runtime.DecodeFidelity(raw)
 	if err != nil {
 		return nil, access.Invalid("fidelity", err.Error())
 	}
-	if f == nil {
-		return nil, nil
-	}
-	out, err := json.Marshal(f)
-	return out, err
+	return json.Marshal(f)
 }
 
 // ValidateFidelityPolicy is shared by draft validation, activation and
@@ -77,22 +42,11 @@ func ValidateFidelityPolicy(fidelity, rawPolicy json.RawMessage) error {
 	return err
 }
 
-func requireFidelityExecution(raw json.RawMessage) error {
-	f, err := runtime.DecodeFidelity(raw)
-	if err != nil {
-		return access.Invalid("fidelity", err.Error())
-	}
-	if err = runtime.RequireRouteExecution(f); err != nil {
-		return access.Fail(422, "strict_execution_unavailable", err.Error())
-	}
-	return nil
-}
-
 // compileDraftExecution checks the same configured links used by release
 // installation. It is read-only and never performs provider inference or probes.
 func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
-	if err != nil || runtime.FidelityMode(fidelity) != runtime.FidelityStrict {
+	if err != nil || !fidelity.Strict() {
 		return err
 	}
 	snapshot, err := runtime.Compile(ctx, tx)
@@ -112,10 +66,22 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 			Incompatibility() (code, field, requirement, message string)
 		}
 		if errors.As(err, &failure) {
-			code, _, _, message := failure.Incompatibility()
-			return access.Fail(422, code, message)
+			code, _, requirement, message := failure.Incompatibility()
+			return access.Fail(422, code, message+transformedGuidance[requirement])
 		}
 		return err
 	}
 	return nil
+}
+
+// transformedGuidance completes strict refusals that exist only because a
+// target lacks a provider profile or needs translation. A transformed route
+// serves such a target, so the author learns which declaration to make.
+var transformedGuidance = map[string]string{
+	"explicit_profile":         " Declare the route transformed to use a provider without a profile.",
+	"operation_contract":       " Declare the route transformed to translate for this target.",
+	"generation_dialect":       " Declare the route transformed to translate for this target.",
+	"native_media_contract":    " Declare the route transformed to translate for this target.",
+	"native_batch_contract":    " Declare the route transformed to translate for this target.",
+	"native_realtime_contract": " Declare the route transformed to translate for this target.",
 }

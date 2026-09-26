@@ -398,12 +398,6 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
-	if len(input.Fidelity) == 0 {
-		input.Fidelity, err = PublishedFidelity(r.Context(), tx, input.Slug, input.ProjectID)
-		if err != nil {
-			return access.Reply{}, err
-		}
-	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
 	if err != nil {
 		return access.Reply{}, err
@@ -455,9 +449,6 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	}
 	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
 		return access.Reply{}, access.Invalid("project_id", "The draft's project is set at creation and cannot change.")
-	}
-	if len(input.Fidelity) == 0 {
-		input.Fidelity = bytes.Clone(current.Fidelity)
 	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {

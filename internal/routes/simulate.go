@@ -154,7 +154,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, route.Fidelity.Strict())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -303,7 +303,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, route.Fidelity.Strict())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -355,7 +355,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/diff", h(s.revisionDiff))
 	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/{revision_id}", h(s.revision))
 	mux.HandleFunc("POST /api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
-	mux.HandleFunc("POST /api/v1/routes/{route_id}/migration-draft", h(s.migrationDraft))
 	mux.HandleFunc("GET /api/v1/routing-policies/{scope}/{id}", h(s.policy))
 	mux.HandleFunc("PUT /api/v1/routing-policies/{scope}/{id}", h(s.putPolicy))
 	mux.HandleFunc("POST /api/v1/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))

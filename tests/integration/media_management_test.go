@@ -149,7 +149,7 @@ func provisionVideo(t *testing.T, h *accessHarness, b *browser, endpoint string,
 	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("video-activate")), 200)
 	slug := "video-" + uuid.NewString()[:8]
 	draft := map[string]any{
-		"slug": slug, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"slug": slug, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"operations": []string{"video_create", "video_get", "video_content", "video_delete"},
 		"targets":    []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
 	}

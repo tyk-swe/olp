@@ -250,7 +250,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
-	if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+	if route.Fidelity.Strict() {
 		if e := strictMediaContext(x); e != nil {
 			return e
 		}
@@ -274,7 +274,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
 			encode := media.EncodeConfigured
-			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+			if route.Fidelity.Strict() {
 				encode = media.EncodeStrictConfigured
 			}
 			call, effective, e := encode(request, p.Connector(), t.ProviderModel)
@@ -282,7 +282,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
-			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+			if route.Fidelity.Strict() {
 				template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
 				if !ok {
 					semantic = errors.New("compiled strict media contract unavailable")

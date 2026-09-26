@@ -94,6 +94,9 @@ export async function verifyProviderRouting(page: Page, info: TestInfo) {
     .getByRole('link', { name: 'provider-pool-route', exact: true })
     .click();
   await page.getByLabel('Maximum attempts').fill('3');
+  // Bulk-created drafts are strict; these providers have no profile.
+  await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
+  await page.getByLabel('Fidelity mode').selectOption('transformed');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   const policy = page.locator('section').filter({
     has: page.getByRole('heading', {

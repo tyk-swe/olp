@@ -293,7 +293,7 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	// A route can keep serving the active model while an older provider
 	// revision becomes the draft, even when their model sets differ.
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_model_id": secondID, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)

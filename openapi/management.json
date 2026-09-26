@@ -1653,7 +1653,15 @@
             "type": "array"
           },
           "fidelity": {
-            "$ref": "#/components/schemas/RouteFidelity"
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1946,6 +1954,7 @@
       "ContentPolicyRule": {
         "properties": {
           "action": {
+            "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
             "enum": [
               "block",
               "redact"
@@ -2529,7 +2538,15 @@
             "type": "array"
           },
           "fidelity": {
-            "$ref": "#/components/schemas/RouteFidelity"
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6742,7 +6759,15 @@
             "type": "array"
           },
           "fidelity": {
-            "$ref": "#/components/schemas/RouteFidelity"
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7482,15 +7507,7 @@
             "type": "string"
           },
           "fidelity": {
-            "description": "Null means the route retains its historical legacy contract.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RouteFidelity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -7506,7 +7523,8 @@
           "targets",
           "content_policy",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "fidelity"
         ],
         "type": "object"
       },
@@ -7555,15 +7573,7 @@
             "type": "string"
           },
           "fidelity": {
-            "description": "Null means the route retains its historical legacy contract.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RouteFidelity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -7571,7 +7581,8 @@
           "slug",
           "state",
           "project_id",
-          "etag"
+          "etag",
+          "fidelity"
         ],
         "type": "object"
       },
@@ -7677,26 +7688,10 @@
             "type": "boolean"
           },
           "fidelity_before": {
-            "description": "Null means the route retains its historical legacy contract.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RouteFidelity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RouteFidelity"
           },
           "fidelity_after": {
-            "description": "Null means the route retains its historical legacy contract.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RouteFidelity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -7713,7 +7708,10 @@
           "operations_removed",
           "targets_added",
           "targets_removed",
-          "targets_changed"
+          "targets_changed",
+          "fidelity_changed",
+          "fidelity_before",
+          "fidelity_after"
         ],
         "type": "object"
       },
@@ -7800,15 +7798,7 @@
             "type": "array"
           },
           "fidelity": {
-            "description": "Null means the route retains its historical legacy contract.",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/RouteFidelity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RouteFidelity"
           }
         },
         "required": [
@@ -7824,7 +7814,8 @@
           "activated_at",
           "operations",
           "targets",
-          "content_policy"
+          "content_policy",
+          "fidelity"
         ],
         "type": "object"
       },
@@ -9742,13 +9733,12 @@
       },
       "RouteFidelity": {
         "additionalProperties": false,
-        "description": "Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.",
+        "description": "Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.",
         "properties": {
           "mode": {
             "default": "strict",
-            "description": "Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.",
+            "description": "Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.",
             "enum": [
-              "legacy",
               "strict",
               "transformed"
             ],
@@ -9995,7 +9985,6 @@
           "fidelity": {
             "type": "string",
             "enum": [
-              "legacy",
               "strict",
               "transformed"
             ]
@@ -10032,7 +10021,7 @@
               "not_evaluated",
               "incompatible",
               "blocked",
-              "legacy",
+              "transformed",
               "admitted"
             ]
           },
@@ -10056,7 +10045,7 @@
           "fidelity",
           "evidence"
         ],
-        "description": "Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification."
+        "description": "Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification."
       },
       "InteractionObligations": {
         "type": "object",
@@ -10221,25 +10210,6 @@
           "resource_scope_declared"
         ],
         "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
-      },
-      "CreateRouteMigrationDraftRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "slug"
-        ],
-        "properties": {
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100,
-            "pattern": "^[a-z0-9][a-z0-9._-]*$",
-            "description": "Previously unpublished route identity; retired slugs cannot be reused."
-          },
-          "fidelity": {
-            "$ref": "#/components/schemas/RouteFidelity"
-          }
-        }
       },
       "OperationDialect": {
         "type": "object",
@@ -21575,119 +21545,6 @@
         "tags": [
           "users"
         ]
-      }
-    },
-    "/api/v1/routes/{route_id}/migration-draft": {
-      "post": {
-        "operationId": "create_route_migration_draft",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "route_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Current published route ETag"
-          }
-        ],
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
-                }
-              }
-            },
-            "description": "",
-            "headers": {
-              "Location": {
-                "description": "Path of the created resource",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Idempotency-Key is missing or invalid"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Idempotency-Key was already used or is in progress"
-          },
-          "412": {
-            "description": "Source route ETag has changed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid fidelity or previously published destination slug",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "csrfToken": [],
-            "sessionCookie": []
-          }
-        ],
-        "tags": [
-          "routes"
-        ],
-        "description": "Copy the current published revision into a same-project review draft under a previously unpublished slug. Fidelity defaults to strict. Preserves settings and policies; does not activate or invoke inference.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRouteMigrationDraftRequest"
-              }
-            }
-          }
-        }
       }
     },
     "/api/v1/operation-dialects": {

@@ -109,7 +109,7 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			}
 			detail = h.want(owner, "GET", path, nil, nil, 200)
 			h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": routeSlug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": routeSlug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 			key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "native inference", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			read := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "models only", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)

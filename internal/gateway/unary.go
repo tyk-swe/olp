@@ -52,7 +52,7 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 		model = header.Model
 	}
 	route, exists := x.request.release.Snapshot.Routes[model]
-	if !explicit && (!exists || runtime.FidelityMode(route.Fidelity) != runtime.FidelityStrict) {
+	if !explicit && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
 	if !exists {

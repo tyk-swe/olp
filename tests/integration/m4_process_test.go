@@ -145,7 +145,7 @@ func m4Provisioned(t *testing.T) *m4Install {
 	in.h.want(in.owner, http.MethodPost, in.path+"/activate", nil,
 		withMatch(detail, map[string]string{"Idempotency-Key": "activate"}), 200)
 	draft := in.h.want(in.owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 20000, "max_attempts": 1,
+		"slug": routeSlug, "overall_timeout_ms": 20000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_id": in.provider, "provider_model": vendorModel,
 			"priority": 0, "weight": 1, "timeout_ms": 15000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)

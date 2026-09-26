@@ -81,6 +81,7 @@ const activeRoute: ActiveRoute = {
     activated_at: '2026-07-12T12:00:00Z',
     activated_by: 'user-a',
     content_policy: null,
+    fidelity: { mode: 'strict' },
     id: 'revision-a',
     max_attempts: 1,
     operations: ['generation'],

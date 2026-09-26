@@ -19,7 +19,7 @@ func TestConfigurationPromotion(t *testing.T) {
 	provider := createScopedProvider(source, sourceOwner, "Promoted vendor", vendor.URL+"/v1", projectID, 201)
 	activateScopedProvider(source, sourceOwner, provider)
 	draft := source.want(sourceOwner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": "promoted", "project_id": projectID,
+		"slug": "promoted", "project_id": projectID, "fidelity": map[string]any{"mode": "transformed"},
 		"operations": []any{"generation"}, "overall_timeout_ms": 30000, "max_attempts": 2,
 		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		"content_policy": map[string]any{"rules": []any{map[string]any{

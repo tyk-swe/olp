@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
-func historicalFidelitySnapshot(t *testing.T) Snapshot {
+func fidelitySnapshot(t *testing.T) Snapshot {
 	t.Helper()
 	raw, err := fixtures.Files.ReadFile("routing/attempt-order.json")
 	if err != nil {
@@ -25,34 +25,36 @@ func historicalFidelitySnapshot(t *testing.T) Snapshot {
 	}
 	return corpus.Snapshot
 }
-func TestHistoricalRouteFidelityKeepsRecordedDigest(t *testing.T) {
-	snapshot := historicalFidelitySnapshot(t)
-	// Captured with snapshot.go/publish.go from pre-fidelity checkpoint 1030e6ef,
-	// using the unchanged independently checked-in routing source fixture.
-	const previousDigest = "db556c7bfd9209dc7edd834abe3aca58129406d82dd0354ca25b153d26ef93a3"
-	digest, err := snapshot.Digest()
-	if err != nil || digest != previousDigest {
-		t.Fatalf("historical digest changed: %s %v", digest, err)
-	}
+
+func TestSnapshotsCarryExplicitRouteFidelity(t *testing.T) {
+	snapshot := fidelitySnapshot(t)
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), `"fidelity"`) {
-		t.Fatal("omitted legacy fidelity entered serialized snapshots")
+	if !strings.Contains(string(data), `"fidelity":{"mode":"transformed"}`) {
+		t.Fatal("serialized snapshot omitted the route fidelity", string(data))
 	}
 	var restored Snapshot
 	if err = json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = NewRelease("legacy-fixture", 1, &restored, nil); err != nil {
-		t.Fatal("historical snapshot no longer installs", err)
+	if _, err = NewRelease("transformed-fixture", 1, &restored, nil); err != nil {
+		t.Fatal("transformed snapshot did not install", err)
+	}
+	for slug, route := range restored.Routes {
+		route.Fidelity = RouteFidelity{}
+		restored.Routes[slug] = route
+	}
+	if err = restored.Validate(); err == nil || !strings.Contains(err.Error(), "fidelity.mode must be strict or transformed") {
+		t.Fatal("snapshot without a route fidelity installed", err)
 	}
 }
-func TestStrictSnapshotCannotInstallLegacyExecution(t *testing.T) {
-	snapshot := historicalFidelitySnapshot(t)
+
+func TestStrictSnapshotRequiresCompiledProfiles(t *testing.T) {
+	snapshot := fidelitySnapshot(t)
 	for slug, route := range snapshot.Routes {
-		route.Fidelity = &RouteFidelity{Mode: FidelityStrict}
+		route.Fidelity = RouteFidelity{Mode: FidelityStrict}
 		route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "mask", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Pattern: "secret"}}}
 		snapshot.Routes[slug] = route
 		if err := snapshot.Validate(); !errors.Is(err, ErrFidelityPolicyConflict) {
@@ -74,18 +76,24 @@ func TestStrictSnapshotCannotInstallLegacyExecution(t *testing.T) {
 		break
 	}
 }
-func TestExplicitFidelityDefaultsAndInvalidContracts(t *testing.T) {
-	f, err := DecodeFidelity(nil)
-	if err != nil || f != nil || FidelityMode(f) != FidelityLegacy {
-		t.Fatal("omission changed historical behavior")
+
+func TestOmittedFidelityIsStrictAndLegacyIsRejected(t *testing.T) {
+	for _, raw := range []string{``, `null`, ` null `, `{}`, `{"mode":"strict"}`} {
+		f, err := DecodeFidelity([]byte(raw))
+		if err != nil || f.Mode != FidelityStrict || !f.Strict() {
+			t.Fatalf("%q did not declare a strict route: %+v %v", raw, f, err)
+		}
 	}
-	f, err = DecodeFidelity([]byte(`{}`))
-	if err != nil || f.Mode != FidelityStrict {
-		t.Fatal("explicit empty contract did not default strict")
+	f, err := DecodeFidelity([]byte(`{"mode":"transformed"}`))
+	if err != nil || f.Mode != FidelityTransformed || f.Strict() {
+		t.Fatal("transformed declaration was not preserved", f, err)
 	}
-	for _, raw := range []string{`null`, `[]`, `{"mode":null}`, `{"mode":""}`, `{"mode":"STRICT"}`, `{"mode":"native"}`, `{"mode":"strict","mode":"legacy"}`, `{"Mode":"legacy"}`, `{"mode":"strict","other":true}`} {
+	for _, raw := range []string{`{"mode":"legacy"}`, `[]`, `"strict"`, `{"mode":null}`, `{"mode":""}`, `{"mode":"STRICT"}`, `{"mode":"native"}`, `{"mode":"strict","mode":"legacy"}`, `{"Mode":"legacy"}`, `{"mode":"strict","other":true}`} {
 		if _, err := DecodeFidelity([]byte(raw)); err == nil {
 			t.Fatalf("ambiguous fidelity accepted: %s", raw)
 		}
+	}
+	if err := ValidateRouteFidelity(RouteFidelity{Mode: "legacy"}, nil); err == nil {
+		t.Fatal("legacy fidelity validated")
 	}
 }

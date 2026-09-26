@@ -237,6 +237,38 @@ func TestValidateDocumentRejectsDuplicatesAndReferences(t *testing.T) {
 	}
 }
 
+func TestRouteFidelityOmissionIsStrictInDocuments(t *testing.T) {
+	omitted := testDocument()
+	first, err := Digest(omitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(omitted.Routes[0].Fidelity) != `{"mode":"strict"}` {
+		t.Fatalf("canonical route did not state strict fidelity: %s", omitted.Routes[0].Fidelity)
+	}
+	for _, raw := range []string{`{"mode":"strict"}`, `{}`, `null`} {
+		explicit := testDocument()
+		explicit.Pricing.EffectiveAt = omitted.Pricing.EffectiveAt
+		explicit.Routes[0].Fidelity = json.RawMessage(raw)
+		digest, err := Digest(explicit)
+		if err != nil || digest != first {
+			t.Fatalf("%s differs from an omitted fidelity: %v", raw, err)
+		}
+	}
+	transformed := testDocument()
+	transformed.Pricing.EffectiveAt = omitted.Pricing.EffectiveAt
+	transformed.Routes[0].Fidelity = json.RawMessage(`{"mode":"transformed"}`)
+	if digest, _ := Digest(transformed); digest == first {
+		t.Fatal("transformed fidelity did not change the digest")
+	}
+	legacy := testDocument()
+	legacy.Routes[0].Fidelity = json.RawMessage(`{"mode":"legacy"}`)
+	var problem *access.Problem
+	if err := testServer().validateDocument(legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
+		t.Fatalf("legacy fidelity was not a typed field error: %v", err)
+	}
+}
+
 func TestValidateBindingsRejectsForeignRef(t *testing.T) {
 	doc := testDocument()
 	if err := validateBindings(doc, map[string]string{"acme/other": "secret"}); err == nil {
@@ -408,7 +440,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, nil}},
+		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`)}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
 		{match: "FROM olp.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},

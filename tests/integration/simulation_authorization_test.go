@@ -27,7 +27,7 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "provider-activate"}), 200)
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)

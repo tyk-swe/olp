@@ -156,7 +156,7 @@ func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	groups := [][]string{{"image_generation", "image_edit", "image_variation"}, {"speech"}, {"transcription"}, {"video_create", "video_list", "video_get", "video_content", "video_delete"}}
 	for _, ops := range groups {
 		slug := strings.ReplaceAll(ops[0], "_", "-")
-		draft := call("POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": ops, "overall_timeout_ms": 5000, "max_attempts": 1, "targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}}}, "", 201)
+		draft := call("POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": ops, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}}}, "", 201)
 		path := "/api/v1/route-drafts/" + draft["id"].(string)
 		draft = call("POST", path+"/validate", nil, draft["etag"].(string), 200)
 		mode := "unary"

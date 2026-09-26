@@ -196,7 +196,7 @@ func publishProfileNetworkRoute(t *testing.T, h *accessHarness, owner *browser, 
 	t.Helper()
 	const slug = "profile-network"
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
 	}, idem("profile-route"), 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("profile-route-activate")), 200)

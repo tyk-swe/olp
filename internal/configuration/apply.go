@@ -108,22 +108,11 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			if err != nil {
 				return err
 			}
-			if len(route.Fidelity) == 0 {
-				route.Fidelity = current.Fidelity
-			}
 			if canonicalEqualRoute(route, current) {
 				continue
 			}
 		}
-		if !staged && len(route.Fidelity) == 0 {
-			if existing, ok := state.routes[route.Slug]; ok && lower(state.projectOf(existing.ProjectID)) == lower(route.Project) {
-				route.Fidelity = existing.Fidelity
-			}
-		}
 		if err := routes.ValidateFidelityPolicy(route.Fidelity, route.ContentPolicy); err != nil {
-			return err
-		}
-		if err := routes.ValidateFidelityMigration(ctx, tx, route.Slug, route.Fidelity); err != nil {
 			return err
 		}
 		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity}

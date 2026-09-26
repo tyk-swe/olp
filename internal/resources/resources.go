@@ -15,6 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+// Strict and transformed resources keep separate kinds because their storage
+// contracts differ: a strict kind stores an encrypted native payload under a
+// contract version, while a transformed kind stores metadata only.
 const (
 	KindFile           = "file"
 	KindBatch          = "batch"
@@ -167,7 +170,7 @@ func (s *Store) List(ctx context.Context, kind, apiKeyID string, limit int, afte
 	return s.ListKinds(ctx, []string{kind}, apiKeyID, limit, afterID)
 }
 
-// ListKinds joins legacy and strict resource identities without changing
+// ListKinds joins transformed and strict resource identities without changing
 // either storage contract. The cursor belongs to this owner and one of the
 // requested kinds; an unrelated local ID cannot move the page boundary.
 func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {

@@ -471,7 +471,9 @@ func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabi
 	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	slug := "state-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	draftBody := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	// Without a provider profile the route must be transformed; callers that
+	// configure a profile may declare a strict route instead.
+	draftBody := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	for key, value := range draftFields {
 		draftBody[key] = value
 	}
@@ -655,7 +657,7 @@ func TestBatchLifecycle(t *testing.T) {
 	h.want(owner, "PATCH", "/api/v1/providers/"+detail["id"].(string), map[string]any{"name": "Provider state fixture v2", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": fixture.URL, "deployment": vendorModel, "api_version": "2024-10-21"}}, etagHeader(detail), 200)
 	detail = h.want(owner, "GET", "/api/v1/providers/"+detail["id"].(string), nil, nil, 200)
 	h.want(owner, "POST", "/api/v1/providers/"+detail["id"].(string)+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"batch"}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"batch"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	h.refresh()
 	status, fetched, _ = h.gateway("GET", "/v1/files/"+fileID, secret, nil)
@@ -1027,7 +1029,7 @@ func provisionBedrockContract(t *testing.T, h *accessHarness, endpoint, model st
 	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	slug := "bedrock-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	routeInput := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	routeInput := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	if strict {
 		routeInput["fidelity"] = map[string]any{}
 	}
@@ -1166,7 +1168,7 @@ func testBedrockIngress(t *testing.T, strict bool) {
 		t.Fatalf("unsupported invoke certification: %v", result)
 	}
 
-	invokeDraft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": "invoke-" + strings.ReplaceAll(uuid.NewString()[:8], "-", ""), "operations": []string{"bedrock_invoke"}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": "anthropic.claude-3-haiku-20240307-v1:0", "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	invokeDraft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": "invoke-" + strings.ReplaceAll(uuid.NewString()[:8], "-", ""), "operations": []string{"bedrock_invoke"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": "anthropic.claude-3-haiku-20240307-v1:0", "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	status, body, _ := h.request(owner, "POST", "/api/v1/route-drafts/"+invokeDraft["id"].(string)+"/activate", nil, withMatch(invokeDraft, map[string]string{"Idempotency-Key": uuid.NewString()}))
 	problem, _ := body["detail"].(string)
 	if status != 422 || !strings.Contains(problem, "bedrock_invoke") {
@@ -1212,7 +1214,7 @@ func TestHistoricalResourceModel(t *testing.T) {
 			map[string]any{"provider_id": detail["id"], "provider_model": modelB, "priority": priorityB, "weight": 1, "timeout_ms": 5000},
 		}
 	}
-	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": targets(1, 0)}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": targets(1, 0)}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	secret := stateKey(t, h, owner, slug, true)
 	h.refresh()
@@ -1233,7 +1235,7 @@ func TestHistoricalResourceModel(t *testing.T) {
 	h.want(owner, "PATCH", path, map[string]any{"name": "Two model fixture v2", "configuration": create["configuration"]}, etagHeader(detail), 200)
 	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-	draft = h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": targets(0, 1)}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	draft = h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": targets(0, 1)}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	h.refresh()
 

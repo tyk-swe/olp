@@ -49,7 +49,7 @@ func (x *execution) summarizeSource() requestSummary {
 }
 
 func (x *execution) strict() bool {
-	return x.route != nil && runtime.FidelityMode(x.route.Fidelity) == runtime.FidelityStrict
+	return x.route != nil && x.route.Fidelity.Strict()
 }
 
 // Prepared invocations are retained only for this inference request and bounded

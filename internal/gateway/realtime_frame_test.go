@@ -49,7 +49,7 @@ func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 	}
 }
 
-func TestLegacyRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *testing.T) {
+func TestTransformedRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *testing.T) {
 	for _, raw := range []string{
 		`{"type":"response.audio.delta","response_id":"resp_1","delta":"AQID","output_index":0}`,
 		`{"type":"session.updated","event_id":"event_1"}`,
@@ -57,7 +57,7 @@ func TestLegacyRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *testin
 	} {
 		state := realtimeResponseState{}
 		if got := state.providerFrame(websocket.MessageText, []byte(raw), false); got != nil {
-			t.Fatalf("nonterminal legacy frame fabricated usage: frame=%s usage=%+v", raw, got)
+			t.Fatalf("nonterminal transformed frame fabricated usage: frame=%s usage=%+v", raw, got)
 		}
 	}
 	for _, raw := range []string{

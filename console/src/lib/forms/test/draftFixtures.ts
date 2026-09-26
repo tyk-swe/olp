@@ -43,6 +43,7 @@ export const draft: RouteDraft = {
   overall_timeout_ms: 120000,
   max_attempts: 1,
   content_policy: null,
+  fidelity: { mode: 'strict' },
   targets: [
     {
       id: 'target-a',

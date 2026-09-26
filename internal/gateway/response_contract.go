@@ -123,6 +123,9 @@ func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, au
 	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 		return notFoundError("not_found", "The stored response is unavailable to this key.")
 	}
+	if !current.Fidelity.Strict() {
+		return strictRouteChanged()
+	}
 	p, _, e := s.resolveResource(ctx, x, authority, res, operationGeneration)
 	if e != nil {
 		return e
