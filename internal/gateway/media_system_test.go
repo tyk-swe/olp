@@ -318,6 +318,10 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	exec(`INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag)
 		VALUES($1,$2,$3,$4,$5,$6)`,
 		route.ID, route.Slug, f.ownerID, route.Revision, route.RevisionID, uuid.NewString())
+	operations, _ := json.Marshal(route.Operations)
+	exec(`INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity)
+		VALUES($1,$2,$3,$4,$5,$6,$7,'[]',$8,$9,'{}','{"mode":"transformed"}')`,
+		route.RevisionID, route.ID, route.Revision, route.Slug, operations, route.OverallTimeout, route.MaxAttempts, uuid.NewString(), f.ownerID)
 	digest, err := f.snapshot.Digest()
 	if err != nil {
 		t.Fatal(err)
