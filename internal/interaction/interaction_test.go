@@ -131,8 +131,8 @@ func TestNativeProfilesPreserveOriginalGenerationDocuments(t *testing.T) {
 				t.Fatal("native token control renamed")
 			}
 			for _, entry := range plan.Prepared().Provenance() {
-				if entry.Origin == oif.LegacyMapping || entry.Origin == oif.ExplicitTransform {
-					t.Fatal("legacy transformation admitted as native identity")
+				if entry.Origin == oif.TransformedMapping || entry.Origin == oif.ExplicitTransform {
+					t.Fatal("transformed mapping admitted as native identity")
 				}
 			}
 		})

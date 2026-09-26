@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
-// prepareText is a qualified operation mapping, independent of the legacy
+// prepareText is a qualified operation mapping, independent of the transformed
 // Parts/Calls converter. Its narrow input and guarded output contract keeps
 // the native baseline explicit instead of approximating unsupported features.
 func (t *Template) prepareText(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {

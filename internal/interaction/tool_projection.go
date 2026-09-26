@@ -393,7 +393,7 @@ func (p *Plan) ProjectUnary(completion *openai.Completion, handle string, limit 
 	if !onlyMembers(root, "id type role model content stop_reason stop_sequence usage") {
 		return nil, Delivery{}, guardFailure("/result", "qualified_native_result")
 	}
-	// Reuse the incremental block guards without passing through a legacy codec.
+	// Reuse the incremental block guards without passing through a transformed codec.
 	projection.plan = &Plan{template: p.template, config: p.config, prepared: p.prepared, effective: p.effective, sourceFamily: p.sourceFamily, stream: true, route: p.route, receipt: p.receipt}
 	seq := uint64(0)
 	observe := func(name string, body any) error {

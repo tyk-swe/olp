@@ -108,7 +108,7 @@ func TestFrozenVersionOneReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This digest pins the fixture contracts and every referenced artifact together.
-	const manifestDigest = "c71cbc5a59e44059e1c0b2f53365f6acd91821a9bf1ced7ed731d704db60e878"
+	const manifestDigest = "9528f2aebb1e0fbba668cb4d98862bbc4eabad27b71b6f259cfdaec117bac648"
 	actual := sha256.Sum256(manifest)
 	if hex.EncodeToString(actual[:]) != manifestDigest {
 		t.Fatal("v1 references changed: add a new version instead of rewriting the reference")

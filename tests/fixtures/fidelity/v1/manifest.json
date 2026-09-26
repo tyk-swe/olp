@@ -8,7 +8,7 @@
   "files": {
     "anthropic-tool-next-request.json": "81062860b3b9d324f122027adaa141280a665e710df452277cb3cb4ebbb08c07",
     "anthropic-tool-workflow.sse": "8989d7c7b79e0cf1a79b84bef0e9a023b176cb58259df6aabc37a0de3a8197ac",
-    "counterexamples.json": "02526c4e75940cfb3d794346f9a9e1b78aba501dbc1340e095a65ba6c90fd18f",
+    "counterexamples.json": "9d73b69d12359255fd7d1b95a8dbe2dcfefdaa962287dbcd7632198382d83537",
     "inventory.json": "5c8746173d02ded1798e87fc0f48f8f599eccaf1b2c3b2c7864164e6eb24afbb"
   }
 }

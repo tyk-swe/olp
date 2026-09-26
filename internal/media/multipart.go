@@ -195,7 +195,7 @@ type Form struct {
 	text       map[string][]string
 	files      map[string][]Part
 	source     []Field // accepted caller members in original multipart order
-	normalized bool    // legacy parsing changed text, filename, or part metadata
+	normalized bool    // parsing changed text, filename, or part metadata
 	spool      *Spool
 	handles    []Handle
 	armed      bool

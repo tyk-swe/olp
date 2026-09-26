@@ -1,6 +1,6 @@
 // Package interaction compiles and binds strict operation contracts. It owns
 // semantic admission; live authority, dispatch, retry and accounting remain with
-// their existing owners. No legacy encoder establishes a strict plan.
+// their existing owners. No transformed codec establishes a strict plan.
 package interaction
 
 import (

@@ -109,7 +109,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 
 func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {
 	for _, entry := range request.OIF().Provenance() {
-		if entry.Origin == oif.ExplicitTransform || entry.Origin == oif.LegacyMapping {
+		if entry.Origin == oif.ExplicitTransform || entry.Origin == oif.TransformedMapping {
 			return oif.Prepared{}, incompatible("policy_conflict", "/request", "semantic_preservation", "Strict execution cannot consume a semantically transformed source.")
 		}
 	}

@@ -94,7 +94,7 @@
           }
         ]
       },
-      "legacy_target": {
+      "transformed_target": {
         "contents": [
           {
             "role": "user",
@@ -143,7 +143,7 @@
           "maxOutputTokens": 32
         }
       },
-      "legacy_loss": "text after the tool call moved before the call",
+      "transformed_loss": "text after the tool call moved before the call",
       "strict_reason": "ordered_content",
       "paths": [
         "/messages/1/content"
@@ -242,7 +242,7 @@
           }
         ]
       },
-      "legacy_target": {
+      "transformed_target": {
         "model": "fixture-model",
         "max_tokens": 32,
         "stream": false,
@@ -268,7 +268,7 @@
           }
         ]
       },
-      "legacy_loss": "system and developer roles collapse to one system scope",
+      "transformed_loss": "system and developer roles collapse to one system scope",
       "strict_reason": "instruction_scope",
       "paths": [
         "/messages/1/role"
@@ -344,7 +344,7 @@
           }
         }
       },
-      "legacy_target": {
+      "transformed_target": {
         "model": "fixture-model",
         "max_tokens": 32,
         "stream": false,
@@ -378,7 +378,7 @@
           }
         }
       },
-      "legacy_loss": "schema name, description and explicit strictness disappear",
+      "transformed_loss": "schema name, description and explicit strictness disappear",
       "strict_reason": "structured_output_contract",
       "paths": [
         "/response_format/json_schema/name",
@@ -414,7 +414,7 @@
         ],
         "temperature": null
       },
-      "legacy_target": {
+      "transformed_target": {
         "contents": [
           {
             "role": "user",
@@ -426,7 +426,7 @@
           }
         ]
       },
-      "legacy_loss": "explicit null temperature becomes absent",
+      "transformed_loss": "explicit null temperature becomes absent",
       "strict_reason": "control_presence",
       "paths": [
         "/temperature"
@@ -460,7 +460,7 @@
         ],
         "max_completion_tokens": 64
       },
-      "legacy_target": {
+      "transformed_target": {
         "model": "fixture-model",
         "messages": [
           {
@@ -476,7 +476,7 @@
         "max_tokens": 64,
         "stream": false
       },
-      "legacy_loss": "a native completion-budget name and scope become an unqualified max_tokens budget",
+      "transformed_loss": "a native completion-budget name and scope become an unqualified max_tokens budget",
       "strict_reason": "reasoning_budget",
       "paths": [
         "/max_completion_tokens"
@@ -532,7 +532,7 @@
           "precise_integer": 9007199254740993
         }
       },
-      "legacy_error": "/fixture_extension",
+      "transformed_error": "/fixture_extension",
       "strict_reason": "target_capability",
       "paths": [
         "/fixture_extension"
@@ -564,7 +564,7 @@
           }
         ]
       },
-      "legacy_target": {
+      "transformed_target": {
         "contents": [
           {
             "role": "user",

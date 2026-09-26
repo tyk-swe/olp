@@ -45,7 +45,7 @@ func (r Result) Rows() []Ranked       { return slices.Clone(r.rows) }
 func Definitions() []operations.Dialect {
 	out := []operations.Dialect{}
 	for _, id := range []string{"rerank", "voyage-rerank", "tei-rerank", "cohere-rerank-v2"} {
-		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: "openai", Label: id, Evidence: "native-rerank-identity-scores/1", Address: operations.Address{LegacyPath: "rerank"}}
+		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: "openai", Label: id, Evidence: "native-rerank-identity-scores/1", Address: operations.Address{FamilyPath: "rerank"}}
 		if id == "voyage-rerank" || id == "tei-rerank" || id == "cohere-rerank-v2" {
 			d.Surface = "native"
 		}
