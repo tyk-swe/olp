@@ -2883,7 +2883,7 @@ type ProviderConfiguration struct {
 	Kind         ProviderKind              `json:"kind"`
 	Options      *ConnectionOptions        `json:"options,omitempty"`
 
-	// ProfileId Versioned provider profile identity. Omit together with profile_revision to retain legacy configuration semantics.
+	// ProfileId Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.
 	ProfileId *string `json:"profile_id,omitempty"`
 
 	// ProfileRevision Immutable provider profile composition revision selected with profile_id.

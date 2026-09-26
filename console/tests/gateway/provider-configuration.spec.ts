@@ -334,7 +334,7 @@ test('configuration forms retain native source through real saves, conflicts and
   await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
 });
 
-test('profile migration, schema fields and write-only network credentials share one draft', async ({
+test('Automatic provider profile selection, schema fields and write-only network credentials share one draft', async ({
   page,
   request
 }, info) => {
@@ -347,12 +347,21 @@ test('profile migration, schema fields and write-only network credentials share 
     page,
     'POST',
     '/api/v1/providers',
-    `{"name":"Profile migration ${info.project.name}","configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","options":{"parameter_defaults":{"seed":9007199254740993}}},"credential":"compatible-provider-secret","model":"${model}"}`
+    `{"name":"Automatic provider ${info.project.name}","configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","options":{"parameter_defaults":{"seed":9007199254740993}}},"credential":"compatible-provider-secret","model":"${model}"}`
   );
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
   const path = `/api/v1/providers/${id}`;
   await page.goto(`/providers/${id}`);
+  await expect(page.getByLabel('API profile')).toHaveValue('');
+  await expect(
+    page.getByLabel('API profile').locator('option:checked')
+  ).toHaveText('Automatic provider · no profile selected');
+  await expect(
+    page.locator('.profile-summary').getByText('Automatic provider', {
+      exact: true
+    })
+  ).toBeVisible();
   await page.getByText('Advanced configuration JSON', { exact: true }).click();
   const json = page.getByLabel('Native configuration JSON', { exact: true });
   await page.getByLabel('API profile').selectOption('compatible-chat@1');
@@ -362,9 +371,7 @@ test('profile migration, schema fields and write-only network credentials share 
   await expect(
     page.getByRole('button', { name: 'Save draft', exact: true })
   ).toBeDisabled();
-  await page
-    .getByRole('button', { name: 'Remove legacy parameter defaults' })
-    .click();
+  await page.getByRole('button', { name: 'Remove parameter defaults' }).click();
   await page.getByText('Operation defaults', { exact: true }).click();
   await page
     .getByLabel('Operation for defaults', { exact: true })

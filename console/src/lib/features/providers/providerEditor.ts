@@ -293,7 +293,7 @@ export function validateProviderDraft(
   };
   if (draft.document?.issue) return draft.document.issue;
   // Versioned profiles own connection requirements; the server validates their
-  // hosting adapter. Legacy kind fields cannot describe registered profiles.
+  // hosting adapter. Kind fields describe Automatic providers, not profiles.
   const profiled = Boolean(draft.profileId);
   const missing = spec.fields
     .filter(

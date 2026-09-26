@@ -88,9 +88,13 @@ export class ConfigurationDraft {
     const revision = this.text(['profile_revision']);
     if (Boolean(profile) !== Boolean(revision))
       return 'Select the profile identity and revision together.';
-    const legacy = this.at(['options', 'parameter_defaults']);
-    if (profile && nativeObject(legacy) && Object.keys(legacy).length)
-      return 'Move or explicitly remove legacy parameter defaults before selecting a profile.';
+    const parameterDefaults = this.at(['options', 'parameter_defaults']);
+    if (
+      profile &&
+      nativeObject(parameterDefaults) &&
+      Object.keys(parameterDefaults).length
+    )
+      return 'Parameter defaults belong to Automatic providers; move or explicitly remove them before selecting a profile.';
     if (
       !profile &&
       [

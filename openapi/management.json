@@ -5197,7 +5197,7 @@
             "$ref": "#/components/schemas/ConnectionOptions"
           },
           "profile_id": {
-            "description": "Versioned provider profile identity. Omit together with profile_revision to retain legacy configuration semantics.",
+            "description": "Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.",
             "type": "string"
           },
           "profile_revision": {
