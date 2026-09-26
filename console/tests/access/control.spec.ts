@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const password = 'a long browser test password';
 const rotatedPassword = 'a rotated browser test password';
-// With the Go gateway available, every signed-in role lands on the overview;
+// Every signed-in role lands on the overview;
 // only roles that can manage providers see the onboarding heading.
 const ownerLanding = 'Bring your first model route online.';
 const viewerLanding = 'Gateway overview';

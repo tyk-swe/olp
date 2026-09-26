@@ -461,7 +461,7 @@ const videoCreateBody = "--video-boundary\r\n" +
 
 const videoCreateContentType = "multipart/form-data; boundary=video-boundary"
 
-// TestVideoJobLifecycleEndToEnd ports the Rust media-jobs system journey:
+// TestVideoJobLifecycleEndToEnd covers the media job journey end to end:
 // durable create, client-facing refresh, content download, two-phase delete,
 // idempotent re-delete, and session-authorized management views.
 func TestVideoJobLifecycleEndToEnd(t *testing.T) {
@@ -673,7 +673,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 	}
 }
 
-// TestVideoDeleteAmbiguityRetainsIntent ports the injected-finalize-failure
+// TestVideoDeleteAmbiguityRetainsIntent covers the injected-finalize-failure
 // path: the upstream delete lands, the tombstone write fails, the client sees
 // a retryable 503 and the row stays delete-pending for a second attempt.
 func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
@@ -736,7 +736,7 @@ func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 	}
 }
 
-// TestVideoCreateAttachFailureCompensates ports the two-phase create
+// TestVideoCreateAttachFailureCompensates covers the two-phase create
 // failure: the attach write fails after the provider accepted the job, so the
 // gateway persists cleanup intent, deletes the orphan upstream, and only then
 // answers 503.
@@ -910,7 +910,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	}
 }
 
-// TestMediaJobCredentialRevocation ports the revocation guard: historical
+// TestMediaJobCredentialRevocation covers the revocation guard: historical
 // credentials keep working while retained, and an explicit revocation always
 // wins — the job records a durable class instead of touching upstream.
 func TestMediaJobCredentialRevocation(t *testing.T) {

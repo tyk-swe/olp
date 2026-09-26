@@ -481,7 +481,7 @@ test('retained media records expose metadata, filters, and accessible details', 
   await signIn(page);
   // Seed terminal history against the preceding journey's actual published
   // provider, key, and generation. Creation/reconciliation/content are covered
-  // by the gateway service suites; every read here uses the real Go API.
+  // by the gateway service suites; every read here uses the real management API.
   const database = new URL(process.env.OLP_DATABASE_URL!);
   database.pathname =
     '/' +

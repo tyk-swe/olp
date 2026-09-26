@@ -122,11 +122,10 @@ export type RoutingSimulationInput = Pick<
  * call, which is what separates this from the playground. The endpoint accepts
  * OLP's canonical operation envelope rather than a console request shape, and
  * the generated contract types that field as an open object, so the envelope is
- * assembled here and nowhere else, and `tests/system/configuration_http_postgres/routes.rs`
- * pins the same payload from the backend side so a protocol change fails there
- * rather than silently at runtime. The envelope is a generation request because
- * that is what the playground composes; a route that serves only another
- * operation will report no eligible attempt.
+ * assembled here and nowhere else, and `api.test.ts` pins its shape. The
+ * envelope is a generation request because that is what the playground
+ * composes; a route that serves only another operation will report no
+ * eligible attempt.
  */
 export async function simulateRouting(
   input: RoutingSimulationInput,

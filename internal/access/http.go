@@ -80,7 +80,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 	}
 	expected := auth.Digest("installation", "identity")
 	if fingerprint != nil && !hmac.Equal(fingerprint, expected) {
-		return nil, errors.New("authentication key does not match the Go installation")
+		return nil, errors.New("authentication key does not match the installation")
 	}
 	if active != nil && *active != keys.Active {
 		return nil, errors.New("master key active version differs; run master-key reencrypt or reload the current ring")

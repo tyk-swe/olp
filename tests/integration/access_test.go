@@ -112,8 +112,8 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	return newAccessHarnessAtInstallation(t, pool, dbURL, installation)
 }
 
-// Migration tests may serve an explicitly installed historical schema prefix
-// before upgrading it. Ordinary harnesses always migrate and verify first.
+// newAccessHarnessAtInstallation composes the harness over an already migrated
+// database and its installation identity.
 func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation string) *accessHarness {
 	t.Helper()
 	key := strings.Repeat("ab", 32)

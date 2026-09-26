@@ -75,4 +75,4 @@ pg_dump "$staging_url" --schema=olp --no-owner --no-privileges --file="$scratch/
 # Recheck emptiness under the same lock as migrate, and restore atomically.
 psql "$OLP_RESTORE_DATABASE_URL" -Xq -v ON_ERROR_STOP=1 --single-transaction \
   -f "$scratch/empty.sql" -f "$scratch/restore.sql" >/dev/null
-printf 'Restored and verified the Go installation, keys, migration history and runtime identity.\n'
+printf 'Restored and verified the installation, keys, migration history and runtime identity.\n'

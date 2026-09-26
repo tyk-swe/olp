@@ -101,7 +101,7 @@ func TestPlayground(t *testing.T) {
 	reply := h.want(owner, "POST", "/api/v1/playground",
 		map[string]any{"model": slug, "input": "hi"}, nil, 200)
 	if reply["output_text"] != vendorAnswer || reply["model"] != slug {
-		t.Fatalf("legacy playground: %v", reply)
+		t.Fatalf("basic playground: %v", reply)
 	}
 	if reply["usage"] == nil || reply["routing"] == nil {
 		t.Fatalf("usage and routing must accompany the reply: %v", reply)

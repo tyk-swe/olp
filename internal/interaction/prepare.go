@@ -173,9 +173,9 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 		prepared = next
 	}
 	if t.wire == openai.FamilyChat {
-		_, legacyCap := prepared.Document().Root().Lookup("max_tokens")
-		_, completionCap := prepared.Document().Root().Lookup("max_completion_tokens")
-		if legacyCap && completionCap {
+		_, maxTokens := prepared.Document().Root().Lookup("max_tokens")
+		_, maxCompletionTokens := prepared.Document().Root().Lookup("max_completion_tokens")
+		if maxTokens && maxCompletionTokens {
 			return oif.Prepared{}, incompatible("reasoning_budget", "/max_completion_tokens", "conflicting_budget_scopes", "The effective request combines token controls with distinct scopes; no precedence or equivalence is qualified.")
 		}
 	}

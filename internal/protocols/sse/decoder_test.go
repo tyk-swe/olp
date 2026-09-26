@@ -38,8 +38,8 @@ func TestRetainedFragmentedSSE(t *testing.T) {
 }
 
 func TestRetainedProviderStreamsHaveValidJSONFrames(t *testing.T) {
-	// This qualifies framing only. Canonical text/usage expectations belong to
-	// the provider codec milestones and remain untouched in the same corpus.
+	// This checks framing only. The provider codec tests own the canonical
+	// text and usage expectations in the same corpus.
 	files, err := fs.Glob(fixtures.Files, "streams/*.sse")
 	if err != nil {
 		t.Fatal(err)

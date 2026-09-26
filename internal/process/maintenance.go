@@ -124,7 +124,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 		return errors.New("cannot inspect installation key state")
 	}
 	if fingerprint != nil && !hmac.Equal(fingerprint, auth.Digest("installation", "identity")) {
-		return errors.New("authentication key does not match the Go installation")
+		return errors.New("authentication key does not match the installation")
 	}
 	rotated := 0
 	if command == "reencrypt" && !options.DryRun {

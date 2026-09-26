@@ -2494,7 +2494,7 @@ type PlaygroundRequest struct {
 	Model           string                      `json:"model"`
 	Operation       *PlaygroundRequestOperation `json:"operation,omitempty"`
 
-	// Request Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with the legacy fields.
+	// Request Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with input, tools, response_format, temperature or max_output_tokens.
 	Request        *map[string]interface{}                     `json:"request,omitempty"`
 	ResponseFormat nullable.Nullable[PlaygroundResponseFormat] `json:"response_format,omitempty"`
 	Routing        *RoutingPreferences                         `json:"routing,omitempty"`
@@ -3791,7 +3791,7 @@ type RuntimeGenerationResponse struct {
 
 // SessionDetailResponse defines model for SessionDetailResponse.
 type SessionDetailResponse struct {
-	// BrowserHint Coarse, untrusted browser/device display hint. Legacy sessions use Unknown browser.
+	// BrowserHint Coarse, untrusted browser/device display hint. An unrecognized user agent shows Unknown browser.
 	BrowserHint *string            `json:"browser_hint,omitempty"`
 	CreatedAt   time.Time          `json:"created_at"`
 	Current     bool               `json:"current"`

@@ -252,7 +252,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		writeJSON(w, out)
 	})
 	// Azure's reviewed legacy Responses profile uses the resource-level path;
-	// the deployment path above remains the older compatibility fixture.
+	// the deployment path above serves Automatic Azure providers.
 	mux.HandleFunc("POST /openai/responses", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
 		f.respCreates.Add(1)

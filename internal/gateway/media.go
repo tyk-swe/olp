@@ -37,7 +37,8 @@ func (s *Server) transport() *media.Transport { return s.Media.Jobs.Transport }
 // multipartParseDeadline bounds one inbound multipart body.
 const multipartParseDeadline = 60 * time.Second
 
-// Multipart media uses the same admission estimates as the Rust gateway.
+// mediaMultipartTokens is the fixed token estimate that admits multipart and
+// video media requests.
 const mediaMultipartTokens = 2000
 
 func (s *Server) registerMedia(mux *http.ServeMux) {
@@ -305,7 +306,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		},
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" {
-				// Legacy codecs have their historical null/default wire behavior;
+				// Automatic providers keep their codec's null/default wire behavior;
 				// only explicit profiles define an exact effective native source.
 				return mediaParameterNames(request), nil
 			}

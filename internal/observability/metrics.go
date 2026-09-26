@@ -37,8 +37,8 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 	mediaResult, mediaErr := media.ReconciliationSummary(ctx, s.Pool, now)
 	mediaSummary := &mediaResult
 	consumer, consumerErr := usage.ReadConsumerStatus(ctx, s.Pool, now)
-	// Epoch health defaults to zero when the read fails, matching the Rust
-	// collector: an absent epoch table must not suppress the whole exposition.
+	// Epoch health defaults to zero when the read fails: an absent epoch table
+	// must not suppress the whole exposition.
 	epochs, _ := ReadEpochHealth(ctx, s.Pool)
 	operations, operationsErr := ReadOperationsSummary(ctx, s.Pool, 5)
 	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Pool)

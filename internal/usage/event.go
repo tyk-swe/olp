@@ -57,7 +57,7 @@ type Event struct {
 
 // Attempt is one provider attempt made while serving the request. Routing and
 // usage are omitted entirely when absent: a pre-attempt event carries neither,
-// and an older writer may not have sent routing at all.
+// and the event contract does not require routing.
 type Attempt struct {
 	Routing       *Routing      `json:"routing,omitempty"`
 	ID            string        `json:"id"`

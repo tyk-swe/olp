@@ -274,8 +274,8 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 		}
 		if routing != nil {
 			// Stored provenance is re-decoded rather than passed through, so a
-			// row written by an older or damaged writer cannot reach the
-			// console as a shape the contract does not describe.
+			// damaged row cannot reach the console as a shape the contract
+			// does not describe.
 			var parsed Routing
 			if err = json.Unmarshal(routing, &parsed); err != nil {
 				return RequestDetail{}, fmt.Errorf("read request attempts: stored routing is invalid")

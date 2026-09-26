@@ -4034,7 +4034,7 @@
           },
           "request": {
             "additionalProperties": true,
-            "description": "Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with the legacy fields.",
+            "description": "Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with input, tools, response_format, temperature or max_output_tokens.",
             "type": "object"
           },
           "stream": {
@@ -8530,7 +8530,7 @@
       "SessionDetailResponse": {
         "properties": {
           "browser_hint": {
-            "description": "Coarse, untrusted browser/device display hint. Legacy sessions use Unknown browser.",
+            "description": "Coarse, untrusted browser/device display hint. An unrecognized user agent shows Unknown browser.",
             "type": "string"
           },
           "created_at": {

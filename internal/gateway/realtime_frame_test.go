@@ -9,9 +9,10 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-// The prior strict observer validated with OIF and then decoded a Go struct.
-// These cases pin its terminal/usage projection while the wire still forwards
-// the original bytes, including on malformed or ambiguous native events.
+// The reference observer validates with OIF and then decodes a Go struct.
+// These cases pin the strict decoder to its terminal/usage projection while the
+// wire still forwards the original bytes, including on malformed or ambiguous
+// native events.
 func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 	for _, frame := range []string{
 		`{"type":"response.audio.delta","response_id":"resp_1","delta":"AQID","output_index":0}`,
@@ -38,13 +39,13 @@ func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 		`{"type":"response.done","response":{"id":"\uD83D\uDE00"}}`,
 	} {
 		data := []byte(frame)
-		var prior realtimeFrame
+		var reference realtimeFrame
 		doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
-		priorValid := err == nil && doc.Root().Kind() == oif.Object && json.Unmarshal(data, &prior) == nil
-		var current realtimeFrame
-		currentValid := decodeStrictRealtimeFrame(data, &current)
-		if currentValid != priorValid || currentValid && !reflect.DeepEqual(current, prior) {
-			t.Fatalf("native observation changed for %s: prior=%+v valid=%t current=%+v valid=%t", frame, prior, priorValid, current, currentValid)
+		referenceValid := err == nil && doc.Root().Kind() == oif.Object && json.Unmarshal(data, &reference) == nil
+		var decoded realtimeFrame
+		decodedValid := decodeStrictRealtimeFrame(data, &decoded)
+		if decodedValid != referenceValid || decodedValid && !reflect.DeepEqual(decoded, reference) {
+			t.Fatalf("native observation differs for %s: reference=%+v valid=%t decoded=%+v valid=%t", frame, reference, referenceValid, decoded, decodedValid)
 		}
 	}
 }
@@ -70,7 +71,7 @@ func TestTransformedRealtimeUsagePrefilterPreservesNativeTerminalProjection(t *t
 		state := realtimeResponseState{}
 		usage := state.providerFrame(websocket.MessageText, []byte(raw), false)
 		if usage == nil || usage.InputTokens != 3 || usage.OutputTokens != 2 {
-			t.Fatalf("legacy terminal usage was lost for %s: %+v", raw, usage)
+			t.Fatalf("transformed terminal usage was lost for %s: %+v", raw, usage)
 		}
 	}
 }

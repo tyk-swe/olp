@@ -62,7 +62,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build native candidate without Rust
+      - name: Build native candidate
         run: |
           mkdir -p .local/evidence
           docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp:candidate . 2>&1 | tee .local/evidence/build.log

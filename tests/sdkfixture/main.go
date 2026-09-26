@@ -1,4 +1,4 @@
-// sdkfixture serves the Go inference surface against an in-process mock
+// sdkfixture serves the OLP inference surface against an in-process mock
 // upstream so the official SDKs exercise the real gateway: bounded ingress,
 // key authentication, route selection, credential injection, model
 // rewriting, and native streaming. Nothing here fabricates a success the
