@@ -6,6 +6,10 @@
     activateRoute,
     type RouteDraftValidation
   } from '$lib/features/routes/api';
+  import {
+    fidelityOptions,
+    type FidelityMode
+  } from '$lib/features/routes/routeFidelity';
   import type { ProviderModelInventory } from '../models';
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
   let {
@@ -28,6 +32,9 @@
     const kept = chosen.filter((item) => shown.has(item.entry.model.id));
     if (kept.length !== chosen.length) chosen = kept;
   });
+  // Like every route, bulk drafts are strict unless the author declares them
+  // transformed; nothing is chosen on the author's behalf.
+  let fidelity = $state<FidelityMode>('strict');
   let busy = $state(false);
   let cancelled = $state(false);
   onDestroy(() => {
@@ -87,6 +94,7 @@
             operations,
             overall_timeout_ms: 120000,
             max_attempts: Math.min(items.length, 32767),
+            fidelity: { mode: fidelity },
             targets: items.map(({ entry }) => ({
               provider_id: entry.provider_id,
               provider_model: entry.model.upstream_model,
@@ -173,6 +181,24 @@
                 .model.upstream_model}"
             /></label
           >{/each}
+        <div class="form-field">
+          <label for="bulk-route-fidelity">Route fidelity</label>
+          <select
+            id="bulk-route-fidelity"
+            bind:value={fidelity}
+            disabled={busy}
+            aria-describedby="bulk-route-fidelity-help"
+          >
+            {#each fidelityOptions as option (option.value)}<option
+                value={option.value}>{option.label}</option
+              >{/each}
+          </select>
+          <small id="bulk-route-fidelity-help"
+            >Applies to every draft created here. Strict targets require
+            versioned provider profiles; declare the routes transformed to use
+            Automatic providers or translate between dialects.</small
+          >
+        </div>
         <button class="button button-primary" disabled={busy}
           >{busy ? 'Creating…' : 'Create reviewed route drafts'}</button
         >
@@ -226,9 +252,12 @@
     max-height: 18rem;
     overflow: auto;
   }
-  small {
+  .choices small {
     display: block;
     margin-left: 1.5rem;
+  }
+  form .form-field {
+    margin: 1rem 0;
   }
   .route-name {
     display: grid;

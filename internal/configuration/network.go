@@ -66,7 +66,7 @@ func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, 
 		return err
 	}
 	var current []byte
-	if err := tx.QueryRow(ctx, "SELECT configuration FROM olp_go.providers WHERE id=$1", providerID).Scan(&current); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT configuration FROM olp.providers WHERE id=$1", providerID).Scan(&current); err != nil {
 		return err
 	}
 	encoded, err := json.Marshal(cfg)
@@ -84,6 +84,6 @@ func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, 
 	if string(canonical) == string(encoded) {
 		return nil
 	}
-	_, err = tx.Exec(ctx, "UPDATE olp_go.providers SET configuration=$2,etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, encoded, access.NewID())
+	_, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2,etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, encoded, access.NewID())
 	return err
 }

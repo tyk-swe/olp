@@ -11,7 +11,7 @@ export async function listPricing(
   cursor?: string
 ): Promise<CursorPage<PricingRevision>> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/pricing/revisions',
+    '/api/v1/pricing/revisions',
     { params: { query: compactQuery({ cursor, limit: 25 }) } }
   );
   return pageResult(result(data, error, response));
@@ -22,7 +22,7 @@ export async function createPricingRevision(
   prices: PriceDraft[]
 ): Promise<PricingRevision> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/pricing/revisions',
+    '/api/v1/pricing/revisions',
     {
       params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
       body: { effective_at: effectiveAt, prices }

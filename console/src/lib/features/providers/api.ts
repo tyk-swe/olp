@@ -21,7 +21,7 @@ export type ProviderVendor = Schemas['Vendor'];
 export async function listProviderVendors(
   signal?: AbortSignal
 ): Promise<ProviderVendor[]> {
-  const response = await apiClient.GET('/api/v3/provider-vendors', { signal });
+  const response = await apiClient.GET('/api/v1/provider-vendors', { signal });
   return result(response.data, response.error, response.response);
 }
 
@@ -36,7 +36,7 @@ export async function listProviderPage(
   signal?: AbortSignal,
   search?: string
 ): Promise<CursorPage<ProviderSummary>> {
-  const response = await apiClient.GET('/api/v3/providers', {
+  const response = await apiClient.GET('/api/v1/providers', {
     params: {
       query: { limit: PROVIDER_PAGE_SIZE, cursor, search: search || undefined }
     },
@@ -49,7 +49,7 @@ export async function getProvider(
   id: string,
   signal?: AbortSignal
 ): Promise<Provider> {
-  const response = await apiClient.GET('/api/v3/providers/{provider_id}', {
+  const response = await apiClient.GET('/api/v1/providers/{provider_id}', {
     params: { path: { provider_id: id } },
     signal
   });
@@ -59,7 +59,7 @@ export async function getProvider(
 export async function createProvider(
   input: CreateProviderInput
 ): Promise<string> {
-  const response = await apiClient.POST('/api/v3/providers', {
+  const response = await apiClient.POST('/api/v1/providers', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -71,7 +71,7 @@ export async function updateProvider(
   etag: string,
   input: UpdateProviderInput
 ): Promise<Provider> {
-  const response = await apiClient.PATCH('/api/v3/providers/{provider_id}', {
+  const response = await apiClient.PATCH('/api/v1/providers/{provider_id}', {
     params: { path: { provider_id: id }, header: { 'If-Match': etag } },
     body: input
   });
@@ -82,7 +82,7 @@ export async function probeProvider(
   provider: Provider
 ): Promise<ProviderProbe> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/probe',
+    '/api/v1/providers/{provider_id}/probe',
     {
       params: {
         path: { provider_id: provider.id },
@@ -97,7 +97,7 @@ export async function probeProvider(
 
 export async function activateProvider(provider: Provider): Promise<number> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/activate',
+    '/api/v1/providers/{provider_id}/activate',
     {
       params: {
         path: { provider_id: provider.id },
@@ -122,7 +122,7 @@ export async function disableProvider(
   provider: Provider
 ): Promise<number | null> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/disable',
+    '/api/v1/providers/{provider_id}/disable',
     {
       params: {
         path: { provider_id: provider.id },
@@ -144,7 +144,7 @@ export async function restoreProviderAsDraft(
   provider: Provider
 ): Promise<Provider> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/restore-as-draft',
+    '/api/v1/providers/{provider_id}/restore-as-draft',
     {
       params: {
         path: { provider_id: provider.id },

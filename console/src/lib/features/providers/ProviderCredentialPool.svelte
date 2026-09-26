@@ -28,7 +28,7 @@
     queryKey: ['provider-slots', provider.id, provider.etag],
     queryFn: async () => {
       const response = await apiClient.GET(
-        '/api/v3/providers/{provider_id}/credential-slots',
+        '/api/v1/providers/{provider_id}/credential-slots',
         { params: { path: { provider_id: provider.id } } }
       );
       return result(response.data, response.error, response.response);
@@ -65,7 +65,7 @@
     notice = '';
     try {
       const response = await apiClient.PUT(
-        '/api/v3/providers/{provider_id}/credential-slots/{slot_id}',
+        '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
         {
           params: { path: { provider_id: provider.id, slot_id: editing.id! } },
           headers: {
@@ -103,7 +103,7 @@
     notice = '';
     try {
       const response = await apiClient.POST(
-        '/api/v3/providers/{provider_id}/credential-slots/{slot_id}/validate',
+        '/api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate',
         {
           params: { path: { provider_id: provider.id, slot_id: slot.id! } },
           headers: { 'If-Match': pool.data.etag }

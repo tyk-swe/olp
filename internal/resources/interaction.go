@@ -37,7 +37,7 @@ func (s *Store) PutInteractionContract(ctx context.Context, r *Resource, upstrea
 	}
 	if r.ParentID != nil {
 		var found bool
-		if err := tx.QueryRow(ctx, `SELECT true FROM olp_go.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, *r.ParentID, r.APIKeyID, KindInteraction, StateDeleted).Scan(&found); err != nil || !found {
+		if err := tx.QueryRow(ctx, `SELECT true FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, *r.ParentID, r.APIKeyID, KindInteraction, StateDeleted).Scan(&found); err != nil || !found {
 			return nil, ErrNotFound
 		}
 	}
@@ -47,7 +47,7 @@ func (s *Store) PutInteractionContract(ctx context.Context, r *Resource, upstrea
 	if len(copy.Metadata) == 0 {
 		copy.Metadata = []byte(`{}`)
 	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp_go.provider_resources
+	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
  (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
 		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID))
@@ -79,7 +79,7 @@ func (s *Store) ReadInteractionContract(ctx context.Context, owner, localID stri
 	if err := s.authorizeOwner(ctx, tx, owner); err != nil {
 		return nil, "", err
 	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, KindInteraction, owner, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNotFound
@@ -109,7 +109,7 @@ func (s *Store) MarkInteractionStatus(ctx context.Context, owner, localID, statu
 	if err != nil || LocalID(KindInteraction, id) != localID {
 		return ErrNotFound
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$4,updated_at=now()
+	tag, err := s.pool.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,updated_at=now()
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$5 AND expires_at>now()`, id, KindInteraction, owner, status, StateDeleted)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 	if err := s.authorizeOwner(ctx, tx, owner); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$4,updated_at=now()
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,updated_at=now()
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4`, id, KindInteraction, owner, StateDeleted)
 	if err != nil {
 		return err
@@ -144,7 +144,7 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 	if tag.RowsAffected() != 1 {
 		return ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp_go.secrets WHERE id=$1 AND purpose=$2`, id, continuationPurpose); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, continuationPurpose); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

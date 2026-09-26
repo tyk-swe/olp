@@ -135,7 +135,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				if profile.ID == "bedrock-anthropic-invoke" && stream {
 					w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 					native := httptest.NewRecorder()
-					parityGeneration(native, "anthropic", true)
+					kindGeneration(native, "anthropic", true)
 					for _, line := range strings.Split(native.Body.String(), "\n") {
 						if !strings.HasPrefix(line, "data: ") {
 							continue
@@ -154,7 +154,7 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				if profile.Dialect == "anthropic-messages" {
 					kind = "anthropic"
 				}
-				parityGeneration(w, kind, stream)
+				kindGeneration(w, kind, stream)
 			}))
 			defer upstream.Close()
 			cfg := map[string]any{"kind": profile.Kind, "profile_id": profile.ID, "profile_revision": profile.Revision, "auth_mode": "api_key", "endpoint": upstream.URL + "/v1"}
@@ -188,8 +188,8 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			if credential != nil {
 				input["credential"] = credential
 			}
-			created := h.want(owner, "POST", "/api/v3/providers", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			providerPath := "/api/v3/providers/" + created["id"].(string)
+			created := h.want(owner, "POST", "/api/v1/providers", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			providerPath := "/api/v1/providers/" + created["id"].(string)
 			models := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)
 			modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 			h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)
@@ -199,13 +199,13 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			if profile.ID == "bedrock-invoke" {
 				operation = "bedrock_invoke"
 			}
-			routeInput := map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+			routeInput := map[string]any{"slug": routeSlug, "operations": []string{operation}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": created["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 			if strict {
 				routeInput["fidelity"] = map[string]any{}
 			}
-			draft := h.want(owner, "POST", "/api/v3/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Profile inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			draft := h.want(owner, "POST", "/api/v1/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
+			key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Profile inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.refresh()
 			path := "/v1/chat/completions"
 			body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"capture"}],"max_tokens":32}`

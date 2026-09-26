@@ -13,16 +13,16 @@ type Identity struct{ ID, Revision string }
 type Origin string
 
 const (
-	Caller            Origin = "caller"
-	ProviderDefault   Origin = "provider_default"
-	ModelDefault      Origin = "model_default"
-	OperationDefault  Origin = "operation_default"
-	IdentityBinding   Origin = "identity_binding"
-	ResourceBinding   Origin = "resource_binding"
-	TransportOption   Origin = "transport_option"
-	QualifiedMapping  Origin = "qualified_mapping"
-	ExplicitTransform Origin = "explicit_transform"
-	LegacyMapping     Origin = "legacy_mapping"
+	Caller             Origin = "caller"
+	ProviderDefault    Origin = "provider_default"
+	ModelDefault       Origin = "model_default"
+	OperationDefault   Origin = "operation_default"
+	IdentityBinding    Origin = "identity_binding"
+	ResourceBinding    Origin = "resource_binding"
+	TransportOption    Origin = "transport_option"
+	QualifiedMapping   Origin = "qualified_mapping"
+	ExplicitTransform  Origin = "explicit_transform"
+	TransformedMapping Origin = "transformed_mapping"
 )
 
 type Presence uint8
@@ -321,7 +321,7 @@ func prepareIdentity(request Request, destination Descriptor, changes []Change, 
 	return p, nil
 }
 
-// PrepareDestination records an admitted mapping or legacy adapter result. It
+// PrepareDestination records an admitted mapping or transformed codec result. It
 // cannot claim identity merely because source and destination happen to match.
 func PrepareDestination(request Request, destination Descriptor, document Document, origin Origin, reason string) (Prepared, error) {
 	if !document.Valid() || origin == "" || reason == "" {

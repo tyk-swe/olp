@@ -1,12 +1,9 @@
 tests/fixtures/streams/*.sse whitespace=-blank-at-eof
 tests/fixtures/fidelity/*/*.sse whitespace=-blank-at-eof
 
-# Generated files: keep them out of review noise. AGENTS.md's Style section
-# names the ones that must never be hand-edited ("Never hand-edit generated
+# Generated files: keep them out of review noise.
 openapi/management.json linguist-generated=true
 console/src/lib/api/schema.d.ts linguist-generated=true
-Cargo.lock linguist-generated=true
-fuzz/Cargo.lock linguist-generated=true
 console/pnpm-lock.yaml linguist-generated=true
 tests/sdk-smoke/pnpm-lock.yaml linguist-generated=true
 docs/assets/screenshots/*.png -diff

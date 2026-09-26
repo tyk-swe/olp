@@ -36,10 +36,10 @@ func (s *Server) credentials(r *http.Request) (access.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
 		'id',c.id,'version',c.version,
 		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
-		'draft_selected',EXISTS(SELECT 1 FROM olp_go.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
+		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
 		'created_at',c.created_at,'revoked_at',c.revoked_at)
-		FROM olp_go.provider_credentials c JOIN olp_go.providers p ON p.id=c.provider_id
-		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
+		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
+		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE c.provider_id=$1 AND c.id<$2 ORDER BY c.id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
@@ -164,14 +164,14 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	}
 	defaultSlot.CredentialID = &credentialID
 	fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
 		return access.Reply{}, err
 	}
 	etag, err := touch(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
@@ -193,10 +193,10 @@ func (s *Server) revoke(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 		var version int
-		err = tx.QueryRow(ctx, "UPDATE olp_go.provider_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", credentialID, current.ID).Scan(&version)
+		err = tx.QueryRow(ctx, "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", credentialID, current.ID).Scan(&version)
 		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
-			if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.provider_credentials WHERE id=$1 AND provider_id=$2)", credentialID, current.ID).Scan(&exists); err != nil {
+			if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2)", credentialID, current.ID).Scan(&exists); err != nil {
 				return access.Reply{}, err
 			}
 			if !exists {
@@ -212,11 +212,11 @@ func (s *Server) revoke(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 		var referenced bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.provider_slots WHERE provider_id=$1 AND credential_id=$2)", current.ID, credentialID).Scan(&referenced); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_slots WHERE provider_id=$1 AND credential_id=$2)", current.ID, credentialID).Scan(&referenced); err != nil {
 			return access.Reply{}, err
 		}
 		etag := access.NewID()
-		if _, err = tx.Exec(ctx, "UPDATE olp_go.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, access.NewID(), referenced); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, access.NewID(), referenced); err != nil {
 			return access.Reply{}, err
 		}
 		return access.Detail(map[string]any{"provider_id": current.ID, "etag": etag, "credential_id": credentialID, "credential_version": version, "runtime_generation": generation}, etag), nil
@@ -267,7 +267,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	activeCredentials := map[string]*string{}
 	if current.ActiveRevisionID != nil {
 		var encoded []byte
-		if err = q.QueryRow(ctx, "SELECT slots FROM olp_go.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded); err != nil {
+		if err = q.QueryRow(ctx, "SELECT slots FROM olp.provider_revisions WHERE id=$1 AND provider_id=$2", *current.ActiveRevisionID, current.ID).Scan(&encoded); err != nil {
 			return access.Reply{}, err
 		}
 		var published []runtime.RevisionSlot
@@ -503,7 +503,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		credentialID = &stored
 	case input.Slot.CredentialVersionID != nil:
 		var revoked bool
-		err = tx.QueryRow(r.Context(), "SELECT revoked_at IS NOT NULL FROM olp_go.provider_credentials WHERE id=$1 AND provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked)
+		err = tx.QueryRow(r.Context(), "SELECT revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return access.Reply{}, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
 		}
@@ -520,19 +520,19 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	restrictions, _ := json.Marshal(slotRestrictions{AllowedAPIKeys: orEmpty(input.Slot.AllowedAPIKeys), AllowedModels: orEmpty(input.Slot.AllowedModels), AllowedRoutes: orEmpty(input.Slot.AllowedRoutes)})
 	limits, _ := json.Marshal(Limits{MaxConcurrency: input.Slot.MaxConcurrency, RequestsPerMinute: input.Slot.RequestsPerMinute, TokensPerMinute: input.Slot.TokensPerMinute})
 	if existing == nil {
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp_go.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
 			return access.Reply{}, err
 		}
 	} else {
 		keepValidation := deref(existing.CredentialID) == deref(credentialID)
-		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
 			return access.Reply{}, err
 		}
 	}
 	if _, err = touch(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
@@ -637,7 +637,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		validatedAt = new(time.Now().UTC())
 		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.slotList(r.Context(), tx, locked)

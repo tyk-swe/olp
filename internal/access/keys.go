@@ -115,12 +115,12 @@ func ParseUUID(value string) (string, error) {
 func AdvanceAuthority(r *http.Request, tx pgx.Tx) (any, error) {
 	var id string
 	var sequence int64
-	err := tx.QueryRow(r.Context(), "UPDATE olp_go.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", NewID()).Scan(&id, &sequence)
+	err := tx.QueryRow(r.Context(), "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", NewID()).Scan(&id, &sequence)
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
 const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb)`
-const keyFrom = " FROM olp_go.api_keys k JOIN olp_go.users u ON u.id=k.created_by LEFT JOIN olp_go.projects pr ON pr.id=k.project_id"
+const keyFrom = " FROM olp.api_keys k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
 // contract's key detail. The budget is live accounting: accrued spend and
@@ -228,14 +228,14 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest("api_key", secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest("api_key", secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
 	if err = Audit(r.Context(), tx, r, p.ID, "api_key.create", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -279,7 +279,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	var revoked *time.Time
 	var projectID *string
 	var groupID *string
-	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp_go.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
 	if err := ProjectAccess(p, projectID, true); err != nil {
@@ -331,7 +331,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	etag = NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), data, input.ExpiresAt, groupID, etag, id); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), data, input.ExpiresAt, groupID, etag, id); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r, tx)
@@ -382,7 +382,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	var revoked *time.Time
 	var projectID *string
 	var groupID *string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp_go.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
 	if err := ProjectAccess(p, projectID, true); err != nil {
@@ -437,9 +437,9 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		action = "api_key.rotate"
 		lookup = secrets.Token()
 		secret = "olp_" + lookup + "_" + secrets.Token()
-		_, err = tx.Exec(r.Context(), "UPDATE olp_go.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest("api_key", secret), etag, data, groupID, id)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest("api_key", secret), etag, data, groupID, id)
 	} else {
-		_, err = tx.Exec(r.Context(), "UPDATE olp_go.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
 	}
 	if err != nil {
 		return Reply{}, err
@@ -466,7 +466,7 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 		return nil
 	}
 	var mismatched bool
-	if err := q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.routes WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)", routes, projectID).Scan(&mismatched); err != nil {
+	if err := q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)", routes, projectID).Scan(&mismatched); err != nil {
 		return err
 	}
 	if mismatched {
@@ -496,7 +496,7 @@ func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority,
 		return a, errors.New("invalid API key")
 	}
 	var digest, data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp_go.api_keys k LEFT JOIN olp_go.budget_groups g ON g.id=k.budget_group_id WHERE k.lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &digest, &data, &a.ExpiresAt, &a.RevokedAt, &a.BudgetGroupID, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit)
+	err := s.Pool.QueryRow(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id WHERE k.lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &digest, &data, &a.ExpiresAt, &a.RevokedAt, &a.BudgetGroupID, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit)
 	if err != nil || !hmac.Equal(digest, s.Auth.Digest("api_key", secret)) {
 		return a, errors.New("invalid API key")
 	}

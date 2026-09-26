@@ -75,7 +75,7 @@ func newVideoUpstream(t *testing.T) *videoUpstream {
 func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 	t.Helper()
 	var cfgRaw []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp_go.providers WHERE id=$1", providerID).Scan(&cfgRaw); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp.providers WHERE id=$1", providerID).Scan(&cfgRaw); err != nil {
 		t.Fatal(err)
 	}
 	var cfg providers.Configuration
@@ -86,7 +86,7 @@ func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 	transportSum := sha256.Sum256(transportInput)
 	transportFP := hex.EncodeToString(transportSum[:])[:32]
 	var credentialID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
 	}
 	credentialFP := transportFP + ":" + credentialID
@@ -119,10 +119,10 @@ func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 		})
 	}
 	capsJSON, _ := json.Marshal(caps)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capsJSON, providerID, vendorModel); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capsJSON, providerID, vendorModel); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -138,8 +138,8 @@ func provisionVideo(t *testing.T, h *accessHarness, b *browser, endpoint string,
 	if projectID != nil {
 		create["project_id"] = projectID
 	}
-	detail := h.want(b, "POST", "/api/v3/providers", create, idem("video-provider"), 201)
-	path := "/api/v3/providers/" + detail["id"].(string)
+	detail := h.want(b, "POST", "/api/v1/providers", create, idem("video-provider"), 201)
+	path := "/api/v1/providers/" + detail["id"].(string)
 	probe := h.want(b, "POST", path+"/probe", nil, etagHeader(detail), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("probe must succeed: %v", probe)
@@ -149,15 +149,15 @@ func provisionVideo(t *testing.T, h *accessHarness, b *browser, endpoint string,
 	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("video-activate")), 200)
 	slug := "video-" + uuid.NewString()[:8]
 	draft := map[string]any{
-		"slug": slug, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"slug": slug, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"operations": []string{"video_create", "video_get", "video_content", "video_delete"},
 		"targets":    []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
 	}
 	if projectID != nil {
 		draft["project_id"] = projectID
 	}
-	created := h.want(b, "POST", "/api/v3/route-drafts", draft, idem("video-draft-"+slug), 201)
-	h.want(b, "POST", "/api/v3/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("video-draft-activate")), 200)
+	created := h.want(b, "POST", "/api/v1/route-drafts", draft, idem("video-draft-"+slug), 201)
+	h.want(b, "POST", "/api/v1/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("video-draft-activate")), 200)
 	return detail, slug
 }
 
@@ -200,7 +200,7 @@ func (h *accessHarness) videoCreate(slug, secret string) (int, map[string]any) {
 
 func mediaJobIDs(t *testing.T, h *accessHarness, b *browser) []string {
 	t.Helper()
-	list := h.want(b, "GET", "/api/v3/media-jobs", nil, nil, 200)
+	list := h.want(b, "GET", "/api/v1/media-jobs", nil, nil, 200)
 	ids := []string{}
 	for _, item := range list["items"].([]any) {
 		ids = append(ids, item.(map[string]any)["id"].(string))
@@ -217,14 +217,14 @@ func TestMediaManagement(t *testing.T) {
 	op := h.invite(owner, "media-op@example.com", "operator")
 	viewer := h.invite(owner, "media-viewer@example.com", "operator")
 	outsider := h.invite(owner, "media-outsider@example.com", "operator")
-	users := h.want(owner, "GET", "/api/v3/users", nil, nil, 200)
+	users := h.want(owner, "GET", "/api/v1/users", nil, nil, 200)
 	ids := map[string]map[string]any{}
 	for _, item := range users["items"].([]any) {
 		record := item.(map[string]any)
 		ids[record["email"].(string)] = record
 	}
 	for _, email := range []string{"media-op@example.com", "media-viewer@example.com", "media-outsider@example.com"} {
-		h.want(owner, "PATCH", "/api/v3/users/"+ids[email]["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(ids[email]), 200)
+		h.want(owner, "PATCH", "/api/v1/users/"+ids[email]["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(ids[email]), 200)
 	}
 	addMember(h, owner, projectA, ids["media-op@example.com"]["id"].(string), "manager")
 	addMember(h, owner, projectA, ids["media-viewer@example.com"]["id"].(string), "viewer")
@@ -233,7 +233,7 @@ func TestMediaManagement(t *testing.T) {
 	outsider = login(h, "media-outsider@example.com")
 
 	_, slug := provisionVideo(t, h, op, up.URL+"/v1", projectA)
-	key := h.want(op, "POST", "/api/v3/api-keys", map[string]any{
+	key := h.want(op, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "media key", "scopes": []string{"inference"},
 		"project_id": projectA, "allowed_routes": []string{slug},
 	}, idem("media-key"), 201)
@@ -263,8 +263,8 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatalf("out-of-scope principal must see no jobs, got %v", got)
 	}
 	jobID, job2ID := jobIDs[0], jobIDs[1]
-	jobPath := "/api/v3/media-jobs/" + jobID
-	job2Path := "/api/v3/media-jobs/" + job2ID
+	jobPath := "/api/v1/media-jobs/" + jobID
+	job2Path := "/api/v1/media-jobs/" + job2ID
 
 	h.want(outsider, "GET", jobPath, nil, nil, 404)
 	h.want(outsider, "POST", jobPath+"/refresh", nil, idem("refresh-out"), 404)
@@ -304,7 +304,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 
 	if _, err := h.Pool.Exec(t.Context(),
-		"UPDATE olp_go.media_jobs SET reconciliation_claim_id=$1, reconciliation_claimed_until=now()+interval '5 minutes' WHERE id=$2",
+		"UPDATE olp.media_jobs SET reconciliation_claim_id=$1, reconciliation_claimed_until=now()+interval '5 minutes' WHERE id=$2",
 		uuid.NewString(), job2ID); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatal("a busy refresh must not reach the provider")
 	}
 	if _, err := h.Pool.Exec(t.Context(),
-		"UPDATE olp_go.media_jobs SET reconciliation_claim_id=NULL, reconciliation_claimed_until=NULL WHERE id=$1", job2ID); err != nil {
+		"UPDATE olp.media_jobs SET reconciliation_claim_id=NULL, reconciliation_claimed_until=NULL WHERE id=$1", job2ID); err != nil {
 		t.Fatal(err)
 	}
 	h.want(op, "POST", job2Path+"/refresh", nil, idem("refresh-clear"), 200)
@@ -366,7 +366,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 
 	rows, err := h.Pool.Query(t.Context(),
-		"SELECT action FROM olp_go.Audit WHERE resource_type='media_job' AND resource_id=$1", jobID)
+		"SELECT action FROM olp.Audit WHERE resource_type='media_job' AND resource_id=$1", jobID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestMediaManagement(t *testing.T) {
 		}
 	}
 	rows, err = h.Pool.Query(t.Context(),
-		"SELECT action FROM olp_go.Audit WHERE resource_type='media_job' AND resource_id=$1", job2ID)
+		"SELECT action FROM olp.Audit WHERE resource_type='media_job' AND resource_id=$1", job2ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 	var leak int
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.Audit WHERE resource_id LIKE '%'||$1||'%'", up.contentBytes).Scan(&leak); err != nil {
+		"SELECT count(*) FROM olp.Audit WHERE resource_id LIKE '%'||$1||'%'", up.contentBytes).Scan(&leak); err != nil {
 		t.Fatal(err)
 	}
 	if leak != 0 {

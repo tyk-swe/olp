@@ -26,8 +26,8 @@ func publishCohereOperation(t *testing.T, h *accessHarness, owner *browser, f *o
 		t.Fatal(err)
 	}
 	configuration := map[string]any{"kind": profile.Kind, "profile_id": profile.ID, "profile_revision": "1", "endpoint": f.URL + "/v2", "auth_mode": "api_key", "options": map[string]any{"vendor_id": "cohere-native-v2"}}
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Cohere native " + uuid.NewString(), "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Cohere native " + uuid.NewString(), "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	model := h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
 	provider = h.want(owner, "PATCH", path+"/models/"+model, map[string]any{"enabled": true, "capabilities": operationCapabilities(profileID, operation, "native")}, etagHeader(provider), 200)
 	f.mu.Lock()
@@ -50,9 +50,9 @@ func publishCohereOperation(t *testing.T, h *accessHarness, owner *browser, f *o
 	if f.policy != nil {
 		draftInput["content_policy"] = f.policy
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Cohere native", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Cohere native", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -243,7 +243,7 @@ func TestStrictCohereNativeEmbedV2RetainsMultimodalInputAndRejectsCorruption(t *
 func TestStrictCohereNativeV2CatalogueKeepsCompatibilityPresetSeparate(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	vendors := h.list(owner, "GET", "/api/v3/provider-vendors", nil, nil, 200)
+	vendors := h.list(owner, "GET", "/api/v1/provider-vendors", nil, nil, 200)
 	found := map[string]map[string]any{}
 	for _, raw := range vendors {
 		entry := raw.(map[string]any)
@@ -255,14 +255,14 @@ func TestStrictCohereNativeV2CatalogueKeepsCompatibilityPresetSeparate(t *testin
 		found["cohere"] == nil || found["cohere"]["endpoint"] != "https://api.cohere.ai/compatibility/v1" {
 		t.Fatalf("native v2 discovery/preset conflated with compatibility: %v", found)
 	}
-	status, invalid, _ := h.request(owner, "POST", "/api/v3/providers", map[string]any{
+	status, invalid, _ := h.request(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Wrong Cohere endpoint", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "profile_id": "cohere-embed-v2", "profile_revision": "1", "auth_mode": "api_key", "endpoint": "https://api.cohere.ai/compatibility/v1", "options": map[string]any{"vendor_id": "cohere-native-v2"}},
 	}, idem(uuid.NewString()))
 	if status < 400 || !strings.Contains(fmt.Sprint(invalid), "/v2 endpoint") {
 		t.Fatalf("public configuration accepted the old compatibility endpoint as native v2: %d %v", status, invalid)
 	}
-	profiles := h.want(owner, "GET", "/api/v3/provider-profiles", nil, nil, 200)["items"].([]any)
+	profiles := h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any)
 	for _, id := range []string{"cohere-embed-v2", "cohere-rerank-v2"} {
 		var profile map[string]any
 		for _, raw := range profiles {

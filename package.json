@@ -1,6 +1,6 @@
 {
   "name": "openllmproxy",
-  "version": "3.0.0",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.24.0",
   "engines": {

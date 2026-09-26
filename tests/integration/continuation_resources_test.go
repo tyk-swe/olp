@@ -93,7 +93,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	// An actual ciphertext-write failure must also roll back the ready state.
 	// NOT VALID leaves the already committed journal readable while checking
 	// this next write.
-	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CompleteContinuation(t.Context(), claimed, ready); err == nil {
@@ -103,7 +103,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	if err != nil || got.State != resources.StateDispatching || !bytes.Equal(payload, initial) {
 		t.Fatalf("ciphertext-write failure changed journal: state=%v err=%v", got, err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CompleteContinuation(t.Context(), claimed, ready); err != nil {
@@ -120,7 +120,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	}
 	var cipher, metadata []byte
 	var purpose string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT s.ciphertext,s.purpose,r.metadata FROM olp_go.secrets s JOIN olp_go.provider_resources r ON r.id=s.id WHERE r.id=$1`, claimed.UUID).Scan(&cipher, &purpose, &metadata); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT s.ciphertext,s.purpose,r.metadata FROM olp.secrets s JOIN olp.provider_resources r ON r.id=s.id WHERE r.id=$1`, claimed.UUID).Scan(&cipher, &purpose, &metadata); err != nil {
 		t.Fatal(err)
 	}
 	for _, private := range [][]byte{[]byte("opaque-private-signature"), []byte("private prompt"), []byte("0.1000000000000000000001")} {
@@ -145,7 +145,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 		}
 		children = append(children, r)
 	}
-	other := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "other owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)["id"].(string)
+	other := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)["id"].(string)
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, other, claimed.ID); !errors.Is(err, resources.ErrNotFound) {
 		t.Fatalf("cross owner read: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 		t.Fatalf("old key read rotated state: %v", err)
 	}
 	// Authenticated ciphertext rejects a change without logging/returning its data.
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.secrets SET ciphertext=set_byte(ciphertext,octet_length(ciphertext)-1,get_byte(ciphertext,octet_length(ciphertext)-1)#1) WHERE id=$1`, children[0].UUID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.secrets SET ciphertext=set_byte(ciphertext,octet_length(ciphertext)-1,get_byte(ciphertext,octet_length(ciphertext)-1)#1) WHERE id=$1`, children[0].UUID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, children[0].ID); !errors.Is(err, resources.ErrContract) {
@@ -184,7 +184,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE id=$1`, children[0].UUID).Scan(&count); err != nil || count != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, children[0].UUID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("tombstone retained payload: %d %v", count, err)
 	}
 	oversized := base
@@ -193,7 +193,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	if _, _, err := store.ClaimContinuation(t.Context(), &oversized, make([]byte, resources.MaxContinuationBytes+1)); !errors.Is(err, resources.ErrPayloadTooLarge) {
 		t.Fatalf("unbounded payload: %v", err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE id=$1`, claimed.UUID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE id=$1`, claimed.UUID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, claimed.ID); !errors.Is(err, resources.ErrNotFound) {
@@ -202,13 +202,13 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	if _, err := store.CleanupExpired(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE id=$1`, claimed.UUID).Scan(&count); err != nil || count != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, claimed.UUID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("expiry retained payload: %d %v", count, err)
 	}
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, children[1].ID); err != nil {
 		t.Fatalf("independent child lost with parent expiry: %v", err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.api_keys SET revoked_at=now() WHERE id=$1`, authority.ID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET revoked_at=now() WHERE id=$1`, authority.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, children[1].ID); !errors.Is(err, resources.ErrNotFound) {
@@ -248,16 +248,16 @@ func TestResolverCurrentChecksLiveCredentialAndSecretExpiry(t *testing.T) {
 	if err != nil || string(secret) != vendorSecret {
 		t.Fatalf("live credential: %v %q", err, secret)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET expires_at=now()-interval '1 second' WHERE id=$1", *res.CredentialID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET expires_at=now()-interval '1 second' WHERE id=$1", *res.CredentialID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := read(); !errors.Is(err, resources.ErrUnavailable) {
 		t.Fatalf("expired secret: %v", err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET expires_at=NULL WHERE id=$1", *res.CredentialID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", *res.CredentialID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_credentials SET revoked_at=now() WHERE id=$1", *res.CredentialID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1", *res.CredentialID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := read(); !errors.Is(err, resources.ErrUnavailable) {
@@ -342,10 +342,10 @@ func TestContinuationClaimForDispatchCommitsOneEncryptedJournal(t *testing.T) {
 		t.Fatalf("failed encryption left an accepted-work journal: %v", err)
 	}
 	var initialSecrets int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose='provider_continuation'`).Scan(&initialSecrets); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE purpose='provider_continuation'`).Scan(&initialSecrets); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp.secrets ADD CONSTRAINT test_continuation_secret_write_failure CHECK (purpose <> 'provider_continuation') NOT VALID`); err != nil {
 		t.Fatal(err)
 	}
 	failingSubmission := resources.SubmissionID(time.Now(), uuid.New())
@@ -354,13 +354,13 @@ func TestContinuationClaimForDispatchCommitsOneEncryptedJournal(t *testing.T) {
 		t.Fatal("ciphertext-write failure committed a claim")
 	}
 	var claims, secretsAfter int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, failingSubmission).Scan(&claims); err != nil || claims != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, failingSubmission).Scan(&claims); err != nil || claims != 0 {
 		t.Fatalf("failed ciphertext write left a journal: count=%d err=%v", claims, err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose='provider_continuation'`).Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE purpose='provider_continuation'`).Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
 		t.Fatalf("failed ciphertext write left a secret: before=%d after=%d err=%v", initialSecrets, secretsAfter, err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `ALTER TABLE olp.secrets DROP CONSTRAINT test_continuation_secret_write_failure`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -390,7 +390,7 @@ func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *te
 	submission := resources.SubmissionID(time.Now(), uuid.New())
 	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
 	var initialSecrets int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose=$1`, "provider_continuation").Scan(&initialSecrets); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE purpose=$1`, "provider_continuation").Scan(&initialSecrets); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,7 +400,7 @@ func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *te
 	}
 	defer rotation.Rollback(context.Background())
 	var active int
-	if err := rotation.QueryRow(t.Context(), `SELECT active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE`).Scan(&active); err != nil {
+	if err := rotation.QueryRow(t.Context(), `SELECT active_key_version FROM olp.installation WHERE singleton FOR UPDATE`).Scan(&active); err != nil {
 		t.Fatal(err)
 	}
 	type outcome struct {
@@ -422,7 +422,7 @@ func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *te
 		t.Fatalf("claim passed an in-progress key rotation: %+v", result)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if _, err := rotation.Exec(t.Context(), `UPDATE olp_go.installation SET active_key_version=$1 WHERE singleton`, active+1); err != nil {
+	if _, err := rotation.Exec(t.Context(), `UPDATE olp.installation SET active_key_version=$1 WHERE singleton`, active+1); err != nil {
 		t.Fatal(err)
 	}
 	if err := rotation.Commit(t.Context()); err != nil {
@@ -433,11 +433,11 @@ func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *te
 		t.Fatalf("stale key claimed accepted work: %+v", result)
 	}
 	var claims int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, submission).Scan(&claims); err != nil || claims != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, submission).Scan(&claims); err != nil || claims != 0 {
 		t.Fatalf("stale key left an accepted-work journal: count=%d err=%v", claims, err)
 	}
 	var secretsAfter int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE purpose=$1`, "provider_continuation").Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE purpose=$1`, "provider_continuation").Scan(&secretsAfter); err != nil || secretsAfter != initialSecrets {
 		t.Fatalf("stale key left ciphertext: before=%d after=%d err=%v", initialSecrets, secretsAfter, err)
 	}
 }

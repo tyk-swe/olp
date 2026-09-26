@@ -206,7 +206,7 @@ func (f Filters) Validate() error {
 // the fact table, the hourly rollup and the boundary probe.
 func (f Filters) dimensions(q *filterQuery) {
 	if !f.AllProjects {
-		q.push(" AND api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
+		q.push(" AND api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
 	}
 	if f.Route != nil {
 		q.pushBind(" AND route_slug = ", *f.Route)
@@ -246,7 +246,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
-		" currency::text AS currency FROM olp_go.attempt_usage_facts WHERE true")
+		" currency::text AS currency FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
@@ -254,7 +254,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" api_key_id, operation, surface, attribution, " + scope.hourlyCount + ", input_tokens, output_tokens," +
 		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
 		" cache_write_1h_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
-		scope.hourlyIncomplete + ", currency::text AS currency FROM olp_go.attempt_usage_hourly WHERE true")
+		scope.hourlyIncomplete + ", currency::text AS currency FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
 	f.dimensions(q)
@@ -276,7 +276,7 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(unpriced_count), 0)::bigint," +
 	" COALESCE(SUM(incomplete_count), 0)::bigint," +
 	" COALESCE(MAX(btrim(currency))," +
-	" (SELECT btrim(currency) FROM olp_go.pricing_currency WHERE singleton))"
+	" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton))"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
@@ -475,10 +475,10 @@ const gapEvidenceSQL = `SELECT COALESCE(SUM(event_count), 0)::bigint,
     FROM (
       SELECT event_count,
              CASE WHEN certainty = 'lower_bound' THEN 1::bigint ELSE 0::bigint END AS uncertain_gap_count
-        FROM olp_go.request_metadata_ingestion_gaps
+        FROM olp.request_metadata_ingestion_gaps
        WHERE last_observed_at >= $1 AND first_observed_at < $2
       UNION ALL
-      SELECT event_count, uncertain_gap_count FROM olp_go.request_metadata_gap_hourly
+      SELECT event_count, uncertain_gap_count FROM olp.request_metadata_gap_hourly
        WHERE last_observed_at >= $1 AND first_observed_at < $2
     ) retained_gaps`
 
@@ -509,7 +509,7 @@ func readCoverage(ctx context.Context, q access.Queryer, f Filters) (Coverage, e
 		return Coverage{RangeComplete: true}, nil
 	}
 	var query filterQuery
-	query.push("SELECT COUNT(DISTINCT bucket)::bigint FROM olp_go.attempt_usage_hourly WHERE bucket = ANY(")
+	query.push("SELECT COUNT(DISTINCT bucket)::bigint FROM olp.attempt_usage_hourly WHERE bucket = ANY(")
 	query.push(query.bind(buckets) + "::timestamptz[])")
 	f.dimensions(&query)
 	var excluded int64

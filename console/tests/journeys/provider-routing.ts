@@ -84,6 +84,11 @@ export async function verifyProviderRouting(page: Page, info: TestInfo) {
   await expect(names).toHaveCount(2);
   await names.nth(0).fill('provider-pool-route');
   await names.nth(1).fill('provider-pool-route');
+  // Bulk drafts are strict unless declared otherwise; these providers have no
+  // profile, so the route is declared transformed before it is created.
+  const fidelity = comparison.getByLabel('Route fidelity');
+  await expect(fidelity).toHaveValue('strict');
+  await fidelity.selectOption('transformed');
   await comparison.screenshot({
     path: info.outputPath('provider-model-comparison.png')
   });
@@ -93,6 +98,7 @@ export async function verifyProviderRouting(page: Page, info: TestInfo) {
   await comparison
     .getByRole('link', { name: 'provider-pool-route', exact: true })
     .click();
+  await expect(page.getByLabel('Fidelity mode')).toHaveValue('transformed');
   await page.getByLabel('Maximum attempts').fill('3');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   const policy = page.locator('section').filter({

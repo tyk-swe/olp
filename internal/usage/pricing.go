@@ -123,7 +123,7 @@ func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt ti
 	}
 	var number int
 	if err = tx.QueryRow(ctx,
-		"SELECT COALESCE(MAX(revision), 0) + 1 FROM olp_go.pricing_revisions").Scan(&number); err != nil {
+		"SELECT COALESCE(MAX(revision), 0) + 1 FROM olp.pricing_revisions").Scan(&number); err != nil {
 		return Revision{}, fmt.Errorf("number pricing revision: %w", err)
 	}
 	revision := Revision{
@@ -134,7 +134,7 @@ func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt ti
 		CreatedAt:   time.Now().UTC(),
 		Prices:      normalized,
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp_go.pricing_revisions
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.pricing_revisions
             (id, revision, effective_at, created_by, created_at) VALUES ($1, $2, $3, $4, $5)`,
 		revision.ID, revision.Revision, revision.EffectiveAt, actor, revision.CreatedAt); err != nil {
 		return Revision{}, fmt.Errorf("store pricing revision: %w", err)
@@ -153,10 +153,10 @@ func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt ti
 func reserveCurrency(ctx context.Context, tx pgx.Tx, currency string) error {
 	var configured string
 	err := tx.QueryRow(ctx,
-		"SELECT btrim(currency) FROM olp_go.pricing_currency WHERE singleton").Scan(&configured)
+		"SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton").Scan(&configured)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err = tx.Exec(ctx,
-			"INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, $1)",
+			"INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, $1)",
 			currency); err != nil {
 			return fmt.Errorf("store installation pricing currency: %w", err)
 		}
@@ -178,7 +178,7 @@ func reserveCurrency(ctx context.Context, tx pgx.Tx, currency string) error {
 func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price) error {
 	if price.ProviderID != nil {
 		var kind string
-		err := tx.QueryRow(ctx, "SELECT kind FROM olp_go.providers WHERE id=$1", *price.ProviderID).Scan(&kind)
+		err := tx.QueryRow(ctx, "SELECT kind FROM olp.providers WHERE id=$1", *price.ProviderID).Scan(&kind)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && kind != price.ProviderKind) {
 			return access.Invalid("prices",
 				"A pricing override must reference a provider of the declared kind.")
@@ -187,7 +187,7 @@ func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price)
 			return fmt.Errorf("read pricing override provider: %w", err)
 		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO olp_go.prices
+	_, err := tx.Exec(ctx, `INSERT INTO olp.prices
             (pricing_revision_id, provider_kind, provider_id, model, operation,
              input_per_million, cached_input_per_million, output_per_million,
              cache_write_input_per_million, cache_write_5m_input_per_million,
@@ -349,11 +349,11 @@ const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.create
         p.cache_write_input_per_million::text, p.cache_write_5m_input_per_million::text,
         p.cache_write_1h_input_per_million::text,
         p.unit_price::text, btrim(p.currency)
-    FROM olp_go.pricing_revisions r
-    LEFT JOIN olp_go.pricing_source_snapshots snap ON snap.id = r.source_snapshot_id
-    LEFT JOIN olp_go.pricing_sources src ON src.id = snap.source_id
-    LEFT JOIN olp_go.prices p ON p.pricing_revision_id = r.id
-    WHERE r.id IN (SELECT id FROM olp_go.pricing_revisions
+    FROM olp.pricing_revisions r
+    LEFT JOIN olp.pricing_source_snapshots snap ON snap.id = r.source_snapshot_id
+    LEFT JOIN olp.pricing_sources src ON src.id = snap.source_id
+    LEFT JOIN olp.prices p ON p.pricing_revision_id = r.id
+    WHERE r.id IN (SELECT id FROM olp.pricing_revisions
                     WHERE ($1::int IS NULL OR revision < $1) ORDER BY revision DESC LIMIT $2)
     ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, p.model, p.operation,
         p.vendor_id NULLS FIRST`

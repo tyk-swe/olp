@@ -11,26 +11,26 @@ const request = (method: string, pathname: string): Request =>
 
 describe('authentication request policy', () => {
   it.each([
-    ['GET', '/api/v3/setup/status'],
-    ['POST', '/api/v3/setup'],
-    ['POST', '/api/v3/sessions'],
-    ['POST', '/api/v3/invitations/accept'],
-    ['GET', '/api/v3/auth/capabilities'],
-    ['GET', '/api/v3/oidc/login'],
-    ['POST', '/api/v3/oidc/login'],
-    ['GET', '/api/v3/oidc/callback?code=one&state=two']
+    ['GET', '/api/v1/setup/status'],
+    ['POST', '/api/v1/setup'],
+    ['POST', '/api/v1/sessions'],
+    ['POST', '/api/v1/invitations/accept'],
+    ['GET', '/api/v1/auth/capabilities'],
+    ['GET', '/api/v1/oidc/login'],
+    ['POST', '/api/v1/oidc/login'],
+    ['GET', '/api/v1/oidc/callback?code=one&state=two']
   ])('recognizes the exact public route %s %s', (method, pathname) => {
     expect(isAuthenticationEndpoint(request(method, pathname))).toBe(true);
   });
 
   it.each([
-    ['GET', '/api/v3/setup'],
-    ['HEAD', '/api/v3/setup/status'],
-    ['OPTIONS', '/api/v3/sessions'],
-    ['POST', '/api/v3/sessions/'],
-    ['POST', '/api/v3/sessions/nested'],
-    ['POST', '/api/v3/oidc/link'],
-    ['GET', '/api/v3/oidc/callback/extra']
+    ['GET', '/api/v1/setup'],
+    ['HEAD', '/api/v1/setup/status'],
+    ['OPTIONS', '/api/v1/sessions'],
+    ['POST', '/api/v1/sessions/'],
+    ['POST', '/api/v1/sessions/nested'],
+    ['POST', '/api/v1/oidc/link'],
+    ['GET', '/api/v1/oidc/callback/extra']
   ])('rejects a widened public route %s %s', (method, pathname) => {
     expect(isAuthenticationEndpoint(request(method, pathname))).toBe(false);
   });
@@ -38,17 +38,17 @@ describe('authentication request policy', () => {
   it('distinguishes current-session reads and deletion from nearby requests', () => {
     expect(
       isSessionValidationEndpoint(
-        request('GET', '/api/v3/sessions/current?fresh=true')
+        request('GET', '/api/v1/sessions/current?fresh=true')
       )
     ).toBe(true);
     expect(
-      isSessionValidationEndpoint(request('POST', '/api/v3/sessions/current'))
+      isSessionValidationEndpoint(request('POST', '/api/v1/sessions/current'))
     ).toBe(false);
     expect(
-      isCurrentSessionDeletion(request('DELETE', '/api/v3/sessions/current'))
+      isCurrentSessionDeletion(request('DELETE', '/api/v1/sessions/current'))
     ).toBe(true);
     expect(
-      isCurrentSessionDeletion(request('DELETE', '/api/v3/sessions/current/'))
+      isCurrentSessionDeletion(request('DELETE', '/api/v1/sessions/current/'))
     ).toBe(false);
   });
 
@@ -61,7 +61,7 @@ describe('authentication request policy', () => {
     ['PUT', true],
     ['DELETE', true]
   ])('classifies %s mutation semantics', (method, expected) => {
-    expect(isMutationRequest(request(method, '/api/v3/profile'))).toBe(
+    expect(isMutationRequest(request(method, '/api/v1/profile'))).toBe(
       expected
     );
   });

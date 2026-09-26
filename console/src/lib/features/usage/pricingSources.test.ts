@@ -53,7 +53,7 @@ describe('pricing sources', () => {
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
-    expect(new URL(request.url).pathname).toBe('/api/v3/pricing/sources');
+    expect(new URL(request.url).pathname).toBe('/api/v1/pricing/sources');
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
   });
 
@@ -66,7 +66,7 @@ describe('pricing sources', () => {
     const request = requests[0]!;
     expect(request.method).toBe('PATCH');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/pricing/sources/${source.id}`
+      `/api/v1/pricing/sources/${source.id}`
     );
     expect(request.headers.get('if-match')).toBe(`"${source.etag}"`);
   });
@@ -93,7 +93,7 @@ describe('pricing sources', () => {
     const request = requests[0]!;
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/pricing/sources/${source.id}/refresh`
+      `/api/v1/pricing/sources/${source.id}/refresh`
     );
     expect(await request.text()).toBe('');
   });
@@ -120,7 +120,7 @@ describe('pricing sources', () => {
     const request = requests[0]!;
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/pricing/source-snapshots/${snapshot.id}/publish`
+      `/api/v1/pricing/source-snapshots/${snapshot.id}/publish`
     );
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
     const body = (await request.json()) as {

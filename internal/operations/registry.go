@@ -37,8 +37,9 @@ type Field struct {
 }
 
 // Address is selected by trusted codec registration. RelativePath is appended
-// by the hosting owner; legacy path keys are adapters, never operation IR.
-type Address struct{ LegacyPath, RelativePath string }
+// by the hosting owner; FamilyPath keys select a connector family endpoint and
+// are adapters, never operation IR.
+type Address struct{ FamilyPath, RelativePath string }
 
 // Dialect is the small unary contract. Optional hooks are absent where that
 // operation has no model-body identity, textual policy surface or usage record.
@@ -86,7 +87,7 @@ func (r *Registry) Register(d Dialect) error {
 	if !Label.MatchString(d.Identity.ID) || d.Identity.Revision == "" || !Label.MatchString(d.Operation.ID) || d.Operation.Revision == "" || d.Request == nil || d.Result == nil || d.Probe == nil || d.Evidence == "" || d.Label == "" {
 		return errors.New("unary dialect requires bounded identities, codecs, probe and evidence")
 	}
-	if d.Address.LegacyPath == "" && d.Address.RelativePath == "" || d.Address.LegacyPath != "" && d.Address.RelativePath != "" {
+	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {
 		return errors.New("unary dialect requires one addressing contract")
 	}
 	r.mu.Lock()

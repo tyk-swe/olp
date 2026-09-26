@@ -16,7 +16,7 @@ export async function listUserPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<User>> {
-  const response = await apiClient.GET('/api/v3/users', {
+  const response = await apiClient.GET('/api/v1/users', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -28,7 +28,7 @@ export async function listUsers(signal?: AbortSignal): Promise<User[]> {
 }
 
 export async function updateUser(user: User, patch: UserPatch): Promise<User> {
-  const response = await apiClient.PATCH('/api/v3/users/{user_id}', {
+  const response = await apiClient.PATCH('/api/v1/users/{user_id}', {
     params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
     body: patch
   });
@@ -39,7 +39,7 @@ export async function listInvitationPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<Invitation>> {
-  const response = await apiClient.GET('/api/v3/invitations', {
+  const response = await apiClient.GET('/api/v1/invitations', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -51,7 +51,7 @@ export async function createInvitation(
   role: string,
   expiresInHours?: number
 ): Promise<InvitationSecret> {
-  const response = await apiClient.POST('/api/v3/invitations', {
+  const response = await apiClient.POST('/api/v1/invitations', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     // Omitting the field lets the API apply its seven-day default; it caps the
     // lifetime at thirty days (720 hours).
@@ -66,7 +66,7 @@ export async function createInvitation(
 
 export async function revokeInvitation(id: string): Promise<void> {
   const response = await apiClient.DELETE(
-    '/api/v3/invitations/{invitation_id}',
+    '/api/v1/invitations/{invitation_id}',
     {
       params: {
         path: { invitation_id: id },
@@ -82,7 +82,7 @@ export async function listSessionPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<Session>> {
-  const response = await apiClient.GET('/api/v3/sessions', {
+  const response = await apiClient.GET('/api/v1/sessions', {
     params: { query: { limit: 50, user_id: userId, cursor } },
     signal
   });
@@ -90,7 +90,7 @@ export async function listSessionPage(
 }
 
 export async function revokeSession(id: string): Promise<void> {
-  const response = await apiClient.DELETE('/api/v3/sessions/{session_id}', {
+  const response = await apiClient.DELETE('/api/v1/sessions/{session_id}', {
     params: { path: { session_id: id } }
   });
   ensureSuccess(response.error, response.response);
@@ -116,7 +116,7 @@ export async function listManagementTokenPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<ManagementToken>> {
-  const response = await apiClient.GET('/api/v3/management-tokens', {
+  const response = await apiClient.GET('/api/v1/management-tokens', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -129,7 +129,7 @@ export async function createManagementToken(
   expiresAt: string,
   projectIds?: string[]
 ): Promise<ManagementTokenSecret> {
-  const response = await apiClient.POST('/api/v3/management-tokens', {
+  const response = await apiClient.POST('/api/v1/management-tokens', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: {
       name,
@@ -146,7 +146,7 @@ export async function revokeManagementToken(
   etag: string
 ): Promise<void> {
   const response = await apiClient.POST(
-    '/api/v3/management-tokens/{management_token_id}/revoke',
+    '/api/v1/management-tokens/{management_token_id}/revoke',
     {
       params: {
         path: { management_token_id: id },
@@ -169,7 +169,7 @@ export async function listProjectPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<Project>> {
-  const response = await apiClient.GET('/api/v3/projects', {
+  const response = await apiClient.GET('/api/v1/projects', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -179,14 +179,14 @@ export async function listProjectPage(
 export async function listProjectMemberships(
   signal?: AbortSignal
 ): Promise<ProjectMembership[]> {
-  const response = await apiClient.GET('/api/v3/project-memberships', {
+  const response = await apiClient.GET('/api/v1/project-memberships', {
     signal
   });
   return result(response.data, response.error, response.response).items;
 }
 
 export async function createProject(name: string): Promise<Project> {
-  const response = await apiClient.POST('/api/v3/projects', {
+  const response = await apiClient.POST('/api/v1/projects', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: { name }
   });
@@ -197,7 +197,7 @@ export async function renameProject(
   project: Project,
   name: string
 ): Promise<Project> {
-  const response = await apiClient.PATCH('/api/v3/projects/{project_id}', {
+  const response = await apiClient.PATCH('/api/v1/projects/{project_id}', {
     params: {
       path: { project_id: project.id },
       header: { 'If-Match': project.etag }
@@ -213,7 +213,7 @@ export async function listProjectMemberPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProjectMember>> {
   const response = await apiClient.GET(
-    '/api/v3/projects/{project_id}/members',
+    '/api/v1/projects/{project_id}/members',
     {
       params: { path: { project_id: projectId }, query: { limit: 50, cursor } },
       signal
@@ -228,7 +228,7 @@ export async function putProjectMember(
   role: ProjectRole
 ): Promise<ProjectMember> {
   const response = await apiClient.PUT(
-    '/api/v3/projects/{project_id}/members/{user_id}',
+    '/api/v1/projects/{project_id}/members/{user_id}',
     {
       params: {
         path: { project_id: project.id, user_id: userId },
@@ -245,7 +245,7 @@ export async function removeProjectMember(
   userId: string
 ): Promise<void> {
   const response = await apiClient.DELETE(
-    '/api/v3/projects/{project_id}/members/{user_id}',
+    '/api/v1/projects/{project_id}/members/{user_id}',
     {
       params: {
         path: { project_id: project.id, user_id: userId },

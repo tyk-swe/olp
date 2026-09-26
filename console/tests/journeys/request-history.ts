@@ -14,7 +14,7 @@ export async function refreshUntilRequestCount(
         const response = page.waitForResponse(
           (candidate) =>
             candidate.request().method() === 'GET' &&
-            new URL(candidate.url()).pathname === '/api/v3/requests'
+            new URL(candidate.url()).pathname === '/api/v1/requests'
         );
         await page.getByRole('button', { name: 'Refresh' }).click();
         await response;

@@ -33,7 +33,7 @@ async function management(
 ): Promise<{ status: number; body: ManagementBody }> {
   return page.evaluate(
     async ({ method, path, body, match }) => {
-      const session = await fetch('/api/v3/sessions/current').then((response) =>
+      const session = await fetch('/api/v1/sessions/current').then((response) =>
         response.json()
       );
       const headers: Record<string, string> = {
@@ -68,7 +68,7 @@ async function publishNativeOperation(
   slug: string
 ): Promise<string> {
   const provider = success(
-    await management(page, 'POST', '/api/v3/providers', {
+    await management(page, 'POST', '/api/v1/providers', {
       name: `${profile} browser fixture`,
       configuration: {
         kind: 'openai_compatible',
@@ -82,7 +82,7 @@ async function publishNativeOperation(
     }),
     201
   );
-  const providerPath = `/api/v3/providers/${provider.id}`;
+  const providerPath = `/api/v1/providers/${provider.id}`;
   const models = success(
     await management(page, 'GET', `${providerPath}/models`),
     200
@@ -123,7 +123,7 @@ async function publishNativeOperation(
     200
   );
   const draft = success(
-    await management(page, 'POST', '/api/v3/route-drafts', {
+    await management(page, 'POST', '/api/v1/route-drafts', {
       slug,
       operations: [operation],
       overall_timeout_ms: 20_000,
@@ -145,14 +145,14 @@ async function publishNativeOperation(
     await management(
       page,
       'POST',
-      `/api/v3/route-drafts/${draft.id}/activate`,
+      `/api/v1/route-drafts/${draft.id}/activate`,
       undefined,
       draft.etag
     ),
     200
   );
   const key = success(
-    await management(page, 'POST', '/api/v3/api-keys', {
+    await management(page, 'POST', '/api/v1/api-keys', {
       name: `${profile} browser key`,
       scopes: ['inference', 'models_read'],
       allowed_routes: [slug]
@@ -171,7 +171,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   await signIn(page);
   const slug = `strict-browser-${info.project.name}`;
   const provider = success(
-    await management(page, 'POST', '/api/v3/providers', {
+    await management(page, 'POST', '/api/v1/providers', {
       name: `Browser Anthropic ${info.project.name}`,
       configuration: {
         kind: 'anthropic',
@@ -196,7 +196,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
     }),
     201
   );
-  const providerPath = `/api/v3/providers/${provider.id}`;
+  const providerPath = `/api/v1/providers/${provider.id}`;
   const models = success(
     await management(page, 'GET', `${providerPath}/models`),
     200
@@ -242,7 +242,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
     200
   );
   const draft = success(
-    await management(page, 'POST', '/api/v3/route-drafts', {
+    await management(page, 'POST', '/api/v1/route-drafts', {
       slug,
       operations: ['generation'],
       overall_timeout_ms: 20_000,
@@ -264,14 +264,14 @@ test('strict inspector has zero inference effects and browser tool continuation 
     await management(
       page,
       'POST',
-      `/api/v3/route-drafts/${draft.id}/activate`,
+      `/api/v1/route-drafts/${draft.id}/activate`,
       undefined,
       draft.etag
     ),
     200
   );
   const key = success(
-    await management(page, 'POST', '/api/v3/api-keys', {
+    await management(page, 'POST', '/api/v1/api-keys', {
       name: `Browser continuation ${info.project.name}`,
       scopes: ['inference', 'models_read'],
       allowed_routes: [slug],
@@ -411,7 +411,7 @@ test('native vector and rerank presentation keeps storage and score representati
     '{"data":[{"index":0,"embedding":"AP8="}],"provider_metadata":{"count":9007199254740993}}';
   const ranked =
     '{"results":[{"index":1,"relevance_score":0.1000000000000000000001},{"index":0,"relevance_score":0.1000000000000000000001}]}';
-  await page.route('**/api/v3/playground', async (route) => {
+  await page.route('**/api/v1/playground', async (route) => {
     const request = JSON.parse(route.request().postData() ?? '{}') as {
       operation?: string;
     };
@@ -602,7 +602,7 @@ test('realtime trace view keeps VAD and interruption order without opening infer
     const path = new URL(request.url()).pathname;
     if (
       request.method() === 'POST' &&
-      ['/v1/', '/native/', '/api/v3/playground'].some((prefix) =>
+      ['/v1/', '/native/', '/api/v1/playground'].some((prefix) =>
         path.startsWith(prefix)
       )
     )

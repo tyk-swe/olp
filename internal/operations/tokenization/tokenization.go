@@ -83,7 +83,7 @@ func Definitions() []operations.Dialect {
 		{"bedrock-count-tokens", "bedrock", "bedrock_count", "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_CountTokens.html"},
 	} {
 		id := entry.id
-		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: entry.surface, Label: id, Address: operations.Address{LegacyPath: entry.path}, Documentation: entry.docs, Evidence: id + "-native-count-scope/1"}
+		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: entry.surface, Label: id, Address: operations.Address{FamilyPath: entry.path}, Documentation: entry.docs, Evidence: id + "-native-count-scope/1"}
 		d.Request = func(source oif.Request) (oif.View, error) { return countRequest(source, id) }
 		d.Result = func(request oif.Request, result oif.Result) (oif.View, error) {
 			return countResult(request, result, id)

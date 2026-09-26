@@ -23,7 +23,7 @@ func (r *recordingHealthExecer) Exec(_ context.Context, sql string, args ...any)
 }
 
 func TestStreamNameIsNamespaced(t *testing.T) {
-	if got := StreamName("olp:go:v1:install:"); got != "olp:go:v1:install:request-metadata" {
+	if got := StreamName("olp:install:"); got != "olp:install:request-metadata" {
 		t.Errorf("stream = %s", got)
 	}
 	if StreamName("a:") == StreamName("b:") {
@@ -61,7 +61,7 @@ func TestCheckpointTaskRecordsOneOutcome(t *testing.T) {
 					t.Errorf("argument %d = %v, want %v", index+1, execer.calls[0][index], argument)
 				}
 			}
-			if !strings.Contains(execer.sql, "olp_go.worker_task_health") {
+			if !strings.Contains(execer.sql, "olp.worker_task_health") {
 				t.Errorf("sql = %s", execer.sql)
 			}
 		})

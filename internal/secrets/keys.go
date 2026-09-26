@@ -98,7 +98,7 @@ func (k *KeyRing) aead(version int) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 func aad(installation, purpose, id string) []byte {
-	b, _ := json.Marshal([]string{"olp-go-secret-v1", installation, purpose, id})
+	b, _ := json.Marshal([]string{"olp-secret-v1", installation, purpose, id})
 	return b
 }
 func (k *KeyRing) Seal(installation, purpose, id string, data []byte) ([]byte, error) {
@@ -138,7 +138,7 @@ func NewAuthKey(key []byte, installation string) *AuthKey {
 }
 func (a *AuthKey) Digest(purpose, value string) []byte {
 	h := hmac.New(sha256.New, a.key)
-	b, _ := json.Marshal([]string{"olp-go-auth-v1", a.installation, purpose, value})
+	b, _ := json.Marshal([]string{"olp-auth-v1", a.installation, purpose, value})
 	h.Write(b)
 	return h.Sum(nil)
 }

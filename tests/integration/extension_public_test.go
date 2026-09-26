@@ -104,12 +104,12 @@ func registerExtensionProfile(t *testing.T, dialect, operation string) string {
 
 func publishExtension(t *testing.T, h *accessHarness, owner *browser, f *extensionFixture, profileID, operation string) (string, string) {
 	t.Helper()
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          "Extension " + uuid.NewString(),
 		"configuration": map[string]any{"kind": "openai_compatible", "profile_id": profileID, "profile_revision": "1", "auth_mode": "api_key", "endpoint": f.URL + "/v1"},
 		"model":         vendorModel, "credential": vendorSecret,
 	}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	provider = h.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": operation, "surface": "native", "mode": "unary"}}}, etagHeader(provider), 200)
@@ -124,9 +124,9 @@ func publishExtension(t *testing.T, h *accessHarness, owner *browser, f *extensi
 	draft := fidelityDraft(slug, provider["id"])
 	draft["operations"] = []string{operation}
 	draft["fidelity"] = map[string]any{"mode": "strict"}
-	working := h.want(owner, "POST", "/api/v3/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+working["id"].(string)+"/activate", nil, withMatch(working, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "fixture extension", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	working := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+working["id"].(string)+"/activate", nil, withMatch(working, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "fixture extension", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -184,7 +184,7 @@ func TestRegisteredExtensionsPublic(t *testing.T) {
 				owner := h.owner()
 				unregistered := map[string]any{"name": "unregistered " + uuid.NewString(), "model": vendorModel,
 					"configuration": map[string]any{"kind": "openai_compatible", "profile_id": "not-registered", "profile_revision": "1", "auth_mode": "api_key", "endpoint": f.URL + "/v1"}, "credential": vendorSecret}
-				h.want(owner, "POST", "/api/v3/providers", unregistered, idem(uuid.NewString()), 422)
+				h.want(owner, "POST", "/api/v1/providers", unregistered, idem(uuid.NewString()), 422)
 				if len(f.captured()) != 0 {
 					t.Fatal("unregistered profile contacted a provider")
 				}

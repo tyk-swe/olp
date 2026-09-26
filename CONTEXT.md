@@ -43,6 +43,11 @@ continuation rules, independently of the environment that hosts it.
 A versioned, compatible combination of dialect, hosting, authentication, and
 transport for a provider-model binding.
 
+**Automatic provider**:
+A provider without a provider profile, whose endpoints follow from its provider
+kind; strict routes refuse it.
+_Avoid_: Legacy configuration.
+
 **Serving identity**:
 The selected model and its serving environment, including the API profile,
 upstream principal, region, resource scope, and observable revisions.
@@ -68,16 +73,13 @@ Delivering already-recorded output from the same accepted work without
 performing inference again.
 
 **Route fidelity**:
-A route's declared legacy, strict, or transformed treatment of invocation
-semantics; native identity and qualified interaction describe individual plans.
+A route's declared strict or transformed treatment of invocation semantics;
+native identity and qualified interaction describe individual plans.
+_Avoid_: Legacy (not a fidelity mode).
 
 **Strict route**:
 A route whose admitted interactions preserve execution, observation, permitted
 continuation, and effects relative to the selected target's native invocation.
-
-**Published route identity**:
-The client address of a published route, carrying its strict or non-strict
-promise across revisions. Crossing that boundary creates a distinct identity.
 
 **Upstream acceptance**:
 What is known about provider work: not sent, outcome unknown, accepted, or
@@ -88,5 +90,6 @@ What the caller may have received: unobserved, partially observed, actionable,
 or terminal. This is independent of upstream acceptance and response commitment.
 
 **Transformed route**:
-A route declaring intentional model-significant changes to an invocation or
-its observed result.
+A route permitted to change an invocation or its observed result, such as
+translating between dialects or redacting content.
+_Avoid_: Legacy route, best-effort route.

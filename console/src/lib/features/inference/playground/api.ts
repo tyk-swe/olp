@@ -43,7 +43,7 @@ export type PlaygroundStreamHandlers = {
 export async function runPlayground(
   input: PlaygroundRequest
 ): Promise<PlaygroundResponse> {
-  const { data, error, response } = await apiClient.POST('/api/v3/playground', {
+  const { data, error, response } = await apiClient.POST('/api/v1/playground', {
     cache: 'no-store',
     headers: { 'cache-control': 'no-store' },
     body: input
@@ -80,7 +80,7 @@ export async function streamPlayground(
   signal: AbortSignal
 ): Promise<void> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/playground/stream',
+    '/api/v1/playground/stream',
     {
       cache: 'no-store',
       headers: { 'cache-control': 'no-store' },

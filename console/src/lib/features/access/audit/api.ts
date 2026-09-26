@@ -22,7 +22,7 @@ export type AuditFilters = {
 export async function listAudit(
   filters: AuditFilters = {}
 ): Promise<CursorPage<AuditEvent>> {
-  const { data, error, response } = await apiClient.GET('/api/v3/audit', {
+  const { data, error, response } = await apiClient.GET('/api/v1/audit', {
     params: { query: compactQuery({ limit: AUDIT_PAGE_SIZE, ...filters }) }
   });
   return pageResult(result(data, error, response));

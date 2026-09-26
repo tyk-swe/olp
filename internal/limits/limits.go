@@ -299,7 +299,7 @@ func (l *Limiter) keysFor(lookupID, costOwnerID string) keys {
 // rateKeys addresses the counters one lookup shares across replicas.
 func (l *Limiter) rateKeys(lookupID string) (string, string) {
 	tagged := l.namespace + ":{" + lookupID + "}"
-	return tagged + ":rate", tagged + ":concurrency:v2"
+	return tagged + ":rate", tagged + ":concurrency"
 }
 
 // simpleUUID renders a UUID without dashes so it is safe inside a hash tag. A

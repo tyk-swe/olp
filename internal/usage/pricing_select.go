@@ -86,8 +86,8 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                  + COALESCE($6::numeric * selected.output_per_million / 1000000, 0)
                  + COALESCE($7::numeric * selected.unit_price, 0))::text
              ELSE NULL END AS estimated_cost
-    FROM olp_go.providers provider
-    LEFT JOIN olp_go.provider_revisions provider_revision
+    FROM olp.providers provider
+    LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($11::uuid, provider.active_revision_id)
        AND provider_revision.provider_id = provider.id
     LEFT JOIN LATERAL (
@@ -96,8 +96,8 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                price.cache_write_input_per_million, price.cache_write_5m_input_per_million,
                price.cache_write_1h_input_per_million,
                btrim(price.currency::text) AS currency
-        FROM olp_go.pricing_revisions revision
-        JOIN olp_go.prices price ON price.pricing_revision_id = revision.id
+        FROM olp.pricing_revisions revision
+        JOIN olp.prices price ON price.pricing_revision_id = revision.id
         WHERE revision.effective_at <= $4
           AND ($11::uuid IS NULL OR provider_revision.id IS NOT NULL)
           AND (NOT $12::boolean OR revision.id = $10::uuid)

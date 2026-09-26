@@ -25,8 +25,7 @@ assert.notEqual(verificationOrigin, origin, 'fixture verification is separate fr
 
 if (process.argv.includes('--check-metadata')) process.exit(0);
 
-// The Go backend gains surfaces milestone by milestone; a run names the ones
-// its fixture serves, defaulting to every surface.
+// A run names the surfaces its fixture serves, defaulting to every surface.
 const surfaces = new Set((process.env.OLP_SDK_SMOKE_SURFACES ?? 'openai,anthropic,gemini').split(','));
 
 const [{ default: Anthropic }, { GoogleGenAI }, { default: OpenAI }] = await Promise.all([

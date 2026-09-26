@@ -21,9 +21,9 @@ reject relative overrides because shell commands and Compose files resolve
 relative paths from different directories. When unset, the directory remains
 `deploy/secrets`.
 
-3.0 uses a JSON master-key ring and a separate authentication HMAC key.
-Provision fresh Go storage independently of Rust 2.x and 3.x. Preserve these
-files when restoring a 3.0 backup or rotating keys within an installation.
+The master key is a JSON key ring, and authentication uses a separate HMAC key.
+Preserve both files when restoring a backup or rotating keys within an
+installation.
 
 ## Bootstrap token lifecycle
 
@@ -40,7 +40,7 @@ docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ```
 
 The helper deletes the token and records retirement so preparation cannot
-recreate it. Omit the bootstrap overlay on later restarts and upgrades. To
+recreate it. Omit the bootstrap overlay on later restarts. To
 intentionally bootstrap a fresh database, remove
 `deploy/secrets/.olp_bootstrap_retired`, prepare again, and include the overlay.
 

@@ -32,7 +32,7 @@ export async function getProviderCapabilityOptions(
   signal?: AbortSignal
 ): Promise<ProviderCapabilityOptions> {
   const response = await apiClient.GET(
-    '/api/v3/provider-kinds/{provider_kind}/capabilities',
+    '/api/v1/provider-kinds/{provider_kind}/capabilities',
     {
       params: { path: { provider_kind: providerKind } },
       signal
@@ -44,7 +44,7 @@ export async function getProviderCapabilityOptions(
 export async function listProviderKinds(
   signal?: AbortSignal
 ): Promise<ProviderKindCapability[]> {
-  const response = await apiClient.GET('/api/v3/provider-kinds', { signal });
+  const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
   return result(response.data, response.error, response.response).items;
 }
 
@@ -54,7 +54,7 @@ export async function listProviderModelPage(
   signal?: AbortSignal
 ): Promise<ProviderModelPage> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/models',
+    '/api/v1/providers/{provider_id}/models',
     {
       params: {
         path: { provider_id: providerId },
@@ -74,7 +74,7 @@ export async function listProviderModelInventoryPage(
   search?: string,
   surface?: components['schemas']['Surface']
 ): Promise<CursorPage<ProviderModelInventory>> {
-  const response = await apiClient.GET('/api/v3/provider-models', {
+  const response = await apiClient.GET('/api/v1/provider-models', {
     params: {
       query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled, search, surface }
     },
@@ -96,7 +96,7 @@ export async function discoverProviderModels(
   provider: Provider
 ): Promise<Provider> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/discovery',
+    '/api/v1/providers/{provider_id}/discovery',
     {
       params: {
         path: { provider_id: provider.id },
@@ -113,7 +113,7 @@ export async function declareProviderModels(
   modelNames: string[]
 ): Promise<Provider> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/discovery',
+    '/api/v1/providers/{provider_id}/discovery',
     {
       params: {
         path: { provider_id: provider.id },
@@ -139,7 +139,7 @@ export async function setProviderModel(
   capabilities: CapabilityDeclaration[]
 ): Promise<Provider> {
   const response = await apiClient.PATCH(
-    '/api/v3/providers/{provider_id}/models/{model_id}',
+    '/api/v1/providers/{provider_id}/models/{model_id}',
     {
       params: {
         path: { provider_id: provider.id, model_id: modelId },
@@ -157,7 +157,7 @@ export async function certifyProviderModel(
   signal?: AbortSignal
 ): Promise<CapabilityCertification> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/models/{model_id}/certify',
+    '/api/v1/providers/{provider_id}/models/{model_id}/certify',
     {
       signal,
       params: {

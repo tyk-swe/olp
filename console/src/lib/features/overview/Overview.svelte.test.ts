@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import type { FixedRole } from '$lib/features/access/session/authorization';
 import { overviewKeys } from '$lib/features/overview/overviewKeys';
@@ -46,7 +47,48 @@ afterEach(async () => {
   if (component) await unmount(component);
   client.clear();
   host.remove();
+  vi.unstubAllGlobals();
   await authLifecycle.principalInvalidated();
+});
+
+it('counts the gateway with one overview request and no collection lists', async () => {
+  const requests = captureRequests((request) => {
+    switch (new URL(request.url).pathname) {
+      case '/api/v1/overview':
+        return jsonResponse({
+          active_providers: 120,
+          active_routes: 80,
+          enabled_models: 300,
+          usable_api_key: true
+        });
+      case '/api/v1/requests':
+        return jsonResponse({ items: [], next_cursor: null });
+      case '/api/v1/auth/capabilities':
+        return jsonResponse({
+          local_login_enabled: true,
+          oidc_login_enabled: false,
+          retention_enforced: true
+        });
+    }
+    return jsonResponse({ title: 'Not found', status: 404 }, { status: 404 });
+  });
+  client.removeQueries();
+  component = mount(OverviewProbe, { target: host, props: { client } });
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('120 active');
+    expect(host.textContent).toContain('80 active');
+  });
+  const paths = requests.map((request) => new URL(request.url).pathname);
+  expect(paths.filter((path) => path === '/api/v1/overview')).toHaveLength(1);
+  for (const collection of [
+    '/api/v1/providers',
+    '/api/v1/provider-models',
+    '/api/v1/routes',
+    '/api/v1/route-drafts',
+    '/api/v1/api-keys'
+  ])
+    expect(paths).not.toContain(collection);
 });
 
 it('updates setup actions and viewing links when the mounted principal changes', () => {

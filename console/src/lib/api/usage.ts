@@ -27,7 +27,7 @@ export async function usageSummary(
   filters: UsageFilters
 ): Promise<UsageSummary> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/usage/summary',
+    '/api/v1/usage/summary',
     {
       params: { query: compactQuery(filters) }
     }
@@ -40,7 +40,7 @@ export async function usageSeries(
   granularity: 'hour' | 'day'
 ): Promise<UsageSeriesResult> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/usage/time-series',
+    '/api/v1/usage/time-series',
     { params: { query: compactQuery({ ...filters, granularity }) } }
   );
   return result(data, error, response);
@@ -52,7 +52,7 @@ export async function usageBreakdown(
     'route' | 'provider' | 'model' | 'api_key' | 'operation' | 'attribution'
 ): Promise<UsageBreakdownResult> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/usage/breakdown',
+    '/api/v1/usage/breakdown',
     { params: { query: compactQuery({ ...filters, dimension, limit: 50 }) } }
   );
   return result(data, error, response);
@@ -62,7 +62,7 @@ export async function usageCompleteness(
   filters: UsageFilters
 ): Promise<UsageCompleteness> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/usage/completeness',
+    '/api/v1/usage/completeness',
     { params: { query: compactQuery(filters) } }
   );
   return result(data, error, response);

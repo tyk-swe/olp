@@ -396,7 +396,7 @@ func TestContentPolicyDecisionDedupOutputSlots(t *testing.T) {
 func TestContentPolicyDecisionDedupCompletion(t *testing.T) {
 	h := newHarness(t, Config{})
 	s := h.gateway
-	x := &execution{route: &runtime.Route{ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
+	x := &execution{route: &runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{
 		{ID: "mask-out", Phase: contentpolicy.PhaseOutput, Pattern: "secret", Action: contentpolicy.ActionRedact, Replacement: "[X]"},
 	}}}}
 	completion := &openai.Completion{OutputText: "a secret", Refusal: "another secret"}

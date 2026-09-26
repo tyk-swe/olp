@@ -30,7 +30,7 @@ func strictHarness(t *testing.T, configure func(*runtime.Snapshot)) *harness {
 		}
 	}
 	route := snapshot.Routes[routeSlug]
-	route.Fidelity = &runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
 	snapshot.Routes[routeSlug] = route
 	if configure != nil {
 		configure(snapshot)

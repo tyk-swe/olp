@@ -72,7 +72,7 @@ describe('media job management api', () => {
 
     const url = new URL(requests[0]!.url);
     expect(requests[0]!.method).toBe('GET');
-    expect(url.pathname).toBe('/api/v3/media-jobs');
+    expect(url.pathname).toBe('/api/v1/media-jobs');
     expect(url.searchParams.get('route')).toBe('video-route');
     expect(url.searchParams.get('state')).toBe('queued');
     expect(url.searchParams.get('lifecycle')).toBe('active');
@@ -90,7 +90,7 @@ describe('media job management api', () => {
 
     expect(requests[0]!.method).toBe('GET');
     expect(new URL(requests[0]!.url).pathname).toBe(
-      `/api/v3/media-jobs/${job.id}`
+      `/api/v1/media-jobs/${job.id}`
     );
     expect(detail.id).toBe(job.id);
   });
@@ -103,7 +103,7 @@ describe('media job management api', () => {
 
     expect(requests[0]!.method).toBe('POST');
     expect(new URL(requests[0]!.url).pathname).toBe(
-      `/api/v3/media-jobs/${job.id}/refresh`
+      `/api/v1/media-jobs/${job.id}/refresh`
     );
   });
 
@@ -115,7 +115,7 @@ describe('media job management api', () => {
 
     expect(requests[0]!.method).toBe('DELETE');
     expect(new URL(requests[0]!.url).pathname).toBe(
-      `/api/v3/media-jobs/${job.id}`
+      `/api/v1/media-jobs/${job.id}`
     );
     expect(requests[0]!.headers.get('if-match')).toBe(`"${job.etag}"`);
   });
@@ -140,7 +140,7 @@ describe('media job management api', () => {
 
     const url = new URL(requests[0]!.url);
     expect(requests[0]!.method).toBe('GET');
-    expect(url.pathname).toBe(`/api/v3/media-jobs/${job.id}/content`);
+    expect(url.pathname).toBe(`/api/v1/media-jobs/${job.id}/content`);
     expect(url.searchParams.get('variant')).toBe('thumbnail');
     expect(filename).toBe('olp-media-1-video.mp4');
     expect(await blob.text()).toBe('video-bytes');

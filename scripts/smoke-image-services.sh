@@ -8,8 +8,8 @@ actual_arch=$(docker image inspect --format '{{.Architecture}}' "$image")
 [[ $actual_arch == "$expected_arch" ]] || { echo "image architecture mismatch: $actual_arch" >&2; exit 1; }
 host_arch=$(uname -m)
 case "$expected_arch:$host_arch" in amd64:x86_64|arm64:aarch64|arm64:arm64) ;; *) echo 'Native architecture qualification requires a matching host; emulation does not qualify' >&2; exit 1 ;; esac
-project="olp-go-image-$$-$RANDOM"
-export OLP_GO_POSTGRES_PORT=0 OLP_GO_VALKEY_PORT=0
+project="olp-image-$$-$RANDOM"
+export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0
 compose=(docker compose -p "$project" -f deploy/compose.dev.yaml)
 containers=()
 scratch=$(mktemp -d)
@@ -32,7 +32,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 "${compose[@]}" up -d --wait --wait-timeout 90
 version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
-[[ $(docker run --rm "$image" --version) == "olp $version Go" ]]
+[[ $(docker run --rm "$image" --version) == "olp $version" ]]
 [[ $(docker image inspect --format '{{.Config.User}}' "$image") == '65532:65532' ]]
 # Use the already pulled PostgreSQL image only to assign disposable volume ownership.
 docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 sh -c 'chown 65532:65532 /secrets/* && chmod 0440 /secrets/*'
@@ -41,15 +41,15 @@ secret_args=(-v "$scratch/secrets:/secrets:ro"
   -e OLP_MASTER_KEY_FILE=/secrets/master.json
   -e OLP_BOOTSTRAP_TOKEN_FILE=/secrets/bootstrap.token)
 docker run --rm --network "${project}_default" --read-only --cap-drop=ALL --security-opt=no-new-privileges \
-  -e OLP_DATABASE_URL='postgres://olp_go:olp-go-local@postgres/olp_go?sslmode=disable' "$image" migrate
+  -e OLP_DATABASE_URL='postgres://olp:olp-local@postgres/olp?sslmode=disable' "$image" migrate
 for mode in all gateway control worker; do
   container="$project-$mode"
   containers+=("$container")
   docker run -d --name "$container" --network "${project}_default" --read-only --cap-drop=ALL --security-opt=no-new-privileges \
     --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
     -p 127.0.0.1::8080 -p 127.0.0.1::9090 \
-    -e OLP_DATABASE_URL='postgres://olp_go:olp-go-local@postgres/olp_go?sslmode=disable' \
-    "${secret_args[@]}" -e OLP_VALKEY_URL='redis://:olp-go-local@valkey/0' "$image" "$mode" >/dev/null
+    -e OLP_DATABASE_URL='postgres://olp:olp-local@postgres/olp?sslmode=disable' \
+    "${secret_args[@]}" -e OLP_VALKEY_URL='redis://:olp-local@valkey/0' "$image" "$mode" >/dev/null
   public=$(docker port "$container" 8080/tcp)
   private=$(docker port "$container" 9090/tcp)
   live=false
@@ -73,7 +73,7 @@ for mode in all gateway control worker; do
     echo 'Unpublished gateway passed readiness' >&2; exit 1
   fi
   if [[ $mode == all || $mode == control ]]; then
-    curl --fail --silent "http://$public/api/v3/openapi.json" | cmp - openapi/management.json
+    curl --fail --silent "http://$public/api/v1/openapi.json" | cmp - openapi/management.json
     curl --fail --silent "http://$public/login" | grep -q 'svelte-root'
   fi
   if [[ $mode != worker ]]; then

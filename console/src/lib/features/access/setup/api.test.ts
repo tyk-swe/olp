@@ -19,7 +19,7 @@ describe('setup API', () => {
     await expect(getSetupStatus()).resolves.toEqual({ setup_required: true });
     expect(fetchMock).toHaveBeenCalledOnce();
     const request = fetchMock.mock.calls[0]?.[0] as Request;
-    expect(new URL(request.url).pathname).toBe('/api/v3/setup/status');
+    expect(new URL(request.url).pathname).toBe('/api/v1/setup/status');
     expect(request.cache).toBe('no-store');
     expect(request.credentials).toBe('same-origin');
     expect(request.redirect).toBe('error');
@@ -55,7 +55,7 @@ describe('setup API', () => {
     ).resolves.toEqual(responseBody);
 
     const request = fetchMock.mock.calls[0]?.[0] as Request;
-    expect(new URL(request.url).pathname).toBe('/api/v3/setup');
+    expect(new URL(request.url).pathname).toBe('/api/v1/setup');
     expect(request.method).toBe('POST');
     expect(await request.clone().text()).toBe(
       JSON.stringify({

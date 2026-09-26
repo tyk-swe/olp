@@ -189,12 +189,12 @@ func TestExplicitDestinationNeverFallsBackToAnotherDialect(t *testing.T) {
 	if string(fields["input"]) != `"hi"` {
 		t.Fatal("identity normalized the source input form")
 	}
-	legacy, _, err := protocols.PrepareTarget(response, openai.FamilyResponses, "openai", "openai", "model", nil)
+	transformed, _, err := protocols.PrepareTarget(response, openai.FamilyResponses, "openai", "openai", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacy.Identity() || legacy.Provenance()[0].Origin != oif.LegacyMapping {
-		t.Fatal("legacy normalization claimed identity")
+	if transformed.Identity() || transformed.Provenance()[0].Origin != oif.TransformedMapping {
+		t.Fatal("transformed normalization claimed identity")
 	}
 }
 

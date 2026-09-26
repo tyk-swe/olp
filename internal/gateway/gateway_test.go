@@ -173,6 +173,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 		Providers:  map[string]runtime.Provider{a.ID: a, b.ID: b},
 		Routes: map[string]runtime.Route{routeSlug: {
 			ID: routeID, Slug: routeSlug, Operations: []string{"generation"}, OverallTimeout: 5000, MaxAttempts: 3, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: time.Now(),
+			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
 			Targets: []runtime.Target{
 				{ID: uuid.NewString(), ProviderID: a.ID, ProviderModel: modelA, Priority: 0, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()},
 				{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Priority: 1, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()},

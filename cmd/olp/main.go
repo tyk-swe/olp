@@ -37,7 +37,7 @@ func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version":
-			fmt.Printf("olp %s Go\n", process.Version)
+			fmt.Printf("olp %s\n", process.Version)
 			return nil
 		case "help", "--help", "-h":
 			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [flags]")

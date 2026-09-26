@@ -105,7 +105,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	routingID := d.ID
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp_go.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
 		return access.Reply{}, err
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())
@@ -117,11 +117,11 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	route := simulationRoute(routingID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.Fidelity, err = runtime.DecodeFidelity(d.Fidelity)
+	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
 	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
@@ -154,7 +154,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, route.Fidelity.Strict())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -303,7 +303,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict)
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, route.Fidelity.Strict())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -340,29 +340,28 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 // Register mounts the route surface.
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v3/route-drafts", h(s.drafts))
-	mux.HandleFunc("POST /api/v3/route-drafts", h(s.createDraft))
-	mux.HandleFunc("GET /api/v3/route-drafts/{draft_id}", h(s.draft))
-	mux.HandleFunc("PUT /api/v3/route-drafts/{draft_id}", h(s.replaceDraft))
-	mux.HandleFunc("DELETE /api/v3/route-drafts/{draft_id}", h(s.deleteDraft))
-	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/validate", h(s.validateDraft))
-	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/activate", h(s.activateDraft))
-	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/simulate", s.Access.HandleWith(1<<20, s.simulateDraft))
-	mux.HandleFunc("GET /api/v3/routes", h(s.routes))
-	mux.HandleFunc("GET /api/v3/routes/{route_id}", h(s.route))
-	mux.HandleFunc("POST /api/v3/routes/{route_id}/retire", h(s.retireRoute))
-	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions", h(s.revisions))
-	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/diff", h(s.revisionDiff))
-	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/{revision_id}", h(s.revision))
-	mux.HandleFunc("POST /api/v3/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
-	mux.HandleFunc("POST /api/v3/routes/{route_id}/migration-draft", h(s.migrationDraft))
-	mux.HandleFunc("GET /api/v3/routing-policies/{scope}/{id}", h(s.policy))
-	mux.HandleFunc("PUT /api/v3/routing-policies/{scope}/{id}", h(s.putPolicy))
-	mux.HandleFunc("POST /api/v3/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))
+	mux.HandleFunc("GET /api/v1/route-drafts", h(s.drafts))
+	mux.HandleFunc("POST /api/v1/route-drafts", h(s.createDraft))
+	mux.HandleFunc("GET /api/v1/route-drafts/{draft_id}", h(s.draft))
+	mux.HandleFunc("PUT /api/v1/route-drafts/{draft_id}", h(s.replaceDraft))
+	mux.HandleFunc("DELETE /api/v1/route-drafts/{draft_id}", h(s.deleteDraft))
+	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/validate", h(s.validateDraft))
+	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/activate", h(s.activateDraft))
+	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/simulate", s.Access.HandleWith(1<<20, s.simulateDraft))
+	mux.HandleFunc("GET /api/v1/routes", h(s.routes))
+	mux.HandleFunc("GET /api/v1/routes/{route_id}", h(s.route))
+	mux.HandleFunc("POST /api/v1/routes/{route_id}/retire", h(s.retireRoute))
+	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions", h(s.revisions))
+	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/diff", h(s.revisionDiff))
+	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/{revision_id}", h(s.revision))
+	mux.HandleFunc("POST /api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
+	mux.HandleFunc("GET /api/v1/routing-policies/{scope}/{id}", h(s.policy))
+	mux.HandleFunc("PUT /api/v1/routing-policies/{scope}/{id}", h(s.putPolicy))
+	mux.HandleFunc("POST /api/v1/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))
 }
 
-func simulationRoute(id, slug string, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
-	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
+func simulationRoute(id, slug string, fidelity runtime.RouteFidelity, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
+	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Fidelity: fidelity, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
 	for _, t := range targets {
 		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
 	}
@@ -392,7 +391,7 @@ func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.S
 	}
 	revoked := map[string]bool{}
 	if len(ids) > 0 {
-		rows, err := q.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp_go.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
+		rows, err := q.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
 		if err != nil {
 			return nil, err
 		}

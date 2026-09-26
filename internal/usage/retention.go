@@ -101,7 +101,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 // accepted range is an error rather than a default: silently substituting 30
 // days for an unreadable setting would delete data the operator kept on purpose.
 func retentionCutoffs(ctx context.Context, conn *pgx.Conn, now time.Time) (cutoffs, error) {
-	rows, err := conn.Query(ctx, `SELECT key, value FROM olp_go.settings WHERE key IN
+	rows, err := conn.Query(ctx, `SELECT key, value FROM olp.settings WHERE key IN
         ('retention.requests_days', 'retention.usage_days', 'retention.audit_days')`)
 	if err != nil {
 		return cutoffs{}, fmt.Errorf("read retention settings: %w", err)
@@ -171,17 +171,17 @@ func drainInBatches(ctx context.Context, conn *pgx.Conn, sql string, args ...any
 // request → anchor → fact lock order. Facts reference the anchor, not the
 // partitioned history table, so purging history does not touch usage.
 const purgeRequestsSQL = `WITH expired AS (
-      SELECT id, started_at FROM olp_go.requests WHERE started_at < $1
+      SELECT id, started_at FROM olp.requests WHERE started_at < $1
       LIMIT $2 FOR UPDATE SKIP LOCKED
     )
-    DELETE FROM olp_go.requests request USING expired
+    DELETE FROM olp.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
 
 const purgeExpiredResourcesSQL = `WITH expired AS (
-      SELECT id FROM olp_go.provider_resources WHERE expires_at IS NOT NULL AND expires_at < $1
+      SELECT id FROM olp.provider_resources WHERE expires_at IS NOT NULL AND expires_at < $1
       LIMIT $2 FOR UPDATE SKIP LOCKED
     )
-    DELETE FROM olp_go.provider_resources WHERE id IN (SELECT id FROM expired)`
+    DELETE FROM olp.provider_resources WHERE id IN (SELECT id FROM expired)`
 
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
@@ -191,11 +191,11 @@ func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time)
 // event out of the delete set until a later pass, and makes repeated rollups
 // additive for an hour that already carries retained totals.
 const rollupSQL = `WITH candidates AS (
-      SELECT ctid FROM olp_go.attempt_usage_facts
+      SELECT ctid FROM olp.attempt_usage_facts
        WHERE observed_at < date_trunc('hour', $1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
        LIMIT $2 FOR UPDATE SKIP LOCKED
     ), expired AS (
-      DELETE FROM olp_go.attempt_usage_facts fact USING candidates
+      DELETE FROM olp.attempt_usage_facts fact USING candidates
        WHERE fact.ctid = candidates.ctid
       RETURNING route_slug, provider_id, upstream_model, operation, surface, api_key_id,
                 budget_group_id, observed_at, input_tokens, output_tokens, cached_input_tokens,
@@ -208,7 +208,7 @@ const rollupSQL = `WITH candidates AS (
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
                 attribution
     ), rolled AS (
-      INSERT INTO olp_go.attempt_usage_hourly
+      INSERT INTO olp.attempt_usage_hourly
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
          budget_group_id, attribution,
          request_count, provider_request_count, model_request_count, target_request_count,
@@ -313,15 +313,15 @@ func rollUpAttemptUsage(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (
 // cascading a child this snapshot cannot see.
 const purgeAnchorsSQL = `WITH orphan AS (
       SELECT anchor.request_id, anchor.request_started_at
-        FROM olp_go.usage_request_anchors anchor
+        FROM olp.usage_request_anchors anchor
        WHERE anchor.request_started_at < $1 AND NOT EXISTS (
-         SELECT 1 FROM olp_go.attempt_usage_facts fact
+         SELECT 1 FROM olp.attempt_usage_facts fact
           WHERE fact.request_id = anchor.request_id
             AND fact.request_started_at = anchor.request_started_at
        )
        LIMIT $2 FOR UPDATE OF anchor SKIP LOCKED
     )
-    DELETE FROM olp_go.usage_request_anchors anchor USING orphan
+    DELETE FROM olp.usage_request_anchors anchor USING orphan
      WHERE anchor.request_id = orphan.request_id
        AND anchor.request_started_at = orphan.request_started_at`
 
@@ -331,9 +331,9 @@ func purgeOrphanedAnchors(ctx context.Context, conn *pgx.Conn, cutoff time.Time)
 }
 
 const purgeAuditSQL = `WITH expired AS (
-      SELECT ctid FROM olp_go.audit WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+      SELECT ctid FROM olp.audit WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED
     )
-    DELETE FROM olp_go.audit entry USING expired WHERE entry.ctid = expired.ctid`
+    DELETE FROM olp.audit entry USING expired WHERE entry.ctid = expired.ctid`
 
 func purgeExpiredAudit(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeAuditSQL, cutoff, int64(retentionBatch))
@@ -344,14 +344,14 @@ func purgeExpiredAudit(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (i
 // gap is held until its dedupe key can no longer be replayed, so rolling it up
 // cannot let the same loss be recorded twice.
 const gapRollupSQL = `WITH expired AS (
-      DELETE FROM olp_go.request_metadata_ingestion_gaps
+      DELETE FROM olp.request_metadata_ingestion_gaps
        WHERE reported_at < $1
          AND (deduplication_key IS NULL
               OR reported_at < now() - make_interval(days => $2::integer, mins => $3::integer))
       RETURNING gateway_instance, reason, event_count, certainty,
                 first_observed_at, last_observed_at
     ), rolled AS (
-      INSERT INTO olp_go.request_metadata_gap_hourly
+      INSERT INTO olp.request_metadata_gap_hourly
         (bucket, gateway_instance, reason, event_count, uncertain_gap_count,
          first_observed_at, last_observed_at)
       SELECT date_trunc('hour', first_observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
@@ -392,26 +392,26 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 	}{
 		// A resolved epoch is evidence only until its usage window closes; the
 		// gap it opened is retained separately.
-		{&report.EpochRows, `DELETE FROM olp_go.request_metadata_gateway_epochs
+		{&report.EpochRows, `DELETE FROM olp.request_metadata_gateway_epochs
             WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1)
                OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)`, []any{windows.usage}},
 		// Receipts are the delivery idempotency record; they expire with the
 		// replay horizon they protect, not with the usage window.
 		{&report.ReceiptRows, `WITH expired AS (
-              SELECT ctid FROM olp_go.request_metadata_event_receipts
+              SELECT ctid FROM olp.request_metadata_event_receipts
                WHERE recorded_at < now() - make_interval(days => $1::integer, mins => $2::integer)
                LIMIT $3 FOR UPDATE SKIP LOCKED
             )
-            DELETE FROM olp_go.request_metadata_event_receipts receipt USING expired
+            DELETE FROM olp.request_metadata_event_receipts receipt USING expired
              WHERE receipt.ctid = expired.ctid`,
 			[]any{int64(ReplayHorizonDays), int64(FutureSkewMinutes), int64(receiptBatch)}},
-		{&report.SessionRows, "DELETE FROM olp_go.sessions WHERE expires_at <= $1", []any{now}},
-		{&report.InvitationRows, `DELETE FROM olp_go.invitations
+		{&report.SessionRows, "DELETE FROM olp.sessions WHERE expires_at <= $1", []any{now}},
+		{&report.InvitationRows, `DELETE FROM olp.invitations
             WHERE expires_at <= $1 AND accepted_at IS NULL AND revoked_at IS NULL`, []any{now}},
 		// Replay records first, then the encrypted responses they point at:
 		// deleting the secret would cascade the replay away uncounted.
-		{&report.ReplayRows, "DELETE FROM olp_go.replays WHERE expires_at <= $1", []any{now}},
-		{&report.OIDCFlowRows, "DELETE FROM olp_go.oidc_flows WHERE expires_at <= $1", []any{now}},
+		{&report.ReplayRows, "DELETE FROM olp.replays WHERE expires_at <= $1", []any{now}},
+		{&report.OIDCFlowRows, "DELETE FROM olp.oidc_flows WHERE expires_at <= $1", []any{now}},
 	}
 	for _, statement := range deletes {
 		tag, execErr := tx.Exec(ctx, statement.sql, statement.args...)
@@ -423,8 +423,8 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 	// Stored replay responses and re-authentication grants expire with their
 	// owners; both are counted under the records above rather than separately.
 	for _, sql := range []string{
-		"DELETE FROM olp_go.secrets WHERE expires_at <= $1",
-		"DELETE FROM olp_go.recent_auth WHERE expires_at <= $1",
+		"DELETE FROM olp.secrets WHERE expires_at <= $1",
+		"DELETE FROM olp.recent_auth WHERE expires_at <= $1",
 	} {
 		if _, err = tx.Exec(ctx, sql, now); err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)

@@ -19,8 +19,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - env:
-          IMAGE: ghcr.io/${{ github.repository }}:3
+          REPOSITORY: ghcr.io/${{ github.repository }}
         run: |
+          # Follow the floating :<major>.<minor> tag of the current version.
+          version=$(jq -r .version package.json)
+          IMAGE="$REPOSITORY:${version%.*}"
           docker pull "$IMAGE"
           digest=$(docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}')
           echo "Scanning $digest" >> "$GITHUB_STEP_SUMMARY"

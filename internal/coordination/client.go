@@ -52,7 +52,7 @@ func Configuration(rawURL, caFile string, timeout time.Duration) (*config.Client
 		WithAddress(&config.NodeAddress{Host: u.Hostname(), Port: port}).
 		WithUseTLS(u.Scheme == "rediss").WithDatabaseId(db).
 		WithRequestTimeout(timeout).WithAdvancedConfiguration(advanced).
-		WithClientName("olp-go").WithLazyConnect(true)
+		WithClientName("olp").WithLazyConnect(true)
 	if u.User != nil {
 		password, _ := u.User.Password()
 		username := u.User.Username()

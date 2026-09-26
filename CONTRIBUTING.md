@@ -2,9 +2,9 @@
 
 Install Go 1.27.1, a C compiler/linker and glibc development headers, Node.js
 26, pnpm 11.24.0, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq,
-Python 3 and ripgrep. Run commands from the repository root. GLIDE ships a
-pinned prebuilt native core; normal development requires CGO but no Rust
-compiler. Release platforms are native Linux amd64 and arm64. macOS and musl are
+Python 3 and ripgrep. Run commands from the repository root. GLIDE links a
+pinned prebuilt native core, so development needs CGO but no Rust toolchain.
+Release platforms are native Linux amd64 and arm64. macOS and musl are
 unqualified.
 
 | Command | Purpose |
@@ -26,12 +26,11 @@ Required CI includes `check`, `integration`, `dependencies`, and both native
 image jobs. Contract generation is reproducible; `openapi/management.json` is
 the checked-in source of truth. Update it alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
-`scripts/without-rust.sh COMMAND` catches accidental Cargo/rustc invocations.
 
 ## Local development
 
 After `make setup` and `make dev`, open http://127.0.0.1:5173 and use
-`.local/go-secrets/bootstrap.token` to create the first owner. Use this origin
+`.local/secrets/bootstrap.token` to create the first owner. Use this origin
 so management requests pass the origin check. Vite proxies management, OIDC
 callbacks, and the configured inference paths; console edits hot reload, while
 backend edits require a restart. See the [console guide](console/README.md) for
@@ -45,10 +44,15 @@ and loopback ports 54321/63791. Stop them with:
 docker compose -f deploy/compose.dev.yaml stop
 ```
 
-Go uses schema `olp_go` and Valkey namespace `olp:go:v1:<installation UUID>:`.
-Provision fresh storage when replacing any Rust release, including Rust 3.0.
-Startup rejects Rust schemas before writes. Back up the old installation with
-its own version and retain it until the independent replacement is verified.
+Development storage uses schema `olp` and Valkey namespace
+`olp:<installation UUID>:`. OLP makes no upgrade promises during 0.x (see
+[ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md)), so a change
+may require a fresh database. Remove the development volumes and start again:
+
+```sh
+docker compose -f deploy/compose.dev.yaml down -v
+make dev
+```
 
 ## Tests and changes
 
@@ -89,29 +93,24 @@ this exception when both support TypeScript 7 and the console passes
 `make check` and the Chromium journey. Other version exceptions require a
 concrete incompatibility or regression and a stated removal condition.
 
-## Release evidence
+## Releases
 
-Root `package.json` owns the stable 3.x version. The console package, chart
-version/appVersion, binary linker value, image label and release tag must agree;
-`scripts/check-release-version.mjs` enforces this. Build images natively on
-amd64 and arm64. Dependency layers are cached independently of application
-source; static assets remain separate from the Go binary. Native GLIDE code and
-CA libraries ship in a nonroot distroless image.
+Root `package.json` owns the 0.x version. The console package, the Node and
+Python SDK smoke packages and lock, the chart `version`, `appVersion` and image
+annotation, the Dockerfile version argument, the Compose image tag, the OpenAPI
+`info.version` and the release tag must agree;
+`scripts/check-release-version.mjs` enforces this. The Makefile injects the
+same version into the binary. Build images natively on amd64 and arm64.
+Dependency layers are cached independently of application source; static assets
+remain separate from the Go binary. Native GLIDE code and CA libraries ship in a
+nonroot distroless image.
 
 Candidate platform digests form one multi-architecture index. Packaged browser,
 SDK and recovery qualification consumes that exact index; promotion only tags
 and attests it and never rebuilds. A manual release-workflow dispatch qualifies
-a candidate without publishing stable version tags. Only a `v3.*` push can
-promote. Fresh storage requirements are recorded in release metadata.
-
-The [dated completion record](docs/roadmap/README.md) preserves qualification of
-the September 18, 2026 candidate, not newer source. Current inventories are
-`deploy/release-inventory.json`, `deploy/release-dependencies.json`, and
-`deploy/release-module-graph.txt`; regenerate them with
-`node scripts/release-inventory.mjs`. The frozen reference is never regenerated
-from the application being tested. CI checks these generated paths;
-qualification runs remain separate. A missing platform result or missed build
-target keeps that candidate's release gate open.
+a candidate without publishing version tags. Only a `v0.*` tag push can promote
+it, publishing `:<version>` and the floating `:<major>.<minor>` tag. A missing
+platform result or missed build target keeps that candidate's release gate open.
 
 A provider, protocol or media feature is not release-ready until its review
 includes native conformance, unsupported/lossy semantics, body/time/admission
@@ -121,8 +120,10 @@ Missing evidence can block release. Preserve feature ownership and immutable
 publication; avoid speculative services, tenant abstractions, or optimization
 gates added only to satisfy a checklist.
 
-Publish the generated management OpenAPI contract with every release. Breaking
-changes require an explicit compatibility/versioning decision, not silently
-updating a fixture. Weekly released-image scans retain a digest-specific
+Publish the generated management OpenAPI contract with every release. During
+0.x a release may break the management API, configuration and storage; make
+such a change deliberately, update the contract and documentation, and record
+it in [the changelog](CHANGELOG.md) rather than silently updating a fixture.
+Weekly scans of the released `:<major>.<minor>` image retain a digest-specific
 vulnerability report; triage findings through [the security policy](SECURITY.md)
-and update the supported patch release.
+and fix them in the latest 0.x release.

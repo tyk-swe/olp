@@ -261,7 +261,7 @@ export class RouteDraftEditorState {
       {
         id: `rule-${this.policyRules.length + 1}`,
         phase: 'input',
-        action: this.fidelity?.mode === 'strict' ? 'block' : 'redact',
+        action: this.fidelity.mode === 'strict' ? 'block' : 'redact',
         pattern: '',
         replacement: ''
       }
@@ -453,7 +453,7 @@ export class RouteDraftEditorState {
       this.operations = [...current.operations];
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
-      this.fidelity = current.fidelity ?? null;
+      this.fidelity = current.fidelity;
       this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,

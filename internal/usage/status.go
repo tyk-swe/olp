@@ -43,7 +43,7 @@ type ConsumerStatus struct {
 func (c ConsumerStatus) Complete() bool { return c.State == ConsumerHealthy }
 
 const consumerHealthSQL = `SELECT pending_events, lag_events, oldest_pending_at, checked_at
-    FROM olp_go.request_metadata_consumer_health WHERE singleton`
+    FROM olp.request_metadata_consumer_health WHERE singleton`
 
 // ReadConsumerStatus loads the consumer health row and classifies it against
 // `now`. A missing row is "unknown" rather than an error: an installation that

@@ -16,12 +16,12 @@ import (
 func compatibleReservationConfiguration(ctx context.Context, q Querier, generationID, providerID string) (bool, error) {
 	var pinned, current []byte
 	err := q.QueryRow(ctx, `SELECT pinned.configuration, current.configuration
-		FROM olp_go.runtime_releases release
-		JOIN olp_go.providers provider ON provider.id=$2::uuid
-		JOIN olp_go.provider_revisions pinned
+		FROM olp.runtime_releases release
+		JOIN olp.providers provider ON provider.id=$2::uuid
+		JOIN olp.provider_revisions pinned
 		  ON pinned.id=(release.snapshot#>>ARRAY['providers',$2::text,'revision_id'])::uuid
 		 AND pinned.provider_id=provider.id
-		JOIN olp_go.provider_revisions current ON current.id=provider.active_revision_id
+		JOIN olp.provider_revisions current ON current.id=provider.active_revision_id
 		WHERE release.id=$1::uuid`, generationID, providerID).Scan(&pinned, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

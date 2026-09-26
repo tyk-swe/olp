@@ -20,7 +20,7 @@ func TestValidateConsumerConfigRejectsUnrunnableSettings(t *testing.T) {
 		mutate   func(*consumerPolicy)
 		wantErr  bool
 	}{
-		{name: "the production policy runs", stream: "olp:go:v1:x:request-metadata",
+		{name: "the production policy runs", stream: "olp:x:request-metadata",
 			consumer: "host-1-abc"},
 		{name: "a stream must be named", stream: "  ", consumer: "host-1-abc", wantErr: true},
 		{name: "a consumer must be named", stream: "stream", consumer: " ", wantErr: true},
@@ -141,11 +141,11 @@ func TestConsumerReadsTheServersAnswersAboutItsGroup(t *testing.T) {
 			err:  rejected("BUSYGROUP: Consumer Group name already exists"),
 			busy: true},
 		{name: "a lost stream key leaves no group to read from",
-			err: rejected("NOGROUP: No such key 'olp:go:v1:i:request-metadata' or consumer " +
+			err: rejected("NOGROUP: No such key 'olp:i:request-metadata' or consumer " +
 				"group 'olp:persistence' in XREADGROUP with GROUP option"),
 			lost: true},
 		{name: "the reclaim script reports the same loss through Lua",
-			err: rejected("NOGROUP: No such key 'olp:go:v1:i:request-metadata' or consumer " +
+			err: rejected("NOGROUP: No such key 'olp:i:request-metadata' or consumer " +
 				"group 'olp:persistence' script: 2d8e554a, on @user_script:1."),
 			lost: true},
 		{name: "a missing key alone is not a missing group",

@@ -63,7 +63,7 @@ func TestVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 			}
 			call(http.StatusTooManyRequests)
 			var jobs int
-			if err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.media_jobs").Scan(&jobs); err != nil {
+			if err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.media_jobs").Scan(&jobs); err != nil {
 				t.Fatal(err)
 			}
 			if jobs != 0 {
@@ -74,7 +74,7 @@ func TestVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 			}
 			call(http.StatusCreated)
 			call(http.StatusTooManyRequests)
-			if err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.media_jobs WHERE lifecycle_state = 'active'").Scan(&jobs); err != nil {
+			if err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.media_jobs WHERE lifecycle_state = 'active'").Scan(&jobs); err != nil {
 				t.Fatal(err)
 			}
 			if jobs != 1 {
@@ -114,7 +114,7 @@ func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 				f.awaitCompleted(t, 1)
 				id := created["id"].(string)
 				var pinnedSlot string
-				if err := f.pool.QueryRow(t.Context(), "SELECT slot_id::text FROM olp_go.media_jobs WHERE id=$1", id).Scan(&pinnedSlot); err != nil || pinnedSlot != f.slotID {
+				if err := f.pool.QueryRow(t.Context(), "SELECT slot_id::text FROM olp.media_jobs WHERE id=$1", id).Scan(&pinnedSlot); err != nil || pinnedSlot != f.slotID {
 					t.Fatalf("job lost selected slot: %q %v", pinnedSlot, err)
 				}
 				f.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, f.log)
@@ -167,7 +167,7 @@ func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 					t.Fatal("quota-rejected operation reached upstream")
 				}
 				var lifecycle string
-				if err := f.pool.QueryRow(t.Context(), "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id=$1", id).Scan(&lifecycle); err != nil || lifecycle != "active" {
+				if err := f.pool.QueryRow(t.Context(), "SELECT lifecycle_state FROM olp.media_jobs WHERE id=$1", id).Scan(&lifecycle); err != nil || lifecycle != "active" {
 					t.Fatalf("quota rejection persisted work for reconciliation: %s %v", lifecycle, err)
 				}
 				if err := held.Refund(t.Context()); err != nil {

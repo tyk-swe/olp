@@ -142,7 +142,7 @@ type Route struct {
 	ProjectID             *string   `json:"project_id,omitempty"`
 
 	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
-	Fidelity      *RouteFidelity        `json:"fidelity,omitempty"`
+	Fidelity      RouteFidelity         `json:"fidelity"`
 }
 
 // Snapshot is the complete immutable serving configuration.

@@ -24,8 +24,8 @@ type Management struct {
 
 // Register mounts the health routes on the management surface.
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/health/ready", m.Access.Handle(m.ready))
-	mux.HandleFunc("GET /api/v3/provider-health", m.Access.Handle(m.providerHealth))
+	mux.HandleFunc("GET /api/v1/health/ready", m.Access.Handle(m.ready))
+	mux.HandleFunc("GET /api/v1/provider-health", m.Access.Handle(m.providerHealth))
 }
 
 func (m *Management) ready(r *http.Request) (access.Reply, error) {

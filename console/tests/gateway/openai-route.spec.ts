@@ -43,7 +43,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -70,7 +70,7 @@ async function manage(
 ): Promise<ManagementResult> {
   return page.evaluate(
     async ({ method, path, options }) => {
-      const session = await fetch('/api/v3/sessions/current').then((r) =>
+      const session = await fetch('/api/v1/sessions/current').then((r) =>
         r.json()
       );
       const headers: Record<string, string> = {
@@ -223,7 +223,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const created = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/v3/providers'
+      new URL(response.url()).pathname === '/api/v1/providers'
   );
   await page.getByRole('button', { name: /Save and test connection/ }).click();
   const providerId = ((await (await created).json()) as { id: string }).id;
@@ -264,7 +264,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await expect(page.getByText('2/2 certified', { exact: true })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: info.outputPath('go-provider-onboarding.png'),
+    path: info.outputPath('provider-onboarding.png'),
     fullPage: true
   });
   await page.getByRole('button', { name: 'Continue to activation' }).click();
@@ -286,13 +286,13 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     page.getByLabel('Provider model').first().locator('option:checked')
   ).toContainText(upstream.model);
   await page.getByLabel('Maximum attempts').fill('2');
-  // This journey intentionally qualifies the historical compatibility route.
-  await page.getByLabel('Fidelity mode').selectOption('legacy');
+  // This provider has no profile, so the route is declared transformed.
+  await page.getByLabel('Fidelity mode').selectOption('transformed');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await verifyDraftSave(page, 'route', route);
 
-  const providerPath = `/api/v3/providers/${providerId}`;
+  const providerPath = `/api/v1/providers/${providerId}`;
   const disabled = await manage(page, 'POST', `${providerPath}/disable`, {
     match: providerPath,
     idempotency: `disable-${Date.now()}`
@@ -305,7 +305,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     page.getByText(/belongs to a connection that is not active\./)
   ).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-route-activation-blocked.png'),
+    path: info.outputPath('route-activation-blocked.png'),
     fullPage: true
   });
   const reactivated = await manage(page, 'POST', `${providerPath}/activate`, {
@@ -329,7 +329,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     .click();
   await expect(page.getByText('Revision 1 active')).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-route-active.png'),
+    path: info.outputPath('route-active.png'),
     fullPage: true
   });
 
@@ -370,7 +370,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     secretDialog.getByText(`OpenAI request succeeded through route ${route}.`)
   ).toBeVisible();
   await secretDialog.screenshot({
-    path: info.outputPath('go-key-connection-test.png')
+    path: info.outputPath('key-connection-test.png')
   });
   await secretDialog
     .getByRole('button', { name: 'I have saved the key' })
@@ -437,7 +437,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await page.getByRole('button', { name: 'Run test' }).click();
   await expect(page.locator('.output pre').first()).toHaveText(upstream.reply);
   await page.screenshot({
-    path: info.outputPath('go-playground.png'),
+    path: info.outputPath('playground.png'),
     fullPage: true
   });
 
@@ -462,9 +462,9 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const historyRequests: string[] = [];
   page.on('request', (outgoing) => {
     const path = new URL(outgoing.url()).pathname;
-    if (path.startsWith('/api/v3/requests')) historyRequests.push(path);
+    if (path.startsWith('/api/v1/requests')) historyRequests.push(path);
   });
-  const capabilitiesPattern = '**/api/v3/auth/capabilities';
+  const capabilitiesPattern = '**/api/v1/auth/capabilities';
   await page.route(capabilitiesPattern, (intercept) =>
     intercept.fulfill({
       status: 503,
@@ -487,7 +487,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const listed = page.waitForResponse(
     (response) =>
       response.request().method() === 'GET' &&
-      new URL(response.url()).pathname === '/api/v3/requests'
+      new URL(response.url()).pathname === '/api/v1/requests'
   );
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   expect((await listed).status()).toBe(200);

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
@@ -20,36 +19,36 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 			owner := h.owner()
 			issuer := newTestIssuer(t)
 			configuration := map[string]any{"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration", "client_id": "test-client", "client_secret": "write-only-client-secret", "enabled": true}
-			saved := h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, nil, 200)
-			h.want(owner, "POST", "/api/v3/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
-			authorization := h.want(owner, "POST", "/api/v3/oidc/link", nil, nil, 200)["authorization_url"].(string)
+			saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, nil, 200)
+			h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
+			authorization := h.want(owner, "POST", "/api/v1/oidc/link", nil, nil, 200)["authorization_url"].(string)
 			claims := map[string]any{"sub": "owner-subject", "email": "owner@example.com"}
 			h.want(owner, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)
 			// A locally provisioned account stays locally managed even without a mapping.
 			var management string
-			if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE email='owner@example.com'").Scan(&management); err != nil || management != "local" {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp.users WHERE email='owner@example.com'").Scan(&management); err != nil || management != "local" {
 				t.Fatalf("local ownership=%s: %v", management, err)
 			}
-			setting := h.want(owner, "GET", "/api/v3/settings/auth.local_login_enabled", nil, nil, 200)
+			setting := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
 			if !processDisabled {
-				setting = h.want(owner, "PUT", "/api/v3/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(setting), 200)
+				setting = h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(setting), 200)
 			}
 			h.Server.LocalLoginDisabled = processDisabled
-			if h.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)["local_login_enabled"] != false {
+			if h.want(nil, "GET", "/api/v1/auth/capabilities", nil, nil, 200)["local_login_enabled"] != false {
 				t.Fatal("local login advertised against effective policy")
 			}
 			expected := 401
 			if processDisabled {
 				expected = 404
 			}
-			h.want(nil, "POST", "/api/v3/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, expected)
-			identities := h.want(owner, "GET", "/api/v3/oidc/identities", nil, nil, 200)
+			h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, expected)
+			identities := h.want(owner, "GET", "/api/v1/oidc/identities", nil, nil, 200)
 			identity := identities["items"].([]any)[0].(map[string]any)
 			if identity["can_unlink"] != false || identities["oidc_reauthentication_available"] != true {
 				t.Fatal("identity capability ignored usable methods")
 			}
 			id := identity["id"].(string)
-			h.want(owner, "POST", "/api/v3/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_unlink", "resource_id": id}, nil, 204)
+			h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_unlink", "resource_id": id}, nil, 204)
 			candidate := maps.Clone(configuration)
 			candidate["enabled"] = false
 			start := make(chan struct{})
@@ -58,12 +57,12 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 			second := &browser{Cookies: maps.Clone(owner.Cookies), CSRF: owner.CSRF}
 			go func() {
 				<-start
-				status, _, _ := h.request(first, "DELETE", "/api/v3/oidc/identities/"+id, nil, nil)
+				status, _, _ := h.request(first, "DELETE", "/api/v1/oidc/identities/"+id, nil, nil)
 				results <- status
 			}()
 			go func() {
 				<-start
-				status, _, _ := h.request(second, "PUT", "/api/v3/oidc/configuration", candidate, etagHeader(saved))
+				status, _, _ := h.request(second, "PUT", "/api/v1/oidc/configuration", candidate, etagHeader(saved))
 				results <- status
 			}()
 			close(start)
@@ -73,18 +72,18 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 				}
 			}
 			var identitiesCount, grants int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp_go.oidc_identities),(SELECT count(*) FROM olp_go.recent_auth)").Scan(&identitiesCount, &grants); err != nil || identitiesCount != 1 || grants != 1 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp.oidc_identities),(SELECT count(*) FROM olp.recent_auth)").Scan(&identitiesCount, &grants); err != nil || identitiesCount != 1 || grants != 1 {
 				t.Fatalf("rollback identities=%d grants=%d err=%v", identitiesCount, grants, err)
 			}
-			if current := h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200); current["etag"] != saved["etag"] || current["enabled"] != true {
+			if current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200); current["etag"] != saved["etag"] || current["enabled"] != true {
 				t.Fatal("rejected disable was committed")
 			}
 			// With both switches enabled, the same unconsumed proof can remove OIDC.
 			h.Server.LocalLoginDisabled = false
 			if !processDisabled {
-				h.want(owner, "PUT", "/api/v3/settings/auth.local_login_enabled", map[string]any{"value": "true"}, etagHeader(setting), 200)
+				h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "true"}, etagHeader(setting), 200)
 			}
-			h.want(owner, "DELETE", "/api/v3/oidc/identities/"+id, nil, nil, 204)
+			h.want(owner, "DELETE", "/api/v1/oidc/identities/"+id, nil, nil, 204)
 		})
 	}
 }
@@ -94,29 +93,29 @@ func TestInvitationAcceptanceRechecksEffectivePolicy(t *testing.T) {
 		t.Run(fmt.Sprint(processDisabled), func(t *testing.T) {
 			h := newAccessHarness(t)
 			owner := h.owner()
-			invitation := h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": "policy@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "policy"}, 201)
+			invitation := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "policy@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "policy"}, 201)
 			h.Server.LocalLoginDisabled = processDisabled
 			if !processDisabled {
-				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
+				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
 					t.Fatal(err)
 				}
 			}
-			h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": "second@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "second"}, 409)
+			h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "second@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "second"}, 409)
 			input := map[string]any{"token": invitation["token"], "display_name": "Policy member", "password": accessPassword}
-			h.want(nil, "POST", "/api/v3/invitations/accept", input, nil, 409)
+			h.want(nil, "POST", "/api/v1/invitations/accept", input, nil, 409)
 			var consumed bool
 			var users int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT accepted_at IS NOT NULL,(SELECT count(*) FROM olp_go.users WHERE email='policy@example.com') FROM olp_go.invitations WHERE id=$1", invitation["invitation"].(map[string]any)["id"]).Scan(&consumed, &users); err != nil || consumed || users != 0 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT accepted_at IS NOT NULL,(SELECT count(*) FROM olp.users WHERE email='policy@example.com') FROM olp.invitations WHERE id=$1", invitation["invitation"].(map[string]any)["id"]).Scan(&consumed, &users); err != nil || consumed || users != 0 {
 				t.Fatalf("consumed=%v users=%d err=%v", consumed, users, err)
 			}
 			h.Server.LocalLoginDisabled = false
-			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.settings SET value='true' WHERE key='auth.local_login_enabled'"); err != nil {
+			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='true' WHERE key='auth.local_login_enabled'"); err != nil {
 				t.Fatal(err)
 			}
 			member := &browser{}
-			h.want(member, "POST", "/api/v3/invitations/accept", input, nil, 201)
-			h.want(member, "DELETE", "/api/v3/sessions/current", nil, nil, 204)
-			h.want(member, "POST", "/api/v3/sessions", map[string]any{"email": "policy@example.com", "password": accessPassword}, nil, 201)
+			h.want(member, "POST", "/api/v1/invitations/accept", input, nil, 201)
+			h.want(member, "DELETE", "/api/v1/sessions/current", nil, nil, 204)
+			h.want(member, "POST", "/api/v1/sessions", map[string]any{"email": "policy@example.com", "password": accessPassword}, nil, 201)
 		})
 	}
 }
@@ -128,7 +127,7 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 	h.Server.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, trusted) }
 	attempt := func(source, email string, status int) {
 		t.Helper()
-		h.want(nil, "POST", "/api/v3/sessions", map[string]any{"email": email, "password": "wrong"}, map[string]string{"X-Forwarded-For": source}, status)
+		h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": email, "password": "wrong"}, map[string]string{"X-Forwarded-For": source}, status)
 	}
 	for _, source := range []string{"203.0.113.1, 10.1.1.1", "2001:db8::2, 10.1.1.1"} {
 		for range 5 {
@@ -152,7 +151,7 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 		attempt(fmt.Sprintf("2001:db8:1::%x", i+1), "distributed@example.com", status)
 	}
 	// A denied attempt does not slide the window or permanently lock the account.
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.auth_admission SET window_started_at=now()-interval '61 seconds'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.auth_admission SET window_started_at=now()-interval '61 seconds'"); err != nil {
 		t.Fatal(err)
 	}
 	attempt("2001:db8:2::1", "distributed@example.com", 401)
@@ -169,68 +168,13 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 	}
 }
 
-func TestAuthenticationOwnershipUpgradeAndSessionHints(t *testing.T) {
-	pool, dbURL := accessDatabase(t)
-	applyMigrationPrefix(t, pool, "0010_authentication_ownership.sql")
-	// Recreate the previous schema and apply the real forward migration to legacy
-	// rows: setup/invitation provenance survives; an ambiguous mixed row fails closed.
-	seedUser := func(email, passwordHash string) string {
-		t.Helper()
-		var id string
-		if err := pool.QueryRow(t.Context(), `INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag)
-            VALUES(gen_random_uuid(),$1,$1,$2,'viewer',gen_random_uuid()) RETURNING id::text`, email, passwordHash).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	linkOIDC := func(userID string) {
-		t.Helper()
-		if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject)
-            SELECT gen_random_uuid(),$1::uuid,'https://issuer.test',email FROM olp_go.users WHERE id=$1::uuid`, userID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ambiguous := seedUser("ambiguous@example.com", "legacy-hash")
-	linkOIDC(ambiguous)
-	retained := seedUser("retained@example.com", "legacy-hash")
-	linkOIDC(retained)
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.audit(id,actor_user_id,action,resource_type,outcome)
-        VALUES(gen_random_uuid(),$1::uuid,'invitation.accept','user','success')`, retained); err != nil {
-		t.Fatal(err)
-	}
-	upgraded := seedUser("upgraded@example.com", secrets.HashPassword(accessPassword))
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.sessions(id,user_id,digest,expires_at)
-        VALUES(gen_random_uuid(),$1::uuid,'\x02'::bytea,now()+interval '1 day')`, upgraded); err != nil {
-		t.Fatal(err)
-	}
-	h := newAccessHarnessOn(t, pool, dbURL)
+func TestSessionListShowsBrowserHintDerivedFromUserAgent(t *testing.T) {
+	h := newAccessHarness(t)
 	owner := h.owner()
-	h.invite(owner, "legacy@example.com", "viewer")
-	for email, want := range map[string]string{"owner@example.com": "local", "legacy@example.com": "local", "retained@example.com": "local", "upgraded@example.com": "local", "ambiguous@example.com": "oidc"} {
-		var got string
-		if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE email=$1", email).Scan(&got); err != nil || got != want {
-			t.Fatalf("%s management=%s want=%s err=%v", email, got, want, err)
-		}
-	}
-	upgradedBrowser := &browser{}
-	h.want(upgradedBrowser, "POST", "/api/v3/sessions", map[string]any{"email": "upgraded@example.com", "password": accessPassword}, nil, 201)
-	sessions := h.want(upgradedBrowser, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
-	legacySeen := false
-	for _, item := range sessions {
-		row := item.(map[string]any)
-		if row["current"] != true {
-			legacySeen = true
-			if row["browser_hint"] != "Unknown browser" {
-				t.Fatalf("pre-upgrade session hint: %v", row)
-			}
-		}
-	}
-	if !legacySeen {
-		t.Fatal("legacy metadata not represented")
-	}
+	h.invite(owner, "member@example.com", "viewer")
 	b := &browser{}
-	h.want(b, "POST", "/api/v3/sessions", map[string]any{"email": "legacy@example.com", "password": accessPassword}, map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Private untrusted <script>"}, 201)
-	sessions = h.want(b, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
+	h.want(b, "POST", "/api/v1/sessions", map[string]any{"email": "member@example.com", "password": accessPassword}, map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Private untrusted <script>"}, 201)
+	sessions := h.want(b, "GET", "/api/v1/sessions", nil, nil, 200)["items"].([]any)
 	found := false
 	for _, item := range sessions {
 		row := item.(map[string]any)

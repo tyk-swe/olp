@@ -67,8 +67,8 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 			WHERE published->>'id'=m.id::text AND c->>'source'='certified' AND ($4='' OR c->>'surface'=$4)
 		),
 		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::json)
-		FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id
-		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
+		FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id
+		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
 		AND ($3::boolean IS NULL OR m.enabled=$3) AND ($4='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(m.capabilities) c WHERE c->>'surface'=$4))
 		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1)
@@ -110,7 +110,7 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp_go.runtime_releases g JOIN olp_go.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp.runtime_releases g JOIN olp.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -124,42 +124,42 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 // Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v3/provider-profiles", h(s.profiles))
-	mux.HandleFunc("GET /api/v3/operation-dialects", h(s.operationDialects))
-	mux.HandleFunc("GET /api/v3/provider-kinds", h(s.kinds))
-	mux.HandleFunc("GET /api/v3/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
-	mux.HandleFunc("GET /api/v3/provider-vendors", h(s.vendors))
-	mux.HandleFunc("GET /api/v3/provider-models", h(s.inventory))
-	mux.HandleFunc("GET /api/v3/runtime-generations", h(s.generations))
-	mux.HandleFunc("GET /api/v3/providers", h(s.providers))
-	mux.HandleFunc("POST /api/v3/providers", s.Access.HandleWith(1<<20, s.createProvider))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}", h(s.provider))
-	mux.HandleFunc("PATCH /api/v3/providers/{provider_id}", s.Access.HandleWith(1<<20, s.updateProvider))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/activate", h(s.activateProvider))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/disable", h(s.disableProvider))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/probe", h(s.probe))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/discovery", s.Access.HandleWith(1<<20, s.discover))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/restore-as-draft", h(s.restoreActiveAsDraft))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/models", h(s.models))
-	mux.HandleFunc("PATCH /api/v3/providers/{provider_id}/models/{model_id}", h(s.setModel))
+	mux.HandleFunc("GET /api/v1/provider-profiles", h(s.profiles))
+	mux.HandleFunc("GET /api/v1/operation-dialects", h(s.operationDialects))
+	mux.HandleFunc("GET /api/v1/provider-kinds", h(s.kinds))
+	mux.HandleFunc("GET /api/v1/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
+	mux.HandleFunc("GET /api/v1/provider-vendors", h(s.vendors))
+	mux.HandleFunc("GET /api/v1/provider-models", h(s.inventory))
+	mux.HandleFunc("GET /api/v1/runtime-generations", h(s.generations))
+	mux.HandleFunc("GET /api/v1/providers", h(s.providers))
+	mux.HandleFunc("POST /api/v1/providers", s.Access.HandleWith(1<<20, s.createProvider))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}", h(s.provider))
+	mux.HandleFunc("PATCH /api/v1/providers/{provider_id}", s.Access.HandleWith(1<<20, s.updateProvider))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/activate", h(s.activateProvider))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/disable", h(s.disableProvider))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/probe", h(s.probe))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/discovery", s.Access.HandleWith(1<<20, s.discover))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/restore-as-draft", h(s.restoreActiveAsDraft))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/models", h(s.models))
+	mux.HandleFunc("PATCH /api/v1/providers/{provider_id}/models/{model_id}", h(s.setModel))
 	// Each advertised capability can consume a full probe budget; reserve
 	// another management budget for preparation, queueing, and persistence.
 	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/network-credentials", h(s.networkCredentials))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/network-credentials", s.Access.HandleWith(256<<10, s.createNetworkCredential))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/network-credentials/{credential_id}/revoke", h(s.revokeNetworkCredential))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credentials", h(s.credentials))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials/{credential_id}/revoke", h(s.revoke))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credential-slots", h(s.slots))
-	mux.HandleFunc("PUT /api/v3/providers/{provider_id}/credential-slots/{slot_id}", h(s.writeSlot))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credential-slots/{slot_id}/validate", s.Access.HandleTimeout(65536, certifyTimeout, s.validateSlot))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions", h(s.revisions))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/diff", h(s.revisionDiff))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/{revision_id}", h(s.revision))
-	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/{revision_id}/models", h(s.revisionModels))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/network-credentials", h(s.networkCredentials))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/network-credentials", s.Access.HandleWith(256<<10, s.createNetworkCredential))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", h(s.revokeNetworkCredential))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/credentials", h(s.credentials))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", h(s.revoke))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/credential-slots", h(s.slots))
+	mux.HandleFunc("PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", h(s.writeSlot))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.Access.HandleTimeout(65536, certifyTimeout, s.validateSlot))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions", h(s.revisions))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/diff", h(s.revisionDiff))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/{revision_id}", h(s.revision))
+	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/{revision_id}/models", h(s.revisionModels))
+	mux.HandleFunc("POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
 }
 
 func (s *Server) profiles(r *http.Request) (access.Reply, error) {

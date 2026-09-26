@@ -51,7 +51,7 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 			return
 		}
 		if !bytes.Contains(body, []byte("Weather and time in Paris?")) {
-			parityGeneration(w, "anthropic", string(input["stream"]) == "true")
+			kindGeneration(w, "anthropic", string(input["stream"]) == "true")
 			return
 		}
 		calls.Add(1)
@@ -110,7 +110,7 @@ func TestPublicNegotiatedToolContinuationCommitReplayAndHistory(t *testing.T) {
 				// At the first ordinary actionable tool chunk, another DB reader must
 				// already see both ready metadata and the authenticated complete payload.
 				var ready bool
-				if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.provider_resources r JOIN olp_go.secrets s ON s.id=r.id WHERE r.submission_id=$1 AND r.state='ready' AND s.purpose='provider_continuation')`, headers["X-OLP-Submission-ID"]).Scan(&ready); err != nil || !ready {
+				if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.submission_id=$1 AND r.state='ready' AND s.purpose='provider_continuation')`, headers["X-OLP-Submission-ID"]).Scan(&ready); err != nil || !ready {
 					t.Fatalf("tool preceded durable dependency: ready=%t err=%v", ready, err)
 				}
 				for _, item := range items {

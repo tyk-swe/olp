@@ -11,11 +11,11 @@ Vite proxying, private secret files, and the one-time owner bootstrap token.
 
 ## Deployment and database roles
 
-Use a fresh, separate database. Go owns schema `olp_go` and its checksum
-history; it rejects Rust schemas and preexisting public tables before writing.
-The installation UUID survives repeated and concurrent migrations. Valkey uses
-the [installation namespace](operations.md#shared-state-in-valkey)
-`olp:go:v1:<installation UUID>:`. Never share a Rust installation's storage.
+Use an empty, separate database for each installation. OLP owns schema `olp`
+and its checksum history. The installation UUID survives repeated and
+concurrent migrations. Valkey uses the
+[installation namespace](operations.md#shared-state-in-valkey)
+`olp:<installation UUID>:`.
 
 Provision a migration owner and a separate, existing runtime login with neither
 superuser nor ownership privileges. Using the migration connection, run:
@@ -122,7 +122,8 @@ A later verified mapped login restores external authorization (not an
 administratively disabled account); old sessions and invitations stay revoked.
 Locally managed accounts retain their locally assigned role on OIDC sign-in.
 OIDC-managed accounts must keep a usable linked identity so self-service unlink
-cannot sever their authorization source.
+cannot sever their authorization source. Role ownership is internal and cannot
+be changed by self-service credential operations.
 
 Local sign-in is usable only when both `OLP_LOCAL_LOGIN_ENABLED` and
 `auth.local_login_enabled` permit it. Capabilities, invitation issuance and
@@ -132,24 +133,10 @@ disabled: issue/accept returns actionable guidance before account creation or
 token consumption. Use mapped OIDC provisioning for SSO-only onboarding; email
 matching never implicitly links an existing account.
 
-Migration `0010_authentication_ownership.sql` classifies legacy accounts using
-provisioning evidence. Setup/accepted-invitation audit events or accepted
-invitation records preserve local ownership; remaining accounts with linked OIDC
-identities become OIDC-managed, including ambiguous mixed-method accounts whose
-original provisioning evidence has expired. Review these ambiguous accounts and
-ensure appropriate provider mappings before upgrading. The migration cannot
-infer ownership from a password added through enrollment. Accounts without OIDC
-identities remain locally managed. Role ownership is internal and cannot be
-changed by self-service credential operations.
-
 Owner protection evaluates proposed mappings against the latest verified email
 and group inputs stored privately for each identity. These inputs never appear
-in identity responses or audit. Run `olp migrate` before starting an updated
-binary; migration `0003_oidc_role_claims.sql` preserves existing identities
-without inventing verified inputs. Complete an OIDC sign-in before relying on an
-upgraded identity as the only owner sign-in method. Changing claim names
-requires another verified owner path or an owner with enabled local password
-sign-in.
+in identity responses or audit. Changing claim names requires another verified
+owner path or an owner with enabled local password sign-in.
 
 Replacing or removing the OIDC client secret requires an active owner with
 enabled local password sign-in. A changed secret invalidates prior OIDC sign-in
@@ -159,7 +146,7 @@ preserves the existing evidence.
 
 OIDC uses maintained `coreos/go-oidc` verification and `x/oauth2` code exchange.
 Configure discovery, the exact issuer, client ID, client secret when required,
-and the callback `<public origin>/api/v3/oidc/callback`. The client selects
+and the callback `<public origin>/api/v1/oidc/callback`. The client selects
 `client_secret_basic` or `client_secret_post` authentication as advertised;
 omitting the supported-methods field defaults to `client_secret_basic`.
 Unsupported token authentication methods are rejected during configuration.
@@ -176,9 +163,9 @@ authentication. Enrollment/link/unlink proofs expire after five minutes, are
 purpose/resource-bound, and are consumed once. Authentication-method changes
 rotate the current session and revoke prior sessions.
 
-Production builds reject insecure OIDC environment switches. Only the explicit
-`oidctest` build tag permits a loopback HTTP issuer, and the integration runner
-builds a separate test binary; release images never enable that tag.
+Only the explicit `oidctest` build tag permits a loopback HTTP issuer; no
+environment variable relaxes OIDC transport checks. The integration runner
+builds a separate test binary, and release images never enable that tag.
 
 ## Projects and budget groups
 
@@ -189,12 +176,12 @@ project managers can write resources and project viewers can read them, subject
 to installation-role permissions. Assigned users cannot administer installation
 membership, OIDC, or global settings. Keep at least one manager per project.
 
-Manage projects and membership through `/api/v3/projects` and
-`/api/v3/projects/{id}/members`. Providers, routes, and gateway keys carry a
+Manage projects and membership through `/api/v1/projects` and
+`/api/v1/projects/{id}/members`. Providers, routes, and gateway keys carry a
 project boundary; a key can use only routes in its own project, including the
 unassigned boundary. Management tokens can also be limited to named projects.
 
-`GET/POST /api/v3/budget-groups` and `GET/PATCH /api/v3/budget-groups/{id}`
+`GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
 manage shared accrued-cost budgets. A group requires a positive daily or monthly
 limit, uses the installation currency, and belongs to one project or the
 unassigned boundary. Attach a key through `budget_group_id`; key and group must
@@ -205,7 +192,7 @@ access. Group limits supplement individual key limits and share their
 ## Management tokens and provisioning
 
 Owners create management tokens from the Access console tab or
-`POST /api/v3/management-tokens`. A token carries 1–8 unique management
+`POST /api/v1/management-tokens`. A token carries 1–8 unique management
 operation scopes (`read`, `access_read`, `access`, `settings`, `configure`,
 `keys`, `playground`, `usage`), a name, and an expiry no more than 366 days
 ahead. The `olpm_` secret is displayed once; only its HMAC digest is stored.
@@ -226,7 +213,7 @@ access to those projects with manager-equivalent project access, still bounded
 by operation scopes. Project-scoped tokens cannot perform installation-wide
 access or settings operations or configuration promotion.
 
-`PUT /api/v3/provisioning/{source}/users/{external_id}` reconciles a provisioned
+`PUT /api/v1/provisioning/{source}/users/{external_id}` reconciles a provisioned
 identity without waiting for a sign-in. An owner session or a management token
 with the `access` scope may call it. The body is the authoritative desired state
 (`email`, `display_name`, `role`, `active`): a missing `(source, external_id)`
@@ -306,5 +293,5 @@ existing session, purpose, resource, and exact identity bindings still apply.
 Session inventory labels `last_seen_at` as **Last session verification**
 (updated at most once a minute by session verification). A coarse browser/device
 hint helps distinguish sessions without retaining raw user agents. It is
-untrusted display metadata, not authentication evidence; legacy sessions show
-Unknown browser.
+untrusted display metadata, not authentication evidence; an unrecognized user
+agent shows Unknown browser.

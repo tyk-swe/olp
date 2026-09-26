@@ -39,7 +39,7 @@ func LoadOutagePolicy(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }) (OutagePolicy, error) {
 	var value string
-	if err := q.QueryRow(ctx, "SELECT value FROM olp_go.settings WHERE key=$1", outagePolicySetting).Scan(&value); err != nil {
+	if err := q.QueryRow(ctx, "SELECT value FROM olp.settings WHERE key=$1", outagePolicySetting).Scan(&value); err != nil {
 		return FailClosed, err
 	}
 	switch value {

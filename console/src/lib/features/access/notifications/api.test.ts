@@ -50,7 +50,7 @@ describe('notification destinations', () => {
     const request = requests[0]!;
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      '/api/v3/notifications/destinations'
+      '/api/v1/notifications/destinations'
     );
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
     expect(await request.json()).toEqual({
@@ -71,7 +71,7 @@ describe('notification destinations', () => {
     const request = requests[0]!;
     expect(request.method).toBe('PATCH');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/notifications/destinations/${destination.id}`
+      `/api/v1/notifications/destinations/${destination.id}`
     );
     expect(request.headers.get('if-match')).toBe(`"${destination.etag}"`);
   });
@@ -95,7 +95,7 @@ describe('budget alert rules', () => {
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
-    expect(new URL(request.url).pathname).toBe('/api/v3/notifications/rules');
+    expect(new URL(request.url).pathname).toBe('/api/v1/notifications/rules');
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
     expect(await request.json()).toMatchObject({
       subject_kind: 'api_key',
@@ -115,7 +115,7 @@ describe('notification deliveries', () => {
     await listNotificationDeliveries(destination.id);
 
     const url = new URL(requests[0]!.url);
-    expect(url.pathname).toBe('/api/v3/notifications/deliveries');
+    expect(url.pathname).toBe('/api/v1/notifications/deliveries');
     expect(url.searchParams.get('rule_id')).toBe(destination.id);
   });
 });

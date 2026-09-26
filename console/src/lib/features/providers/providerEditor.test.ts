@@ -372,7 +372,7 @@ describe('provider editor API mappings', () => {
     ).toBeUndefined();
   });
 
-  it('filters legacy form inputs while preserving complete loaded documents', () => {
+  it('filters form inputs the connector kind does not use while preserving complete loaded documents', () => {
     const values: ProviderEditValues = {
       name: ' Primary OpenAI ',
       endpoint: 'https://api.openai.com/v1/',

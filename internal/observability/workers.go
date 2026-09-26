@@ -12,7 +12,7 @@ import (
 )
 
 // WorkerTask is one fixed worker responsibility that checkpoints its liveness
-// into olp_go.worker_task_health.
+// into olp.worker_task_health.
 type WorkerTask struct {
 	Name       string
 	StaleAfter int64 // seconds since last success before the task is stale
@@ -125,7 +125,7 @@ func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHea
 			CASE WHEN last_success_at IS NULL THEN NULL ELSE
 				GREATEST(0, floor(extract(epoch FROM clock_timestamp() - last_success_at)))::bigint
 			END AS last_success_age_seconds
-		FROM olp_go.worker_task_health ORDER BY task`)
+		FROM olp.worker_task_health ORDER BY task`)
 	if err != nil {
 		return nil, fmt.Errorf("read worker task health: %w", err)
 	}
@@ -187,7 +187,7 @@ func ReadWorkerRecoveryCounters(ctx context.Context, q access.Queryer) (WorkerRe
 	err := q.QueryRow(ctx, `SELECT request_metadata_reclaimed_total, request_metadata_recovered_total,
 			request_metadata_duplicates_total, request_metadata_processed_total,
 			media_reconciliation_gaps_total
-		FROM olp_go.async_worker_counters WHERE singleton`).Scan(
+		FROM olp.async_worker_counters WHERE singleton`).Scan(
 		&c.RequestMetadataReclaimed, &c.RequestMetadataRecovered,
 		&c.RequestMetadataDuplicates, &c.RequestMetadataProcessed,
 		&c.MediaReconciliationGapsTotal)

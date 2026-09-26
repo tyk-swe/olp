@@ -33,7 +33,7 @@ func acctLoadEpoch(t *testing.T, pool *pgxpool.Pool, instance, epoch string) acc
 	err := pool.QueryRow(t.Context(), `SELECT accepted, persisted, dropped, abandoned, retrying,
             writer_closed, gracefully_closed_at, stale_candidate_at, stale_detected_at,
             uncertainty_gap_id::text
-        FROM olp_go.request_metadata_gateway_epochs
+        FROM olp.request_metadata_gateway_epochs
         WHERE gateway_instance = $1 AND process_epoch = $2::uuid`, instance, epoch).
 		Scan(&row.Accepted, &row.Persisted, &row.Dropped, &row.Abandoned, &row.Retrying,
 			&row.WriterClosed, &row.GracefullyClosedAt, &row.StaleCandidateAt,
@@ -57,7 +57,7 @@ func acctGaps(t *testing.T, pool *pgxpool.Pool, instance string) []acctGapRow {
 	t.Helper()
 	rows, err := pool.Query(t.Context(), `SELECT event_count, reason, certainty,
             first_observed_at, last_observed_at
-        FROM olp_go.request_metadata_ingestion_gaps WHERE gateway_instance = $1
+        FROM olp.request_metadata_ingestion_gaps WHERE gateway_instance = $1
         ORDER BY reported_at, id`, instance)
 	if err != nil {
 		t.Fatalf("query gaps: %v", err)
@@ -275,7 +275,7 @@ func TestGatewayEpochDetectionConfirmsEachStaleEpochOnce(t *testing.T) {
 	pool := acctPool(t)
 	instance, epoch := acctInstance(t), acctID(t)
 	silent := time.Now().UTC().Add(-5 * time.Minute)
-	acctExec(t, pool, `INSERT INTO olp_go.request_metadata_gateway_epochs
+	acctExec(t, pool, `INSERT INTO olp.request_metadata_gateway_epochs
             (gateway_instance, process_epoch, started_at, accepted, persisted, dropped,
              abandoned, retrying, writer_closed, updated_at)
         VALUES ($1, $2::uuid, $3, 7, 2, 0, 1, false, false, $3)`, instance, epoch, silent)
@@ -436,7 +436,7 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 
 	// Reporting health is progress the worker supervisor can see.
 	var successes int64
-	if err := pool.QueryRow(t.Context(), `SELECT successes_total FROM olp_go.worker_task_health
+	if err := pool.QueryRow(t.Context(), `SELECT successes_total FROM olp.worker_task_health
         WHERE task = 'request_metadata_consumer'`).Scan(&successes); err != nil {
 		t.Fatalf("load task health: %v", err)
 	}
@@ -473,7 +473,7 @@ func acctConsumerHealth(t *testing.T, pool *pgxpool.Pool) (int64, int64, *time.T
 	var pending, lag int64
 	var oldest *time.Time
 	err := pool.QueryRow(t.Context(), `SELECT pending_events, lag_events, oldest_pending_at
-        FROM olp_go.request_metadata_consumer_health WHERE singleton`).Scan(&pending, &lag, &oldest)
+        FROM olp.request_metadata_consumer_health WHERE singleton`).Scan(&pending, &lag, &oldest)
 	if err != nil {
 		t.Fatalf("load consumer health: %v", err)
 	}

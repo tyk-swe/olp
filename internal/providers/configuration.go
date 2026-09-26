@@ -156,7 +156,7 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", "Use at most 64 parameter defaults.")
 	}
 	if c.ProfileID != "" && len(c.Options.ParameterDefaults) != 0 {
-		return access.Invalid("configuration.options.parameter_defaults", "Explicit profiles use operation_defaults; legacy parameter_defaults cannot be mixed.")
+		return access.Invalid("configuration.options.parameter_defaults", "Explicit profiles use operation_defaults; parameter_defaults belong to Automatic providers.")
 	}
 	if err := openai.ValidateDefaults(c.Options.ParameterDefaults); err != nil {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())

@@ -22,7 +22,7 @@ export async function inspectRouting(
   input: InspectRoutingInput,
   signal?: AbortSignal
 ): Promise<Schemas['RoutingDecision'][]> {
-  const response = await apiClient.POST('/api/v3/routing/simulate', {
+  const response = await apiClient.POST('/api/v1/routing/simulate', {
     body: {
       operation: {
         operation: input.operation,

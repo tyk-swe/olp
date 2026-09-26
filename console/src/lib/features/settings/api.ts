@@ -5,7 +5,7 @@ import { result } from '$lib/api/http';
 export type Setting = components['schemas']['SettingResponse'];
 
 export async function listSettings(): Promise<Setting[]> {
-  const { data, error, response } = await apiClient.GET('/api/v3/settings');
+  const { data, error, response } = await apiClient.GET('/api/v1/settings');
   return result(data, error, response).items;
 }
 
@@ -14,7 +14,7 @@ export async function updateSetting(
   value: string
 ): Promise<Setting> {
   const { data, error, response } = await apiClient.PUT(
-    '/api/v3/settings/{key}',
+    '/api/v1/settings/{key}',
     {
       params: {
         path: { key: setting.key },

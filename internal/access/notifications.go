@@ -12,20 +12,20 @@ import (
 const notificationSecretPurpose = "notification_secret"
 
 const destinationFields = `'id',d.id,'name',d.name,'url',d.url,'project_id',d.project_id,'project_name',p.name,'enabled',d.enabled,'etag',d.etag,'created_by',d.created_by,'created_by_email',u.email,'created_at',d.created_at,'updated_at',d.updated_at`
-const destinationFrom = ` FROM olp_go.notification_destinations d
-	JOIN olp_go.users u ON u.id=d.created_by LEFT JOIN olp_go.projects p ON p.id=d.project_id`
+const destinationFrom = ` FROM olp.notification_destinations d
+	JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects p ON p.id=d.project_id`
 
 const ruleFields = `'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at`
-const ruleFrom = ` FROM olp_go.budget_alert_rules r
-	JOIN olp_go.users u ON u.id=r.created_by
-	LEFT JOIN olp_go.projects p ON p.id=r.project_id
-	LEFT JOIN olp_go.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
-	LEFT JOIN olp_go.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
-	JOIN olp_go.notification_destinations d ON d.id=r.destination_id`
+const ruleFrom = ` FROM olp.budget_alert_rules r
+	JOIN olp.users u ON u.id=r.created_by
+	LEFT JOIN olp.projects p ON p.id=r.project_id
+	LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
+	LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+	JOIN olp.notification_destinations d ON d.id=r.destination_id`
 
 const deliveryFields = `'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at`
-const deliveryFrom = ` FROM olp_go.budget_alert_deliveries v
-	JOIN olp_go.budget_alert_rules r ON r.id=v.rule_id`
+const deliveryFrom = ` FROM olp.budget_alert_deliveries v
+	JOIN olp.budget_alert_rules r ON r.id=v.rule_id`
 
 type destinationInput struct {
 	Name      string           `json:"name"`
@@ -112,7 +112,7 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 	}
 	if string(*raw) == "null" {
 		_, err := tx.Exec(r.Context(),
-			"UPDATE olp_go.notification_destinations SET secret_id=NULL WHERE id=$1", id)
+			"UPDATE olp.notification_destinations SET secret_id=NULL WHERE id=$1", id)
 		return err
 	}
 	var secret string
@@ -127,7 +127,7 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 		return err
 	}
 	_, err := tx.Exec(r.Context(),
-		"UPDATE olp_go.notification_destinations SET secret_id=$2 WHERE id=$1", id, secretID)
+		"UPDATE olp.notification_destinations SET secret_id=$2 WHERE id=$1", id, secretID)
 	return err
 }
 
@@ -178,7 +178,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 	}
 	id, etag := NewID(), NewID()
 	if _, err = tx.Exec(r.Context(),
-		`INSERT INTO olp_go.notification_destinations (id, name, url, project_id, etag, created_by, enabled)
+		`INSERT INTO olp.notification_destinations (id, name, url, project_id, etag, created_by, enabled)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		id, strings.TrimSpace(input.Name), strings.TrimSpace(input.URL), input.ProjectID, etag, p.UserID(), enabled); err != nil {
 		return Reply{}, err
@@ -191,7 +191,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/notifications/destinations/" + id,
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/destinations/" + id,
 		Body: json.RawMessage(data)}
 	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.create",
 		"notification_destination", id, "success"); err != nil {
@@ -222,7 +222,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 	}
 	var projectID *string
 	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp_go.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
+		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)
@@ -278,7 +278,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 	}
 	etag = NewID()
 	if _, err = tx.Exec(r.Context(),
-		"UPDATE olp_go.notification_destinations SET name=$2,url=$3,enabled=$4,etag=$5,updated_at=now() WHERE id=$1",
+		"UPDATE olp.notification_destinations SET name=$2,url=$3,enabled=$4,etag=$5,updated_at=now() WHERE id=$1",
 		id, strings.TrimSpace(current.Name), strings.TrimSpace(current.URL), current.Enabled, etag); err != nil {
 		return Reply{}, err
 	}
@@ -359,10 +359,10 @@ func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input ruleInput
 	switch input.SubjectKind {
 	case "api_key":
 		err = tx.QueryRow(r.Context(),
-			"SELECT project_id::text FROM olp_go.api_keys WHERE id=$1", subjectID).Scan(&subjectProject)
+			"SELECT project_id::text FROM olp.api_keys WHERE id=$1", subjectID).Scan(&subjectProject)
 	case "budget_group":
 		err = tx.QueryRow(r.Context(),
-			"SELECT project_id::text FROM olp_go.budget_groups WHERE id=$1", subjectID).Scan(&subjectProject)
+			"SELECT project_id::text FROM olp.budget_groups WHERE id=$1", subjectID).Scan(&subjectProject)
 	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -384,7 +384,7 @@ func (s *Server) validateRuleDestination(r *http.Request, tx pgx.Tx, input ruleI
 	}
 	var destinationProject *string
 	if err = tx.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp_go.notification_destinations WHERE id=$1", destinationID).Scan(&destinationProject); err != nil {
+		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", destinationID).Scan(&destinationProject); err != nil {
 		if err == pgx.ErrNoRows {
 			return Invalid("destination_id", "The notification destination does not exist.")
 		}
@@ -449,7 +449,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	subjectID, _ := ParseUUID(input.SubjectID)
 	destinationID, _ := ParseUUID(input.DestinationID)
 	if _, err = tx.Exec(r.Context(),
-		`INSERT INTO olp_go.budget_alert_rules
+		`INSERT INTO olp.budget_alert_rules
 		 (id, name, project_id, subject_kind, subject_id, window_kind, threshold_percent,
 		  destination_id, enabled, etag, created_by)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -462,7 +462,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+ruleFields+")"+ruleFrom+" WHERE r.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/notifications/rules/" + id,
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/rules/" + id,
 		Body: json.RawMessage(data)}
 	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.create",
 		"budget_alert_rule", id, "success"); err != nil {
@@ -495,7 +495,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 	}
 	var projectID *string
 	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp_go.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
+		"SELECT project_id::text FROM olp.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)
@@ -565,7 +565,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 	enabled := next.Enabled != nil && *next.Enabled
 	etag = NewID()
 	if _, err = tx.Exec(r.Context(),
-		`UPDATE olp_go.budget_alert_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,
+		`UPDATE olp.budget_alert_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,
 		 threshold_percent=$6,destination_id=$7,enabled=$8,etag=$9,updated_at=now() WHERE id=$1`,
 		id, strings.TrimSpace(next.Name), next.SubjectKind, subjectID, next.WindowKind,
 		*next.ThresholdPercent, destinationID, enabled, etag); err != nil {

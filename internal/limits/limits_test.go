@@ -212,18 +212,18 @@ func TestParseReconciliation(t *testing.T) {
 
 func TestKeysShareOneClusterHashTag(t *testing.T) {
 	t.Parallel()
-	limiter := &Limiter{namespace: "olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
+	limiter := &Limiter{namespace: "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
 	const apiKeyID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 	first := limiter.keysFor("lookup_one_abc", apiKeyID)
 	second := limiter.keysFor("lookup_two_abc", apiKeyID)
 
-	if got, want := first.rate, "olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:rate"; got != want {
+	if got, want := first.rate, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:rate"; got != want {
 		t.Fatalf("rate key = %q, want %q", got, want)
 	}
-	if got, want := first.concurrency, "olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:concurrency:v2"; got != want {
+	if got, want := first.concurrency, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:concurrency"; got != want {
 		t.Fatalf("concurrency key = %q, want %q", got, want)
 	}
-	if got, want := first.dailyCost, "olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{0192cf87d4ab7f2ea8b1c2d3e4f50607}:cost:day"; got != want {
+	if got, want := first.dailyCost, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{0192cf87d4ab7f2ea8b1c2d3e4f50607}:cost:day"; got != want {
 		t.Fatalf("daily cost key = %q, want %q", got, want)
 	}
 	if got, want := first.monthlyCost, strings.TrimSuffix(first.dailyCost, "day")+"month"; got != want {
@@ -246,7 +246,7 @@ func TestKeysShareOneClusterHashTag(t *testing.T) {
 		t.Fatalf("rate key %q is split per dimension", first.rate)
 	}
 	if got, want := limiter.cooldownKey("slot:0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"),
-		"olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:provider-cooldown:slot:0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"; got != want {
+		"olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:provider-cooldown:slot:0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"; got != want {
 		t.Fatalf("cooldown key = %q, want %q", got, want)
 	}
 }
@@ -271,8 +271,8 @@ func TestNamespacesCannotOverrideTheClusterHashTag(t *testing.T) {
 		namespace string
 		wantErr   bool
 	}{
-		{"typical", "olp:go:v1:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits", false},
-		{"punctuation", "olp-go_v1:limits", false},
+		{"typical", "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits", false},
+		{"punctuation", "olp-test_ns:limits", false},
 		{"empty", "", true},
 		{"too long", strings.Repeat("n", 129), true},
 		{"opens a hash tag", "olp:{limits}", true},

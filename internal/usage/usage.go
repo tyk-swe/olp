@@ -105,7 +105,7 @@ type Execer interface {
 // `last_progress_at` only when this pass earned it. GREATEST keeps a slow
 // writer from moving a timestamp backwards, and the totals accumulate so a
 // restart never loses the counts.
-const checkpointTaskSQL = `INSERT INTO olp_go.worker_task_health
+const checkpointTaskSQL = `INSERT INTO olp.worker_task_health
         (task, checked_at, last_success_at, last_progress_at,
          successes_total, failures_total, skipped_total)
     VALUES ($1, clock_timestamp(),
@@ -156,7 +156,7 @@ type Activity struct {
 	Processed  int64
 }
 
-const consumerCountersSQL = `UPDATE olp_go.async_worker_counters SET
+const consumerCountersSQL = `UPDATE olp.async_worker_counters SET
         request_metadata_reclaimed_total = request_metadata_reclaimed_total + $1,
         request_metadata_recovered_total = request_metadata_recovered_total + $2,
         request_metadata_duplicates_total = request_metadata_duplicates_total + $3,

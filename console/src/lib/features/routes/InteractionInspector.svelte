@@ -49,9 +49,9 @@
         Tuple eligibility only. Supply a native request to inspect the effective
         invocation and return contract.
       </p>
-    {:else if status === 'legacy'}
+    {:else if status === 'transformed'}
       <p class="scope-note">
-        Historical route behavior is shown without a strict interaction
+        Transformed route behavior is shown without a strict interaction
         qualification.
       </p>
     {:else}

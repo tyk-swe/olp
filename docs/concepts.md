@@ -23,13 +23,13 @@ cannot exceed the overall deadline. Credential pools can produce several
 attempts per target, so the attempt budget may exceed the target count. See
 [route configuration](provider-routing.md#routes) for bounds and publication.
 
-A route revision may declare a **fidelity** contract. Omitted contracts remain
-legacy. Explicit `transformed` routes declare intentional model-significant
-changes; `strict` routes admit only interactions that preserve execution,
-observation, permitted continuation and effects relative to the target's native
-invocation. A published slug keeps its strict or non-strict identity, so moving
-across that boundary publishes a reviewed draft under a new slug. See
-[route fidelity](gateway.md#runtime-publication-and-authority).
+Every route revision has a **fidelity**: `strict` or `transformed`, and strict
+when a draft omits it. Strict routes admit only interactions that preserve
+execution, observation, permitted continuation and effects relative to the
+target's native invocation. Transformed routes may change an invocation or its
+observed result, such as translating between dialects or redacting content. A
+published slug switches between them through a new revision. See
+[route fidelity](provider-routing.md#route-fidelity).
 
 Keys can use only routes in their own project; a key without a project can use
 only routes without one. Scope and route allowlists further restrict access.

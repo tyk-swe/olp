@@ -11,8 +11,8 @@ func TestRouteRetirementStopsServingAndRestores(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	vendor := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Lifecycle vendor", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": vendor.URL + "/v1/"}, "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Lifecycle vendor", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": vendor.URL + "/v1/"}, "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	probe := h.want(owner, "POST", providerPath+"/probe", nil, etagHeader(detail), 200)
 	if probe["succeeded"] != true {
@@ -37,18 +37,18 @@ func TestRouteRetirementStopsServingAndRestores(t *testing.T) {
 
 	publish := func(key string) map[string]any {
 		t.Helper()
-		draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
-			"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+		draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+			"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 			"targets": []any{map[string]any{"provider_id": created["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 		}, map[string]string{"Idempotency-Key": "draft-" + key}, 201)
-		draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+		draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 		validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 		return h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "activate-" + key}), 200)
 	}
 	activated := publish("initial")
-	routePath := "/api/v3/routes/" + activated["route_id"].(string)
+	routePath := "/api/v1/routes/" + activated["route_id"].(string)
 
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}}, map[string]string{"Idempotency-Key": "key"}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}}, map[string]string{"Idempotency-Key": "key"}, 201)
 	chat := map[string]any{"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	h.refresh()
 	if status, body, _ := h.gateway("POST", "/v1/chat/completions", key["secret"].(string), chat); status != http.StatusOK {

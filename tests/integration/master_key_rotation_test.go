@@ -39,7 +39,7 @@ func TestRotationAuthenticatesEveryDestinationSecretBeforeWriting(t *testing.T) 
 				t.Fatal(err)
 			}
 			defer tx.Rollback(t.Context())
-			if _, err = tx.Exec(t.Context(), "UPDATE olp_go.installation SET active_key_version=$1 WHERE singleton", tc.active); err != nil {
+			if _, err = tx.Exec(t.Context(), "UPDATE olp.installation SET active_key_version=$1 WHERE singleton", tc.active); err != nil {
 				t.Fatal(err)
 			}
 			// The final destination record is expired and beyond a batch boundary;
@@ -64,7 +64,7 @@ func TestRotationAuthenticatesEveryDestinationSecretBeforeWriting(t *testing.T) 
 						ciphertext[len(ciphertext)-1] ^= 1
 					}
 				}
-				if _, err = tx.Exec(t.Context(), "INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,'oidc_flow',$2,$3,$4)", id, key.Active, ciphertext, expires); err != nil {
+				if _, err = tx.Exec(t.Context(), "INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,'oidc_flow',$2,$3,$4)", id, key.Active, ciphertext, expires); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -75,9 +75,9 @@ func TestRotationAuthenticatesEveryDestinationSecretBeforeWriting(t *testing.T) 
 				t.Helper()
 				var state string
 				if err := h.Pool.QueryRow(t.Context(), `SELECT jsonb_build_object(
-					'secrets',(SELECT jsonb_agg(s ORDER BY id) FROM olp_go.secrets s),
-					'installation',(SELECT to_jsonb(i) FROM olp_go.installation i),
-					'audit',(SELECT jsonb_agg(a ORDER BY id) FROM olp_go.audit a))::text`).Scan(&state); err != nil {
+					'secrets',(SELECT jsonb_agg(s ORDER BY id) FROM olp.secrets s),
+					'installation',(SELECT to_jsonb(i) FROM olp.installation i),
+					'audit',(SELECT jsonb_agg(a ORDER BY id) FROM olp.audit a))::text`).Scan(&state); err != nil {
 					t.Fatal(err)
 				}
 				return state

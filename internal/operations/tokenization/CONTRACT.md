@@ -44,5 +44,5 @@ and property names. A refusal never fabricates a native count.
 `tokenization_test.go` independently asserts exact integers beyond float64
 precision, integer spelling, zero/null/empty/omitted distinctions where valid,
 union shape, offsets, corruption rejection, serving/resource affinity, policy
-coverage and immutable public views. Parent #215 owns actual management/runtime,
-SDK and provider-wire integration qualification.
+coverage and immutable public views. Management, runtime, SDK and provider-wire
+integration are tested outside this package.

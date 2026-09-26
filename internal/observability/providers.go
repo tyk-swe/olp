@@ -26,7 +26,7 @@ func ReadOperationsSummary(ctx context.Context, q access.Queryer, windowMinutes 
 	var summary OperationsSummary
 	err := q.QueryRow(ctx, `WITH recent_requests AS MATERIALIZED (
 			SELECT id, started_at, status_code, error_class, total_latency_ms
-			FROM olp_go.requests
+			FROM olp.requests
 			WHERE started_at >= now() - make_interval(mins => $1)
 		)
 		SELECT COUNT(*)::bigint,
@@ -36,7 +36,7 @@ func ReadOperationsSummary(ctx context.Context, q access.Queryer, windowMinutes 
 				FILTER (WHERE total_latency_ms IS NOT NULL),
 			percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms)
 				FILTER (WHERE total_latency_ms IS NOT NULL),
-			(SELECT COUNT(*) FROM olp_go.attempts a
+			(SELECT COUNT(*) FROM olp.attempts a
 				JOIN recent_requests r ON r.id = a.request_id
 					AND r.started_at = a.request_started_at
 				WHERE a.error_class = 'cancelled')::bigint
@@ -84,8 +84,8 @@ const providerHealthSelect = `SELECT p.id::text, p.name, p.kind, p.state,
 		count(a.id) FILTER (WHERE a.error_class IN
 			('connect', 'timeout', 'transport', 'cancelled', 'ambiguous'))::bigint,
 		avg(a.latency_ms)::float8
-	FROM olp_go.providers p
-	LEFT JOIN olp_go.attempts a ON a.provider_id = p.id
+	FROM olp.providers p
+	LEFT JOIN olp.attempts a ON a.provider_id = p.id
 		AND a.started_at >= now() - make_interval(mins => $1)`
 
 // ProviderHealthPage is one page of the provider-health listing.

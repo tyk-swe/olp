@@ -65,7 +65,7 @@ describe('disableProvider', () => {
     const request = requests[0]!;
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/providers/${providerId}/disable`
+      `/api/v1/providers/${providerId}/disable`
     );
     expect(request.headers.get('if-match')).toBe(`"${providerEtag}"`);
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
@@ -100,7 +100,7 @@ describe('restoreProviderAsDraft', () => {
     const request = requests[0]!;
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      `/api/v3/providers/${providerId}/restore-as-draft`
+      `/api/v1/providers/${providerId}/restore-as-draft`
     );
     expect(request.headers.get('if-match')).toBe(`"${providerEtag}"`);
     expect(request.headers.get('idempotency-key')).toMatch(uuid);

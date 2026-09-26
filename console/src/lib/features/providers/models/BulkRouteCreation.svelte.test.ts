@@ -119,7 +119,7 @@ it.each([false, true])(
       else expect(publish().disabled).toBe(true);
     });
     expect(post).toHaveBeenLastCalledWith(
-      '/api/v3/route-drafts/{draft_id}/activate',
+      '/api/v1/route-drafts/{draft_id}/activate',
       expect.objectContaining({
         params: {
           path: { draft_id: receipt.id },
@@ -136,7 +136,7 @@ it.each([false, true])(
       await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(3));
       expect(post).toHaveBeenNthCalledWith(
         3,
-        '/api/v3/route-drafts/{draft_id}/activate',
+        '/api/v1/route-drafts/{draft_id}/activate',
         expect.objectContaining({
           params: expect.objectContaining({
             header: expect.objectContaining({ 'If-Match': receipt.etag })
@@ -145,5 +145,53 @@ it.each([false, true])(
       );
       expect(get).not.toHaveBeenCalled();
     }
+  }
+);
+
+it.each(['strict', 'transformed'] as const)(
+  'creates %s drafts from the declared route fidelity',
+  async (mode) => {
+    const post = vi.spyOn(apiClient, 'POST').mockResolvedValue({
+      data: {
+        id: 'draft-a',
+        slug: 'test-model-12345678',
+        etag: 'etag',
+        state: 'draft'
+      },
+      response: new Response(null, { status: 201 })
+    } as never);
+    host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+    flushSync();
+    const fidelity = host.querySelector<HTMLSelectElement>(
+      '#bulk-route-fidelity'
+    )!;
+    // Strict is preselected, and the author learns when to choose otherwise.
+    expect(fidelity.value).toBe('strict');
+    expect(
+      [...fidelity.options].map((option) => option.textContent?.trim())
+    ).toEqual([
+      'Strict · preserve the native invocation',
+      'Transformed · translate or redact deliberately'
+    ]);
+    expect(
+      host
+        .querySelector('#bulk-route-fidelity-help')
+        ?.textContent?.replace(/\s+/g, ' ')
+    ).toContain('declare the routes transformed to use Automatic providers');
+    if (mode === 'transformed') {
+      fidelity.value = 'transformed';
+      fidelity.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+    }
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/route-drafts',
+      expect.objectContaining({
+        body: expect.objectContaining({ fidelity: { mode } })
+      })
+    );
   }
 );

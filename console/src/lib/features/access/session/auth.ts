@@ -45,7 +45,7 @@ export async function authenticationCapabilities(
   signal?: AbortSignal
 ): Promise<AuthenticationCapabilities> {
   const { data, error, response } = await withAuthenticationDeadline(
-    (signal) => apiClient.GET('/api/v3/auth/capabilities', { signal }),
+    (signal) => apiClient.GET('/api/v1/auth/capabilities', { signal }),
     signal
   );
   const value = result(data, error, response);
@@ -66,7 +66,7 @@ export async function beginOidcLogin(
   returnTo: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const { data, error, response } = await apiClient.POST('/api/v3/oidc/login', {
+  const { data, error, response } = await apiClient.POST('/api/v1/oidc/login', {
     body: { return_to: returnTo },
     signal
   });
@@ -96,7 +96,7 @@ export async function currentSession(
   signal?: AbortSignal
 ): Promise<CurrentSession> {
   const { data, error, response } = await withAuthenticationDeadline(
-    (signal) => apiClient.GET('/api/v3/sessions/current', { signal }),
+    (signal) => apiClient.GET('/api/v1/sessions/current', { signal }),
     signal
   );
   return sessionResult(data, error, response);
@@ -107,7 +107,7 @@ export async function login(
   password: string,
   signal?: AbortSignal
 ): Promise<CurrentSession> {
-  const { data, error, response } = await apiClient.POST('/api/v3/sessions', {
+  const { data, error, response } = await apiClient.POST('/api/v1/sessions', {
     body: { email, password },
     signal
   });
@@ -119,7 +119,7 @@ export async function acceptInvitation(
   signal?: AbortSignal
 ): Promise<CurrentSession> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/invitations/accept',
+    '/api/v1/invitations/accept',
     {
       body: input,
       signal
@@ -130,7 +130,7 @@ export async function acceptInvitation(
 
 export async function logout(signal?: AbortSignal): Promise<void> {
   const { error, response } = await apiClient.DELETE(
-    '/api/v3/sessions/current',
+    '/api/v1/sessions/current',
     { signal }
   );
   // An absent server-side session is already the desired end state. The

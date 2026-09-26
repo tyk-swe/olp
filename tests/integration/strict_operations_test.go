@@ -92,8 +92,8 @@ func publishOperation(t *testing.T, h *accessHarness, owner *browser, f *operati
 		configuration["endpoint"] = f.URL + "/v1/projects/fixture-project/locations/us-central1/publishers/google"
 		delete(providerInput, "credential")
 	}
-	provider := h.want(owner, "POST", "/api/v3/providers", providerInput, idem(uuid.NewString()), 201)
-	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	provider := h.want(owner, "POST", "/api/v1/providers", providerInput, idem(uuid.NewString()), 201)
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
 	modelID := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
 	provider = h.want(owner, "PATCH", providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": operationCapabilities(profileID, operation, surface)}, etagHeader(provider), 200)
 	f.mu.Lock()
@@ -163,9 +163,9 @@ func publishOperation(t *testing.T, h *accessHarness, owner *browser, f *operati
 	if f.policy != nil {
 		draftInput["content_policy"] = f.policy
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Native operation", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Native operation", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -471,7 +471,7 @@ func TestStrictOperationPolicyRefusalPreservesUpstreamOutcome(t *testing.T) {
 func TestStrictOperationInspectorUsesRegisteredContractWithoutDispatch(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	profiles := h.want(owner, "GET", "/api/v3/provider-profiles", nil, nil, 200)["items"].([]any)
+	profiles := h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any)
 	for id, operation := range map[string]string{
 		"gemini-batch-embeddings": "embeddings", "openai-embeddings": "embeddings", "openai-input-tokens": "token_count", "openai-moderation": "moderation",
 		"rerank": "rerank", "tei-classification": "classification", "tei-embeddings": "embeddings", "tei-multivector-embeddings": "embeddings",
@@ -499,7 +499,7 @@ func TestStrictOperationInspectorUsesRegisteredContractWithoutDispatch(t *testin
 	base := map[string]any{"operation": map[string]any{"operation": "embeddings", "route": slug, "request": request}, "surface": "native", "mode": "unary", "dialect": "voyage-embeddings", "seed": "registered-native-inspection"}
 	inspect := func() map[string]any {
 		t.Helper()
-		rows := h.list(owner, "POST", "/api/v3/routing/simulate", base, nil, 200)
+		rows := h.list(owner, "POST", "/api/v1/routing/simulate", base, nil, 200)
 		if len(rows) != 1 {
 			t.Fatalf("inspection target count: %v", rows)
 		}

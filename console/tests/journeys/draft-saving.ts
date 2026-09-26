@@ -6,7 +6,7 @@ export async function verifyDraftSave(
   original: string
 ) {
   const id = new URL(page.url()).pathname.split('/').at(-1)!;
-  const endpoint = `/api/v3/${kind === 'route' ? 'route-drafts' : 'providers'}/${id}`;
+  const endpoint = `/api/v1/${kind === 'route' ? 'route-drafts' : 'providers'}/${id}`;
   const input = page.getByLabel(
     kind === 'route' ? 'Public model slug' : 'Provider name'
   );

@@ -151,7 +151,7 @@ func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*reso
 	return r, &doc, nil
 }
 
-func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string) *Error {
+func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
 	if doc == nil {
 		return nil
 	}
@@ -159,7 +159,7 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 		return notFoundError("not_found", "The stored provider resource is unavailable to this key.")
 	}
-	p, _, e := s.resolveResource(ctx, x, authority, r, operation)
+	p, _, e := s.resolveResource(ctx, x, authority, r, operation, use)
 	if e != nil {
 		return e
 	}

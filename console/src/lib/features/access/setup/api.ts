@@ -17,7 +17,7 @@ export async function getSetupStatus(
   signal?: AbortSignal
 ): Promise<SetupStatus> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/setup/status',
+    '/api/v1/setup/status',
     { signal }
   );
   const value = result(data, error, response);
@@ -36,7 +36,7 @@ export async function createOwner(
   setupToken: string,
   signal?: AbortSignal
 ): Promise<CreateOwnerResponse> {
-  const { data, error, response } = await apiClient.POST('/api/v3/setup', {
+  const { data, error, response } = await apiClient.POST('/api/v1/setup', {
     // The one-time setup token is intentionally sent only as a sensitive
     // request header; it is never included in the JSON owner contract or
     // persisted by the console.

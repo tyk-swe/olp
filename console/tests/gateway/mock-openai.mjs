@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 
-// An OpenAI-compatible upstream for the Go gateway journeys. It records every
+// An OpenAI-compatible upstream for the gateway journeys. It records every
 // request so the journey can prove which credential reached it and that the
 // client API key never did.
 const host = '127.0.0.1';

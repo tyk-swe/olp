@@ -68,7 +68,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -144,8 +144,8 @@ async function provisionRoute(page: Page): Promise<void> {
   await expect(
     page.getByLabel('Provider model').first().locator('option:checked')
   ).toContainText(upstream.model);
-  // This journey intentionally qualifies the historical compatibility route.
-  await page.getByLabel('Fidelity mode').selectOption('legacy');
+  // This provider has no profile, so the route is declared transformed.
+  await page.getByLabel('Fidelity mode').selectOption('transformed');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await page
@@ -324,7 +324,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   ).toBeVisible();
   await expect(page.getByText('Revision 1', { exact: true })).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-pricing-revision.png'),
+    path: info.outputPath('pricing-revision.png'),
     fullPage: true
   });
 
@@ -335,9 +335,9 @@ test('a browser user prices gateway traffic and reads the accounting it produced
       async () =>
         page.evaluate(async (routeSlug) => {
           const session = await (
-            await fetch('/api/v3/sessions/current')
+            await fetch('/api/v1/sessions/current')
           ).json();
-          const response = await fetch('/api/v3/routing/simulate', {
+          const response = await fetch('/api/v1/routing/simulate', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -408,7 +408,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   await expectFact(charge, 'Usage observed', 'Yes');
   await expectFact(charge, 'Usage completeness', 'Complete');
   await page.screenshot({
-    path: info.outputPath('go-request-accounting.png'),
+    path: info.outputPath('request-accounting.png'),
     fullPage: true
   });
 
@@ -458,7 +458,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   await expect(budget).toContainText('Window ends');
   await expect(budget).toContainText('Unpriced attempts this UTC month');
   await page.screenshot({
-    path: info.outputPath('go-usage-budget.png'),
+    path: info.outputPath('usage-budget.png'),
     fullPage: true
   });
 
@@ -481,12 +481,12 @@ test('retained media records expose metadata, filters, and accessible details', 
   await signIn(page);
   // Seed terminal history against the preceding journey's actual published
   // provider, key, and generation. Creation/reconciliation/content are covered
-  // by the gateway service suites; every read here uses the real Go API.
+  // by the gateway service suites; every read here uses the real management API.
   const database = new URL(process.env.OLP_DATABASE_URL!);
   database.pathname =
     '/' +
     (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') +
-    (info.project.name === 'go-packaged' ? 'olp_go_packaged' : 'olp_go_vite');
+    (info.project.name === 'packaged' ? 'olp_packaged' : 'olp_vite');
   const succeeded = randomUUID();
   const failed = randomUUID();
   const seed = await promisify(execFile)('psql', [
@@ -498,15 +498,17 @@ test('retained media records expose metadata, filters, and accessible details', 
     `
     WITH refs AS (
       SELECT p.id AS provider_id, p.active_revision_id AS revision_id,
-        (SELECT id FROM olp_go.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
-        (SELECT id FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id
-      FROM olp_go.providers p WHERE p.name='Accounting upstream'
+        (SELECT id FROM olp.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
+        (SELECT id FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id,
+        (SELECT id FROM olp.provider_slots WHERE provider_id=p.id AND is_default) AS slot_id
+      FROM olp.providers p WHERE p.name='Accounting upstream'
     )
-    INSERT INTO olp_go.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
+    INSERT INTO olp.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
       route_slug,operation,state,lifecycle_state,progress_percent,completed_at,deleted_at,
-      etag,runtime_generation_id,provider_revision_id)
+      etag,runtime_generation_id,provider_revision_id,slot_id,strict_contract)
     SELECT v.id::uuid,'terminal-fixture-'||v.id,key_id,provider_id,'archived-video-model',
-      v.route,'video_create',v.state,'deleted',100,now(),now(),gen_random_uuid(),generation_id,revision_id
+      v.route,'video_create',v.state,'deleted',100,now(),now(),gen_random_uuid(),generation_id,revision_id,
+      slot_id,false
     FROM refs CROSS JOIN (VALUES
       ('${succeeded}','retained-video-success','succeeded'),
       ('${failed}','retained-video-failure','failed')
@@ -537,7 +539,7 @@ test('retained media records expose metadata, filters, and accessible details', 
     page.locator('.job-detail audio, .job-detail video, .job-detail img')
   ).toHaveCount(0);
   const detail = await page.evaluate(async (id) => {
-    const response = await fetch(`/api/v3/media-jobs/${id}`);
+    const response = await fetch(`/api/v1/media-jobs/${id}`);
     if (!response.ok)
       throw new Error(`Media metadata failed: ${response.status}`);
     return response.json();
@@ -546,7 +548,7 @@ test('retained media records expose metadata, filters, and accessible details', 
   for (const field of ['prompt', 'content', 'credential', 'raw_response'])
     expect(detail).not.toHaveProperty(field);
   expect(JSON.stringify(detail)).not.toContain(upstream.credential);
-  expect((await request.get(`/api/v3/media-jobs/${succeeded}`)).status()).toBe(
+  expect((await request.get(`/api/v1/media-jobs/${succeeded}`)).status()).toBe(
     401
   );
   for (const width of [320, 1440]) {
@@ -558,7 +560,7 @@ test('retained media records expose metadata, filters, and accessible details', 
     ).toBeLessThanOrEqual(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await page.screenshot({
-      path: info.outputPath(`go-retained-media-${width}.png`),
+      path: info.outputPath(`retained-media-${width}.png`),
       fullPage: true
     });
   }

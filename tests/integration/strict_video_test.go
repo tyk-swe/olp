@@ -110,12 +110,12 @@ func (f *strictVideoUpstream) snapshot() (int, int, int, int, []string, [][]byte
 
 func publishStrictVideo(t *testing.T, h *accessHarness, owner *browser, upstream *strictVideoUpstream) (string, string) {
 	t.Helper()
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          "Strict video " + uuid.NewString(),
 		"configuration": map[string]any{"kind": "openai_compatible", "profile_id": "compatible-chat", "profile_revision": "1", "auth_mode": "api_key", "endpoint": upstream.URL + "/v1"},
 		"model":         vendorModel, "credential": vendorSecret,
 	}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), 200)
 	if probe["succeeded"] != true {
 		t.Fatal("video fixture model probe failed", probe)
@@ -130,15 +130,15 @@ func publishStrictVideo(t *testing.T, h *accessHarness, owner *browser, upstream
 	unsupported := fidelityDraft("strict-video-list-"+uuid.NewString(), provider["id"])
 	unsupported["operations"] = []string{"video_create", "video_list", "video_get", "video_content", "video_delete"}
 	unsupported["fidelity"] = map[string]any{"mode": "strict"}
-	draftList := h.want(owner, "POST", "/api/v3/route-drafts", unsupported, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draftList["id"].(string)+"/activate", nil, withMatch(draftList, idem(uuid.NewString())), 422)
+	draftList := h.want(owner, "POST", "/api/v1/route-drafts", unsupported, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draftList["id"].(string)+"/activate", nil, withMatch(draftList, idem(uuid.NewString())), 422)
 	slug := "strict-video-" + uuid.NewString()
 	draftInput := fidelityDraft(slug, provider["id"])
 	draftInput["operations"] = []string{"video_create", "video_get", "video_content", "video_delete"}
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict video", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict video", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -201,11 +201,11 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatalf("owner-scoped video inventory lost job: %d %s", status, raw)
 	}
 	var ownerID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT api_key_id::text FROM olp_go.media_jobs WHERE id=$1 AND strict_contract AND native_source_id=$1", localID).Scan(&ownerID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT api_key_id::text FROM olp.media_jobs WHERE id=$1 AND strict_contract AND native_source_id=$1", localID).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
 	var ciphertext []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&ciphertext); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&ciphertext); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(ciphertext, []byte("one frame")) || bytes.Contains(ciphertext, []byte("9007199254740993")) {
@@ -226,20 +226,20 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatal("unreserved video source activated")
 	}
 	var orphanSecrets int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", orphanID).Scan(&orphanSecrets); err != nil || orphanSecrets != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", orphanID).Scan(&orphanSecrets); err != nil || orphanSecrets != 0 {
 		t.Fatalf("failed attachment committed a source secret: %d %v", orphanSecrets, err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, uuid.NewString()); err == nil {
 		t.Fatal("wrong owner read native source")
 	}
 	past := time.Now().Add(-time.Second)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.media_jobs SET expires_at=$2 WHERE id=$1", localID, past); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, past); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
 		t.Fatal("expired job read native source")
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
 		t.Fatal(err)
 	}
 	oldRevoked := recovered.Revoked
@@ -248,13 +248,13 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatal("revoked provider read native source")
 	}
 	recovered.Revoked = oldRevoked
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
 		t.Fatal("tampered video source authenticated")
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, ciphertext); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, ciphertext); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,7 +284,7 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatalf("native delete=%d %s", status, raw)
 	}
 	var secrets int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&secrets); err != nil || secrets != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&secrets); err != nil || secrets != 0 {
 		t.Fatalf("deleted secret retained: %d %v", secrets, err)
 	}
 	status, raw, _ = h.gatewayRaw("DELETE", "/v1/videos/"+localID, key, nil, nil)
@@ -333,5 +333,58 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 	}
 	if _, err := h.Media.ReadNativeVideoSource(t.Context(), record, record.APIKeyID); err == nil {
 		t.Fatal("retired master key read rotated source")
+	}
+}
+
+func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	upstream := newStrictVideoUpstream(t)
+	slug, key := publishStrictVideo(t, h, owner, upstream)
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	form.WriteField("model", slug)
+	form.WriteField("prompt", "retain the strict job")
+	form.Close()
+	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
+	if status != http.StatusCreated {
+		t.Fatalf("strict video create=%d %s", status, raw)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	providerID := route["latest_revision"].(map[string]any)["targets"].([]any)[0].(map[string]any)["provider_id"]
+	draft := transformed(fidelityDraft(slug, providerID))
+	draft["operations"] = []string{"video_create", "video_get", "video_content", "video_delete"}
+	draft = h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	h.refresh()
+	_, getsBefore, contentsBefore, deletesBefore, _, _ := upstream.snapshot()
+	for _, path := range []string{"/v1/videos/" + created.ID, "/v1/videos/" + created.ID + "/content"} {
+		status, raw, _ = h.gatewayRaw("GET", path, key, nil, nil)
+		if status != http.StatusConflict || !strings.Contains(string(raw), "now transformed") {
+			t.Fatalf("GET %s served a strict job on a transformed route: %d %s", path, status, raw)
+		}
+	}
+	// The list keeps the queued job and shows its stored state instead of
+	// polling the provider through a contract the route no longer promises.
+	status, raw, _ = h.gatewayRaw("GET", "/v1/videos", key, nil, nil)
+	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) || !strings.Contains(string(raw), `"status":"queued"`) {
+		t.Fatalf("video list after the route became transformed: %d %s", status, raw)
+	}
+	if _, gets, contents, deletes, _, _ := upstream.snapshot(); gets != getsBefore || contents != contentsBefore || deletes != deletesBefore {
+		t.Fatal("refused or listed strict video job reached the provider")
+	}
+	// Its owner can still delete it, so the provider-held video is removed.
+	status, raw, _ = h.gatewayRaw("DELETE", "/v1/videos/"+created.ID, key, nil, nil)
+	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) {
+		t.Fatalf("delete of a strict job on a transformed route: %d %s", status, raw)
+	}
+	if _, _, _, deletes, _, _ := upstream.snapshot(); deletes != deletesBefore+1 {
+		t.Fatal("strict video delete did not reach the provider")
 	}
 }

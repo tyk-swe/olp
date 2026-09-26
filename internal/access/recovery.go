@@ -26,25 +26,25 @@ func RecoverPassword(ctx context.Context, pool *pgxpool.Pool, address, secret st
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT id FROM olp_go.installation WHERE singleton FOR UPDATE"); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT id FROM olp.installation WHERE singleton FOR UPDATE"); err != nil {
 		return nil, err
 	}
 	var id string
 	var active bool
-	err = tx.QueryRow(ctx, "SELECT id::text,active FROM olp_go.users WHERE email=$1 FOR UPDATE", address).Scan(&id, &active)
+	err = tx.QueryRow(ctx, "SELECT id::text,active FROM olp.users WHERE email=$1 FOR UPDATE", address).Scan(&id, &active)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !active {
 		return nil, errRecovery
 	}
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp_go.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, NewID(), id); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, NewID(), id); err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, "DELETE FROM olp_go.recent_auth WHERE session_id IN (SELECT id FROM olp_go.sessions WHERE user_id=$1)", id); err != nil {
+	if _, err = tx.Exec(ctx, "DELETE FROM olp.recent_auth WHERE session_id IN (SELECT id FROM olp.sessions WHERE user_id=$1)", id); err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, "DELETE FROM olp_go.sessions WHERE user_id=$1", id); err != nil {
+	if _, err = tx.Exec(ctx, "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
 		return nil, err
 	}
 	if err = Audit(ctx, tx, &http.Request{}, "", "user.password_recover", "user", id, "success"); err != nil {

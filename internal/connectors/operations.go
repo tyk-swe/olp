@@ -84,8 +84,8 @@ func RegisterOperationProfile(p Profile) error {
 	return nil
 }
 
-// OperationURL uses only a registered native addressing contract. Its legacy
-// adapter is bounded to explicit paths; unknown operations never choose Chat.
+// OperationURL uses only a registered native addressing contract. Its family
+// endpoint adapter is bounded to explicit paths; unknown operations never choose Chat.
 func (c Config) OperationURL(d operations.Dialect, model string) (string, error) {
 	p, err := profileView(c.ProfileID, c.ProfileRevision)
 	if err != nil {
@@ -111,7 +111,7 @@ func (c Config) OperationURL(d operations.Dialect, model string) (string, error)
 		return base.String(), nil
 	}
 	paths := map[string]openai.Family{"embeddings": openai.FamilyEmbeddings, "moderation": openai.FamilyModeration, "input_tokens": openai.FamilyInputTokens, "anthropic_count": openai.FamilyAnthropicCount, "gemini_count": openai.FamilyGeminiCount, "bedrock_count": openai.Family("bedrock_count"), "gemini_embeddings": openai.FamilyGeminiEmbeddings, "gemini_embeddings_batch": openai.FamilyGeminiEmbeddingsBatch, "vertex_embeddings": openai.FamilyVertexEmbeddings, "bedrock_embeddings": openai.FamilyBedrockEmbeddings, "rerank": openai.FamilyRerank}
-	wire, ok := paths[d.Address.LegacyPath]
+	wire, ok := paths[d.Address.FamilyPath]
 	if !ok {
 		return "", errors.New("operation path adapter is not registered")
 	}

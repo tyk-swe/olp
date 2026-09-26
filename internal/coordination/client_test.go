@@ -51,7 +51,7 @@ func TestConfigurationPreservesConnectionSettings(t *testing.T) {
 			if request.GetRequestTimeout() != 1500 || request.GetConnectionTimeout() != 1500 {
 				t.Fatalf("request/connection timeouts = %d/%d; want 1500ms", request.GetRequestTimeout(), request.GetConnectionTimeout())
 			}
-			if request.GetClientName() != "olp-go" || !request.GetLazyConnect() {
+			if request.GetClientName() != "olp" || !request.GetLazyConnect() {
 				t.Fatal("missing application identity or lazy connection setting")
 			}
 			credentials := request.GetAuthenticationInfo()

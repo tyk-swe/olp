@@ -67,12 +67,12 @@ func TestStartupAuthenticatesEveryStoredSecret(t *testing.T) {
 						ciphertext[len(ciphertext)-1] ^= 1
 					}
 				}
-				if _, err = h.Pool.Exec(t.Context(), "INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,$2,$3,$4,$5)", id, purpose, ring.Active, ciphertext, expires); err != nil {
+				if _, err = h.Pool.Exec(t.Context(), "INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,$2,$3,$4,$5)", id, purpose, ring.Active, ciphertext, expires); err != nil {
 					t.Fatal(err)
 				}
 			}
 			var before string
-			if err := h.Pool.QueryRow(t.Context(), "SELECT jsonb_agg(s ORDER BY id)::text FROM olp_go.secrets s").Scan(&before); err != nil {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT jsonb_agg(s ORDER BY id)::text FROM olp.secrets s").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
 			server, err := access.New(t.Context(), h.Pool, h.Server.Installation, h.Server.Origin, h.Server.Auth, parse(t, 2, tc.key1, tc.key2), h.Bootstrap)
@@ -83,7 +83,7 @@ func TestStartupAuthenticatesEveryStoredSecret(t *testing.T) {
 				t.Fatal("startup error exposed plaintext")
 			}
 			var after string
-			if err := h.Pool.QueryRow(t.Context(), "SELECT jsonb_agg(s ORDER BY id)::text FROM olp_go.secrets s").Scan(&after); err != nil {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT jsonb_agg(s ORDER BY id)::text FROM olp.secrets s").Scan(&after); err != nil {
 				t.Fatal(err)
 			}
 			if before != after {

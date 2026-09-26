@@ -1,42 +1,8 @@
 # Operations runbook
 
-Availability, monitoring, recovery, upgrade, incident, and key-rotation
+Availability, monitoring, recovery, version, incident, and key-rotation
 procedures for production OpenLLMProxy. Keep this runbook with the deployed
 release; deployment topology is in [`deployment.md`](deployment.md).
-
-For the provider-pool and routing-policy schema upgrade, follow the
-[coordinated 3.x procedure](provider-routing.md#coordinated-3x-upgrade). Drain
-older gateways before migrating; mixed binaries cannot enforce the same policy
-and release format.
-
-## Strict route cutover
-
-A route slug is a published contract identity. To move a legacy or transformed
-route to strict, fetch its current ETag and create a review draft with
-`POST /api/v3/routes/{route_id}/migration-draft`, `If-Match`, an idempotency key,
-and a body such as `{"slug":"new-route","fidelity":{"mode":"strict"}}`. The
-destination slug must never have been published, including as a retired route.
-The response is an editable draft that copies the current revision, targets,
-content policy and routing policy. Creation and plan inspection perform no
-inference. Resolve any strict policy or provider-profile incompatibility,
-validate the draft, then activate it. Reusing the original slug for this change
-returns `route_fidelity_migration_required` before publication; configuration
-plan/apply report the same boundary.
-
-Provision an API key or update its allowed routes for the new slug, verify the
-new gateway serves the strict route, and deliberately change clients to that
-slug. Existing clients continue on the original non-strict route until their
-cutover. Older live gateways reject the new release and retain their last
-supported snapshot; they cannot dispatch a slug absent from that snapshot.
-Drain them before retiring the old route. A newly started old binary refuses
-the forward schema and is not a rollback mechanism. Rollback uses a compatible
-binary and the retained legacy route, while keeping current key and credential
-revocations. A database restore needs its own reviewed cutover plan that
-reapplies those revocations; never restore deleted credentials as a shortcut.
-
-The database also rejects an old writer that omits strictness from a new
-revision or release. Migration 0027 refuses a pre-existing strict slug with
-non-strict publication history because its identity cannot be proven safe.
 
 ## Objectives and monitoring
 
@@ -102,10 +68,10 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   restart and hand off between workers.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
-  persists each event once, then acknowledges and deletes it. Unsupported wire
-  versions remain pending. Malformed/invalid payloads and missing deliveries
-  become explicit gaps before drainage. An acknowledgement is not an fsync
-  guarantee.
+  persists each event once, then acknowledges and deletes it. Events without
+  the current wire version, malformed or invalid payloads, and missing
+  deliveries become explicit gaps before drainage. An acknowledgement is not an
+  fsync guarantee.
 - **Gateway epoch detection:** records an unclean gateway exit as a completeness
   gap after two confirming passes.
 - **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and
@@ -156,7 +122,7 @@ The consumer retries delivery failures internally; its outer process launcher
 has no restart supervisor. If it exits (currently only startup misconfiguration
 returns an error), correct the cause and restart the process.
 
-`GET /api/v3/auth/capabilities` reports `limits_enforced` and
+`GET /api/v1/auth/capabilities` reports `limits_enforced` and
 `retention_enforced` from configured Valkey, not live worker health. Configuring
 Valkey without running a worker still reports these flags as true. Use task
 checkpoints to confirm retention is running. Without Valkey, `all` starts only
@@ -195,11 +161,11 @@ synthetic zero spend to bypass initialization.
 
 ### Budget threshold notifications
 
-`GET/POST /api/v3/notifications/destinations` and
-`GET/PATCH /api/v3/notifications/destinations/{id}` manage webhook endpoints;
-`GET/POST /api/v3/notifications/rules` and
-`GET/PATCH /api/v3/notifications/rules/{id}` manage alert rules, and
-`GET /api/v3/notifications/deliveries` lists delivery metadata only.
+`GET/POST /api/v1/notifications/destinations` and
+`GET/PATCH /api/v1/notifications/destinations/{id}` manage webhook endpoints;
+`GET/POST /api/v1/notifications/rules` and
+`GET/PATCH /api/v1/notifications/rules/{id}` manage alert rules, and
+`GET /api/v1/notifications/deliveries` lists delivery metadata only.
 Installation-wide destinations and rules require settings permission;
 project-scoped ones require project-manager access, and a rule's subject (an API
 key or budget group) and destination must belong to the same project.
@@ -216,7 +182,7 @@ responses are drained bounded. Delivery failures persist only a safe category
 response bodies or raw error text.
 
 The delivery worker runs only where Valkey-backed shared state exists.
-`GET /api/v3/auth/capabilities` reports `notifications_active`; when it is
+`GET /api/v1/auth/capabilities` reports `notifications_active`; when it is
 false, destinations and rules still save but nothing is delivered — monitor
 `olp_worker_task_healthy{task="budget_alert_delivery"}` and the
 `budget_alert_deliveries` status counters for live health.
@@ -231,10 +197,10 @@ in latency. Events carry identifiers, timing, token counts, and per-attempt
 evidence only — never prompts, outputs, tool data, or headers.
 
 Management processes serve the results: the usage summary, breakdown, time
-series, and completeness endpoints under `/api/v3/usage/`, request listing and
-detail under `/api/v3/requests`, pricing revisions under
-`/api/v3/pricing/revisions`, and gateway epochs and their acknowledgement under
-`/api/v3/request-metadata/gateway-epochs`. Reports mark a partial boundary
+series, and completeness endpoints under `/api/v1/usage/`, request listing and
+detail under `/api/v1/requests`, pricing revisions under
+`/api/v1/pricing/revisions`, and gateway epochs and their acknowledgement under
+`/api/v1/request-metadata/gateway-epochs`. Reports mark a partial boundary
 bucket as approximate and report what they excluded, and carry gap evidence and
 consumer health so incompleteness stays visible after aggregation. Usage
 endpoints accept `attribution_key` with an optional `attribution_value` to
@@ -244,13 +210,13 @@ are omitted). Request list and detail expose each request's stored labels.
 Project-scoped readers see only their own projects' rows in every report.
 
 Pricing can also come from managed sources rather than hand-entered revisions.
-`GET/POST /api/v3/pricing/sources` and `GET/PATCH /api/v3/pricing/sources/{id}`
-register an external price document; `POST /api/v3/pricing/sources/{id}/refresh`
+`GET/POST /api/v1/pricing/sources` and `GET/PATCH /api/v1/pricing/sources/{id}`
+register an external price document; `POST /api/v1/pricing/sources/{id}/refresh`
 fetches it through the egress policy (bounded size, JSON schema, redirect
 validation), stores an immutable SHA-256-keyed snapshot, and returns a diff
 against the latest published revision without publishing anything.
-`GET /api/v3/pricing/sources/{id}/snapshots` lists retained snapshots and
-`POST /api/v3/pricing/source-snapshots/{id}/publish` mints a new immutable
+`GET /api/v1/pricing/sources/{id}/snapshots` lists retained snapshots and
+`POST /api/v1/pricing/source-snapshots/{id}/publish` mints a new immutable
 pricing revision from one snapshot, optionally merged with scoped per-entry
 overrides. A source is advisory: negotiated rates need publish-time overrides,
 because the published revision — not the raw source document — is what
@@ -267,16 +233,22 @@ metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT` (30
 seconds by default). Forced closure records uncertainty instead of extending the
 deployment termination budget.
 
+Delivery and replay evidence is retained for seven days plus five minutes of
+clock-skew grace. A late entry is recorded as uncertain completeness, never
+silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
+* 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
+within seven days; do not extend the window by suspending maintenance.
+
 ## Shared state in Valkey
 
 Every key is prefixed with the installation namespace
-`olp:go:v1:<installation>:`, so installations sharing one Valkey service never
+`olp:<installation>:`, so installations sharing one Valkey service never
 read, acknowledge, or reconcile one another's state.
 
 | Key | Contents |
 | --- | --- |
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
-| `<prefix>limits:{<lookup>}:concurrency:v2` | Concurrency leases for one lookup. |
+| `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
 | `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key or budget-group UUID. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
 | `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
@@ -295,7 +267,7 @@ balance.
 3. Review usage completeness and pricing coverage before exporting costs.
    Missing upstream usage is incomplete and unpriced, never zero.
 4. Review provider health, authentication, role/key changes, credential
-   rotations, and route activations in the audit stream. `GET /api/v3/audit`
+   rotations, and route activations in the audit stream. `GET /api/v1/audit`
    narrows a page by `action`, `resource_type`, `resource_id`,
    `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
    each category can be reviewed on its own. Session-driven actions also
@@ -346,9 +318,10 @@ For a production recovery point:
    `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
 
 The script requires a zero, at-most-30-second-old durable checkpoint and an
-explicit quiescence assertion. It exports one PostgreSQL snapshot and creates an
-`olp-go-v1` manifest containing the checksum, installation identity, migration
-count, and runtime generation. Only the `olp_go` schema is backed up.
+explicit quiescence assertion. It exports one PostgreSQL snapshot and creates a
+manifest with format and schema markers `olp`, the checksum, installation
+identity, migration count, and runtime generation. Only the `olp` schema is
+backed up.
 
 The dump contains password hashes, session and API-key digests, and encrypted
 provider/OIDC credentials. Keep master-key rings and authentication HMAC files
@@ -360,7 +333,7 @@ script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
 Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
 empty Valkey service, and mount the original master and auth key files. The
 restore role needs CREATEDB: the command first restores to a disposable staging
-database, verifies the manifest/checksum/history/identity, applies supported Go
+database, verifies the manifest/checksum/history/identity, applies the binary's
 migrations, and authenticates every encrypted record with `olp doctor`. Only
 then does one transaction recheck and populate the empty destination. Failure
 removes staging and leaves the destination unchanged. Set `OLP_MAINTENANCE_BIN`
@@ -369,33 +342,28 @@ installation with its original keys and a fresh Valkey service. A restored
 installation retains its namespace; run it as a replacement, or isolate its
 Valkey service from the source installation.
 
-## Installation and upgrades
+## Installation and versions
 
-Go does not upgrade Rust 2.x or Rust 3.x storage. Back up the existing
-installation with its own version, provision independent Go storage and secrets,
-and verify providers, routes, permissions, SDK requests, usage, and recovery
-before redirecting traffic. Rust schemas are refused before any Go objects are
-created.
+Each installation starts from an empty PostgreSQL database and uses its own
+Valkey namespace. During 0.x, OLP makes no compatibility, upgrade,
+mixed-version or rollback promises: any release may change the management API,
+configuration and storage, and a release may require a fresh installation. See
+[ADR 0004](adr/0004-no-compatibility-promises-during-0x.md).
 
-For subsequent 3.x releases, review forward-only migrations, rehearse against an
-isolated 3.0 backup, quiesce new inference and mutations, and drain accounting.
-Take the final snapshot while workers still supply a fresh checkpoint, then stop
-workers for migration. Run `olp migrate` once and roll out all process modes
-before resuming admission. Verify readiness, generation convergence, backlog,
-usage completeness, provider probes, and latency. Restore the saved database and
-keys into a replacement installation if rollback requires an older schema.
-
-Delivery and replay evidence is retained for seven days plus five minutes of
-clock-skew grace. A late entry is recorded as uncertain completeness, never
-silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
-* 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
-within seven days; do not extend the window by suspending maintenance.
-
-Migrations are forward-only; never edit migration history or checksums.
+Run one version across every process mode. To run a new release against an
+existing database, take a [drained backup](#backup-and-restore), stop every
+process, run `olp migrate` once with the new binary, and start all process
+modes on that version. With Helm, scale the gateway, control and worker
+Deployments to zero before `helm upgrade`; its pre-upgrade hook runs the
+migration Job before the new pods start. Verify readiness, generation
+convergence, backlog, usage completeness, provider probes, and latency before
+resuming admission. There is no rollback: a binary refuses a database whose
+schema is newer than its own, and migrations never run in reverse. Never edit
+migration history or checksums.
 
 ## Database deadlines and privileges
 
-Go pool connections set a ten-second statement deadline, ten-second lock wait
+Pool connections set a ten-second statement deadline, ten-second lock wait
 and fifteen-second idle-transaction deadline. Commands additionally obey the
 startup/dependency deadlines in the configuration reference. Backup should use a
 dedicated read role with access to migration history and all backed-up tables

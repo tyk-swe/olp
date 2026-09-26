@@ -96,7 +96,7 @@ describe('session API', () => {
       'correct horse battery staple'
     );
 
-    expect(new URL(requests[0]!.url).pathname).toBe('/api/v3/sessions');
+    expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/sessions');
     expect(requests[0]!.method).toBe('POST');
     expect(JSON.parse(await requests[0]!.clone().text())).toEqual({
       email: 'operator@example.com',
@@ -120,7 +120,7 @@ describe('session API', () => {
     const session = await acceptInvitation(input);
 
     expect(new URL(requests[0]!.url).pathname).toBe(
-      '/api/v3/invitations/accept'
+      '/api/v1/invitations/accept'
     );
     expect(requests[0]!.method).toBe('POST');
     expect(JSON.parse(await requests[0]!.clone().text())).toEqual(input);

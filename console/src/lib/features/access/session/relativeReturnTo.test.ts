@@ -38,7 +38,7 @@ describe('relativeReturnTo', () => {
     '/login?return_to=%2Fsettings',
     '/a/../login',
     '/%6cogin',
-    '/api/v3/oidc/callback'
+    '/api/v1/oidc/callback'
   ])('rejects %s', (input) => {
     expect(relativeReturnTo(input, ORIGIN)).toBe('/');
   });

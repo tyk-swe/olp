@@ -29,7 +29,7 @@ export async function listNotificationDestinationPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<NotificationDestination>> {
-  const response = await apiClient.GET('/api/v3/notifications/destinations', {
+  const response = await apiClient.GET('/api/v1/notifications/destinations', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -39,7 +39,7 @@ export async function listNotificationDestinationPage(
 export async function createNotificationDestination(
   input: CreateNotificationDestinationInput
 ): Promise<NotificationDestination> {
-  const response = await apiClient.POST('/api/v3/notifications/destinations', {
+  const response = await apiClient.POST('/api/v1/notifications/destinations', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -51,7 +51,7 @@ export async function updateNotificationDestination(
   input: UpdateNotificationDestinationInput
 ): Promise<NotificationDestination> {
   const response = await apiClient.PATCH(
-    '/api/v3/notifications/destinations/{notification_destination_id}',
+    '/api/v1/notifications/destinations/{notification_destination_id}',
     {
       params: {
         path: { notification_destination_id: destination.id },
@@ -75,7 +75,7 @@ export async function listBudgetAlertRulePage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<BudgetAlertRule>> {
-  const response = await apiClient.GET('/api/v3/notifications/rules', {
+  const response = await apiClient.GET('/api/v1/notifications/rules', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -85,7 +85,7 @@ export async function listBudgetAlertRulePage(
 export async function createBudgetAlertRule(
   input: CreateBudgetAlertRuleInput
 ): Promise<BudgetAlertRule> {
-  const response = await apiClient.POST('/api/v3/notifications/rules', {
+  const response = await apiClient.POST('/api/v1/notifications/rules', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -97,7 +97,7 @@ export async function updateBudgetAlertRule(
   input: UpdateBudgetAlertRuleInput
 ): Promise<BudgetAlertRule> {
   const response = await apiClient.PATCH(
-    '/api/v3/notifications/rules/{budget_alert_rule_id}',
+    '/api/v1/notifications/rules/{budget_alert_rule_id}',
     {
       params: {
         path: { budget_alert_rule_id: rule.id },
@@ -114,7 +114,7 @@ export async function listNotificationDeliveries(
   signal?: AbortSignal
 ): Promise<BudgetAlertDelivery[]> {
   return collectCursorPages(async (cursor) => {
-    const response = await apiClient.GET('/api/v3/notifications/deliveries', {
+    const response = await apiClient.GET('/api/v1/notifications/deliveries', {
       params: { query: { limit: 50, cursor, rule_id: ruleId } },
       signal
     });

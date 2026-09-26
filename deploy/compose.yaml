@@ -1,4 +1,4 @@
-name: openllmproxy-go-v1
+name: openllmproxy
 
 x-database-environment: &database-environment
   OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp:${POSTGRES_PASSWORD_URL_ENCODED:-olp}@postgres:5432/olp}
@@ -39,7 +39,7 @@ x-application-environment: &application-environment
   OLP_LOG_LEVEL: ${OLP_LOG_LEVEL:-info}
 
 x-olp-container: &olp-container
-  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:3.0.0}
+  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:0.1.0}
   read_only: true
   # Compose bind-mounts file-backed secrets with host ownership. Run as the
   # invoking non-root user so mode-0600 development secrets remain readable.

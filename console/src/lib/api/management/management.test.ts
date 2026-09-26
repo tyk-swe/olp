@@ -37,7 +37,7 @@ describe('management resources', () => {
     const controller = new AbortController();
     const requests = captureRequests((request) => {
       const body =
-        new URL(request.url).pathname === '/api/v3/users'
+        new URL(request.url).pathname === '/api/v1/users'
           ? { items: [], next_cursor: null }
           : { items: [], next_cursor: null };
       return jsonResponse(body);
@@ -50,11 +50,11 @@ describe('management resources', () => {
     await getOidcConfiguration(controller.signal);
 
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
-      '/api/v3/providers',
-      '/api/v3/route-drafts',
-      '/api/v3/api-keys',
-      '/api/v3/users',
-      '/api/v3/oidc/configuration'
+      '/api/v1/providers',
+      '/api/v1/route-drafts',
+      '/api/v1/api-keys',
+      '/api/v1/users',
+      '/api/v1/oidc/configuration'
     ]);
     expect(requests.every((request) => !request.signal.aborted)).toBe(true);
 

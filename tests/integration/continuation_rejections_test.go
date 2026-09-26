@@ -35,7 +35,7 @@ func TestNegotiatedContinuationRejectsUnqualifiedOutputAndControlsBeforeDispatch
 				t.Fatalf("unqualified %s dispatched or lost its precise reason: %d calls=%d %s", tc.name, status, calls.Load(), result)
 			}
 			var claims int
-			if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE kind='continuation' AND submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claims); err != nil || claims != 0 {
+			if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='continuation' AND submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claims); err != nil || claims != 0 {
 				t.Fatalf("pre-dispatch rejection left accepted work: claims=%d err=%v", claims, err)
 			}
 		})

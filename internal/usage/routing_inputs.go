@@ -107,7 +107,7 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
  SELECT p.*,r.id AS rid,r.revision,r.effective_at,row_number() OVER
  (PARTITION BY p.provider_kind,p.provider_id,p.vendor_id,p.model,p.operation,(r.effective_at>$1)
  ORDER BY r.effective_at DESC,r.revision DESC) AS rank
- FROM olp_go.prices p JOIN olp_go.pricing_revisions r ON r.id=p.pricing_revision_id)
+ FROM olp.prices p JOIN olp.pricing_revisions r ON r.id=p.pricing_revision_id)
  SELECT rid::text,revision,effective_at,provider_kind,provider_id::text,vendor_id,model,operation,
  input_per_million::text,output_per_million::text,cached_input_per_million::text,
  cache_write_input_per_million::text,cache_write_5m_input_per_million::text,cache_write_1h_input_per_million::text,
@@ -136,7 +136,7 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
  CASE WHEN count(*) FILTER(WHERE a.routing->>'mode'='streaming' AND a.routing->>'streamed_output_tokens' IS NOT NULL AND a.latency_ms>(a.routing->>'first_output_ms')::double precision)>=20 THEN
  avg(CASE WHEN a.routing->>'mode'='streaming' AND a.latency_ms>(a.routing->>'first_output_ms')::double precision
  THEN (a.routing->>'streamed_output_tokens')::double precision*1000/(a.latency_ms-(a.routing->>'first_output_ms')::double precision) END) END,max(a.completed_at)
- FROM olp_go.attempts a JOIN olp_go.requests r ON r.id=a.request_id AND r.started_at=a.request_started_at
+ FROM olp.attempts a JOIN olp.requests r ON r.id=a.request_id AND r.started_at=a.request_started_at
  WHERE a.completed_at>=$1::timestamptz-interval '5 minutes' AND a.completed_at<=$1 AND a.error_class IS NULL
  AND a.status_code BETWEEN 200 AND 299 AND a.latency_ms IS NOT NULL AND a.routing->>'mode' IN ('unary','streaming')
  AND (a.routing->>'mode'<>'streaming' OR a.routing->>'first_output_ms' IS NOT NULL)

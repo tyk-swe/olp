@@ -5,9 +5,10 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-// Descriptor adapts historical family names to independent operation/dialect
-// identities. Wire-v1 describes the checked-in codec contract, not a claim
-// that a provider's moving API or model alias is immutable.
+// Descriptor adapts family names to independent operation/dialect identities.
+// Wire-v1 describes the checked-in codec contract, not a claim that a
+// provider's moving API or model alias is immutable. Family descriptors carry
+// the transformed codec profile until a provider profile binds the destination.
 var wireDialects = map[Family]string{
 	FamilyChat: "openai-chat", FamilyResponses: "openai-responses", FamilyInputTokens: "openai-input-tokens",
 	FamilyAnthropic: "anthropic-messages", FamilyAnthropicCount: "anthropic-count-tokens",
@@ -31,10 +32,10 @@ func Descriptor(family Family, stream bool) oif.Descriptor {
 	if family == "bedrock_count" {
 		operation = "token_count"
 	}
-	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: dialect, Revision: "wire-v1"}, Profile: oif.Identity{ID: "legacy", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
+	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: dialect, Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
 }
 
-// LiftEvent is shared by the legacy stream adapters. Framing remains owned by
+// LiftEvent is shared by the family stream adapters. Framing remains owned by
 // the transport decoder; JSON ambiguity is rejected before dialect projection.
 func LiftEvent(family Family, data, name string, sequence uint64, maxBytes int) (oif.Event, error) {
 	d := Descriptor(family, true)

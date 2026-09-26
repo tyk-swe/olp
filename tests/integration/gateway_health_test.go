@@ -15,7 +15,7 @@ type persistedUsageStream struct{ pool *pgxpool.Pool }
 
 func (s persistedUsageStream) Do(ctx context.Context, args ...string) (any, error) {
 	payload := []byte(args[4])
-	event, _, err := usage.Decode(payload)
+	event, err := usage.Decode(payload)
 	if err != nil {
 		return nil, err
 	}

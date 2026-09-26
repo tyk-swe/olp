@@ -1,6 +1,6 @@
 # Gateway execution
 
-The Go gateway serves OpenAI, Anthropic, Gemini, and Bedrock clients with shared
+The gateway serves OpenAI, Anthropic, Gemini, and Bedrock clients with shared
 authentication, project boundaries, admission, routing policy, and accounting.
 Canonical generation, media, retained resources, and realtime use the execution
 paths appropriate to their lifecycle. See [Access](access.md) for installation
@@ -17,15 +17,14 @@ serves management only. `gateway` serves inference only and needs the database
 and `OLP_AUTH_HMAC_KEY_FILE` for authority. Database-encrypted provider
 credentials also require `OLP_MASTER_KEY_FILE`. A gateway using
 `OLP_CONNECTOR_CONFIG_FILE` may omit the master key for mounted default-slot
-credentials; enabled named pools require it. Mounted releases must contain the
-published default-slot ID; republish older Go releases before enabling this
-mode. `worker` publishes no public listener and runs only the accounting, media
-reconciliation, and [recovery plane](operations.md#replicated-worker-health),
-which `all` also runs; an installation that serves traffic with `gateway` and
-`control` needs at least one `worker` replica for accounting, budget
-reconciliation, retention, and media job polling to happen at all. Gateway
-readiness on the private `GET /health/ready` listener fails while the
-key-authority snapshot is missing or stale.
+credentials; enabled named pools require it. `worker` publishes no public
+listener and runs only the accounting, media reconciliation, and
+[recovery plane](operations.md#replicated-worker-health), which `all` also runs;
+an installation that serves traffic with `gateway` and `control` needs at least
+one `worker` replica for accounting, budget reconciliation, retention, and media
+job polling to happen at all. Gateway readiness on the private
+`GET /health/ready` listener fails while the key-authority snapshot is missing
+or stale.
 
 ## Configuration
 
@@ -43,15 +42,16 @@ only when it validates and every referenced credential can be decrypted; a
 release that fails either check is skipped and the previous one stays active.
 Repeated publication is harmless.
 
-Route revisions carry an optional [fidelity declaration](qualification/fidelity/route-contracts.md).
-Historical omission remains legacy and retains its original snapshot encoding.
-Explicit transformed routes declare their intentional policy changes. Strict
+Every route revision and runtime snapshot carries an explicit
+[fidelity](provider-routing.md#route-fidelity): strict or transformed. Strict
 drafts reject redaction, and strict publication compiles each target's admitted
-[interaction contract](qualification/fidelity/strict-planning.md) during draft
-validation, activation and release installation; a target without an admitted
-contract fails closed. A published slug keeps its strict or non-strict
-identity: moving across that boundary requires a reviewed migration draft under
-a previously unpublished slug.
+interaction contract during draft validation, activation and release
+installation; a target without an admitted contract fails closed. Transformed
+routes translate between dialects, apply redaction and use Automatic providers.
+A published slug switches between strict and transformed through a new
+revision. A stored resource is served only under the fidelity it was created
+with, and its owner can always list, delete or cancel it; see
+[route fidelity](provider-routing.md#route-fidelity).
 
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older
@@ -151,9 +151,10 @@ rule names a phase (`input` or `output`), an action (`block` or `redact`), a
 pattern, and an optional literal replacement (redact only; `$`-sequences are
 never expanded, so a replacement of `$1` inserts the text `$1`). Validation
 bounds the policy at 64 rules, 512 bytes per pattern, 16 KiB of combined pattern
-bytes, and rejects patterns that match the empty string. Policies publish with
-the route revision, restore with it, and travel through configuration export and
-import.
+bytes, and rejects patterns that match the empty string. `redact` rules require
+a transformed route; strict routes accept only `block` rules. Policies publish
+with the route revision, restore with it, and travel through configuration
+export and import.
 
 Input rules run before token estimation and before any provider call. The
 gateway walks only the supported textual fields of the canonical request —
@@ -218,7 +219,7 @@ pinned historical credential through rotation and provider changes, obeys
 explicit revocation guards, and finishes accounting. `GET /v1/videos`,
 `GET /v1/videos/{video_id}`, `GET /v1/videos/{video_id}/content`, and
 `DELETE /v1/videos/{video_id}` expose the durable record, which the management
-`/api/v3/media-jobs` reads mirror for operators. The console provides
+`/api/v1/media-jobs` reads mirror for operators. The console provides
 metadata-only list/detail views, filters, and manual refresh. It has no
 automatic polling, content download/delete controls, video cancellation
 workflow, or video playground controls. The Advanced playground provides a
@@ -288,9 +289,9 @@ revision, release sequence, family, mode, outcome, status, whether the response
 was committed, timing, observed usage when the upstream reported it, and one
 record per attempt with target, provider revision, slot, credential version,
 status class, and timing. Prompts, outputs, tool data, headers, and credentials
-are never included. `GET /api/v3/provider-health` summarizes the same facts per
-provider for the requested window, `GET /api/v3/health/ready` serves the cached
-readiness snapshot, and `GET /api/v3/media-jobs` lists and reads durable video
+are never included. `GET /api/v1/provider-health` summarizes the same facts per
+provider for the requested window, `GET /api/v1/health/ready` serves the cached
+readiness snapshot, and `GET /api/v1/media-jobs` lists and reads durable video
 jobs. The same envelope is the source of the durable request, attempt, and
 priced usage records described in
 [accounting delivery](operations.md#accounting-delivery-and-shutdown).
@@ -312,7 +313,3 @@ A terminal stream event, retrieval, or cancellation carrying final usage settles
 that record once, including when several replicas poll concurrently. Until final
 usage is observed, the record remains pending; clients must poll responses that
 finish after their creation connection closes.
-
-Stored mappings created before this accounting record was introduced cannot
-safely recover the original generation identity. Retrieval does not rebill those
-mappings.

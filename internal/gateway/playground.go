@@ -27,8 +27,8 @@ type Playground struct {
 }
 
 func (p *Playground) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v3/playground", p.Access.HandleTimeout(1<<20, playgroundTimeout, p.handle))
-	mux.HandleFunc("POST /api/v3/playground/stream", p.Access.HandleStream(1<<20, playgroundTimeout, p.stream))
+	mux.HandleFunc("POST /api/v1/playground", p.Access.HandleTimeout(1<<20, playgroundTimeout, p.handle))
+	mux.HandleFunc("POST /api/v1/playground/stream", p.Access.HandleStream(1<<20, playgroundTimeout, p.stream))
 }
 
 type playgroundTool struct {

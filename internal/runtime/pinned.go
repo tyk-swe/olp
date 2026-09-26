@@ -44,7 +44,7 @@ func (s *Snapshot) PinnedCurrent(route Route, provider Provider, target Target, 
 	if !matchedSlot {
 		return nil, Slot{}, false
 	}
-	if FidelityMode(currentRoute.Fidelity) == FidelityStrict {
+	if currentRoute.Fidelity.Strict() {
 		if s.interactions[currentRoute.Slug][target.ID] == nil {
 			return nil, Slot{}, false
 		}

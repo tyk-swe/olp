@@ -53,7 +53,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 	var providerProject *string
 	var configuration, models, slots []byte
 	err := query.QueryRow(ctx,
-		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text FROM olp_go.provider_revisions r JOIN olp_go.providers p ON p.id=r.provider_id WHERE r.id=$1",
+		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
 		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots, &providerName, &providerState, &providerProject)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
@@ -127,7 +127,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 	var operations, targets, policy, fidelity, contentPolicy []byte
 	err = query.QueryRow(ctx,
 		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy
-         FROM olp_go.route_revisions v JOIN olp_go.routes r ON r.id=v.route_id WHERE v.id=$1`,
+         FROM olp.route_revisions v JOIN olp.routes r ON r.id=v.route_id WHERE v.id=$1`,
 		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
 		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &fidelity, &contentPolicy)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -174,7 +174,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 	if res.CredentialID != nil {
 		var revoked bool
 		err = query.QueryRow(ctx,
-			"SELECT revoked_at IS NOT NULL FROM olp_go.provider_credentials WHERE id=$1",
+			"SELECT revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1",
 			*res.CredentialID).Scan(&revoked)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revoked) {
 			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
@@ -199,7 +199,7 @@ func (r *Resolver) NetworkCredential(ctx context.Context, providerID, credential
 	}
 	defer tx.Rollback(ctx)
 	var valid bool
-	if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp_go.provider_network_credentials WHERE id=$1 AND provider_id=$2", credentialID, providerID).Scan(&valid); err != nil || !valid {
+	if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", credentialID, providerID).Scan(&valid); err != nil || !valid {
 		return nil, ErrUnavailable
 	}
 	return r.keys.Read(ctx, tx, r.installation, credentialID, "provider_credential")

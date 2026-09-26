@@ -188,7 +188,7 @@ describe('resource API errors', () => {
           title: 'Rate limited',
           detail: 'Retry after the window',
           status: 429,
-          instance: '/api/v3/requests',
+          instance: '/api/v1/requests',
           errors: {
             request: [
               { code: 'invalid', message: 'Retry after the advertised window.' }
@@ -207,7 +207,7 @@ describe('resource API errors', () => {
       title: 'Rate limited',
       detail: 'Retry after the window',
       status: 429,
-      instance: '/api/v3/requests',
+      instance: '/api/v1/requests',
       errors: {
         request: [
           { code: 'invalid', message: 'Retry after the advertised window.' }

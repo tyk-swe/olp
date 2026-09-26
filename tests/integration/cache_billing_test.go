@@ -46,7 +46,7 @@ func TestCacheBillingExactPrices(t *testing.T) {
 	var cached, write, write5m, write1h *int64
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT cached_input_tokens,
         cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`,
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`,
 		event.RequestID).Scan(&cached, &write, &write5m, &write1h); err != nil {
 		t.Fatalf("load cache columns: %v", err)
 	}
@@ -94,9 +94,9 @@ func TestCacheBillingValidation(t *testing.T) {
 	insert := func(input, cached, write, write5m, write1h any) error {
 		request := acctID(t)
 		started := time.Now().UTC()
-		acctExec(t, fixture.Pool, `INSERT INTO olp_go.usage_request_anchors
+		acctExec(t, fixture.Pool, `INSERT INTO olp.usage_request_anchors
             (request_id, request_started_at) VALUES ($1::uuid, $2)`, request, started)
-		_, err := fixture.Pool.Exec(t.Context(), `INSERT INTO olp_go.attempt_usage_facts
+		_, err := fixture.Pool.Exec(t.Context(), `INSERT INTO olp.attempt_usage_facts
             (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, api_key_id,
              provider_id, route_slug, upstream_model, operation, surface, observed_at,
              charge_status, usage_observed, usage_complete, input_tokens, cached_input_tokens,
@@ -132,7 +132,7 @@ func TestCacheBillingValidation(t *testing.T) {
 func TestCacheBillingRollupPreservesCategories(t *testing.T) {
 	fixture := acctSeed(t, acctPool(t))
 	group := acctID(t)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.budget_groups
+	acctExec(t, fixture.Pool, `INSERT INTO olp.budget_groups
         (id, name, project_id, daily_cost_limit, etag, created_by)
         VALUES ($1::uuid, $2, NULL, '5.00', $3::uuid, $4::uuid)`,
 		group, "rollup-group", acctID(t), fixture.User)
@@ -152,10 +152,10 @@ func TestCacheBillingRollupPreservesCategories(t *testing.T) {
 	if _, err := usage.RunMaintenance(t.Context(), fixture.Pool, observed.Add(91*24*time.Hour)); err != nil {
 		t.Fatalf("maintenance: %v", err)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`); count != 0 {
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != 0 {
 		t.Fatalf("unrolled facts remain: %d", count)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_hourly
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_hourly
         WHERE api_key_id = $1::uuid`, fixture.Key); count != 2 {
 		t.Fatalf("rollups = %d, want one row per budget-group dimension", count)
 	}
@@ -163,7 +163,7 @@ func TestCacheBillingRollupPreservesCategories(t *testing.T) {
 	var write, write5m, write1h int64
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text,
         cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens
-        FROM olp_go.attempt_usage_hourly WHERE budget_group_id IS NOT NULL`).Scan(
+        FROM olp.attempt_usage_hourly WHERE budget_group_id IS NOT NULL`).Scan(
 		&storedGroup, &write, &write5m, &write1h); err != nil {
 		t.Fatalf("grouped rollup: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestCacheBillingRollupPreservesCategories(t *testing.T) {
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT
         COALESCE(SUM(cache_write_input_tokens),0)::text,
         COALESCE(SUM(cache_write_input_tokens) FILTER (WHERE budget_group_id IS NOT NULL),0)::text
-        FROM olp_go.attempt_usage_hourly`).Scan(&rolled.Total, &rolled.Group); err != nil {
+        FROM olp.attempt_usage_hourly`).Scan(&rolled.Total, &rolled.Group); err != nil {
 		t.Fatalf("rollup totals: %v", err)
 	}
 	if rolled.Total != "45" || rolled.Group != "30" {

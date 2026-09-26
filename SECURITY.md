@@ -2,14 +2,15 @@
 
 ## Supported versions
 
-Security fixes target the latest published 3.0.x release. The development
+OpenLLMProxy is a 0.x work in progress. Security fixes target the latest
+published 0.x release only; earlier releases receive no fixes. The development
 branch also accepts vulnerability reports, including unreleased changes.
 
 | Version | Security support |
 | --- | --- |
-| 3.0.x | Latest published patch |
+| Latest 0.x release | Supported |
+| Earlier 0.x releases | Unsupported |
 | Development branch | Reports accepted; fixes land before release |
-| 2.x and earlier | Unsupported; 3.0 requires a fresh installation |
 
 Report suspected vulnerabilities in any version; upgrading is not a
 prerequisite for reporting. A package version in a source checkout does not

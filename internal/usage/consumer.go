@@ -438,19 +438,12 @@ func (r *consumerRun) processEntry(ctx context.Context, entry StreamEntry) (bool
 			"request-metadata-stream:"+entry.ID+":missing")
 	}
 
-	event, decoded, err := Decode(entry.Payload)
-	switch {
-	case err != nil:
+	event, err := Decode(entry.Payload)
+	if err != nil {
 		r.log.Error("discarding malformed request metadata stream event",
 			"stream_id", entry.ID, "error", err)
 		return r.finishGap(ctx, entry.ID, "malformed_stream_event",
 			"request-metadata-stream:"+entry.ID+":malformed")
-	case decoded == DecodedUnsupported:
-		// A newer writer's event. Leaving it pending keeps it for a build that
-		// understands it; acknowledging it would lose usage nobody can price.
-		r.log.Warn("unsupported request metadata version retained for a compatible reader",
-			"stream_id", entry.ID)
-		return false, false, true
 	}
 
 	result, err := PersistEvent(ctx, r.pool, event, entry.Payload)

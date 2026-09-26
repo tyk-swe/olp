@@ -42,7 +42,7 @@
   }
 
   function oidcHref() {
-    return `/api/v3/oidc/login?return_to=${encodeURIComponent(destination())}`;
+    return `/api/v1/oidc/login?return_to=${encodeURIComponent(destination())}`;
   }
 
   async function submit(event: SubmitEvent) {

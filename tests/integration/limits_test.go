@@ -39,7 +39,7 @@ func limClient(t *testing.T) *coordination.Client {
 // still runs while the connection is open.
 func limNamespace(t *testing.T, c *coordination.Client, label string) string {
 	t.Helper()
-	namespace := "olp-go-test:limits:" + label + ":" + rand.Text()
+	namespace := "olp-test:limits:" + label + ":" + rand.Text()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -98,7 +98,7 @@ func limRequest(lookup string) limits.Request {
 
 func limRateKeys(namespace, lookup string) (string, string) {
 	prefix := namespace + ":{" + lookup + "}"
-	return prefix + ":rate", prefix + ":concurrency:v2"
+	return prefix + ":rate", prefix + ":concurrency"
 }
 
 func limCostKeys(namespace, apiKeyID string) (string, string) {
@@ -1015,14 +1015,14 @@ func limSeedAuthority(t *testing.T, pool *pgxpool.Pool) (string, string) {
 	t.Helper()
 	owner := uuid.NewString()
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.users (id,email,display_name,role,etag)
+		`INSERT INTO olp.users (id,email,display_name,role,etag)
 		 VALUES ($1,$2,'Owner','owner',gen_random_uuid())`,
 		owner, "owner-"+strings.ToLower(rand.Text())+"@limits.test"); err != nil {
 		t.Fatal(err)
 	}
 	provider := uuid.NewString()
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.providers (id,name,kind,state,configuration,etag,slots_etag,created_by)
+		`INSERT INTO olp.providers (id,name,kind,state,configuration,etag,slots_etag,created_by)
 		 VALUES ($1,$2,'openai','active','{}'::jsonb,gen_random_uuid(),gen_random_uuid(),$3)`,
 		provider, "provider-"+strings.ToLower(rand.Text()), owner); err != nil {
 		t.Fatal(err)
@@ -1039,7 +1039,7 @@ func limSeedKey(t *testing.T, pool *pgxpool.Pool, owner string, revoked bool) st
 		revokedAt = &now
 	}
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.api_keys (id,lookup_id,digest,name,created_by,policy,etag,revoked_at)
+		`INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,revoked_at)
 		 VALUES ($1,$2,$3,'key',$4,'{}'::jsonb,gen_random_uuid(),$5)`,
 		id, limLookup(), []byte{1, 2, 3}, owner, revokedAt); err != nil {
 		t.Fatal(err)
@@ -1053,13 +1053,13 @@ func limSeedFact(t *testing.T, pool *pgxpool.Pool, provider, apiKey string, obse
 	t.Helper()
 	request := uuid.NewString()
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.usage_request_anchors (request_id,request_started_at) VALUES ($1,$2)`,
+		`INSERT INTO olp.usage_request_anchors (request_id,request_started_at) VALUES ($1,$2)`,
 		request, observedAt); err != nil {
 		t.Fatal(err)
 	}
 	unpriced := cost == nil
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.attempt_usage_facts (
+		`INSERT INTO olp.attempt_usage_facts (
 			attempt_id,event_id,request_id,request_started_at,attempt_ordinal,api_key_id,provider_id,
 			route_slug,upstream_model,operation,surface,observed_at,charge_status,usage_observed,
 			usage_complete,input_tokens,output_tokens,cached_input_tokens,estimated_cost,unpriced,currency,
@@ -1079,7 +1079,7 @@ func limSeedFact(t *testing.T, pool *pgxpool.Pool, provider, apiKey string, obse
 func limSeedHourly(t *testing.T, pool *pgxpool.Pool, provider, apiKey string, bucket time.Time, cost string, unpriced int64) {
 	t.Helper()
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.attempt_usage_hourly (
+		`INSERT INTO olp.attempt_usage_hourly (
 			bucket,route_slug,provider_id,upstream_model,operation,surface,api_key_id,
 			request_count,provider_request_count,model_request_count,target_request_count,
 			input_tokens,output_tokens,cached_input_tokens,media_units,estimated_cost,
@@ -1106,7 +1106,7 @@ func limWindowRows(t *testing.T, pool *pgxpool.Pool, apiKey string) map[string]s
 	t.Helper()
 	rows, err := pool.Query(t.Context(),
 		`SELECT window_kind||':'||window_id, accrued::text||'/'||unpriced_attempts
-		 FROM olp_go.api_key_cost_windows WHERE api_key_id=$1`, apiKey)
+		 FROM olp.api_key_cost_windows WHERE api_key_id=$1`, apiKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1162,7 +1162,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 
 	// A window that has passed is pruned rather than left to accumulate.
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.api_key_cost_windows VALUES ($1,'day',$2,9,0)`,
+		`INSERT INTO olp.api_key_cost_windows VALUES ($1,'day',$2,9,0)`,
 		spender, windows.DailyID-1); err != nil {
 		t.Fatal(err)
 	}
@@ -1257,7 +1257,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	// The status expression the key API renders reports the same balances.
 	var budget []byte
 	if err := pool.QueryRow(t.Context(),
-		"SELECT "+limits.BudgetSQL+" FROM olp_go.api_keys k WHERE k.id=$1", spender).Scan(&budget); err != nil {
+		"SELECT "+limits.BudgetSQL+" FROM olp.api_keys k WHERE k.id=$1", spender).Scan(&budget); err != nil {
 		t.Fatalf("BudgetSQL: %v", err)
 	}
 	var status struct {
@@ -1284,7 +1284,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 			status.Monthly.WindowEndsAt, windows.DailyEnd, windows.MonthlyEnd)
 	}
 	if err := pool.QueryRow(t.Context(),
-		"SELECT "+limits.BudgetSQL+" FROM olp_go.api_keys k WHERE k.id=$1", revoked).Scan(&budget); err != nil {
+		"SELECT "+limits.BudgetSQL+" FROM olp.api_keys k WHERE k.id=$1", revoked).Scan(&budget); err != nil {
 		t.Fatalf("BudgetSQL: %v", err)
 	}
 	if err := json.Unmarshal(budget, &status); err != nil {
@@ -1304,7 +1304,7 @@ func TestLimitsOutagePolicyIsReadFromSettings(t *testing.T) {
 		t.Fatal("LoadOutagePolicy must fail when the setting is absent")
 	}
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO olp_go.settings (key,value,etag,updated_by)
+		`INSERT INTO olp.settings (key,value,etag,updated_by)
 		 VALUES ('limits.valkey_unavailable','fail_open',gen_random_uuid(),$1)`, owner); err != nil {
 		t.Fatal(err)
 	}
@@ -1316,7 +1316,7 @@ func TestLimitsOutagePolicyIsReadFromSettings(t *testing.T) {
 		t.Fatalf("policy = %v, want fail_open", policy)
 	}
 	if _, err = pool.Exec(t.Context(),
-		`UPDATE olp_go.settings SET value='maybe' WHERE key='limits.valkey_unavailable'`); err != nil {
+		`UPDATE olp.settings SET value='maybe' WHERE key='limits.valkey_unavailable'`); err != nil {
 		t.Fatal(err)
 	}
 	policy, err = limits.LoadOutagePolicy(t.Context(), pool)
@@ -1493,7 +1493,7 @@ func TestLimitsBudgetWindowsIgnoreTheSessionTimeZone(t *testing.T) {
 	owner, provider := limSeedAuthority(t, pool)
 	windowSQL := limBudgetWindowSQL(t)
 	budgetSQL := "SELECT " + limBudgetClock(t, limits.BudgetSQL, "$2") +
-		" FROM olp_go.api_keys k WHERE k.id=$1"
+		" FROM olp.api_keys k WHERE k.id=$1"
 
 	cases := []struct {
 		name string

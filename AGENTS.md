@@ -3,14 +3,11 @@
 ## Project Structure & Module Organization
 
 OpenLLMProxy combines a Go gateway with a client-only SvelteKit console.
-Independent conformance inputs live in `tests/fixtures/reference-inventory.json`
-and `tests/release-behaviors.json`; `docs/roadmap/README.md` retains dated
-qualification provenance.
 
 - `internal/`: backend feature packages (`access/`, `providers/`, `routes/`, `gateway/`, `media/`, `observability/`); keep types, SQL, handlers and workflows together. `cmd/olp` is the binary entrypoint; `openapi/management.json` owns the management contract and `openapi/document.go` embeds it.
 - `console/src/lib/features/`: matching console features; shared UI lives in `console/src/lib/components/`, pages in `console/src/routes/`, and static assets in `console/static/`.
 - `tests/fixtures/`: language-neutral protocol corpus; `tests/integration/`: process and service suites; `tests/sdk*`: official SDK qualification; `console/tests/`: browser journeys.
-- `internal/database/migrations/`: forward-only Go SQL history; `deploy/`: Compose and Helm configuration; `scripts/`: automation; `docs/`: architecture and operations guides.
+- `internal/database/migrations/`: forward-only, sequential SQL migrations; `deploy/`: Compose and Helm configuration; `scripts/`: automation; `docs/`: architecture and operations guides.
 
 ## Build, Test, and Development Commands
 
@@ -64,6 +61,11 @@ behavior, record validation, and include screenshots for visible console
 changes. Regenerate affected API contracts rather than editing generated files.
 Keep migrations forward-only and sequential; update Helm values, schema, and
 templates together.
+
+During 0.x, write code for the storage, configuration and API formats the
+current version produces; [ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md)
+records the no-compatibility-promises policy. Compatibility with providers and
+the official OpenAI, Anthropic and Gemini SDKs is the product and stays intact.
 
 ## Agent skills
 

@@ -640,7 +640,7 @@ it.each(['constraints', 'defaults'] as const)(
       expect(host.textContent).toContain('Routing policy staged.');
     });
     expect(put).toHaveBeenCalledWith(
-      '/api/v3/routing-policies/{scope}/{id}',
+      '/api/v1/routing-policies/{scope}/{id}',
       expect.objectContaining({ body: policy })
     );
     expect(navigationBlocked()).toBe(false);
@@ -731,6 +731,9 @@ it('shows before and after policies when only the routing policy changed', async
     timeout_changed: false,
     max_attempts_changed: false,
     content_policy_changed: false,
+    fidelity_changed: false,
+    fidelity_before: { mode: 'strict' },
+    fidelity_after: { mode: 'strict' },
     routing_policy_changed: true,
     routing_policy_before: before,
     routing_policy_after: after,
@@ -792,7 +795,7 @@ it('uses the credential editor snapshot ETag after a background refetch', async 
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() =>
     expect(put).toHaveBeenCalledWith(
-      '/api/v3/providers/{provider_id}/credential-slots/{slot_id}',
+      '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
       expect.objectContaining({
         headers: expect.objectContaining({ 'If-Match': 'original-etag' }),
         body: expect.objectContaining({
@@ -999,7 +1002,7 @@ it.each(['original-key', 'changed-key'])(
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() =>
       expect(patch).toHaveBeenCalledWith(
-        '/api/v3/api-keys/{api_key_id}',
+        '/api/v1/api-keys/{api_key_id}',
         expect.objectContaining({
           params: expect.objectContaining({
             header: {

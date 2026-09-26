@@ -79,7 +79,7 @@ func (f *webhookFixture) hit(i int) webhookHit {
 func alertInstallation(t *testing.T, h *accessHarness) string {
 	t.Helper()
 	var installation string
-	if err := h.Pool.QueryRow(context.Background(), "SELECT id::text FROM olp_go.installation WHERE singleton").Scan(&installation); err != nil {
+	if err := h.Pool.QueryRow(context.Background(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
 		t.Fatalf("installation: %v", err)
 	}
 	return installation
@@ -93,7 +93,7 @@ func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	}
 	var baseline int64
 	_ = h.Pool.QueryRow(context.Background(),
-		"SELECT successes_total+failures_total+skipped_total FROM olp_go.worker_task_health WHERE task='budget_alert_delivery'").Scan(&baseline)
+		"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&baseline)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
@@ -105,7 +105,7 @@ func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	for {
 		var checked int64
 		err := h.Pool.QueryRow(context.Background(),
-			"SELECT successes_total+failures_total+skipped_total FROM olp_go.worker_task_health WHERE task='budget_alert_delivery'").Scan(&checked)
+			"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&checked)
 		if err == nil && checked > baseline {
 			break
 		}
@@ -126,7 +126,7 @@ func alertDeliveries(t *testing.T, h *accessHarness, ruleID string) []map[string
 		`SELECT jsonb_build_object('id',id,'status',status,'attempts',attempts,'last_error_code',last_error_code,
 		 'window_id',window_id,'threshold_percent',threshold_percent,'delivered_at',delivered_at,
 		 'accrued',accrued::text,'limit',limit_amount::text,'currency',currency)
-		 FROM olp_go.budget_alert_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
+		 FROM olp.budget_alert_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
 	if err != nil {
 		t.Fatalf("deliveries: %v", err)
 	}
@@ -159,41 +159,41 @@ func TestBudgetAlertDelivery(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	exec("INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
 
-	keyHit := h.want(owner, "POST", "/api/v3/api-keys",
+	keyHit := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "alerted key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	keyMiss := h.want(owner, "POST", "/api/v3/api-keys",
+	keyMiss := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "quiet key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	keyStale := h.want(owner, "POST", "/api/v3/api-keys",
+	keyStale := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "stale key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	group := h.want(owner, "POST", "/api/v3/budget-groups",
+	group := h.want(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "shared spend", "monthly_cost_limit": "5.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	windows := limits.BudgetWindows(time.Now())
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '8.000000000000', 0)`, keyHit["id"], windows.DailyID)
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '7.900000000000', 0)`, keyMiss["id"], windows.DailyID)
 
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '9.500000000000', 0)`, keyStale["id"], windows.DailyID-1)
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '1.000000000000', 0)`, keyStale["id"], windows.DailyID)
-	exec(`INSERT INTO olp_go.budget_group_cost_windows (budget_group_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.budget_group_cost_windows (budget_group_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'month', $2, '5.000000000000', 0)`, group["id"], windows.MonthlyID)
 
-	signed := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	signed := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "signed hook", "url": hook.URL + "/signed", "secret": "signing-key"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	unsigned := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	unsigned := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "plain hook", "url": hook.URL + "/plain"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
-	for _, path := range []string{"/api/v3/notifications/destinations/" + signed["id"].(string), "/api/v3/notifications/destinations"} {
+	for _, path := range []string{"/api/v1/notifications/destinations/" + signed["id"].(string), "/api/v1/notifications/destinations"} {
 		status, body, _ := h.request(owner, "GET", path, nil, nil)
 		if status != 200 {
 			t.Fatalf("destination read: %d", status)
@@ -204,19 +204,19 @@ func TestBudgetAlertDelivery(t *testing.T) {
 		}
 	}
 
-	ruleKey := h.want(owner, "POST", "/api/v3/notifications/rules",
+	ruleKey := h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "key over 80", "subject_kind": "api_key", "subject_id": keyHit["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	ruleGroup := h.want(owner, "POST", "/api/v3/notifications/rules",
+	ruleGroup := h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "group at limit", "subject_kind": "budget_group", "subject_id": group["id"],
 			"window_kind": "month", "threshold_percent": 100, "destination_id": unsigned["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	ruleQuiet := h.want(owner, "POST", "/api/v3/notifications/rules",
+	ruleQuiet := h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "quiet rule", "subject_kind": "api_key", "subject_id": keyMiss["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	ruleStale := h.want(owner, "POST", "/api/v3/notifications/rules",
+	ruleStale := h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "stale rule", "subject_kind": "api_key", "subject_id": keyStale["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
@@ -300,7 +300,7 @@ func TestBudgetAlertDelivery(t *testing.T) {
 		t.Fatalf("second pass delivered again: %d", hook.count())
 	}
 
-	listed := h.want(owner, "GET", "/api/v3/notifications/deliveries?rule_id="+ruleKey["id"].(string), nil, nil, 200)
+	listed := h.want(owner, "GET", "/api/v1/notifications/deliveries?rule_id="+ruleKey["id"].(string), nil, nil, 200)
 	items := listed["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("delivery listing = %v", listed)
@@ -332,17 +332,17 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	exec("INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, 'USD')")
-	key := h.want(owner, "POST", "/api/v3/api-keys",
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	key := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "retry key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	windows := limits.BudgetWindows(time.Now())
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '9.000000000000', 0)`, key["id"], windows.DailyID)
-	destination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "flaky hook", "url": hook.URL + "/flaky"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	rule := h.want(owner, "POST", "/api/v3/notifications/rules",
+	rule := h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "retry rule", "subject_kind": "api_key", "subject_id": key["id"],
 			"window_kind": "day", "threshold_percent": 50, "destination_id": destination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
@@ -359,10 +359,10 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		t.Fatalf("retry fired inside backoff: %d", hook.count())
 	}
 
-	exec("DELETE FROM olp_go.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'", key["id"])
-	exec(`UPDATE olp_go.api_keys SET policy = jsonb_set(policy, '{daily_cost_limit}', '"999.00"') WHERE id=$1`, key["id"])
+	exec("DELETE FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'", key["id"])
+	exec(`UPDATE olp.api_keys SET policy = jsonb_set(policy, '{daily_cost_limit}', '"999.00"') WHERE id=$1`, key["id"])
 
-	exec("UPDATE olp_go.budget_alert_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusBadRequest)
 	alertPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)
@@ -377,7 +377,7 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		t.Fatalf("retry did not report claim-time evidence: %v", retryBody)
 	}
 
-	exec("UPDATE olp_go.budget_alert_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusNoContent)
 	alertPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)
@@ -396,33 +396,33 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	owner := h.owner()
 	hook := newWebhookFixture(t)
 
-	status, problem, _ := h.request(owner, "POST", "/api/v3/notifications/destinations",
+	status, problem, _ := h.request(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "internal", "url": "http://10.0.0.9/hook"},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
 	if status != 422 {
 		t.Fatalf("internal destination = %d %v", status, problem)
 	}
-	status, problem, _ = h.request(owner, "POST", "/api/v3/notifications/destinations",
+	status, problem, _ = h.request(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "credentialed", "url": "https://user:pass@127.0.0.1/hook"},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
 	if status != 422 {
 		t.Fatalf("credentialed destination = %d %v", status, problem)
 	}
 
-	project := h.want(owner, "POST", "/api/v3/projects",
+	project := h.want(owner, "POST", "/api/v1/projects",
 		map[string]any{"name": "Scoped"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	projectID := project["id"].(string)
-	scopedDestination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	scopedDestination := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "scoped hook", "url": hook.URL + "/scoped", "project_id": projectID},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	globalKey := h.want(owner, "POST", "/api/v3/api-keys",
+	globalKey := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "global key", "scopes": []string{"inference"}},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	projectKey := h.want(owner, "POST", "/api/v3/api-keys",
+	projectKey := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "project key", "scopes": []string{"inference"}, "project_id": projectID},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
-	status, _, _ = h.request(owner, "POST", "/api/v3/notifications/rules",
+	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "mismatch subject", "project_id": projectID, "subject_kind": "api_key",
 			"subject_id": globalKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": scopedDestination["id"]},
@@ -430,10 +430,10 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	if status != 422 {
 		t.Fatalf("global subject under project rule = %d", status)
 	}
-	globalDestination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	globalDestination := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "global hook", "url": hook.URL + "/global"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	status, _, _ = h.request(owner, "POST", "/api/v3/notifications/rules",
+	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "mismatch destination", "project_id": projectID, "subject_kind": "api_key",
 			"subject_id": projectKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": globalDestination["id"]},
@@ -442,7 +442,7 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 		t.Fatalf("global destination under project rule = %d", status)
 	}
 
-	status, _, _ = h.request(owner, "POST", "/api/v3/notifications/rules",
+	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "global rule project dest", "subject_kind": "api_key",
 			"subject_id": globalKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": scopedDestination["id"]},
@@ -451,26 +451,26 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 		t.Fatalf("project destination under global rule = %d", status)
 	}
 
-	h.want(owner, "POST", "/api/v3/notifications/rules",
+	h.want(owner, "POST", "/api/v1/notifications/rules",
 		map[string]any{"name": "scoped rule", "project_id": projectID, "subject_kind": "api_key",
 			"subject_id": projectKey["id"], "window_kind": "month", "threshold_percent": 90,
 			"destination_id": scopedDestination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
-	destination := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "idempotent", "url": hook.URL + "/idem"},
 		map[string]string{"Idempotency-Key": "alert-idem-1"}, 201)
-	replay := h.want(owner, "POST", "/api/v3/notifications/destinations",
+	replay := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "idempotent", "url": hook.URL + "/idem"},
 		map[string]string{"Idempotency-Key": "alert-idem-1"}, 201)
 	if replay["id"] != destination["id"] {
 		t.Fatalf("idempotent replay created a second destination: %v vs %v", replay["id"], destination["id"])
 	}
 
-	detail := h.want(owner, "GET", "/api/v3/notifications/destinations/"+destination["id"].(string), nil, nil, 200)
-	updated := h.want(owner, "PATCH", "/api/v3/notifications/destinations/"+destination["id"].(string),
+	detail := h.want(owner, "GET", "/api/v1/notifications/destinations/"+destination["id"].(string), nil, nil, 200)
+	updated := h.want(owner, "PATCH", "/api/v1/notifications/destinations/"+destination["id"].(string),
 		map[string]any{"enabled": false}, withMatch(detail, nil), 200)
-	status, problem, _ = h.request(owner, "PATCH", "/api/v3/notifications/destinations/"+destination["id"].(string),
+	status, problem, _ = h.request(owner, "PATCH", "/api/v1/notifications/destinations/"+destination["id"].(string),
 		map[string]any{"enabled": true}, withMatch(detail, nil))
 	if status != 412 {
 		t.Fatalf("stale etag patch = %d %v", status, problem)

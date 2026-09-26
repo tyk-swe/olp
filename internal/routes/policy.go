@@ -60,7 +60,7 @@ func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*st
 		table = "api_keys"
 	}
 	var project *string
-	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp_go."+table+" WHERE id=$1", id).Scan(&project)
+	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp."+table+" WHERE id=$1", id).Scan(&project)
 	return project, err
 }
 func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bool) (*runtime.Policy, string, error) {
@@ -70,7 +70,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 		if scope == "api-key" {
 			table = "api_keys"
 		}
-		query := "SELECT etag::text FROM olp_go." + table + " WHERE id=$1"
+		query := "SELECT etag::text FROM olp." + table + " WHERE id=$1"
 		if lock {
 			query += " FOR UPDATE"
 		}
@@ -80,7 +80,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	}
 	var data []byte
 	var storedETag string
-	query := "SELECT policy,etag::text FROM olp_go.routing_policies WHERE scope=$1 AND scope_id=$2"
+	query := "SELECT policy,etag::text FROM olp.routing_policies WHERE scope=$1 AND scope_id=$2"
 	if lock {
 		query += " FOR UPDATE"
 	}
@@ -165,14 +165,14 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 	}
 	etag = access.NewID()
 	data, _ := json.Marshal(policy)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, scope, id, data, etag, principal.UserID()); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, scope, id, data, etag, principal.UserID()); err != nil {
 		return access.Reply{}, err
 	}
 	switch scope {
 	case "route-draft":
-		_, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET etag=$2,state='draft',updated_at=now() WHERE id=$1", id, etag)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET etag=$2,state='draft',updated_at=now() WHERE id=$1", id, etag)
 	case "api-key":
-		_, err = tx.Exec(r.Context(), "UPDATE olp_go.api_keys SET etag=$2 WHERE id=$1", id, etag)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
 	}
 	if err != nil {
 		return access.Reply{}, err

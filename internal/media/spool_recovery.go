@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -33,7 +32,7 @@ func openSpoolDirectory(base string) (string, *os.File, error) {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "olp-media-") {
 			continue
 		}
-		if err := reclaimSpool(filepath.Join(base, entry.Name()), entry.Name()); err != nil {
+		if err := reclaimSpool(filepath.Join(base, entry.Name())); err != nil {
 			return "", nil, err
 		}
 	}
@@ -54,19 +53,11 @@ func openSpoolDirectory(base string) (string, *os.File, error) {
 	return root, owner, nil
 }
 
-func reclaimSpool(root, name string) error {
+func reclaimSpool(root string) error {
 	owner, err := os.OpenFile(filepath.Join(root, spoolOwnerFile), os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
-		// Older releases have no ownership lock. Preserve a live or unidentifiable
-		// process, and reclaim only directories whose recorded PID no longer exists.
-		pidText, _, ok := strings.Cut(strings.TrimPrefix(name, "olp-media-"), "-")
-		pid, parseErr := strconv.Atoi(pidText)
-		if !ok || parseErr != nil || pid <= 0 {
-			return nil
-		}
-		if !errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
-			return nil
-		}
+		// Registration holds the recovery lock until the ownership lock exists,
+		// so a spool without one was abandoned before registration finished.
 		return os.RemoveAll(root)
 	}
 	if err != nil {

@@ -6,10 +6,10 @@ Bedrock client requests across certified provider models. Providers include
 OpenAI, Anthropic, Gemini, Vertex AI, Amazon Bedrock, Azure OpenAI, and reviewed
 OpenAI-compatible endpoints.
 
-The Go release requires fresh PostgreSQL storage and isolated Valkey state. Rust
-2.x and 3.x databases are rejected before migration; there is no Rust-to-Go data
-migration. Keep the old installation and its backups until you have verified the
-replacement.
+OpenLLMProxy 0.1.0 is a work in progress. During 0.x it makes no compatibility,
+upgrade, mixed-version or rollback promises: any release may change the
+management API, configuration and storage. See
+[ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md).
 
 ## Develop locally
 
@@ -20,7 +20,7 @@ make setup
 make dev
 ```
 
-Open http://127.0.0.1:5173 and use `.local/go-secrets/bootstrap.token` to create
+Open http://127.0.0.1:5173 and use `.local/secrets/bootstrap.token` to create
 the first owner. Vite serves the console with hot reload and proxies the
 configured API paths to Go. Restart after backend edits.
 
@@ -43,14 +43,17 @@ docker compose --env-file .env \
 Visit the configured `OLP_PUBLIC_ORIGIN` and use
 `deploy/secrets/olp_bootstrap_token` for first-owner setup. After setup,
 [recreate the application without the bootstrap overlay and retire the token](deploy/secrets/README.md#bootstrap-token-lifecycle).
-To use a published 3.x image, set `OLP_IMAGE` and omit the build overlay and
+To use a published 0.x image, set `OLP_IMAGE` and omit the build overlay and
 `--build`.
 
 In the console, connect a provider, discover and certify models, and activate
 it. Create and publish a route targeting those models, then issue an API key in
-the same project with the required scopes and route access. See
-[provider routing](docs/provider-routing.md) for credential pools, bulk
-workflows, and price, latency, throughput, and privacy preferences.
+the same project with the required scopes and route access. A route is strict
+unless you declare it transformed; declare it transformed when it translates
+between dialects, redacts content or uses a provider without a provider
+profile. See [provider routing](docs/provider-routing.md) for route fidelity,
+credential pools, bulk workflows, and price, latency, throughput, and privacy
+preferences.
 
 For production, follow [deployment](docs/deployment.md) and
 [configuration](docs/configuration.md). Gateway, control, and worker modes can
@@ -78,11 +81,11 @@ console.log(response.output_text);
 Use `/anthropic` as the Anthropic SDK base URL and `/gemini` as the Gemini SDK
 base URL. Bedrock uses `/bedrock` and separate gateway authentication; see the
 [Bedrock guide](docs/providers/bedrock.md#bedrock-sdk-ingress), including proxy
-requirements. `/openai/v1` and `x-litellm-api-key` are retired.
+requirements.
 
 | Interface | Path |
 | --- | --- |
-| Management API and OpenAPI | `/api/v3` and `/api/v3/openapi.json` |
+| Management API and OpenAPI | `/api/v1` and `/api/v1/openapi.json` |
 | OpenAI | `/v1` |
 | Anthropic | `/anthropic/v1` |
 | Gemini | `/gemini/v1beta` and `/gemini/v1` |
@@ -107,10 +110,9 @@ upstream.
 | [Configuration](docs/configuration.md) | Variables, CLI settings, and configuration promotion |
 | [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
-| [Operations](docs/operations.md) | Monitoring, recovery, and upgrades |
+| [Operations](docs/operations.md) | Monitoring, recovery, and versions |
 | [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
 | [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
-| [Completion record](docs/roadmap/README.md) | Historical rewrite qualification and evidence |
 
 ## Operations
 

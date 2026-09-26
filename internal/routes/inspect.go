@@ -188,10 +188,10 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 	if parsed == nil {
 		return nil, nil, inspections
 	}
-	fidelity := runtime.FidelityMode(route.Fidelity)
+	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*openai.Request{}
 	var effective func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand)
-	if fidelity == runtime.FidelityStrict {
+	if route.Fidelity.Strict() {
 		effective = func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
@@ -216,9 +216,9 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		result := &interactionInspection{Status: "incompatible", Fidelity: fidelity, Evidence: []string{}}
 		inspections[target.ID] = result
 		config := provider.Connector()
-		if fidelity != runtime.FidelityStrict {
-			// Legacy/transformed previews retain their explicit old semantics and
-			// never acquire a strict qualification class from a successful encode.
+		if !route.Fidelity.Strict() {
+			// Transformed previews show the translated invocation and never
+			// acquire a strict qualification class from a successful encode.
 			if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
 				return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
 			}
@@ -226,7 +226,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			if err != nil {
 				return err
 			}
-			result.Status, result.Class = "legacy", fidelity
+			result.Status, result.Class = runtime.FidelityTransformed, fidelity
 			result.Operation = parsed.Family.Operation()
 			result.IngressDialect = openai.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
 			result.EgressDialect = openai.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
@@ -311,7 +311,7 @@ func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspe
 			if !inspected {
 				status = "not_inspected"
 			}
-			inspection = &interactionInspection{Status: status, Fidelity: runtime.FidelityMode(route.Fidelity), Evidence: []string{}}
+			inspection = &interactionInspection{Status: status, Fidelity: route.Fidelity.Mode, Evidence: []string{}}
 		}
 		result = append(result, inspectedDecision{Decision: decision, Interaction: inspection})
 	}

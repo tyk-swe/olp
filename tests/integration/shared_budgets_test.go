@@ -16,7 +16,7 @@ import (
 func TestSharedBudgetAdmission(t *testing.T) {
 	c := limClient(t)
 	f := glSeed(t, limLimiter(t, c, limNamespace(t, c, "shared-budget")), limits.FailClosed)
-	group := f.h.want(f.owner, "POST", "/api/v3/budget-groups",
+	group := f.h.want(f.owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "shared spend", "daily_cost_limit": "5.00"},
 		idem("group-shared"), 201)
 	groupID := group["id"].(string)
@@ -72,11 +72,11 @@ func TestSharedBudgetAPI(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 
-	group := h.want(owner, "POST", "/api/v3/budget-groups",
+	group := h.want(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "ops budget", "daily_cost_limit": "10", "monthly_cost_limit": "100"},
 		idem("group-ops"), 201)
 	groupID := group["id"].(string)
-	path := "/api/v3/budget-groups/" + groupID
+	path := "/api/v1/budget-groups/" + groupID
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	if detail["name"] != "ops budget" || detail["project_id"] != nil {
 		t.Fatalf("group detail: %v", detail)
@@ -116,29 +116,29 @@ func TestSharedBudgetAPI(t *testing.T) {
 		t.Fatalf("project_id patch: %d %v", status, out)
 	}
 
-	list := h.want(owner, "GET", "/api/v3/budget-groups", nil, nil, 200)
+	list := h.want(owner, "GET", "/api/v1/budget-groups", nil, nil, 200)
 	items, ok := list["items"].([]any)
 	if !ok || len(items) != 1 || items[0].(map[string]any)["id"] != groupID {
 		t.Fatalf("group list: %v", list)
 	}
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "OPS BUDGET", "daily_cost_limit": "1"},
 		idem("group-dup")); status != 409 {
 		t.Fatalf("duplicate group name: %d %v", status, out)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "no limits"}, idem("group-none")); status != 422 {
 		t.Fatalf("group without a limit: %d", status)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "bad amount", "daily_cost_limit": "0"},
 		idem("group-zero")); status != 422 {
 		t.Fatalf("zero limit: %d", status)
 	}
 
 	project := createProject(h, owner, "team")
-	projectGroup := h.want(owner, "POST", "/api/v3/budget-groups",
+	projectGroup := h.want(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "team budget", "project_id": project, "daily_cost_limit": "3"},
 		idem("group-team"), 201)
 	projectGroupID := projectGroup["id"].(string)
@@ -148,39 +148,39 @@ func TestSharedBudgetAPI(t *testing.T) {
 		for k, v := range body {
 			base[k] = v
 		}
-		return h.want(owner, "POST", "/api/v3/api-keys", base, idem("key-"+uuid.NewString()), want)
+		return h.want(owner, "POST", "/api/v1/api-keys", base, idem("key-"+uuid.NewString()), want)
 	}
 	keyA := newKey(map[string]any{"budget_group_id": projectGroupID, "project_id": project}, 201)
 	newKey(map[string]any{"budget_group_id": projectGroupID, "project_id": project}, 201)
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "mismatch", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"project_id": project, "budget_group_id": groupID}, idem("key-mismatch")); status != 422 {
 		t.Fatalf("project-mismatched group: %d %v", status, out)
 	}
-	if status, out, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "cross", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"budget_group_id": projectGroupID}, idem("key-cross")); status != 422 {
 		t.Fatalf("project group on a global key: %d %v", status, out)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "ghost", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"budget_group_id": uuid.NewString()}, idem("key-ghost")); status != 404 {
 		t.Fatalf("unknown group: %d", status)
 	}
 
 	keyID := keyA["id"].(string)
-	keyDetail := h.want(owner, "GET", "/api/v3/api-keys/"+keyID, nil, nil, 200)
+	keyDetail := h.want(owner, "GET", "/api/v1/api-keys/"+keyID, nil, nil, 200)
 	if keyDetail["budget_group_id"] != projectGroupID {
 		t.Fatalf("assigned group: %v", keyDetail["budget_group_id"])
 	}
-	if status, out, _ := h.request(owner, "PATCH", "/api/v3/api-keys/"+keyID,
+	if status, out, _ := h.request(owner, "PATCH", "/api/v1/api-keys/"+keyID,
 		map[string]any{"budget_group_id": groupID}, etagHeader(keyDetail)); status != 422 {
 		t.Fatalf("cross-project group assignment: %d %v", status, out)
 	}
-	h.want(owner, "PATCH", "/api/v3/api-keys/"+keyID,
+	h.want(owner, "PATCH", "/api/v1/api-keys/"+keyID,
 		map[string]any{"budget_group_id": nil}, etagHeader(keyDetail), 200)
-	keyDetail = h.want(owner, "GET", "/api/v3/api-keys/"+keyID, nil, nil, 200)
+	keyDetail = h.want(owner, "GET", "/api/v1/api-keys/"+keyID, nil, nil, 200)
 	if keyDetail["budget_group_id"] != nil {
 		t.Fatalf("group not cleared: %v", keyDetail["budget_group_id"])
 	}
@@ -191,14 +191,14 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	newGroup := func(limit string) string {
 		t.Helper()
 		id := acctID(t)
-		acctExec(t, fixture.Pool, `INSERT INTO olp_go.budget_groups
+		acctExec(t, fixture.Pool, `INSERT INTO olp.budget_groups
             (id, name, project_id, daily_cost_limit, etag, created_by)
             VALUES ($1::uuid, $2, NULL, $3::text::numeric, $4::uuid, $5::uuid)`,
 			id, "group-"+id, limit, acctID(t), fixture.User)
 		return id
 	}
 	groupA, groupB := newGroup("5.00"), newGroup("9.00")
-	acctExec(t, fixture.Pool, `UPDATE olp_go.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
+	acctExec(t, fixture.Pool, `UPDATE olp.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
 		groupA, fixture.Key)
 
 	observed := time.Now().UTC().Add(-time.Minute)
@@ -235,7 +235,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 
 	var storedGroup *string
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("fact group: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {
@@ -243,7 +243,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 	var requestGroup *string
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.requests WHERE id = $1::uuid`, event.RequestID).Scan(&requestGroup); err != nil {
+        FROM olp.requests WHERE id = $1::uuid`, event.RequestID).Scan(&requestGroup); err != nil {
 		t.Fatalf("request group: %v", err)
 	}
 	if requestGroup == nil || *requestGroup != groupA {
@@ -251,7 +251,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 
 	bucket := time.Now().UTC().Truncate(time.Hour)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.attempt_usage_hourly
+	acctExec(t, fixture.Pool, `INSERT INTO olp.attempt_usage_hourly
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
          budget_group_id, request_count, provider_request_count, model_request_count,
          target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
@@ -262,16 +262,16 @@ func TestSharedBudgetAccounting(t *testing.T) {
          1, 1, 1, 1, 10, 10, 0, 0, '1.25'::numeric, 0, 0, 0, 0, 0, 0, 0, 0, 'USD', 0)`,
 		bucket, fixture.Provider, fixture.Key, groupA)
 
-	acctExec(t, fixture.Pool, `UPDATE olp_go.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
+	acctExec(t, fixture.Pool, `UPDATE olp.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
 		groupB, fixture.Key)
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("fact group after move: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {
 		t.Fatalf("reattributed persisted fact: %v", storedGroup)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_hourly
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_hourly
         WHERE budget_group_id = $1::uuid`, groupA); count != 1 {
 		t.Fatalf("reattributed rollup: %d group rows", count)
 	}
@@ -305,7 +305,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 		t.Fatalf("second event snapshots = %d, want 2", len(result.CostSnapshots))
 	}
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, second.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, second.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("second fact group: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {

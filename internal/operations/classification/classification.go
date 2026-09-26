@@ -114,7 +114,7 @@ func (r ScoringResult) Source() oif.Result   { return r.source }
 func (r ScoringResult) Scores() []Similarity { return slices.Clone(r.scores) }
 
 func Definitions() []operations.Dialect {
-	moderation := operations.Dialect{Identity: identity("openai-moderation"), Operation: identity("moderation"), Surface: "openai", Label: "OpenAI native moderation", Address: operations.Address{LegacyPath: "moderation"}, Documentation: "https://developers.openai.com/api/reference/typescript/resources/moderations/methods/create", Evidence: "openai-moderation-native-scope/1", Request: moderationRequest, Result: moderationResult, BindModel: bindModel, BindResultModel: operations.ModelChanges, InputText: moderationText, OutputText: outputText, Probe: func(model string) []byte {
+	moderation := operations.Dialect{Identity: identity("openai-moderation"), Operation: identity("moderation"), Surface: "openai", Label: "OpenAI native moderation", Address: operations.Address{FamilyPath: "moderation"}, Documentation: "https://developers.openai.com/api/reference/typescript/resources/moderations/methods/create", Evidence: "openai-moderation-native-scope/1", Request: moderationRequest, Result: moderationResult, BindModel: bindModel, BindResultModel: operations.ModelChanges, InputText: moderationText, OutputText: outputText, Probe: func(model string) []byte {
 		return operations.Raw(map[string]any{"model": model, "input": "A neutral moderation probe."})
 	}}
 	moderation.RequestSchema = operations.ObjectSchema(map[string]any{"model": map[string]any{"type": "string"}, "input": map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": []string{"string", "object"}}}}}}, "input")

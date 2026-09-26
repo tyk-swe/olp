@@ -111,8 +111,8 @@ func TestUsageRowsSpanLiveFactsAndRetainedBuckets(t *testing.T) {
 	filters.usageRows(&query, scopeFor(filters))
 	sql := query.sql()
 	for _, fragment := range []string{
-		"FROM olp_go.attempt_usage_facts", "target_request_counted", "target_unpriced_counted",
-		"target_incomplete_counted", "FROM olp_go.attempt_usage_hourly", "target_request_count",
+		"FROM olp.attempt_usage_facts", "target_request_counted", "target_unpriced_counted",
+		"target_incomplete_counted", "FROM olp.attempt_usage_hourly", "target_request_count",
 		"target_unpriced_count", "target_incomplete_count", "observed_at >= $", "observed_at < $",
 		"bucket >= $", "bucket + interval '1 hour' <= $", "route_slug = $", "provider_id = $",
 		"upstream_model = $", "api_key_id = $", "operation = $", "UNION ALL",

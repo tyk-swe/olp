@@ -47,23 +47,23 @@ const dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
       WHEN r.subject_kind='api_key' THEN k.policy->>'monthly_cost_limit'
       WHEN r.window_kind='day' THEN g.daily_cost_limit::text ELSE g.monthly_cost_limit::text END AS limit,
  d.id::text,d.url,d.secret_id::text,r.name
-FROM olp_go.budget_alert_rules r
-LEFT JOIN olp_go.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
-LEFT JOIN olp_go.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
-LEFT JOIN olp_go.api_key_cost_windows kwd ON kwd.api_key_id=k.id AND kwd.window_kind='day'
-LEFT JOIN olp_go.api_key_cost_windows kwm ON kwm.api_key_id=k.id AND kwm.window_kind='month'
-LEFT JOIN olp_go.budget_group_cost_windows gwd ON gwd.budget_group_id=g.id AND gwd.window_kind='day'
-LEFT JOIN olp_go.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.window_kind='month'
-JOIN olp_go.notification_destinations d ON d.id=r.destination_id
+FROM olp.budget_alert_rules r
+LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
+LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+LEFT JOIN olp.api_key_cost_windows kwd ON kwd.api_key_id=k.id AND kwd.window_kind='day'
+LEFT JOIN olp.api_key_cost_windows kwm ON kwm.api_key_id=k.id AND kwm.window_kind='month'
+LEFT JOIN olp.budget_group_cost_windows gwd ON gwd.budget_group_id=g.id AND gwd.window_kind='day'
+LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.window_kind='month'
+JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE r.enabled AND d.enabled`
 
 const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,v.window_id,v.threshold_percent,v.attempts,v.last_attempt_at,
  r.name,r.subject_kind,r.subject_id::text,r.window_kind,
  v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),
  d.url,d.secret_id::text
-FROM olp_go.budget_alert_deliveries v
-JOIN olp_go.budget_alert_rules r ON r.id=v.rule_id
-JOIN olp_go.notification_destinations d ON d.id=r.destination_id
+FROM olp.budget_alert_deliveries v
+JOIN olp.budget_alert_rules r ON r.id=v.rule_id
+JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE v.status IN ('pending','failed') AND v.attempts<$1
 ORDER BY v.created_at
 LIMIT $2`
@@ -270,7 +270,7 @@ func (w *alertWorker) claimDue(ctx context.Context) (int, error) {
 			storedCurrency = &currency
 		}
 		tag, err := tx.Exec(ctx,
-			`INSERT INTO olp_go.budget_alert_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
+			`INSERT INTO olp.budget_alert_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
 			 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, 'pending') ON CONFLICT DO NOTHING`,
 			w.newID(), a.ruleID, *a.windowID, a.threshold, accrued.String(), limit.String(), storedCurrency)
 		if err != nil {
@@ -307,7 +307,7 @@ func (w *alertWorker) pending(ctx context.Context) ([]delivery, error) {
 
 func (w *alertWorker) currency(ctx context.Context) string {
 	var currency string
-	err := w.pool.QueryRow(ctx, "SELECT currency FROM olp_go.pricing_currency WHERE singleton").Scan(&currency)
+	err := w.pool.QueryRow(ctx, "SELECT currency FROM olp.pricing_currency WHERE singleton").Scan(&currency)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		w.log.Warn("budget alert currency lookup failed", "error", err)
 	}
@@ -358,7 +358,7 @@ func (w *alertWorker) deliver(ctx context.Context, d delivery) {
 		lastError = &code
 	}
 	if _, err := w.pool.Exec(ctx,
-		`UPDATE olp_go.budget_alert_deliveries
+		`UPDATE olp.budget_alert_deliveries
 		 SET attempts=attempts+1,last_attempt_at=now(),status=$2,last_error_code=$3,
 		     delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
 		 WHERE id=$1`,

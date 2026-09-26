@@ -68,9 +68,16 @@ export type RouteEditorValues = {
   targets: EditableTarget[];
   contentPolicyRules: EditablePolicyRule[];
   projectId?: string;
-  /** Null preserves a historical omission; explicit modes require review. */
-  fidelity?: components['schemas']['RouteFidelity'] | null;
+  /** Every draft the console saves states its fidelity; strict is the default. */
+  fidelity: components['schemas']['RouteFidelity'];
 };
+
+/** Omitted modes are strict, matching the server's default. */
+export function fidelityLabel(
+  fidelity?: components['schemas']['RouteFidelity'] | null
+): 'Strict' | 'Transformed' {
+  return fidelity?.mode === 'transformed' ? 'Transformed' : 'Strict';
+}
 
 export const operationOptions = [
   ['generation', 'Text generation'],
@@ -299,7 +306,7 @@ export function buildCreateRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
-    ...(values.fidelity ? { fidelity: values.fidelity } : {}),
+    fidelity: values.fidelity,
     targets: values.targets.map((target) => {
       const model = providerModel(target, modelOptions)!;
       return {
@@ -322,7 +329,7 @@ export function buildReplaceRouteDraftInput(
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
-    ...(values.fidelity ? { fidelity: values.fidelity } : {}),
+    fidelity: values.fidelity,
     targets: values.targets.map((target) => ({
       provider_model_id: target.providerModelId,
       priority: target.priority,

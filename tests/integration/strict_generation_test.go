@@ -96,11 +96,11 @@ func newStrictProviderFixture(t *testing.T, profile string) *strictProviderFixtu
 		case "compatible-responses", "azure-v1-responses":
 			writeResponsesFixture(nativeWriter, vendorModel, vendorAnswer, stream)
 		case "anthropic-messages":
-			parityGeneration(nativeWriter, "anthropic", stream)
+			kindGeneration(nativeWriter, "anthropic", stream)
 		case "gemini-generation":
-			parityGeneration(nativeWriter, "gemini", stream)
+			kindGeneration(nativeWriter, "gemini", stream)
 		default:
-			parityGeneration(nativeWriter, "openai", stream)
+			kindGeneration(nativeWriter, "openai", stream)
 		}
 		if buffered != nil {
 			var result map[string]json.RawMessage
@@ -143,8 +143,8 @@ func publishStrictProvider(t *testing.T, h *accessHarness, owner *browser, f *st
 	if options != nil {
 		config["options"] = options
 	}
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Strict " + f.profile + uuid.NewString(), "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
-	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Strict " + f.profile + uuid.NewString(), "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
 	f.providerID = provider["id"].(string)
 	modelID := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
 	surfaces := []string{"openai"}
@@ -170,9 +170,9 @@ func publishStrictProvider(t *testing.T, h *accessHarness, owner *browser, f *st
 	if policy != nil {
 		input["content_policy"] = policy
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", input, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", input, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -195,8 +195,8 @@ func TestStrictPublicAmbiguousWorkNeverReplaysOrSubstitutes(t *testing.T) {
 		map[string]any{"provider_id": first.providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000},
 		map[string]any{"provider_id": second.providerID, "provider_model": vendorModel, "priority": 1, "weight": 1, "timeout_ms": 5000},
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", input, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", input, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	h.refresh()
 	sink := make(strictOutcomeSink, 2)
 	h.Gateway.Sink = sink
@@ -278,7 +278,7 @@ func TestStrictPublicQualifiedTextAndPreciseRefusals(t *testing.T) {
 	f := newStrictProviderFixture(t, "anthropic-messages")
 	slug, key := publishStrictProvider(t, h, owner, f, nil, nil, "strict")
 	beforePlayground := len(f.captured())
-	problem := h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": slug, "input": "hello"}, nil, 400)
+	problem := h.want(owner, "POST", "/api/v1/playground", map[string]any{"model": slug, "input": "hello"}, nil, 400)
 	if problemCode(t, problem) != "state_carrier" || len(f.captured()) != beforePlayground {
 		t.Fatal("unqualified playground projection dispatched strict work", problem)
 	}

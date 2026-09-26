@@ -34,7 +34,7 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 			return nil, errors.New("mounted connector kind and authentication must match the published provider")
 		}
 		if p.DefaultSlotID == "" {
-			return nil, errors.New("republish the provider to record its default slot before mounting credentials")
+			return nil, errors.New("mounted connector requires a published default slot")
 		}
 		for _, slot := range p.Slots {
 			if !slot.Enabled {

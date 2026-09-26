@@ -58,7 +58,7 @@ func validManagementToken(input managementTokenInput) error {
 }
 
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
-const managementTokenFrom = " FROM olp_go.management_tokens t JOIN olp_go.users u ON u.id=t.created_by"
+const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
 func (s *Server) ownerPrincipal(r *http.Request, q Queryer) (Principal, error) {
 	p, err := s.Principal(r, q, "access")
@@ -130,7 +130,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 	if input.ProjectIDs != nil {
 		projectIDs = *input.ProjectIDs
 		var known int64
-		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp_go.projects WHERE id=ANY($1::uuid[])", projectIDs).Scan(&known); err != nil {
+		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.projects WHERE id=ANY($1::uuid[])", projectIDs).Scan(&known); err != nil {
 			return Reply{}, err
 		}
 		if int(known) != len(projectIDs) {
@@ -148,11 +148,11 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var createdAt time.Time
-	if err = tx.QueryRow(r.Context(), "INSERT INTO olp_go.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.Auth.Digest("management_token", secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
+	if err = tx.QueryRow(r.Context(), "INSERT INTO olp.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.Auth.Digest("management_token", secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
 		return Reply{}, err
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "name": strings.TrimSpace(input.Name), "scopes": input.Scopes, "all_projects": allProjects, "project_ids": projectIDs, "created_by": p.ID, "created_by_email": p.Email, "etag": etag, "expires_at": input.ExpiresAt, "revoked_at": nil, "created_at": createdAt, "secret": secret}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/management-tokens/" + id, Body: body}
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/management-tokens/" + id, Body: body}
 	if err = Audit(r.Context(), tx, r, p.ID, "management_token.create", "management_token", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -185,7 +185,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 	}
 	var etag string
 	var revoked *time.Time
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,revoked_at FROM olp_go.management_tokens WHERE id=$1", id).Scan(&etag, &revoked); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,revoked_at FROM olp.management_tokens WHERE id=$1", id).Scan(&etag, &revoked); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {
@@ -195,7 +195,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, Fail(409, "management_token_revoked", "This token is already revoked.")
 	}
 	etag = NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.management_tokens SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.management_tokens SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id); err != nil {
 		return Reply{}, err
 	}
 	result := Detail(map[string]any{"id": id, "etag": etag}, etag)

@@ -38,7 +38,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	}
 	// This in-process fixture does not emit asynchronous metadata. Real worker
 	// drain and history preservation are exercised by browser-integration.sh.
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.request_metadata_consumer_health VALUES(true,0,0,NULL,now())`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,0,0,NULL,now())`); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -80,6 +80,10 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var markers struct{ Format, Schema string }
+	if err := json.Unmarshal(manifest, &markers); err != nil || markers.Format != "olp" || markers.Schema != "olp" {
+		t.Fatalf("backup manifest markers = %+v, want format and schema olp: %v", markers, err)
+	}
 	dump, err := os.ReadFile(backup)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +102,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 			t.Fatalf("missing bootstrap was accepted: %v: %s", err, out)
 		}
 	})
-	for _, failure := range []string{"incomplete", "corrupt", "incompatible", "wrong-key", "initialized", "valid"} {
+	for _, failure := range []string{"incomplete", "corrupt", "incompatible", "wrong-format", "wrong-schema", "wrong-key", "initialized", "valid"} {
 		t.Run(failure, func(t *testing.T) {
 			target, url := accessDatabase(t)
 			env["OLP_RESTORE_DATABASE_URL"] = url
@@ -114,6 +118,16 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				var m map[string]any
 				json.Unmarshal(manifest, &m)
 				m["migration_history"].([]any)[0].(map[string]any)["checksum"] = strings.Repeat("0", 64)
+				b, _ := json.Marshal(m)
+				write(failure+".dump.manifest.json", string(b))
+			case "wrong-format", "wrong-schema":
+				var m map[string]any
+				json.Unmarshal(manifest, &m)
+				if failure == "wrong-format" {
+					m["format"] = "olp-archive"
+				} else {
+					m["schema"] = "public"
+				}
 				b, _ := json.Marshal(m)
 				write(failure+".dump.manifest.json", string(b))
 			case "wrong-key":
@@ -156,7 +170,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				t.Fatalf("accepted %s backup", failure)
 			}
 			var exists bool
-			if err := target.QueryRow(t.Context(), "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='olp_go')").Scan(&exists); err != nil || exists {
+			if err := target.QueryRow(t.Context(), "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='olp')").Scan(&exists); err != nil || exists {
 				t.Fatalf("failed restore mutated destination: %v", err)
 			}
 		})

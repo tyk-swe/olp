@@ -1,4 +1,4 @@
-// sdkfixture serves the Go inference surface against an in-process mock
+// sdkfixture serves the OLP inference surface against an in-process mock
 // upstream so the official SDKs exercise the real gateway: bounded ingress,
 // key authentication, route selection, credential injection, model
 // rewriting, and native streaming. Nothing here fabricates a success the
@@ -31,8 +31,8 @@ import (
 const (
 	routeSlug     = "sdk-smoke-route"
 	upstreamModel = "fixture-model"
-	apiKey        = "olp_go_fixture_key"
-	conflictKey   = "olp_go_fixture_conflict_key"
+	apiKey        = "olp_fixture_key"
+	conflictKey   = "olp_fixture_conflict_key"
 	credential    = "fixture-upstream-credential"
 )
 
@@ -178,6 +178,9 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 			RevisionID:     uuid.NewString(),
 			Revision:       1,
 			PublishedAt:    now,
+			// The official SDK surfaces reach providers without profiles and
+			// across dialects, which only a transformed route permits.
+			Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed},
 		}},
 	}
 	secrets := map[string][]byte{credentialID: []byte(credential)}

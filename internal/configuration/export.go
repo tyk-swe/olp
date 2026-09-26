@@ -13,7 +13,7 @@ import (
 
 func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Document, error) {
 	doc := &Document{APIVersion: APIVersion}
-	projects, err := q.Query(ctx, "SELECT name FROM olp_go.projects ORDER BY lower(name),name")
+	projects, err := q.Query(ctx, "SELECT name FROM olp.projects ORDER BY lower(name),name")
 	if err != nil {
 		return nil, err
 	}
@@ -29,8 +29,8 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		return nil, err
 	}
 	providersRows, err := q.Query(ctx, `SELECT p.id::text,p.name,pr.name,p.state,r.configuration,r.models,r.slots
-        FROM olp_go.providers p LEFT JOIN olp_go.projects pr ON pr.id=p.project_id
-        LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id AND p.state='active'
+        FROM olp.providers p LEFT JOIN olp.projects pr ON pr.id=p.project_id
+        LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id AND p.state='active'
         ORDER BY lower(p.name),p.name`)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	}
 	for _, pp := range pending {
 		var configuration []byte
-		if err = q.QueryRow(ctx, "SELECT configuration FROM olp_go.providers WHERE id=$1", pp.id).Scan(&configuration); err != nil {
+		if err = q.QueryRow(ctx, "SELECT configuration FROM olp.providers WHERE id=$1", pp.id).Scan(&configuration); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(configuration, &pp.entry.Configuration); err != nil {
@@ -110,8 +110,8 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
 	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity
-        FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id
-        LEFT JOIN olp_go.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
+        FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
+        LEFT JOIN olp.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 }
 
 func exportModels(ctx context.Context, q access.Queryer, providerID string) ([]ModelEntry, error) {
-	rows, err := q.Query(ctx, "SELECT upstream_model,display_name,enabled,capabilities FROM olp_go.provider_models WHERE provider_id=$1 ORDER BY upstream_model", providerID)
+	rows, err := q.Query(ctx, "SELECT upstream_model,display_name,enabled,capabilities FROM olp.provider_models WHERE provider_id=$1 ORDER BY upstream_model", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func exportModels(ctx context.Context, q access.Queryer, providerID string) ([]M
 }
 
 func exportSlots(ctx context.Context, q access.Queryer, providerID, providerName string) ([]SlotEntry, error) {
-	rows, err := q.Query(ctx, "SELECT name,is_default,position,enabled,priority,weight,credential_id::text,restrictions,limits FROM olp_go.provider_slots WHERE provider_id=$1 ORDER BY position", providerID)
+	rows, err := q.Query(ctx, "SELECT name,is_default,position,enabled,priority,weight,credential_id::text,restrictions,limits FROM olp.provider_slots WHERE provider_id=$1 ORDER BY position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func exportSlots(ctx context.Context, q access.Queryer, providerID, providerName
 }
 
 func providerNameMap(ctx context.Context, q access.Queryer) (map[string]string, error) {
-	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp_go.providers")
+	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.providers")
 	if err != nil {
 		return nil, err
 	}

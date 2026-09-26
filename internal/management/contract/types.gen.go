@@ -485,7 +485,6 @@ func (e InspectedTurnScope) Valid() bool {
 
 // Defines values for InteractionInspectionFidelity.
 const (
-	InteractionInspectionFidelityLegacy      InteractionInspectionFidelity = "legacy"
 	InteractionInspectionFidelityStrict      InteractionInspectionFidelity = "strict"
 	InteractionInspectionFidelityTransformed InteractionInspectionFidelity = "transformed"
 )
@@ -493,8 +492,6 @@ const (
 // Valid indicates whether the value is a known member of the InteractionInspectionFidelity enum.
 func (e InteractionInspectionFidelity) Valid() bool {
 	switch e {
-	case InteractionInspectionFidelityLegacy:
-		return true
 	case InteractionInspectionFidelityStrict:
 		return true
 	case InteractionInspectionFidelityTransformed:
@@ -524,9 +521,9 @@ const (
 	InteractionInspectionStatusAdmitted     InteractionInspectionStatus = "admitted"
 	InteractionInspectionStatusBlocked      InteractionInspectionStatus = "blocked"
 	InteractionInspectionStatusIncompatible InteractionInspectionStatus = "incompatible"
-	InteractionInspectionStatusLegacy       InteractionInspectionStatus = "legacy"
 	InteractionInspectionStatusNotEvaluated InteractionInspectionStatus = "not_evaluated"
 	InteractionInspectionStatusNotInspected InteractionInspectionStatus = "not_inspected"
+	InteractionInspectionStatusTransformed  InteractionInspectionStatus = "transformed"
 )
 
 // Valid indicates whether the value is a known member of the InteractionInspectionStatus enum.
@@ -538,11 +535,11 @@ func (e InteractionInspectionStatus) Valid() bool {
 		return true
 	case InteractionInspectionStatusIncompatible:
 		return true
-	case InteractionInspectionStatusLegacy:
-		return true
 	case InteractionInspectionStatusNotEvaluated:
 		return true
 	case InteractionInspectionStatusNotInspected:
+		return true
+	case InteractionInspectionStatusTransformed:
 		return true
 	default:
 		return false
@@ -848,7 +845,6 @@ func (e RouteDetailResponseState) Valid() bool {
 
 // Defines values for RouteFidelityMode.
 const (
-	RouteFidelityModeLegacy      RouteFidelityMode = "legacy"
 	RouteFidelityModeStrict      RouteFidelityMode = "strict"
 	RouteFidelityModeTransformed RouteFidelityMode = "transformed"
 )
@@ -856,8 +852,6 @@ const (
 // Valid indicates whether the value is a known member of the RouteFidelityMode enum.
 func (e RouteFidelityMode) Valid() bool {
 	switch e {
-	case RouteFidelityModeLegacy:
-		return true
 	case RouteFidelityModeStrict:
 		return true
 	case RouteFidelityModeTransformed:
@@ -1661,11 +1655,11 @@ type ConfigurationProviderEntry struct {
 type ConfigurationRouteEntry struct {
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
 
-	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
-	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
-	MaxAttempts      int32          `json:"max_attempts"`
-	Operations       []string       `json:"operations"`
-	OverallTimeoutMs int32          `json:"overall_timeout_ms"`
+	// Fidelity Omit, or send null, to declare a strict route.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
 	Project       nullable.Nullable[string]        `json:"project"`
@@ -1753,6 +1747,7 @@ type ContentPolicy struct {
 
 // ContentPolicyRule defines model for ContentPolicyRule.
 type ContentPolicyRule struct {
+	// Action Redaction is permitted only on transformed routes; strict routes accept block rules.
 	Action ContentPolicyRuleAction `json:"action"`
 	Id     string                  `json:"id"`
 
@@ -1764,7 +1759,7 @@ type ContentPolicyRule struct {
 	Replacement *string `json:"replacement,omitempty"`
 }
 
-// ContentPolicyRuleAction defines model for ContentPolicyRule.Action.
+// ContentPolicyRuleAction Redaction is permitted only on transformed routes; strict routes accept block rules.
 type ContentPolicyRuleAction string
 
 // ContentPolicyRulePhase defines model for ContentPolicyRule.Phase.
@@ -1950,25 +1945,16 @@ type CreateProviderRequest struct {
 type CreateRouteDraftRequest struct {
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
 
-	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
-	Fidelity         *RouteFidelity `json:"fidelity,omitempty"`
-	MaxAttempts      int32          `json:"max_attempts"`
-	Operations       *[]string      `json:"operations,omitempty"`
-	OverallTimeoutMs int64          `json:"overall_timeout_ms"`
+	// Fidelity Omit, or send null, to declare a strict route.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       *[]string                        `json:"operations,omitempty"`
+	OverallTimeoutMs int64                            `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	Slug      string                                `json:"slug"`
 	Targets   []RouteTargetRequest                  `json:"targets"`
-}
-
-// CreateRouteMigrationDraftRequest defines model for CreateRouteMigrationDraftRequest.
-type CreateRouteMigrationDraftRequest struct {
-	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
-	Fidelity *RouteFidelity `json:"fidelity,omitempty"`
-
-	// Slug Previously unpublished route identity; retired slugs cannot be reused.
-	Slug string `json:"slug"`
 }
 
 // CredentialListResponse defines model for CredentialListResponse.
@@ -2156,7 +2142,7 @@ type InteractionIncompatibility struct {
 	Requirement string  `json:"requirement"`
 }
 
-// InteractionInspection Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification.
+// InteractionInspection Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification.
 type InteractionInspection struct {
 	Class            *string                       `json:"class,omitempty"`
 	Dispositions     *[]InteractionDisposition     `json:"dispositions,omitempty"`
@@ -2508,7 +2494,7 @@ type PlaygroundRequest struct {
 	Model           string                      `json:"model"`
 	Operation       *PlaygroundRequestOperation `json:"operation,omitempty"`
 
-	// Request Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with the legacy fields.
+	// Request Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with input, tools, response_format, temperature or max_output_tokens.
 	Request        *map[string]interface{}                     `json:"request,omitempty"`
 	ResponseFormat nullable.Nullable[PlaygroundResponseFormat] `json:"response_format,omitempty"`
 	Routing        *RoutingPreferences                         `json:"routing,omitempty"`
@@ -2883,7 +2869,7 @@ type ProviderConfiguration struct {
 	Kind         ProviderKind              `json:"kind"`
 	Options      *ConnectionOptions        `json:"options,omitempty"`
 
-	// ProfileId Versioned provider profile identity. Omit together with profile_revision to retain legacy configuration semantics.
+	// ProfileId Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.
 	ProfileId *string `json:"profile_id,omitempty"`
 
 	// ProfileRevision Immutable provider profile composition revision selected with profile_id.
@@ -3311,13 +3297,13 @@ type RecentAuthenticationRequest struct {
 type ReplaceRouteDraftRequest struct {
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
 
-	// Fidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
-	Fidelity         *RouteFidelity              `json:"fidelity,omitempty"`
-	MaxAttempts      int32                       `json:"max_attempts"`
-	Operations       []string                    `json:"operations"`
-	OverallTimeoutMs int32                       `json:"overall_timeout_ms"`
-	Slug             string                      `json:"slug"`
-	Targets          []ReplaceRouteTargetRequest `json:"targets"`
+	// Fidelity Omit, or send null, to declare a strict route.
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	Slug             string                           `json:"slug"`
+	Targets          []ReplaceRouteTargetRequest      `json:"targets"`
 }
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
@@ -3528,12 +3514,12 @@ type RouteDraftDetailResponse struct {
 	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
 	Etag           openapi_types.UUID        `json:"etag"`
 
-	// Fidelity Null means the route retains its historical legacy contract.
-	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	Id               openapi_types.UUID               `json:"id"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	Fidelity         RouteFidelity      `json:"fidelity"`
+	Id               openapi_types.UUID `json:"id"`
+	MaxAttempts      int32              `json:"max_attempts"`
+	Operations       []string           `json:"operations"`
+	OverallTimeoutMs int32              `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -3554,9 +3540,9 @@ type RouteDraftListResponse struct {
 type RouteDraftResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
 
-	// Fidelity Null means the route retains its historical legacy contract.
-	Fidelity nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	Id       openapi_types.UUID               `json:"id"`
+	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	Fidelity RouteFidelity      `json:"fidelity"`
+	Id       openapi_types.UUID `json:"id"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -3564,13 +3550,13 @@ type RouteDraftResponse struct {
 	State     string                                `json:"state"`
 }
 
-// RouteFidelity Route fidelity declaration. Omission retains historical legacy behavior for a new slug and preserves an existing contract during edits. An explicit empty object defaults to strict; null is not a reset. Strict execution requires a compiled interaction plan and is unavailable in this foundation release.
+// RouteFidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 type RouteFidelity struct {
-	// Mode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+	// Mode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
 	Mode *RouteFidelityMode `json:"mode,omitempty"`
 }
 
-// RouteFidelityMode Legacy preserves published historical behavior; strict requires complete preservation; transformed declares intentional semantic transformations. Native identity and qualified interaction are per-plan classes.
+// RouteFidelityMode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
 type RouteFidelityMode string
 
 // RouteListResponse defines model for RouteListResponse.
@@ -3590,25 +3576,25 @@ type RouteRetireResponse struct {
 type RouteRevisionDiffResponse struct {
 	ContentPolicyChanged bool `json:"content_policy_changed"`
 
-	// FidelityAfter Null means the route retains its historical legacy contract.
-	FidelityAfter nullable.Nullable[RouteFidelity] `json:"fidelity_after,omitempty"`
+	// FidelityAfter Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	FidelityAfter RouteFidelity `json:"fidelity_after"`
 
-	// FidelityBefore Null means the route retains its historical legacy contract.
-	FidelityBefore       nullable.Nullable[RouteFidelity] `json:"fidelity_before,omitempty"`
-	FidelityChanged      *bool                            `json:"fidelity_changed,omitempty"`
-	FromRevision         int32                            `json:"from_revision"`
-	MaxAttemptsChanged   bool                             `json:"max_attempts_changed"`
-	OperationsAdded      []string                         `json:"operations_added"`
-	OperationsRemoved    []string                         `json:"operations_removed"`
-	RoutingPolicyAfter   RoutingPolicy                    `json:"routing_policy_after"`
-	RoutingPolicyBefore  RoutingPolicy                    `json:"routing_policy_before"`
-	RoutingPolicyChanged bool                             `json:"routing_policy_changed"`
-	SlugChanged          bool                             `json:"slug_changed"`
-	TargetsAdded         []string                         `json:"targets_added"`
-	TargetsChanged       []string                         `json:"targets_changed"`
-	TargetsRemoved       []string                         `json:"targets_removed"`
-	TimeoutChanged       bool                             `json:"timeout_changed"`
-	ToRevision           int32                            `json:"to_revision"`
+	// FidelityBefore Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	FidelityBefore       RouteFidelity `json:"fidelity_before"`
+	FidelityChanged      bool          `json:"fidelity_changed"`
+	FromRevision         int32         `json:"from_revision"`
+	MaxAttemptsChanged   bool          `json:"max_attempts_changed"`
+	OperationsAdded      []string      `json:"operations_added"`
+	OperationsRemoved    []string      `json:"operations_removed"`
+	RoutingPolicyAfter   RoutingPolicy `json:"routing_policy_after"`
+	RoutingPolicyBefore  RoutingPolicy `json:"routing_policy_before"`
+	RoutingPolicyChanged bool          `json:"routing_policy_changed"`
+	SlugChanged          bool          `json:"slug_changed"`
+	TargetsAdded         []string      `json:"targets_added"`
+	TargetsChanged       []string      `json:"targets_changed"`
+	TargetsRemoved       []string      `json:"targets_removed"`
+	TimeoutChanged       bool          `json:"timeout_changed"`
+	ToRevision           int32         `json:"to_revision"`
 }
 
 // RouteRevisionListResponse defines model for RouteRevisionListResponse.
@@ -3623,18 +3609,18 @@ type RouteRevisionResponse struct {
 	ActivatedBy   openapi_types.UUID               `json:"activated_by"`
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
 
-	// Fidelity Null means the route retains its historical legacy contract.
-	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	Id               openapi_types.UUID               `json:"id"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
-	Revision         int32                            `json:"revision"`
-	RouteId          openapi_types.UUID               `json:"route_id"`
-	RoutingPolicy    RoutingPolicy                    `json:"routing_policy"`
-	Slug             string                           `json:"slug"`
-	SourceDraftId    openapi_types.UUID               `json:"source_draft_id"`
-	Targets          []RouteTargetResponse            `json:"targets"`
+	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	Fidelity         RouteFidelity         `json:"fidelity"`
+	Id               openapi_types.UUID    `json:"id"`
+	MaxAttempts      int32                 `json:"max_attempts"`
+	Operations       []string              `json:"operations"`
+	OverallTimeoutMs int32                 `json:"overall_timeout_ms"`
+	Revision         int32                 `json:"revision"`
+	RouteId          openapi_types.UUID    `json:"route_id"`
+	RoutingPolicy    RoutingPolicy         `json:"routing_policy"`
+	Slug             string                `json:"slug"`
+	SourceDraftId    openapi_types.UUID    `json:"source_draft_id"`
+	Targets          []RouteTargetResponse `json:"targets"`
 }
 
 // RouteSimulationResponse defines model for RouteSimulationResponse.
@@ -3707,7 +3693,7 @@ type RoutingDecision struct {
 	// Incompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
-	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and legacy previews never claim strict qualification.
+	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification.
 	Interaction           *InteractionInspection          `json:"interaction,omitempty"`
 	MaxOutputTokens       nullable.Nullable[int64]        `json:"max_output_tokens,omitempty"`
 	MetadataObservedAt    nullable.Nullable[time.Time]    `json:"metadata_observed_at,omitempty"`
@@ -3805,7 +3791,7 @@ type RuntimeGenerationResponse struct {
 
 // SessionDetailResponse defines model for SessionDetailResponse.
 type SessionDetailResponse struct {
-	// BrowserHint Coarse, untrusted browser/device display hint. Legacy sessions use Unknown browser.
+	// BrowserHint Coarse, untrusted browser/device display hint. An unrecognized user agent shows Unknown browser.
 	BrowserHint *string            `json:"browser_hint,omitempty"`
 	CreatedAt   time.Time          `json:"created_at"`
 	Current     bool               `json:"current"`
@@ -4836,14 +4822,6 @@ type ListRoutesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
-// CreateRouteMigrationDraftParams defines parameters for CreateRouteMigrationDraft.
-type CreateRouteMigrationDraftParams struct {
-	IdempotencyKey string `json:"Idempotency-Key"`
-
-	// IfMatch Current published route ETag
-	IfMatch string `json:"If-Match"`
-}
-
 // RetireRouteParams defines parameters for RetireRoute.
 type RetireRouteParams struct {
 	IfMatch        string `json:"If-Match"`
@@ -5111,9 +5089,6 @@ type ReplaceRouteDraftJSONRequestBody = ReplaceRouteDraftRequest
 
 // SimulateRouteDraftJSONRequestBody defines body for SimulateRouteDraft for application/json ContentType.
 type SimulateRouteDraftJSONRequestBody = SimulateRouteRequest
-
-// CreateRouteMigrationDraftJSONRequestBody defines body for CreateRouteMigrationDraft for application/json ContentType.
-type CreateRouteMigrationDraftJSONRequestBody = CreateRouteMigrationDraftRequest
 
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy

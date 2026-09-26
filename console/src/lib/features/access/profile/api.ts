@@ -13,7 +13,7 @@ export type RecentAuthenticationPurpose =
   'password_enrollment' | 'oidc_link' | 'oidc_unlink';
 
 export async function getProfile(): Promise<UserProfile> {
-  const { data, error, response } = await apiClient.GET('/api/v3/profile');
+  const { data, error, response } = await apiClient.GET('/api/v1/profile');
   return result(data, error, response);
 }
 
@@ -21,7 +21,7 @@ export async function updateProfile(
   profile: UserProfile,
   input: ProfileUpdate
 ): Promise<UserProfile> {
-  const { data, error, response } = await apiClient.PATCH('/api/v3/profile', {
+  const { data, error, response } = await apiClient.PATCH('/api/v1/profile', {
     params: { header: { 'If-Match': profile.etag } },
     body: input
   });
@@ -34,7 +34,7 @@ export async function reauthenticateWithPassword(
   resourceId?: string
 ): Promise<void> {
   const { error, response } = await apiClient.POST(
-    '/api/v3/profile/reauthenticate',
+    '/api/v1/profile/reauthenticate',
     {
       body: {
         current_password: currentPassword,
@@ -51,7 +51,7 @@ export async function changePassword(
   input: PasswordChange
 ): Promise<UserProfile> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/profile/password',
+    '/api/v1/profile/password',
     {
       params: { header: { 'If-Match': profile.etag } },
       body: input
@@ -65,7 +65,7 @@ export async function enrollPassword(
   input: PasswordEnrollment
 ): Promise<UserProfile> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/profile/password/enroll',
+    '/api/v1/profile/password/enroll',
     {
       params: { header: { 'If-Match': profile.etag } },
       body: input
@@ -76,7 +76,7 @@ export async function enrollPassword(
 
 export async function listOidcIdentities(): Promise<OidcIdentityList> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/oidc/identities'
+    '/api/v1/oidc/identities'
   );
   return result(data, error, response);
 }
@@ -86,7 +86,7 @@ export async function beginOidcReauthentication(
   resourceId?: string
 ): Promise<string> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/oidc/reauthenticate',
+    '/api/v1/oidc/reauthenticate',
     { body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) } }
   );
   return result(data, error, response).authorization_url;
@@ -94,7 +94,7 @@ export async function beginOidcReauthentication(
 
 export async function unlinkOidcIdentity(identityId: string): Promise<void> {
   const { error, response } = await apiClient.DELETE(
-    '/api/v3/oidc/identities/{identity_id}',
+    '/api/v1/oidc/identities/{identity_id}',
     { params: { path: { identity_id: identityId } } }
   );
   ensureSuccess(error, response);

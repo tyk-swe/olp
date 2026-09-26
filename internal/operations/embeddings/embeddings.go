@@ -73,7 +73,7 @@ func Definitions() []operations.Dialect {
 	out := make([]operations.Dialect, 0, len(definitions))
 	for _, definition := range definitions {
 		id := definition.id
-		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: definition.surface, Label: id, Address: operations.Address{LegacyPath: definition.path, RelativePath: definition.relative}, Evidence: "native-embedding-storage/1"}
+		d := operations.Dialect{Identity: oif.Identity{ID: id, Revision: operations.Revision}, Operation: identity, Surface: definition.surface, Label: id, Address: operations.Address{FamilyPath: definition.path, RelativePath: definition.relative}, Evidence: "native-embedding-storage/1"}
 		d.Request = func(source oif.Request) (oif.View, error) {
 			if id == "cohere-embed-v2" {
 				return liftCohereRequest(source)

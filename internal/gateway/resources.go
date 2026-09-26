@@ -115,7 +115,53 @@ func pinUnavailable() *Error {
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
 
-func (s *Server) resolveResource(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, operation string) (*pin, *runtime.Route, *Error) {
+// retainedUse is what a request does with a retained resource.
+type retainedUse int
+
+const (
+	// retainedHousekeeping lists, deletes or cancels a retained resource.
+	retainedHousekeeping retainedUse = iota
+	// retainedRetrieval reads a retained resource or its content.
+	retainedRetrieval
+	// retainedNewWork starts provider work from a retained resource.
+	retainedNewWork
+)
+
+// retainedContract serves a retained resource only under the contract it was
+// created with. A strict resource is refused once its route is transformed,
+// and a transformed one cannot start new work once its route is strict. The
+// owner can always list, delete or cancel, so provider-held data can be
+// removed and running upstream work stopped whatever the route promises now.
+func retainedContract(strict bool, current runtime.RouteFidelity, use retainedUse) *Error {
+	switch {
+	case use == retainedHousekeeping:
+		return nil
+	case strict && !current.Strict():
+		return serverError(http.StatusConflict, "provider_resource_unavailable",
+			"This strict resource is unavailable because its route is now transformed.")
+	case !strict && current.Strict() && use == retainedNewWork:
+		return serverError(http.StatusConflict, "provider_resource_unavailable",
+			"This resource was created under a transformed route and cannot start work now that the route is strict.")
+	}
+	return nil
+}
+
+// strictResourceKind reports whether a resource kind holds a strict contract.
+// Gemini Interactions keep one kind under either fidelity, so their kind says
+// nothing about the contract (known is false).
+func strictResourceKind(kind string) (strict, known bool) {
+	switch kind {
+	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation:
+		return true, true
+	case resources.KindResponse, resources.KindFile, resources.KindBatch:
+		return false, true
+	}
+	return false, false
+}
+
+// resolveResource rebuilds the provider pin that owns a retained resource and
+// refuses a use its route no longer promises.
+func (s *Server) resolveResource(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *runtime.Route, *Error) {
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
@@ -128,6 +174,13 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
+	}
+	if current, published := x.request.release.Snapshot.Routes[res.RouteSlug]; published {
+		if strict, known := strictResourceKind(res.Kind); known {
+			if e := retainedContract(strict, current.Fidelity, use); e != nil {
+				return nil, nil, e
+			}
+		}
 	}
 	var target *runtime.Target
 	for i := range route.Targets {
@@ -288,7 +341,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if x.mode == "streaming" && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyResponses) {
 		req.Header.Set("Accept", "text/event-stream")
@@ -962,7 +1015,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		return nil, finish(classConnect, nil)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
 		pipeR.CloseWithError(err)
@@ -1054,7 +1107,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch") != nil {
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
 				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."), x.family)
 				return
 			}
@@ -1070,7 +1123,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1128,7 +1181,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1163,7 +1216,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "files/"+url.PathEscape(res.UpstreamID)+"/content", nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -1229,7 +1282,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
+func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, openai.FamilyFile)
 	if done {
 		return
@@ -1249,11 +1302,11 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, op func(contex
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
 		return
 	}
-	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch"); e != nil {
+	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch", use); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch")
+	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1365,7 +1418,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
 		return
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch")
+	// The batch runs under the file's retained route revision. Resolution
+	// refuses a file whose contract the current route no longer promises, so
+	// that revision's fidelity is also the route's current one.
+	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch", retainedNewWork)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1376,7 +1432,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)
 			return
 		}
-		if e := s.authorizeDurable(r.Context(), x, authority, file, fileContract, "batch"); e != nil {
+		if e := s.authorizeDurable(r.Context(), x, authority, file, fileContract, "batch", retainedNewWork); e != nil {
 			s.stateFail(x, w, e, x.family)
 			return
 		}
@@ -1513,7 +1569,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
+func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, openai.FamilyBatch)
 	if done {
 		return
@@ -1533,11 +1589,11 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, op func(conte
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."), x.family)
 		return
 	}
-	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch"); e != nil {
+	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch", use); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch")
+	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1585,7 +1641,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch") != nil {
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
 				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."), x.family)
 				return
 			}
@@ -1601,13 +1657,13 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		return s.batchRefresh(ctx, x, res, p, http.MethodGet, "batches/"+url.PathEscape(res.UpstreamID), nil, w)
 	})
 }
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		if res.Kind == resources.KindStrictBatch {
 			switch res.State {
 			case "completed", "failed", "expired", "cancelled":

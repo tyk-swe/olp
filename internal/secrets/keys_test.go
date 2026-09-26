@@ -2,6 +2,11 @@ package secrets
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -60,6 +65,39 @@ func TestSecretPermissionsAndDomainSeparatedDigests(t *testing.T) {
 		t.Fatal("authentication domains collide")
 	}
 }
+
+// Stored ciphertexts and digests are only readable while these authority labels
+// stay fixed, so they are pinned against an independent computation.
+func TestSecretAuthorityLabelsBindStoredRecords(t *testing.T) {
+	key := bytes.Repeat([]byte{0xab}, 32)
+	ring, err := ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := ring.Seal("installation-a", "oidc_client", "record-a", []byte("private-value"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	associated, _ := json.Marshal([]string{"olp-secret-v1", "installation-a", "oidc_client", "record-a"})
+	if plain, err := gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], associated); err != nil || string(plain) != "private-value" {
+		t.Fatalf("sealed record is not bound to the olp-secret-v1 authority: %v", err)
+	}
+	mac := hmac.New(sha256.New, key)
+	labelled, _ := json.Marshal([]string{"olp-auth-v1", "installation-a", "session", "value"})
+	mac.Write(labelled)
+	if !bytes.Equal(NewAuthKey(key, "installation-a").Digest("session", "value"), mac.Sum(nil)) {
+		t.Fatal("digest is not bound to the olp-auth-v1 authority")
+	}
+}
+
 func TestPasswordsAreSaltedAndVerificationIsBounded(t *testing.T) {
 	first, second := HashPassword("a long secure password"), HashPassword("a long secure password")
 	if first == second || !VerifyPassword("a long secure password", first) || VerifyPassword("incorrect", first) {

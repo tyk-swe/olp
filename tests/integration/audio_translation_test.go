@@ -37,11 +37,11 @@ func TestAudioTranslationPublicStrictRouteAndPinnedSDK(t *testing.T) {
 	sink := &captureSink{}
 	h.Gateway.Sink = sink
 	price := map[string]any{"provider_kind": "openai_compatible", "model": vendorModel, "operation": "translation", "currency": "USD", "unit_price": "0.000100000000"}
-	created := h.want(owner, "POST", "/api/v3/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{price}}, idem("audio-translation-price"), 201)
+	created := h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{price}}, idem("audio-translation-price"), 201)
 	if created["prices"].([]any)[0].(map[string]any)["operation"] != "translation" {
 		t.Fatalf("translation pricing did not persist: %v", created)
 	}
-	listed := h.want(owner, "GET", "/api/v3/pricing/revisions", nil, nil, 200)
+	listed := h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
 	if len(listed["items"].([]any)) != 1 {
 		t.Fatalf("translation pricing missing: %v", listed)
 	}

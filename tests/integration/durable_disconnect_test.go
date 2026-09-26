@@ -43,13 +43,13 @@ func TestAcceptedBatchMappingSurvivesClientDisconnect(t *testing.T) {
 	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_lock($1)", lockKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp_go.wait_batch_mapping() RETURNS trigger LANGUAGE plpgsql AS $$
+	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp.wait_batch_mapping() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.kind='batch' THEN PERFORM pg_advisory_xact_lock(21416014); END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER wait_batch_mapping BEFORE INSERT ON olp_go.provider_resources
-FOR EACH ROW EXECUTE FUNCTION olp_go.wait_batch_mapping()`); err != nil {
+CREATE TRIGGER wait_batch_mapping BEFORE INSERT ON olp.provider_resources
+FOR EACH ROW EXECUTE FUNCTION olp.wait_batch_mapping()`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +100,7 @@ AND wait_event_type='Lock' AND wait_event='advisory')`).Scan(&waiting); err != n
 	deadline = time.Now().Add(3 * time.Second)
 	for {
 		var mapped int
-		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources
+		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources
 WHERE kind='batch' AND upstream_id='batch-up-1'`).Scan(&mapped); err != nil {
 			t.Fatal(err)
 		}

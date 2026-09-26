@@ -277,7 +277,7 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 }
 
 // Custom endpoints need a safe live probe; native media instead relies on the
-// official connector contract and authenticated discovery, as in the Rust gateway.
+// official connector contract and authenticated discovery.
 func certifiable(kind, vendor string, c CapabilityInput) bool {
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false

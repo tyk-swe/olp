@@ -155,7 +155,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	if call.Accept != "" {
 		req.Header.Set("Accept", call.Accept)
 	}
