@@ -123,14 +123,14 @@ async function observedGatewayResponses(
   });
 }
 
-test.describe('Go-hosted console integration', () => {
+test.describe('Hosted console integration', () => {
   test.describe.configure({ mode: 'serial' });
   test.skip(
     process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
     'The restored database has already completed setup.'
   );
 
-  test('Go serves the console and enforces the real setup/session/management boundary', async ({
+  test('olp serves the console and enforces the real setup/session/management boundary', async ({
     page,
     context
   }) => {
@@ -244,7 +244,7 @@ test.describe('Go-hosted console integration', () => {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -315,8 +315,8 @@ test.describe('Go-hosted console integration', () => {
       page.getByText(vertical.deployment, { exact: true }).first()
     ).toBeVisible();
 
-    // Discovery now seeds native suggestions. Review exactly the same four
-    // tuples as the frozen journey, replacing suggestions before certification.
+    // Discovery seeds native suggestions. Replace them with exactly four
+    // reviewed tuples before certification.
     const suggestions = page.getByRole('button', {
       name: /^Remove capability /
     });
@@ -374,8 +374,8 @@ test.describe('Go-hosted console integration', () => {
       page.getByLabel('Provider model').first().locator('option:checked')
     ).toContainText(vertical.deployment);
     await page.getByLabel('Maximum attempts').fill('1');
-    // This journey intentionally qualifies the historical compatibility route.
-    await page.getByLabel('Fidelity mode').selectOption('legacy');
+    // This provider has no profile, so the route is declared transformed.
+    await page.getByLabel('Fidelity mode').selectOption('transformed');
     await page.getByRole('button', { name: 'Create draft' }).click();
     await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
     await verifyDraftSave(page, 'route', vertical.route);

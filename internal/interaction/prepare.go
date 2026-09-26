@@ -109,7 +109,7 @@ func (t *Template) Bind(request *openai.Request, context Context) (*Plan, error)
 
 func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif.Prepared, error) {
 	for _, entry := range request.OIF().Provenance() {
-		if entry.Origin == oif.ExplicitTransform || entry.Origin == oif.LegacyMapping {
+		if entry.Origin == oif.ExplicitTransform || entry.Origin == oif.TransformedMapping {
 			return oif.Prepared{}, incompatible("policy_conflict", "/request", "semantic_preservation", "Strict execution cannot consume a semantically transformed source.")
 		}
 	}
@@ -173,9 +173,9 @@ func (t *Template) prepareNative(request *openai.Request, receipt *Receipt) (oif
 		prepared = next
 	}
 	if t.wire == openai.FamilyChat {
-		_, legacyCap := prepared.Document().Root().Lookup("max_tokens")
-		_, completionCap := prepared.Document().Root().Lookup("max_completion_tokens")
-		if legacyCap && completionCap {
+		_, maxTokens := prepared.Document().Root().Lookup("max_tokens")
+		_, maxCompletionTokens := prepared.Document().Root().Lookup("max_completion_tokens")
+		if maxTokens && maxCompletionTokens {
 			return oif.Prepared{}, incompatible("reasoning_budget", "/max_completion_tokens", "conflicting_budget_scopes", "The effective request combines token controls with distinct scopes; no precedence or equivalence is qualified.")
 		}
 	}

@@ -60,7 +60,7 @@ func TestAccountingRejectsConcurrentIdentityReuse(t *testing.T) {
 			if persisted != 1 || rejected != 1 {
 				t.Fatalf("persisted/rejected = %d/%d, want 1/1", persisted, rejected)
 			}
-			if got := acctCount(t, f, "SELECT count(*) FROM olp_go.attempt_usage_facts"); got != 1 {
+			if got := acctCount(t, f, "SELECT count(*) FROM olp.attempt_usage_facts"); got != 1 {
 				t.Fatalf("facts = %d, want one attribution", got)
 			}
 		})
@@ -104,7 +104,7 @@ func TestRequestFiltersSurviveUsageFactRetention(t *testing.T) {
 	}})
 	acctPersist(t, f, event)
 	// Usage retention may remove facts before request/attempt history expires.
-	acctExec(t, f.Pool, "DELETE FROM olp_go.attempt_usage_facts WHERE request_id=$1", event.RequestID)
+	acctExec(t, f.Pool, "DELETE FROM olp.attempt_usage_facts WHERE request_id=$1", event.RequestID)
 	rows, _, err := usage.ListRequests(t.Context(), f.Pool,
 		usage.RequestFilters{ProviderID: &f.Provider, Model: &model, AllProjects: true}, nil, 10)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestPricingUsesTheRecordedRevisionVendor(t *testing.T) {
 	attempt := acctAttempt(t, provider, 1, "model", 200, acctObserved(7, 5, nil, nil))
 	attempt.Routing = &usage.Routing{ProviderRevisionID: revision}
 	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{attempt}})
-	acctExec(t, f.Pool, `UPDATE olp_go.providers
+	acctExec(t, f.Pool, `UPDATE olp.providers
 		SET configuration=$2::json
 		WHERE id=$1`, provider,
 		`{"kind":"openai_compatible","auth_mode":"none","endpoint":"https://example.com/v1","options":{"vendor_id":"openrouter"}}`)

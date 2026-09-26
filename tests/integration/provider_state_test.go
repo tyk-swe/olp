@@ -17,8 +17,8 @@ func TestCredentialSlotWritesRequireCurrentETag(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Slot preconditions", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}, "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Slot preconditions", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}, "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	listPath := providerPath + "/credential-slots"
 	original := h.want(owner, "GET", listPath, nil, nil, 200)
 	slotID := original["items"].([]any)[0].(map[string]any)["id"].(string)
@@ -54,9 +54,9 @@ func TestCredentialSlotRotationReplaysAndReportsPublishedCredential(t *testing.T
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Slot rotation", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}, "credential": vendorSecret, "model": vendorModel}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Slot rotation", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}, "credential": vendorSecret, "model": vendorModel}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	providerID := created["id"].(string)
-	providerPath := "/api/v3/providers/" + providerID
+	providerPath := "/api/v1/providers/" + providerID
 	listPath := providerPath + "/credential-slots"
 	original := h.want(owner, "GET", listPath, nil, nil, 200)
 	slot := original["items"].([]any)[0].(map[string]any)
@@ -144,11 +144,11 @@ func TestCredentialHistoryTracksEveryDraftAndPublishedSlot(t *testing.T) {
 	up := newVendor(t)
 	up.accept(vendorRotated)
 	up.accept("replacement")
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Credential history", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
 	defaultCredential := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
 	poolSlot := uuid.NewString()
@@ -235,8 +235,8 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	configuration := func(endpoint string) map[string]any {
 		return map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": endpoint}
 	}
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Inventory publication", "configuration": configuration(up.URL + "/v1"), "credential": vendorSecret, "model": "first"}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Inventory publication", "configuration": configuration(up.URL + "/v1"), "credential": vendorSecret, "model": "first"}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	certify := func(name string) string {
 		t.Helper()
 		models := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)
@@ -262,7 +262,7 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	assertAvailability := func(want map[string]bool) {
 		t.Helper()
 		for _, query := range []string{"", "?surface=openai"} {
-			inventory := h.want(owner, "GET", "/api/v3/provider-models"+query, nil, nil, 200)
+			inventory := h.want(owner, "GET", "/api/v1/provider-models"+query, nil, nil, 200)
 			got := map[string]bool{}
 			for _, item := range inventory["items"].([]any) {
 				entry := item.(map[string]any)
@@ -292,14 +292,14 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	assertAvailability(map[string]bool{"first": false, "second": true})
 	// A route can keep serving the active model while an older provider
 	// revision becomes the draft, even when their model sets differ.
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_model_id": secondID, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	route := h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route"}), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "restore inference"}, map[string]string{"Idempotency-Key": "key"}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "restore inference"}, map[string]string{"Idempotency-Key": "key"}, 201)
 	h.refresh()
 	sequence := h.Runtime.Release().Sequence
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
@@ -334,13 +334,13 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 			}
 		}
 	}
-	live := h.want(owner, "GET", "/api/v3/routes/"+route["route_id"].(string), nil, nil, 200)
+	live := h.want(owner, "GET", "/api/v1/routes/"+route["route_id"].(string), nil, nil, 200)
 	if live["latest_revision"].(map[string]any)["targets"].([]any)[0].(map[string]any)["available"] != true {
 		t.Fatalf("draft restore hid the published route target: %v", live)
 	}
 	currentDraft := h.want(owner, "GET", draftPath, nil, nil, 200)
 	h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(currentDraft), 200)
-	decisions := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{"operation": map[string]any{"request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "api_key_id": key["id"]}, nil, 200)
+	decisions := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{"operation": map[string]any{"request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "api_key_id": key["id"]}, nil, 200)
 	if len(decisions) != 1 || decisions[0].(map[string]any)["eligible"] != true {
 		t.Fatalf("restore changed routing simulation: %v", decisions)
 	}

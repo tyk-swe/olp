@@ -30,26 +30,26 @@ type Server struct {
 // the management catch-all, so they take precedence over its 404.
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v3/usage/summary", h(s.usageSummary))
-	mux.HandleFunc("GET /api/v3/usage/breakdown", h(s.usageBreakdown))
-	mux.HandleFunc("GET /api/v3/usage/time-series", h(s.usageTimeSeries))
-	mux.HandleFunc("GET /api/v3/usage/completeness", h(s.usageCompleteness))
-	mux.HandleFunc("GET /api/v3/requests", h(s.listRequests))
-	mux.HandleFunc("GET /api/v3/requests/{request_id}", h(s.getRequest))
-	mux.HandleFunc("GET /api/v3/pricing/revisions", h(s.listPricingRevisions))
+	mux.HandleFunc("GET /api/v1/usage/summary", h(s.usageSummary))
+	mux.HandleFunc("GET /api/v1/usage/breakdown", h(s.usageBreakdown))
+	mux.HandleFunc("GET /api/v1/usage/time-series", h(s.usageTimeSeries))
+	mux.HandleFunc("GET /api/v1/usage/completeness", h(s.usageCompleteness))
+	mux.HandleFunc("GET /api/v1/requests", h(s.listRequests))
+	mux.HandleFunc("GET /api/v1/requests/{request_id}", h(s.getRequest))
+	mux.HandleFunc("GET /api/v1/pricing/revisions", h(s.listPricingRevisions))
 	// A revision may carry thousands of rates, well past the default body cap.
-	mux.HandleFunc("POST /api/v3/pricing/revisions", s.Access.HandleWith(1<<20, s.createPricingRevision))
-	mux.HandleFunc("GET /api/v3/pricing/sources", h(s.listPricingSources))
-	mux.HandleFunc("POST /api/v3/pricing/sources", h(s.createPricingSource))
-	mux.HandleFunc("GET /api/v3/pricing/sources/{pricing_source_id}", h(s.getPricingSource))
-	mux.HandleFunc("PATCH /api/v3/pricing/sources/{pricing_source_id}", h(s.updatePricingSource))
-	mux.HandleFunc("POST /api/v3/pricing/sources/{pricing_source_id}/refresh", h(s.refreshPricingSource))
-	mux.HandleFunc("GET /api/v3/pricing/sources/{pricing_source_id}/snapshots", h(s.listPricingSourceSnapshots))
+	mux.HandleFunc("POST /api/v1/pricing/revisions", s.Access.HandleWith(1<<20, s.createPricingRevision))
+	mux.HandleFunc("GET /api/v1/pricing/sources", h(s.listPricingSources))
+	mux.HandleFunc("POST /api/v1/pricing/sources", h(s.createPricingSource))
+	mux.HandleFunc("GET /api/v1/pricing/sources/{pricing_source_id}", h(s.getPricingSource))
+	mux.HandleFunc("PATCH /api/v1/pricing/sources/{pricing_source_id}", h(s.updatePricingSource))
+	mux.HandleFunc("POST /api/v1/pricing/sources/{pricing_source_id}/refresh", h(s.refreshPricingSource))
+	mux.HandleFunc("GET /api/v1/pricing/sources/{pricing_source_id}/snapshots", h(s.listPricingSourceSnapshots))
 
-	mux.HandleFunc("POST /api/v3/pricing/source-snapshots/{pricing_source_snapshot_id}/publish",
+	mux.HandleFunc("POST /api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish",
 		s.Access.HandleWith(1<<20, s.publishPricingSourceSnapshot))
-	mux.HandleFunc("GET /api/v3/request-metadata/gateway-epochs", h(s.listGatewayEpochs))
-	mux.HandleFunc("POST /api/v3/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
+	mux.HandleFunc("GET /api/v1/request-metadata/gateway-epochs", h(s.listGatewayEpochs))
+	mux.HandleFunc("POST /api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
 		h(s.acknowledgeGatewayEpoch))
 }
 
@@ -203,7 +203,7 @@ func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var keyProject *string
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp_go.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
 		return access.Reply{}, err
 	}
 	if !p.CanProject(keyProject, false) {

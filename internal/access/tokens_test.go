@@ -54,7 +54,7 @@ func machineServer(t *testing.T) *Server {
 }
 
 func machineRequest(secret, method string) *http.Request {
-	r := httptest.NewRequest(method, "/api/v3/routes", nil)
+	r := httptest.NewRequest(method, "/api/v1/routes", nil)
 	r.Header.Set("Authorization", "Bearer "+secret)
 	return r
 }
@@ -178,7 +178,7 @@ func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	defer server.Close()
 
 	send := func(headers map[string]string, cookies []*http.Cookie) int {
-		r, err := http.NewRequest("POST", server.URL+"/api/v3/test", strings.NewReader("{}"))
+		r, err := http.NewRequest("POST", server.URL+"/api/v1/test", strings.NewReader("{}"))
 		if err != nil {
 			t.Fatal(err)
 		}

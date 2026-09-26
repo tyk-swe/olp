@@ -253,7 +253,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 		}
 		_ = json.Unmarshal(c.Models[name], &metadata)
 		if metadata.Deployment != "" && (binding.Model != "" || binding.Deployment != "") {
-			return errors.New("serving binding collides with legacy model deployment metadata")
+			return errors.New("serving binding collides with a deployment in model metadata")
 		}
 		operations := map[string]bool{}
 		for op := range c.OperationDefaults {

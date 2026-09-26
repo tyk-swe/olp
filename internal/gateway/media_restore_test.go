@@ -67,12 +67,12 @@ func TestReplacementRestoreRetainsMediaJobsAndRotatedCredentials(t *testing.T) {
 	}
 	run(env["OLP_MAINTENANCE_BIN"], "master-key", "reencrypt")
 	run(env["OLP_MAINTENANCE_BIN"], "master-key", "verify-retirement", "1")
-	if _, err := f.pool.Exec(t.Context(), "INSERT INTO olp_go.request_metadata_consumer_health(singleton,pending_events,lag_events,checked_at) VALUES(true,0,0,clock_timestamp())"); err != nil {
+	if _, err := f.pool.Exec(t.Context(), "INSERT INTO olp.request_metadata_consumer_health(singleton,pending_events,lag_events,checked_at) VALUES(true,0,0,clock_timestamp())"); err != nil {
 		t.Fatal(err)
 	}
 	backup := run("./scripts/backup.sh", filepath.Join(dir, "backup"))
 	replacement := systemPool(t)
-	if _, err := replacement.Exec(t.Context(), "DROP SCHEMA olp_go CASCADE"); err != nil {
+	if _, err := replacement.Exec(t.Context(), "DROP SCHEMA olp CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	sourceURL.Path = "/" + replacement.Config().ConnConfig.Database

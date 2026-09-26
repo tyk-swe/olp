@@ -68,7 +68,7 @@ func inspectRequest(document oif.Document, provenance []oif.Provenance) inspecte
 			field.Empty = &empty
 		}
 		for _, item := range provenance {
-			if item.Pointer == field.Field || (item.Pointer == "" || item.Pointer == "/") && (item.Origin == oif.QualifiedMapping || item.Origin == oif.LegacyMapping || item.Origin == oif.ExplicitTransform) {
+			if item.Pointer == field.Field || (item.Pointer == "" || item.Pointer == "/") && (item.Origin == oif.QualifiedMapping || item.Origin == oif.TransformedMapping || item.Origin == oif.ExplicitTransform) {
 				field.Origin = inspectionOrigin(item.Origin)
 			}
 		}
@@ -123,7 +123,7 @@ func inspectionOrigin(origin oif.Origin) string {
 	switch origin {
 	case oif.Caller, oif.ProviderDefault, oif.ModelDefault, oif.OperationDefault,
 		oif.IdentityBinding, oif.ResourceBinding, oif.TransportOption,
-		oif.QualifiedMapping, oif.ExplicitTransform, oif.LegacyMapping:
+		oif.QualifiedMapping, oif.ExplicitTransform, oif.TransformedMapping:
 		return string(origin)
 	default:
 		return "configured"

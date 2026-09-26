@@ -21,7 +21,7 @@ export async function listPricingSourcePage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<PricingSource>> {
-  const response = await apiClient.GET('/api/v3/pricing/sources', {
+  const response = await apiClient.GET('/api/v1/pricing/sources', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -33,7 +33,7 @@ export async function createPricingSource(input: {
   url: string;
   enabled?: boolean;
 }): Promise<PricingSource> {
-  const response = await apiClient.POST('/api/v3/pricing/sources', {
+  const response = await apiClient.POST('/api/v1/pricing/sources', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -45,7 +45,7 @@ export async function updatePricingSource(
   input: { name?: string; url?: string; enabled?: boolean }
 ): Promise<PricingSource> {
   const response = await apiClient.PATCH(
-    '/api/v3/pricing/sources/{pricing_source_id}',
+    '/api/v1/pricing/sources/{pricing_source_id}',
     {
       params: {
         path: { pricing_source_id: source.id },
@@ -61,7 +61,7 @@ export async function refreshPricingSource(
   source: PricingSource
 ): Promise<PricingSourceRefresh> {
   const response = await apiClient.POST(
-    '/api/v3/pricing/sources/{pricing_source_id}/refresh',
+    '/api/v1/pricing/sources/{pricing_source_id}/refresh',
     { params: { path: { pricing_source_id: source.id } } }
   );
   return result(response.data, response.error, response.response);
@@ -73,7 +73,7 @@ export async function listPricingSourceSnapshots(
 ): Promise<PricingSourceSnapshot[]> {
   return collectCursorPages(async (cursor) => {
     const response = await apiClient.GET(
-      '/api/v3/pricing/sources/{pricing_source_id}/snapshots',
+      '/api/v1/pricing/sources/{pricing_source_id}/snapshots',
       {
         params: {
           path: { pricing_source_id: source.id },
@@ -91,7 +91,7 @@ export async function publishPricingSnapshot(
   input: PublishPricingSourceInput
 ): Promise<Schemas['PricingRevisionResponse']> {
   const response = await apiClient.POST(
-    '/api/v3/pricing/source-snapshots/{pricing_source_snapshot_id}/publish',
+    '/api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish',
     {
       params: {
         path: { pricing_source_snapshot_id: snapshot.id },

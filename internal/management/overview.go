@@ -15,7 +15,7 @@ type Overview struct {
 
 // Register mounts the overview summary on the management surface.
 func (o *Overview) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/overview", o.Access.Handle(o.summary))
+	mux.HandleFunc("GET /api/v1/overview", o.Access.Handle(o.summary))
 }
 
 func (o *Overview) summary(r *http.Request) (access.Reply, error) {
@@ -26,11 +26,11 @@ func (o *Overview) summary(r *http.Request) (access.Reply, error) {
 	var response contract.OverviewResponse
 	err = o.Access.Pool.QueryRow(r.Context(),
 		"SELECT "+
-			"(SELECT count(*) FROM olp_go.providers WHERE active_revision IS NOT NULL AND ($1 OR project_id = ANY($2::uuid[]))),"+
-			"(SELECT count(*) FROM olp_go.routes WHERE ($1 OR project_id = ANY($2::uuid[]))),"+
-			"(SELECT count(*) FROM olp_go.provider_models WHERE enabled AND ($1 OR provider_id IN"+
-			" (SELECT id FROM olp_go.providers WHERE project_id = ANY($2::uuid[])))),"+
-			"EXISTS(SELECT 1 FROM olp_go.api_keys WHERE revoked_at IS NULL AND ($1 OR project_id = ANY($2::uuid[])))",
+			"(SELECT count(*) FROM olp.providers WHERE active_revision IS NOT NULL AND ($1 OR project_id = ANY($2::uuid[]))),"+
+			"(SELECT count(*) FROM olp.routes WHERE ($1 OR project_id = ANY($2::uuid[]))),"+
+			"(SELECT count(*) FROM olp.provider_models WHERE enabled AND ($1 OR provider_id IN"+
+			" (SELECT id FROM olp.providers WHERE project_id = ANY($2::uuid[])))),"+
+			"EXISTS(SELECT 1 FROM olp.api_keys WHERE revoked_at IS NULL AND ($1 OR project_id = ANY($2::uuid[])))",
 		p.AllProjects, p.ProjectIDs()).
 		Scan(&response.ActiveProviders, &response.ActiveRoutes, &response.EnabledModels, &response.UsableApiKey)
 	if err != nil {

@@ -19,31 +19,31 @@ func TestOIDCConfigurationCanDisableUnavailableProvider(t *testing.T) {
 		"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration",
 		"client_id": "test-client", "client_secret": "write-only-client-secret", "enabled": true,
 	}
-	saved := h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, nil, 200)
+	saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, nil, 200)
 	issuer.Server.Close()
 	delete(configuration, "client_secret")
 	configuration["enabled"] = false
-	h.want(viewer, "PUT", "/api/v3/oidc/configuration", configuration, etagHeader(saved), 403)
-	h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, nil, 428)
-	h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, etagHeader(map[string]any{"etag": "stale"}), 412)
-	current := h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200)
+	h.want(viewer, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 403)
+	h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, nil, 428)
+	h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(map[string]any{"etag": "stale"}), 412)
+	current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
 	if current["etag"] != saved["etag"] || current["enabled"] != true {
 		t.Fatal("a rejected disable changed the configuration")
 	}
-	disabled := h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, etagHeader(saved), 200)
-	current = h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200)
+	disabled := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 200)
+	current = h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
 	if current["enabled"] != false || current["etag"] != disabled["etag"] || current["etag"] == saved["etag"] || current["has_client_secret"] != true {
 		t.Fatal("disabling did not persist the configuration and preserve its secret")
 	}
-	h.want(nil, "POST", "/api/v3/oidc/login", map[string]any{}, nil, 403)
+	h.want(nil, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 403)
 	for _, enabled := range []any{true, nil} {
 		configuration["enabled"] = enabled
 		if enabled == nil {
 			delete(configuration, "enabled")
 		}
-		h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, etagHeader(disabled), 422)
+		h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(disabled), 422)
 	}
-	current = h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200)
+	current = h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
 	if current["enabled"] != false || current["etag"] != disabled["etag"] {
 		t.Fatal("failed discovery changed the disabled configuration")
 	}
@@ -57,19 +57,19 @@ func TestOIDCDisableUnavailableProviderPreservesLastUsableOwner(t *testing.T) {
 		"issuer": issuer.Server.URL, "discovery_url": issuer.Server.URL + "/.well-known/openid-configuration",
 		"client_id": "test-client", "client_secret": "write-only-client-secret", "enabled": true,
 	}
-	saved := h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, nil, 200)
-	h.want(owner, "POST", "/api/v3/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
-	authorization := h.want(owner, "POST", "/api/v3/oidc/link", nil, nil, 200)["authorization_url"].(string)
+	saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, nil, 200)
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
+	authorization := h.want(owner, "POST", "/api/v1/oidc/link", nil, nil, 200)["authorization_url"].(string)
 	h.want(owner, "GET", issuer.callback(t, authorization, map[string]any{"sub": "owner-subject", "email": "owner@example.com"}), nil, nil, 303)
-	local := h.want(owner, "GET", "/api/v3/settings/auth.local_login_enabled", nil, nil, 200)
-	h.want(owner, "PUT", "/api/v3/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(local), 200)
+	local := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(local), 200)
 	issuer.Server.Close()
 	configuration["enabled"] = false
-	problem := h.want(owner, "PUT", "/api/v3/oidc/configuration", configuration, etagHeader(saved), 409)
+	problem := h.want(owner, "PUT", "/api/v1/oidc/configuration", configuration, etagHeader(saved), 409)
 	if problem["type"] != "https://openllmproxy.dev/problems/last_usable_owner" {
 		t.Fatal("disabling the last owner sign-in path was not rejected by owner protection")
 	}
-	current := h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200)
+	current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
 	if current["enabled"] != true || current["etag"] != saved["etag"] {
 		t.Fatal("a rejected disable changed the configuration")
 	}
@@ -103,14 +103,14 @@ func TestOIDCConfigurationRejectsPrivateAdvertisedEndpoints(t *testing.T) {
 			if field == "issuer" {
 				unsafe["issuer"] = privateEndpoint
 			}
-			rejected := h.want(owner, "PUT", "/api/v3/oidc/configuration", unsafe, nil, 422)
+			rejected := h.want(owner, "PUT", "/api/v1/oidc/configuration", unsafe, nil, 422)
 			if rejected["errors"].(map[string]any)["discovery_url"] == nil {
 				t.Fatal("unsafe advertised endpoint must be a discovery validation error")
 			}
-			h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 404)
-			saved := h.want(owner, "PUT", "/api/v3/oidc/configuration", valid, nil, 200)
-			h.want(owner, "PUT", "/api/v3/oidc/configuration", unsafe, etagHeader(saved), 422)
-			current := h.want(owner, "GET", "/api/v3/oidc/configuration", nil, nil, 200)
+			h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 404)
+			saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", valid, nil, 200)
+			h.want(owner, "PUT", "/api/v1/oidc/configuration", unsafe, etagHeader(saved), 422)
+			current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
 			if current["etag"] != saved["etag"] || current["discovery_url"] != saved["discovery_url"] || current["issuer"] != saved["issuer"] {
 				t.Fatal("a rejected endpoint changed the saved configuration")
 			}

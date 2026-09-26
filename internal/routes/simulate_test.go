@@ -31,7 +31,7 @@ func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
 			tc.slot.ID = uuid.NewString()
 			p.Slots = []runtime.Slot{tc.slot}
 			snapshot.Providers[first] = p
-			snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", []string{"generation"}, 3000, 1, targets)
+			snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, []string{"generation"}, 3000, 1, targets)
 			plan, err := runtime.PlanRequest(snapshot, "route", "generation", "openai", "unary", []byte("seed"), runtime.SelectionOptions{KeyID: uuid.NewString(), CheckSlots: true})
 			if err != nil || len(plan.Decisions) != 2 {
 				t.Fatal(plan, err)

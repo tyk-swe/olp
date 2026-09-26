@@ -8,7 +8,7 @@ docker pull --platform "${OLP_IMAGE_PLATFORM:?set the native image platform}" "$
 ./scripts/scan-image.sh "$OLP_CONSOLE_E2E_IMAGE" "${RUNNER_TEMP:-/tmp}/olp-candidate-scan"
 ./scripts/smoke-image-services.sh "$OLP_CONSOLE_E2E_IMAGE" "${OLP_IMAGE_PLATFORM#linux/}"
 project="olp-candidate-$$-$RANDOM"
-export OLP_GO_POSTGRES_PORT=0 OLP_GO_VALKEY_PORT=0
+export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0
 compose=(docker compose -p "$project" -f deploy/compose.dev.yaml)
 scratch=$(mktemp -d)
 cleanup() {
@@ -25,9 +25,9 @@ trap 'exit 143' TERM
 "${compose[@]}" up -d --wait --wait-timeout 90
 postgres=$("${compose[@]}" port postgres 5432)
 valkey=$("${compose[@]}" port valkey 6379)
-export OLP_TEST_DATABASE_ADMIN_URL="postgres://olp_go:olp-go-local@$postgres/postgres"
-export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp_go:olp-go-local@$postgres"
-export OLP_VALKEY_URL="redis://:olp-go-local@$valkey/0"
+export OLP_TEST_DATABASE_ADMIN_URL="postgres://olp:olp-local@$postgres/postgres"
+export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
+export OLP_VALKEY_URL="redis://:olp-local@$valkey/0"
 export OLP_LOCAL_DIR="$scratch"
 source scripts/secrets.sh "$scratch/secrets"
 export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"

@@ -189,7 +189,7 @@ func (s *Service) FinalizeDeletion(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	if finalized {
-		if _, err := tx.Exec(ctx, "DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", id); err != nil {
+		if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", id); err != nil {
 			return false, dbError(err)
 		}
 	}
@@ -224,7 +224,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	// provider revision the reservation recorded.
 	var raw []byte
 	err := s.Pool.QueryRow(ctx,
-		"SELECT snapshot FROM olp_go.runtime_releases WHERE id = $1", record.RuntimeGenerationID).Scan(&raw)
+		"SELECT snapshot FROM olp.runtime_releases WHERE id = $1", record.RuntimeGenerationID).Scan(&raw)
 	if err != nil {
 		return nil, 0, "media_job_runtime_unavailable"
 	}
@@ -244,19 +244,9 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 
 	var selected *runtime.Slot
 	for i := range provider.Slots {
-		slot := &provider.Slots[i]
-		if record.SlotID != nil {
-			if slot.ID == *record.SlotID {
-				selected = slot
-				break
-			}
-		} else if (slot.CredentialID == nil && record.CredentialVersionID == nil) ||
-			(slot.CredentialID != nil && record.CredentialVersionID != nil && *slot.CredentialID == *record.CredentialVersionID) {
-			// Legacy jobs can recover a slot only when the identity is unique.
-			if selected != nil {
-				return nil, 0, "media_job_slot_unavailable"
-			}
-			selected = slot
+		if provider.Slots[i].ID == record.SlotID {
+			selected = &provider.Slots[i]
+			break
 		}
 	}
 	if selected == nil {
@@ -305,7 +295,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 		}
 		defer tx.Rollback(ctx)
 		var valid bool
-		if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp_go.provider_network_credentials WHERE id=$1 AND provider_id=$2", id, provider.ID).Scan(&valid); err != nil || !valid {
+		if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", id, provider.ID).Scan(&valid); err != nil || !valid {
 			return nil, 0, "media_job_network_credential_unavailable"
 		}
 		networkSecret, err = s.Keys.Read(ctx, tx, s.Installation, id, "provider_credential")
@@ -579,7 +569,7 @@ func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimI
 	if err := finalizeDeletionClaimed(ctx, tx, record.ID, claimID); err != nil {
 		return mutationFailure(err)
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", record.ID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", record.ID); err != nil {
 		return mutationFailure(dbError(err))
 	}
 	if err := tx.Commit(ctx); err != nil {

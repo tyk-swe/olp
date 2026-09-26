@@ -2,7 +2,7 @@
 
 The bundled Helm chart deploys one immutable image in gateway, control, worker,
 and migration modes. This guide covers production topology;
-[`operations.md`](operations.md) covers monitoring, recovery, upgrades, and
+[`operations.md`](operations.md) covers monitoring, recovery, versions, and
 incidents.
 
 ## Prerequisites and secrets
@@ -20,11 +20,10 @@ before installing (names and keys are configurable through `config`):
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
-Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Rust 2.x and
-Rust 3.x storage cannot be upgraded in place; use isolated Valkey state as well.
-New installations also need a 32-byte base64 bootstrap-token Secret mounted only
-into control pods. Keep all secret values out of values files and shell history;
-the chart schema validates configured names and keys.
+Provision an empty PostgreSQL database for each installation and a JSON
+master-key ring. A new installation also needs a 32-byte base64 bootstrap-token
+Secret mounted only into control pods. Keep all secret values out of values
+files and shell history; the chart schema validates configured names and keys.
 
 ### Shared Valkey and workers
 
@@ -39,14 +38,15 @@ three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
 consume work concurrently; PostgreSQL advisory locks serialize maintenance and
 cost reconciliation, and Valkey consumer groups reclaim metadata ownership.
 Runtime releases publish transactionally with their activating mutation, not
-through a worker outbox. The worker Deployment uses `Recreate`: mixed-version
-workers are not supported during schema changes.
+through a worker outbox. The worker Deployment uses `Recreate`, so two worker
+versions never run at once. OLP supports no mixed-version deployment during 0.x;
+see [installation and versions](operations.md#installation-and-versions).
 
 ## Release artifacts
 
 The release workflow publishes the multi-architecture image to
 `ghcr.io/tyk-swe/olp` and the chart to
-`oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 3.x version and
+`oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 0.x version and
 pin its image digest for production. When testing this source tree before
 publication, build `deploy/Dockerfile` and package `deploy/helm` locally.
 Publication depends on the tagged commit passing check, dependency policy and
@@ -70,7 +70,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  tag: "3.0.0"
+  tag: "0.1.0"
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
@@ -180,8 +180,8 @@ Migration pods have no listener and deny ingress.
 Egress defaults to allow-all. Provider endpoints are arbitrary public HTTPS
 hosts, and the chart never sees the PostgreSQL or Valkey addresses —
 `config.databaseSecretName` and `config.valkeySecretName` hold opaque connection
-URLs — so a restrictive default would break every installation on first upgrade.
-Harden it once those addresses are known:
+URLs — so a restrictive default would break every installation. Harden it once
+those addresses are known:
 
 ```yaml
 networkPolicy:
@@ -214,7 +214,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.tag=3.0.0 \
+  --set-string image.tag=0.1.0 \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -225,9 +225,9 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 3.0.0 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 0.1.0 \
   --namespace olp --create-namespace \
-  --set-string image.tag=3.0.0 \
+  --set-string image.tag=0.1.0 \
   --values production-values.yaml --timeout 20m --wait
 ```
 

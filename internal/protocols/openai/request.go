@@ -534,9 +534,9 @@ func (r *Request) EncodeWithProvenance(upstreamModel string, defaults map[string
 	return body, provenance, err
 }
 
-// EncodeFieldsWithProvenance gives the legacy dialect adapter its owned
+// EncodeFieldsWithProvenance gives the transformed dialect codec its owned
 // destination fields without a serialize/parse round trip. The source remains
-// immutable; profile-specific legacy lowering can inspect this working copy.
+// immutable; profile-specific transformed lowering can inspect this working copy.
 func (r *Request) EncodeFieldsWithProvenance(upstreamModel string, defaults map[string]json.RawMessage) (map[string]json.RawMessage, []oif.Provenance, error) {
 	var provenance []oif.Provenance
 	fields, err := r.encodeFields(upstreamModel, defaults, func(name string) {

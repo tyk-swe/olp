@@ -56,7 +56,7 @@
     queryFn: async ({ queryKey, signal }) => {
       const [, keyScope, keyId] = queryKey as [unknown, Scope, string, unknown];
       const response = await apiClient.GET(
-        '/api/v3/routing-policies/{scope}/{id}',
+        '/api/v1/routing-policies/{scope}/{id}',
         {
           params: { path: { scope: keyScope, id: keyId } },
           signal
@@ -162,7 +162,7 @@
       const body: Policy = JSON.parse(text);
       const previousEtag = policy.data.etag;
       const response = await apiClient.PUT(
-        '/api/v3/routing-policies/{scope}/{id}',
+        '/api/v1/routing-policies/{scope}/{id}',
         {
           params: { path: { scope: actionScope, id: actionId } },
           headers: {

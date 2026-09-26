@@ -10,7 +10,7 @@ export type OidcConfigurationInput = Schemas['OidcConfigurationRequest'];
 export async function getOidcConfiguration(
   signal?: AbortSignal
 ): Promise<OidcConfiguration | null> {
-  const response = await apiClient.GET('/api/v3/oidc/configuration', {
+  const response = await apiClient.GET('/api/v1/oidc/configuration', {
     signal
   });
   if (response.response.status === 404) return null;
@@ -21,7 +21,7 @@ export async function putOidcConfiguration(
   input: OidcConfigurationInput,
   etag?: string
 ): Promise<OidcConfiguration> {
-  const response = await apiClient.PUT('/api/v3/oidc/configuration', {
+  const response = await apiClient.PUT('/api/v1/oidc/configuration', {
     params: { header: { 'If-Match': etag ?? null } },
     body: input
   });
@@ -29,7 +29,7 @@ export async function putOidcConfiguration(
 }
 
 export async function beginOidcLink(): Promise<string> {
-  const response = await apiClient.POST('/api/v3/oidc/link');
+  const response = await apiClient.POST('/api/v1/oidc/link');
   return result(response.data, response.error, response.response)
     .authorization_url;
 }

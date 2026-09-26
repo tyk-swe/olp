@@ -168,7 +168,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		var retainedRoute *runtime.Route
-		p, retainedRoute, e = s.resolveResource(ctx, x, authority, parent, "generation")
+		p, retainedRoute, e = s.resolveResource(ctx, x, authority, parent, "generation", retainedNewWork)
 		if e != nil || retainedRoute == nil || retainedRoute.Slug != route.Slug || p.provider.ProfileID != "gemini-interactions" || !p.provider.Supports(p.model, "generation", "gemini", x.mode) {
 			fail(pinUnavailable())
 			return
@@ -443,7 +443,11 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	x.estimate = resourceEstimate
 	var retained *runtime.Route
 	var e *Error
-	p, retained, e = s.resolveResource(ctx, x, authority, res, "generation")
+	use := retainedHousekeeping
+	if r.Method == http.MethodGet {
+		use = retainedRetrieval
+	}
+	p, retained, e = s.resolveResource(ctx, x, authority, res, "generation", use)
 	if e != nil || retained == nil || retained.Slug != current.Slug || p.provider.ProfileID != "gemini-interactions" || !p.provider.Supports(p.model, "generation", "gemini", x.mode) {
 		fail(pinUnavailable())
 		return

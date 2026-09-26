@@ -40,10 +40,10 @@ const BudgetSQL = `(SELECT jsonb_build_object(` +
 	`COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts` +
 	` FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,` +
 	`CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint` +
-	` AS unpriced_attempts FROM olp_go.attempt_usage_facts f` +
+	` AS unpriced_attempts FROM olp.attempt_usage_facts f` +
 	` WHERE f.api_key_id=k.id AND f.observed_at>=w.monthly_start AND f.observed_at<w.monthly_end` +
 	` UNION ALL SELECT h.bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
-	` FROM olp_go.attempt_usage_hourly h` +
+	` FROM olp.attempt_usage_hourly h` +
 	` WHERE h.api_key_id=k.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
 
 const GroupBudgetSQL = `(SELECT jsonb_build_object(` +
@@ -66,10 +66,10 @@ const GroupBudgetSQL = `(SELECT jsonb_build_object(` +
 	`COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts` +
 	` FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,` +
 	`CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint` +
-	` AS unpriced_attempts FROM olp_go.attempt_usage_facts f` +
+	` AS unpriced_attempts FROM olp.attempt_usage_facts f` +
 	` WHERE f.budget_group_id=g.id AND f.observed_at>=w.monthly_start AND f.observed_at<w.monthly_end` +
 	` UNION ALL SELECT h.bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
-	` FROM olp_go.attempt_usage_hourly h` +
+	` FROM olp.attempt_usage_hourly h` +
 	` WHERE h.budget_group_id=g.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
 
 // Windows are the fixed UTC day and month a cost budget is measured over.
@@ -198,12 +198,12 @@ const addCostDeltaSQL = `WITH deltas (window_kind, window_id, accrued, unpriced_
   VALUES ('day'::text, $2::bigint, $3::text::numeric, 0::bigint),
          ('month'::text, $4::bigint, $3::text::numeric, $5::bigint)
 ), applied AS (
-  INSERT INTO olp_go.api_key_cost_windows
+  INSERT INTO olp.api_key_cost_windows
     (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
   SELECT $1::uuid, window_kind, window_id, accrued, unpriced_attempts FROM deltas
   ON CONFLICT (api_key_id, window_kind, window_id) DO UPDATE SET
-    accrued = olp_go.api_key_cost_windows.accrued + EXCLUDED.accrued,
-    unpriced_attempts = olp_go.api_key_cost_windows.unpriced_attempts
+    accrued = olp.api_key_cost_windows.accrued + EXCLUDED.accrued,
+    unpriced_attempts = olp.api_key_cost_windows.unpriced_attempts
                         + EXCLUDED.unpriced_attempts
   RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts
 ) SELECT api_key_id::text,
@@ -218,12 +218,12 @@ const addGroupCostDeltaSQL = `WITH deltas (window_kind,window_id,accrued,unprice
  VALUES ('day'::text,$2::bigint,$3::text::numeric,0::bigint),
         ('month'::text,$4::bigint,$3::text::numeric,$5::bigint)
 ), applied AS (
- INSERT INTO olp_go.budget_group_cost_windows
+ INSERT INTO olp.budget_group_cost_windows
    (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
  SELECT $1::uuid,window_kind,window_id,accrued,unpriced_attempts FROM deltas
  ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
-   accrued=olp_go.budget_group_cost_windows.accrued+EXCLUDED.accrued,
-   unpriced_attempts=olp_go.budget_group_cost_windows.unpriced_attempts+EXCLUDED.unpriced_attempts
+   accrued=olp.budget_group_cost_windows.accrued+EXCLUDED.accrued,
+   unpriced_attempts=olp.budget_group_cost_windows.unpriced_attempts+EXCLUDED.unpriced_attempts
  RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
 ) SELECT budget_group_id::text,
  MAX(window_id) FILTER (WHERE window_kind='day')::bigint,
@@ -268,21 +268,21 @@ func addOwnerDelta(ctx context.Context, tx pgx.Tx, query string, ownerID string,
 // facts can still see, which is what makes reconciliation safe to repeat after
 // retention has rolled attempts up.
 const reconciliationSnapshotsSQL = `WITH active_keys AS (
-  SELECT id AS api_key_id FROM olp_go.api_keys
+  SELECT id AS api_key_id FROM olp.api_keys
   WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $1::timestamptz)
 ), usage AS (
   SELECT fact.api_key_id, fact.observed_at,
          COALESCE(fact.estimated_cost, 0)::numeric AS cost,
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.unpriced
               THEN 1 ELSE 0 END::bigint AS unpriced_attempts
-  FROM olp_go.attempt_usage_facts fact
+  FROM olp.attempt_usage_facts fact
   JOIN active_keys key ON key.api_key_id = fact.api_key_id
   WHERE fact.observed_at >= $3::timestamptz AND fact.observed_at < $4::timestamptz
   UNION ALL
   SELECT hourly.api_key_id, hourly.bucket,
          COALESCE(hourly.estimated_cost, 0)::numeric,
          hourly.unpriced_attempt_count
-  FROM olp_go.attempt_usage_hourly hourly
+  FROM olp.attempt_usage_hourly hourly
   JOIN active_keys key ON key.api_key_id = hourly.api_key_id
   WHERE hourly.bucket >= $3::timestamptz AND hourly.bucket < $4::timestamptz
 ), totals AS (
@@ -295,7 +295,7 @@ const reconciliationSnapshotsSQL = `WITH active_keys AS (
   FROM active_keys key LEFT JOIN usage ON usage.api_key_id = key.api_key_id
   GROUP BY key.api_key_id
 ), pruned AS (
-  DELETE FROM olp_go.api_key_cost_windows
+  DELETE FROM olp.api_key_cost_windows
   WHERE (window_kind = 'day' AND window_id < $5::bigint)
      OR (window_kind = 'month' AND window_id < $6::bigint) RETURNING 1
 ), desired AS (
@@ -304,12 +304,12 @@ const reconciliationSnapshotsSQL = `WITH active_keys AS (
   UNION ALL
   SELECT api_key_id, 'month', $6::bigint, monthly_accrued, unpriced_attempts FROM totals
 ), reconciled AS (
-  INSERT INTO olp_go.api_key_cost_windows
+  INSERT INTO olp.api_key_cost_windows
     (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
   SELECT api_key_id, window_kind, window_id, accrued, unpriced_attempts FROM desired
   ON CONFLICT (api_key_id, window_kind, window_id) DO UPDATE SET
-    accrued = GREATEST(olp_go.api_key_cost_windows.accrued, EXCLUDED.accrued),
-    unpriced_attempts = GREATEST(olp_go.api_key_cost_windows.unpriced_attempts,
+    accrued = GREATEST(olp.api_key_cost_windows.accrued, EXCLUDED.accrued),
+    unpriced_attempts = GREATEST(olp.api_key_cost_windows.unpriced_attempts,
                                  EXCLUDED.unpriced_attempts)
   RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts
 ) SELECT api_key_id::text, $5::bigint,
@@ -320,17 +320,17 @@ const reconciliationSnapshotsSQL = `WITH active_keys AS (
   FROM reconciled GROUP BY api_key_id ORDER BY api_key_id`
 
 const reconciliationGroupSnapshotsSQL = `WITH active_groups AS (
- SELECT id AS budget_group_id FROM olp_go.budget_groups
+ SELECT id AS budget_group_id FROM olp.budget_groups
  WHERE $1::timestamptz IS NOT NULL
    AND (daily_cost_limit IS NOT NULL OR monthly_cost_limit IS NOT NULL)
 ), usage AS (
  SELECT fact.budget_group_id,fact.observed_at,COALESCE(fact.estimated_cost,0)::numeric AS cost,
    CASE WHEN fact.charge_status<>'not_billable' AND fact.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts
- FROM olp_go.attempt_usage_facts fact JOIN active_groups g USING (budget_group_id)
+ FROM olp.attempt_usage_facts fact JOIN active_groups g USING (budget_group_id)
  WHERE fact.observed_at >= $3::timestamptz AND fact.observed_at < $4::timestamptz
  UNION ALL
  SELECT hourly.budget_group_id,hourly.bucket,COALESCE(hourly.estimated_cost,0)::numeric,hourly.unpriced_attempt_count
- FROM olp_go.attempt_usage_hourly hourly JOIN active_groups g USING (budget_group_id)
+ FROM olp.attempt_usage_hourly hourly JOIN active_groups g USING (budget_group_id)
  WHERE hourly.bucket >= $3::timestamptz AND hourly.bucket < $4::timestamptz
 ), totals AS (
  SELECT g.budget_group_id,
@@ -339,18 +339,18 @@ const reconciliationGroupSnapshotsSQL = `WITH active_groups AS (
   COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts
  FROM active_groups g LEFT JOIN usage u USING (budget_group_id) GROUP BY g.budget_group_id
 ), pruned AS (
- DELETE FROM olp_go.budget_group_cost_windows
+ DELETE FROM olp.budget_group_cost_windows
  WHERE (window_kind='day' AND window_id<$5::bigint) OR (window_kind='month' AND window_id<$6::bigint) RETURNING 1
 ), desired AS (
  SELECT budget_group_id,'day'::text AS window_kind,$5::bigint AS window_id,daily_accrued AS accrued,0::bigint AS unpriced_attempts FROM totals
  UNION ALL
  SELECT budget_group_id,'month',$6::bigint,monthly_accrued,unpriced_attempts FROM totals
 ), reconciled AS (
- INSERT INTO olp_go.budget_group_cost_windows (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
+ INSERT INTO olp.budget_group_cost_windows (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
  SELECT budget_group_id,window_kind,window_id,accrued,unpriced_attempts FROM desired
  ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
-  accrued=GREATEST(olp_go.budget_group_cost_windows.accrued,EXCLUDED.accrued),
-  unpriced_attempts=GREATEST(olp_go.budget_group_cost_windows.unpriced_attempts,EXCLUDED.unpriced_attempts)
+  accrued=GREATEST(olp.budget_group_cost_windows.accrued,EXCLUDED.accrued),
+  unpriced_attempts=GREATEST(olp.budget_group_cost_windows.unpriced_attempts,EXCLUDED.unpriced_attempts)
  RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
 ) SELECT budget_group_id::text,$5::bigint,
  MAX(accrued) FILTER (WHERE window_kind='day')::text,$6::bigint,

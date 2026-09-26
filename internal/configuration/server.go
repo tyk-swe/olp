@@ -20,9 +20,9 @@ type Server struct {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/configuration/export", s.Access.Handle(s.export))
-	mux.HandleFunc("POST /api/v3/configuration/plan", s.Access.HandleWith(4<<20, s.planEndpoint))
-	mux.HandleFunc("POST /api/v3/configuration/apply", s.Access.HandleTimeout(4<<20, 60*time.Second, s.applyEndpoint))
+	mux.HandleFunc("GET /api/v1/configuration/export", s.Access.Handle(s.export))
+	mux.HandleFunc("POST /api/v1/configuration/plan", s.Access.HandleWith(4<<20, s.planEndpoint))
+	mux.HandleFunc("POST /api/v1/configuration/apply", s.Access.HandleTimeout(4<<20, 60*time.Second, s.applyEndpoint))
 }
 
 func (s *Server) principal(r *http.Request, q access.Queryer) (access.Principal, error) {

@@ -117,15 +117,15 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 		return nil, false, err
 	}
 	out, err := scan(s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
- SELECT id FROM olp_go.api_keys WHERE id=$3 AND revoked_at IS NULL
+ SELECT id FROM olp.api_keys WHERE id=$3 AND revoked_at IS NULL
    AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
 ), parent AS MATERIALIZED (
- SELECT id FROM olp_go.provider_resources WHERE id=$15 AND api_key_id=$3
+ SELECT id FROM olp.provider_resources WHERE id=$15 AND api_key_id=$3
    AND kind=$2 AND state=$19 AND expires_at>now() FOR SHARE
 ), active AS MATERIALIZED (
- SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE
+ SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE
 ), inserted AS (
- INSERT INTO olp_go.provider_resources
+ INSERT INTO olp.provider_resources
  (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id)
  SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
  FROM owner CROSS JOIN active
@@ -134,7 +134,7 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
  ON CONFLICT(api_key_id,submission_id) WHERE submission_id IS NOT NULL DO NOTHING
  RETURNING `+columns+`
 ), stored AS (
- INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at)
+ INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at)
  SELECT id,$20,$17,$18,expires_at FROM inserted
  ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
    ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
@@ -163,15 +163,15 @@ func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, bool
 	}
 	if r.ParentID != nil {
 		var valid bool
-		err = tx.QueryRow(ctx, `SELECT true FROM olp_go.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state=$4 AND expires_at>now() FOR SHARE`, *r.ParentID, r.APIKeyID, KindContinuation, StateReady).Scan(&valid)
+		err = tx.QueryRow(ctx, `SELECT true FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state=$4 AND expires_at>now() FOR SHARE`, *r.ParentID, r.APIKeyID, KindContinuation, StateReady).Scan(&valid)
 		if err != nil || !valid {
 			return nil, false, ErrNotFound
 		}
 	}
-	out, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`, r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
+	out, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`, r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		var active int
-		if keyErr := tx.QueryRow(ctx, `SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE`).Scan(&active); keyErr != nil {
+		if keyErr := tx.QueryRow(ctx, `SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE`).Scan(&active); keyErr != nil {
 			return nil, false, keyErr
 		}
 		if active != s.keys.Active {
@@ -191,7 +191,7 @@ func (s *Store) MarkUnknown(ctx context.Context, r *Resource) error {
 	return s.transition(ctx, r, StateDispatching, StateUnknown)
 }
 func (s *Store) transition(ctx context.Context, r *Resource, from, to string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$4,updated_at=now() WHERE id=$1 AND api_key_id=$2 AND state=$3 AND kind=$5 AND expires_at>now()`, r.UUID, r.APIKeyID, from, to, KindContinuation)
+	tag, err := s.pool.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,updated_at=now() WHERE id=$1 AND api_key_id=$2 AND state=$3 AND kind=$5 AND expires_at>now()`, r.UUID, r.APIKeyID, from, to, KindContinuation)
 	if err != nil {
 		return err
 	}
@@ -216,17 +216,17 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
 	// commit together, while owner and installation rows stay shared-locked.
 	var owner, active, updated, stored bool
 	err = s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
- SELECT id FROM olp_go.api_keys WHERE id=$1 AND revoked_at IS NULL
+ SELECT id FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL
    AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
 ), active AS MATERIALIZED (
- SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE
+ SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE
 ), updated AS (
- UPDATE olp_go.provider_resources AS r SET state=$4,updated_at=now()
+ UPDATE olp.provider_resources AS r SET state=$4,updated_at=now()
  FROM owner,active
  WHERE r.id=$2 AND r.api_key_id=$1 AND r.state=$3 AND r.kind=$5
    AND r.expires_at>now() AND active.active_key_version=$6 RETURNING r.id
 ), stored AS (
- INSERT INTO olp_go.secrets(id,purpose,key_version,ciphertext,expires_at)
+ INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at)
  SELECT id,$7,$6,$8,$9 FROM updated
  ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
    ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
@@ -273,7 +273,7 @@ func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (
 	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
 		return nil, nil, err
 	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
+	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
@@ -291,7 +291,7 @@ func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (
 }
 func (s *Store) FindSubmission(ctx context.Context, owner, submission string) (*Resource, []byte, error) {
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `SELECT id FROM olp_go.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3`, owner, submission, KindContinuation).Scan(&id)
+	err := s.pool.QueryRow(ctx, `SELECT id FROM olp.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3`, owner, submission, KindContinuation).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
@@ -302,7 +302,7 @@ func (s *Store) FindSubmission(ctx context.Context, owner, submission string) (*
 }
 func (s *Store) authorizeOwner(ctx context.Context, tx pgx.Tx, owner string) error {
 	var valid bool
-	err := tx.QueryRow(ctx, `SELECT true FROM olp_go.api_keys WHERE id=$1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) FOR SHARE`, owner).Scan(&valid)
+	err := tx.QueryRow(ctx, `SELECT true FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) FOR SHARE`, owner).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -334,7 +334,7 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 	if len(copy.Metadata) == 0 {
 		copy.Metadata = []byte(`{}`)
 	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp_go.provider_resources
+	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
  (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
 		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID))

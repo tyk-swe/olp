@@ -11,7 +11,7 @@ export async function listRuntimeGenerations(
   cursor?: string
 ): Promise<CursorPage<RuntimeGeneration>> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/runtime-generations',
+    '/api/v1/runtime-generations',
     {
       params: {
         query: compactQuery({ cursor, limit: RUNTIME_GENERATION_PAGE_SIZE })

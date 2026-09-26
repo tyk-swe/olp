@@ -67,10 +67,10 @@ type sourceDocument struct {
 }
 
 const sourceColumns = `SELECT id::text, name, url, enabled, etag::text, created_by::text,
-        created_at, updated_at FROM olp_go.pricing_sources`
+        created_at, updated_at FROM olp.pricing_sources`
 
 const snapshotColumns = `SELECT id::text, source_id::text, sha256, document,
-        fetched_at FROM olp_go.pricing_source_snapshots`
+        fetched_at FROM olp.pricing_source_snapshots`
 
 func scanSource(row pgx.Row) (Source, error) {
 	var source Source
@@ -195,7 +195,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 	}
 	id, etag := access.NewID(), access.NewID()
 	source, err := scanSource(tx.QueryRow(r.Context(),
-		`INSERT INTO olp_go.pricing_sources (id, name, url, enabled, etag, created_by)
+		`INSERT INTO olp.pricing_sources (id, name, url, enabled, etag, created_by)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id::text, name, url, enabled, etag::text, created_by::text, created_at, updated_at`,
 		id, strings.TrimSpace(input.Name), strings.TrimSpace(input.URL), enabled, etag, principal.UserID()))
@@ -203,7 +203,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, ETag: source.ETag,
-		Location: "/api/v3/pricing/sources/" + source.ID, Body: source}
+		Location: "/api/v1/pricing/sources/" + source.ID, Body: source}
 	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.create",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
@@ -290,7 +290,7 @@ func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
 		}
 	}
 	source, err = scanSource(tx.QueryRow(r.Context(),
-		`UPDATE olp_go.pricing_sources SET name=$2, url=$3, enabled=$4, etag=$5, updated_at=now()
+		`UPDATE olp.pricing_sources SET name=$2, url=$3, enabled=$4, etag=$5, updated_at=now()
 		 WHERE id=$1
 		 RETURNING id::text, name, url, enabled, etag::text, created_by::text, created_at, updated_at`,
 		id, name, rawURL, enabled, access.NewID()))
@@ -413,7 +413,7 @@ func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	snapshot, err := scanSnapshot(tx.QueryRow(r.Context(),
-		`INSERT INTO olp_go.pricing_source_snapshots (id, source_id, sha256, document)
+		`INSERT INTO olp.pricing_source_snapshots (id, source_id, sha256, document)
 		 VALUES ($1, $2, $3, $4::jsonb)
 		 ON CONFLICT (source_id, sha256) DO UPDATE SET source_id = EXCLUDED.source_id
 		 RETURNING id::text, source_id::text, sha256, document, fetched_at`,
@@ -603,7 +603,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, er
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(),
-		"UPDATE olp_go.pricing_revisions SET source_snapshot_id=$1 WHERE id=$2",
+		"UPDATE olp.pricing_revisions SET source_snapshot_id=$1 WHERE id=$2",
 		snapshot.ID, revision.ID); err != nil {
 		return access.Reply{}, fmt.Errorf("record pricing provenance: %w", err)
 	}

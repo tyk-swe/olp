@@ -21,7 +21,7 @@ export type MediaJobFilters = {
 export async function listMediaJobs(
   filters: MediaJobFilters
 ): Promise<CursorPage<MediaJob>> {
-  const { data, error, response } = await apiClient.GET('/api/v3/media-jobs', {
+  const { data, error, response } = await apiClient.GET('/api/v1/media-jobs', {
     params: { query: compactQuery(filters) }
   });
   return pageResult(result(data, error, response));
@@ -29,7 +29,7 @@ export async function listMediaJobs(
 
 export async function getMediaJob(jobId: string): Promise<MediaJob> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/media-jobs/{job_id}',
+    '/api/v1/media-jobs/{job_id}',
     { params: { path: { job_id: jobId } } }
   );
   return result(data, error, response);
@@ -37,7 +37,7 @@ export async function getMediaJob(jobId: string): Promise<MediaJob> {
 
 export async function refreshMediaJob(jobId: string): Promise<MediaJob> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/media-jobs/{job_id}/refresh',
+    '/api/v1/media-jobs/{job_id}/refresh',
     { params: { path: { job_id: jobId } } }
   );
   return result(data, error, response);
@@ -48,7 +48,7 @@ export async function deleteMediaJob(
   etag: string
 ): Promise<void> {
   const { error, response } = await apiClient.DELETE(
-    '/api/v3/media-jobs/{job_id}',
+    '/api/v1/media-jobs/{job_id}',
     {
       params: {
         path: { job_id: jobId },
@@ -66,7 +66,7 @@ export async function downloadMediaJobContent(
   variant: MediaContentVariant
 ): Promise<{ blob: Blob; filename: string }> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/media-jobs/{job_id}/content',
+    '/api/v1/media-jobs/{job_id}/content',
     {
       params: {
         path: { job_id: jobId },

@@ -39,11 +39,6 @@ official JavaScript SDKs, and Chromium journeys at packaged and Vite origins.
 Both origins run replacement recovery into an empty database with a separate
 Valkey service. Failure-path restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
-The September 19, 2026 run at `bf46237fbc6f` failed the hosted API-key journey's
-accessibility check: hovered dark-theme table helper text measured 4.39:1
-contrast against a 4.5:1 requirement. That run did not complete browser
-qualification or its later restore stages. Keep the assertion enabled and use
-current CI evidence to determine whether the failure still applies.
 
 Service-dependent Go tests require the `integration` build tag, even when they
 live beside feature code. They fail with setup guidance when their required
@@ -68,31 +63,11 @@ CI. Set `OLP_LIVE_PROVIDER` and run
 main-branch `live-providers` workflow. Its configuration lists required secrets
 and cloud identity variables. Live calls consume provider quota.
 
-## Qualification evidence
+## Contract and browser coverage
 
-Fidelity release validation retains every feature and functional gate and adds
-a [bounded strict performance smoke](../docs/qualification/fidelity/release-validation.md).
-Long statistical quality/performance studies are optional. Superseded study
-runners, their runner-specific tests and raw captures have a
-[commit-pinned archive](../docs/evidence/fidelity-performance/archive.md);
-`make test-scripts` discovers all retained `scripts/*.test.mjs` automatically.
-No public behavior or semantic integration tests were retired with those runners.
-
-The independent [frozen reference](fixtures/reference-inventory.json) preserves
-100 management tuples, 77 inference tuples, 133 suite sources, and SHA-256
-hashes of the 18 neutral fixtures. [Behavior mappings](release-behaviors.json)
-explicitly name successor tests and explain retired Rust-only harnesses. Never
-regenerate the reference from current Go code.
-`node scripts/release-inventory.mjs` rejects changed fixtures, lost
-operation/capability tuples, missing mappings, and missing named tests, then
-writes current inventories under `deploy/`. Its script tests exercise negative
-mapping validation. The integration registration check walks the **current
-embedded contract**, which can include operations beyond the frozen baseline.
-Neither an inventory nor a named test's existence proves execution.
-
-The [September 18 qualification](../docs/roadmap/README.md) is historical and
-applies only to its recorded source and image. Use current CI results for
-current code. Browser journeys cover accounting, cloud configuration, bulk
-certification, grouped routes, pools, policy exclusions, preview, publication,
-playground, and replacement recovery through deterministic local providers, not
-paid accounts.
+The release contract test, run inside the process suite, checks that every
+operation in the embedded OpenAPI contract reaches a handler. A test's existence
+does not prove it ran; use CI results for the commit you are checking. Browser
+journeys cover accounting, cloud configuration, bulk certification, grouped
+routes, pools, policy exclusions, preview, publication, playground, and
+replacement recovery through deterministic local providers, not paid accounts.

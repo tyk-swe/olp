@@ -1,32 +1,32 @@
-name: olp-go-dev
+name: olp-dev
 services:
   postgres:
     image: postgres:18
     environment:
-      POSTGRES_USER: olp_go
-      POSTGRES_PASSWORD: olp-go-local
-      POSTGRES_DB: olp_go
+      POSTGRES_USER: olp
+      POSTGRES_PASSWORD: olp-local
+      POSTGRES_DB: olp
     ports:
-      - '127.0.0.1:${OLP_GO_POSTGRES_PORT:-54321}:5432'
+      - '127.0.0.1:${OLP_POSTGRES_PORT:-54321}:5432'
     volumes:
-      - postgres-go:/var/lib/postgresql
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U olp_go -d olp_go']
+      test: ['CMD-SHELL', 'pg_isready -U olp -d olp']
       interval: 1s
       timeout: 3s
       retries: 60
   valkey:
     image: valkey/valkey:9
-    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-go-local']
+    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-local']
     ports:
-      - '127.0.0.1:${OLP_GO_VALKEY_PORT:-63791}:6379'
+      - '127.0.0.1:${OLP_VALKEY_PORT:-63791}:6379'
     volumes:
-      - valkey-go:/data
+      - valkey-data:/data
     healthcheck:
-      test: ['CMD', 'valkey-cli', '-a', 'olp-go-local', 'ping']
+      test: ['CMD', 'valkey-cli', '-a', 'olp-local', 'ping']
       interval: 1s
       timeout: 3s
       retries: 60
 volumes:
-  postgres-go:
-  valkey-go:
+  postgres-data:
+  valkey-data:

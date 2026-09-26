@@ -17,7 +17,7 @@ const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
 const valkeyUrl = process.env.OLP_VALKEY_URL;
 if (!databaseUrl) {
   throw new Error(
-    'OLP_CONSOLE_E2E_DATABASE_URL is required for the Go-hosted console integration'
+    'OLP_CONSOLE_E2E_DATABASE_URL is required for the hosted console integration'
   );
 }
 if (!masterKeyFile) {

@@ -24,7 +24,7 @@ func DecodeRequest(wire, target openai.Family, body []byte, route, encoding stri
 
 func decode(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
 	if wire == openai.FamilyChat || wire == openai.FamilyResponses {
-		return decodeLegacy(wire, target, body, route, encoding, request)
+		return decodeTransformed(wire, target, body, route, encoding, request)
 	}
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
@@ -34,7 +34,7 @@ func decode(wire, target openai.Family, body []byte, route, encoding string, req
 	if err != nil {
 		return nil, protocolError("unregistered result contract")
 	}
-	c, err := decodeLegacy(wire, target, result.Source().Bytes(), route, encoding, request)
+	c, err := decodeTransformed(wire, target, result.Source().Bytes(), route, encoding, request)
 	if c != nil {
 		c.Native = result
 		if wire == openai.FamilyBedrock && target == wire {
@@ -45,7 +45,11 @@ func decode(wire, target openai.Family, body []byte, route, encoding string, req
 	}
 	return c, err
 }
-func decodeLegacy(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
+
+// decodeTransformed is the family result codec. It translates a completion
+// when the target dialect differs; strict callers pass wire == target, so it
+// only applies the native grammar.
+func decodeTransformed(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
 	var c *openai.Completion
 	var err error
 	switch wire {

@@ -50,7 +50,7 @@ export type RequestFilters = {
 export async function listRequests(
   filters: RequestFilters
 ): Promise<CursorPage<RequestSummary>> {
-  const { data, error, response } = await apiClient.GET('/api/v3/requests', {
+  const { data, error, response } = await apiClient.GET('/api/v1/requests', {
     params: { query: compactQuery(filters) }
   });
   return pageResult(result(data, error, response));
@@ -58,7 +58,7 @@ export async function listRequests(
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/requests/{request_id}',
+    '/api/v1/requests/{request_id}',
     { params: { path: { request_id: requestId } } }
   );
   return result(data, error, response);

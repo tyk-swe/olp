@@ -60,7 +60,7 @@ const epochColumns = `SELECT gateway_instance, process_epoch::text, started_at, 
         stale_detected_at, acknowledged_at, acknowledged_by::text, uncertainty_gap_id::text,
         CASE WHEN stale_detected_at IS NOT NULL
              THEN GREATEST(accepted - persisted - abandoned, 0) ELSE 0 END
-    FROM olp_go.request_metadata_gateway_epochs WHERE true`
+    FROM olp.request_metadata_gateway_epochs WHERE true`
 
 // ListGatewayEpochs pages process epochs by their last durable checkpoint. An
 // unknown state filter is refused rather than ignored: a silently unfiltered
@@ -164,7 +164,7 @@ func AcknowledgeGatewayEpoch(ctx context.Context, tx pgx.Tx, processEpoch, actor
 	var acknowledgedAt *time.Time
 	var acknowledgedBy *string
 	err := tx.QueryRow(ctx, `SELECT gateway_instance, acknowledged_at, acknowledged_by::text
-            FROM olp_go.request_metadata_gateway_epochs
+            FROM olp.request_metadata_gateway_epochs
             WHERE process_epoch = $1 AND stale_detected_at IS NOT NULL FOR UPDATE`, processEpoch).
 		Scan(&instance, &acknowledgedAt, &acknowledgedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -180,7 +180,7 @@ func AcknowledgeGatewayEpoch(ctx context.Context, tx pgx.Tx, processEpoch, actor
 	// The stored acknowledgement never precedes detection, so the row cannot
 	// claim an operator saw the loss before it was recorded.
 	var stamped time.Time
-	if err = tx.QueryRow(ctx, `UPDATE olp_go.request_metadata_gateway_epochs
+	if err = tx.QueryRow(ctx, `UPDATE olp.request_metadata_gateway_epochs
             SET acknowledged_at = GREATEST($1, stale_detected_at), acknowledged_by = $2
             WHERE process_epoch = $3 AND acknowledged_at IS NULL
             RETURNING acknowledged_at, acknowledged_by::text`,

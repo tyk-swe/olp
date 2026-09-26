@@ -23,7 +23,7 @@ export async function listRequestMetadataGatewayEpochs(
   cursor?: string
 ): Promise<CursorPage<RequestMetadataGatewayEpoch>> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/request-metadata/gateway-epochs',
+    '/api/v1/request-metadata/gateway-epochs',
     { params: { query: { state, cursor, limit: GATEWAY_EPOCH_PAGE_SIZE } } }
   );
   return pageResult(result(data, error, response));
@@ -33,14 +33,14 @@ export async function acknowledgeRequestMetadataGatewayEpoch(
   processEpoch: string
 ): Promise<RequestMetadataEpochAcknowledgement> {
   const { data, error, response } = await apiClient.POST(
-    '/api/v3/request-metadata/gateway-epochs/{process_epoch}/acknowledge',
+    '/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge',
     { params: { path: { process_epoch: processEpoch } } }
   );
   return result(data, error, response);
 }
 
 export async function getReadiness(): Promise<Readiness> {
-  const { data, error, response } = await apiClient.GET('/api/v3/health/ready');
+  const { data, error, response } = await apiClient.GET('/api/v1/health/ready');
   return result(data, error, response);
 }
 
@@ -50,7 +50,7 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
 }> {
   let responseWindow = windowMinutes;
   const items = await collectCursorPages(async (cursor) => {
-    const response = await apiClient.GET('/api/v3/provider-health', {
+    const response = await apiClient.GET('/api/v1/provider-health', {
       params: {
         query: {
           window_minutes: windowMinutes,

@@ -19,12 +19,13 @@ type Invocation struct {
 	Defaults []connectors.DefaultProvenance
 }
 
-// Prepare retains legacy admission semantics until a route selects the strict
-// planner. Explicit profile selection fixes the destination dialect and records
-// every effective native default and hosting wrapper in the prepared document.
-func Prepare(request *openai.Request, config connectors.Config, model string, legacyDefaults protocols.Object) (Invocation, error) {
+// Prepare builds a transformed invocation. Automatic providers select the
+// destination by provider kind and apply their parameter defaults. Explicit
+// profile selection fixes the destination dialect and records every effective
+// native default and hosting wrapper in the prepared document.
+func Prepare(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
 	wire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
-	defaults := legacyDefaults
+	defaults := parameterDefaults
 	var origins []connectors.DefaultProvenance
 	if config.ProfileID != "" {
 		if err := config.ValidateProfile(); err != nil {
@@ -94,8 +95,8 @@ func Prepare(request *openai.Request, config connectors.Config, model string, le
 	return Invocation{Prepared: prepared, Wire: wire, Defaults: applied}, nil
 }
 
-func Encode(request *openai.Request, config connectors.Config, model string, legacyDefaults protocols.Object) ([]byte, openai.Family, error) {
-	invocation, err := Prepare(request, config, model, legacyDefaults)
+func Encode(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) ([]byte, openai.Family, error) {
+	invocation, err := Prepare(request, config, model, parameterDefaults)
 	if err != nil {
 		return nil, "", err
 	}

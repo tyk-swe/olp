@@ -22,7 +22,8 @@ import (
 
 // Profile links independently owned dialect, hosting and authentication contracts.
 // Revision is OLP's immutable composition revision, not a provider model revision.
-// Omitted profiles retain legacy configuration and published snapshot semantics.
+// A provider without a profile is an Automatic provider: its endpoints follow
+// from its provider kind, and strict routes refuse it.
 type Profile struct {
 	OperationDialects map[string]string          `json:"operation_dialects"`
 	DefaultSchemas    map[string]json.RawMessage `json:"default_schemas"`

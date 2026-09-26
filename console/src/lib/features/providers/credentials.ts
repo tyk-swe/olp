@@ -24,7 +24,7 @@ async function listProviderCredentialPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderCredential>> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/credentials',
+    '/api/v1/providers/{provider_id}/credentials',
     {
       params: {
         path: { provider_id: id },
@@ -41,7 +41,7 @@ export async function rotateProviderCredential(
   secret: string
 ): Promise<void> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/credentials',
+    '/api/v1/providers/{provider_id}/credentials',
     {
       params: {
         path: { provider_id: provider.id },
@@ -61,7 +61,7 @@ export async function revokeProviderCredential(
   credentialId: string
 ): Promise<void> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/credentials/{credential_id}/revoke',
+    '/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke',
     {
       params: {
         path: { provider_id: provider.id, credential_id: credentialId },

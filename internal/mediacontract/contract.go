@@ -444,7 +444,7 @@ func (t *Template) inspectJSONInput(doc oif.Document) error {
 }
 
 // JSONResult retains the complete bounded native source, including unknown
-// categories and exact numeric lexemes, before the legacy typed projection.
+// categories and exact numeric lexemes, rather than a typed projection of it.
 func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result, error) {
 	if !source.Valid() || source.Root().Kind() != oif.Object {
 		return oif.Result{}, reject("protocol_violation", "/result", "media_result", "The native media result is not a JSON object.")

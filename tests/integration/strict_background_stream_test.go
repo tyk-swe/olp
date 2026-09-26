@@ -104,15 +104,15 @@ func TestStrictBackgroundResponseStreamRecoversAfterReaderLoss(t *testing.T) {
 	}
 	var attempts, input, output int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &input, &output); err != nil || attempts != 1 || input != 4 || output != 6 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &input, &output); err != nil || attempts != 1 || input != 4 || output != 6 {
 		t.Fatalf("background reader-loss usage duplicated/lost: attempts=%d input=%d output=%d err=%v", attempts, input, output, err)
 	}
 	var providerID, credentialID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp_go.providers p JOIN olp_go.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
 		t.Fatal(err)
 	}
-	detail := restarted.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, http.StatusOK)
-	restarted.want(owner, "POST", "/api/v3/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	detail := restarted.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, http.StatusOK)
+	restarted.want(owner, "POST", "/api/v1/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	restarted.refresh()
 	before = fixture.dials.Load()
 	if status, _, _ := restarted.gatewayRaw(http.MethodGet, "/v1/responses/"+local+"?stream=true", key, nil, nil); status != http.StatusConflict || fixture.dials.Load() != before {
@@ -161,7 +161,7 @@ func TestStrictBackgroundResponseFailedTerminalIsVisibleAndSettled(t *testing.T)
 	}
 	var attempts, input, output int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &input, &output); err != nil || attempts != 1 || input != 4 || output != 6 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &input, &output); err != nil || attempts != 1 || input != 4 || output != 6 {
 		t.Fatalf("failed terminal usage duplicated/lost: attempts=%d input=%d output=%d err=%v", attempts, input, output, err)
 	}
 }
@@ -241,11 +241,11 @@ func TestStrictBackgroundResponsePendingCancelAndExpiry(t *testing.T) {
 	}
 	var count int64
 	var charge string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(max(charge_status),'') FROM olp_go.attempt_usage_facts
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(max(charge_status),'') FROM olp.attempt_usage_facts
  WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &charge); err != nil || count != 1 || charge != "billing_uncertain" {
 		t.Fatalf("terminal missing usage was not recorded conservatively: count=%d charge=%q err=%v", count, charge, err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_response' AND route_slug=$1`, slug); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_response' AND route_slug=$1`, slug); err != nil {
 		t.Fatal(err)
 	}
 	before := fixture.dials.Load()
@@ -290,7 +290,7 @@ func TestStrictResponseParentIdentitySurvivesParentExpiry(t *testing.T) {
 	}
 	child["id"], child["previous_response_id"] = "resp-up-2", "resp-up-1"
 	fixture.resps["resp-up-2"] = child
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_response' AND upstream_id='resp-up-1'`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_response' AND upstream_id='resp-up-1'`); err != nil {
 		t.Fatal(err)
 	}
 	status, body, _ = h.gatewayRaw(http.MethodGet, "/v1/responses/"+second, key, nil, nil)
@@ -324,9 +324,9 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 		!bytes.Contains(stream, []byte(`"type":"response.failed"`)) || !bytes.Contains(stream, []byte(`"id":"strict_response_`)) ||
 		bytes.Contains(stream, []byte(`"id":"resp-up-1"`)) || bytes.Contains(stream, []byte(vendorSecret)) || bytes.Contains(stream, []byte(escapedVendorSecret)) {
 		var state string
-		_ = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state)
+		_ = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state)
 		var facts int64
-		_ = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&facts)
+		_ = h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&facts)
 		t.Fatalf("failed native POST terminal was not safely delivered: status=%d state=%q facts=%d stream=%s", status, state, facts, stream)
 	}
 	terminal := sink.last()
@@ -335,7 +335,7 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 	}
 	var count, input, output int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
 		t.Fatalf("failed POST metering not committed before terminal: count=%d input=%d output=%d err=%v", count, input, output, err)
 	}
 	// A credential in an unknown decoded member name cannot be safely renamed.
@@ -350,11 +350,11 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 		t.Fatalf("unsafe failed frame was delivered: status=%d stream=%s", status, stream)
 	}
 	var state string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-2'`).Scan(&state); err != nil || state != "failed" {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE kind='strict_response' AND upstream_id='resp-up-2'`).Scan(&state); err != nil || state != "failed" {
 		t.Fatalf("unsafe failed frame lost accepted terminal state: state=%q err=%v", state, err)
 	}
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 2 || input != 5 || output != 8 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 2 || input != 5 || output != 8 {
 		t.Fatalf("unsafe failed frame lost observed billing: count=%d input=%d output=%d err=%v", count, input, output, err)
 	}
 }
@@ -401,7 +401,7 @@ func TestStrictBackgroundFailedUnaryResourceRedactsEscapedCredential(t *testing.
 	}
 	var count, input, output int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
 		t.Fatalf("failed resource reconciliation changed by redaction refusal: count=%d input=%d output=%d err=%v", count, input, output, err)
 	}
 }
@@ -473,7 +473,7 @@ func TestStrictBackgroundStreamErrorKeepsAcceptedWorkRecoverable(t *testing.T) {
 	}
 	var state string
 	var pending bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT state, metadata ? 'pending_usage' FROM olp_go.provider_resources
+	if err := h.Pool.QueryRow(t.Context(), `SELECT state, metadata ? 'pending_usage' FROM olp.provider_resources
  WHERE kind='strict_response' AND upstream_id='resp-up-1'`).Scan(&state, &pending); err != nil || state != "in_progress" || !pending {
 		t.Fatalf("stream error falsely terminated accepted work: state=%q pending=%t err=%v", state, pending, err)
 	}
@@ -486,7 +486,7 @@ func TestStrictBackgroundStreamErrorKeepsAcceptedWorkRecoverable(t *testing.T) {
 	}
 	var count, input, output int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&count, &input, &output); err != nil || count != 1 || input != 4 || output != 6 {
 		t.Fatalf("accepted work after stream error was billed twice or lost: count=%d input=%d output=%d err=%v", count, input, output, err)
 	}
 }
@@ -510,7 +510,7 @@ func TestStrictBackgroundStreamRejectsResponseIDDrift(t *testing.T) {
 	}
 	var first, second int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE upstream_id='resp-drift-1'),
- count(*) FILTER (WHERE upstream_id='resp-drift-2') FROM olp_go.provider_resources WHERE kind='strict_response'`).Scan(&first, &second); err != nil || first != 1 || second != 0 {
+ count(*) FILTER (WHERE upstream_id='resp-drift-2') FROM olp.provider_resources WHERE kind='strict_response'`).Scan(&first, &second); err != nil || first != 1 || second != 0 {
 		t.Fatalf("ID drift installed another accepted resource: first=%d second=%d err=%v", first, second, err)
 	}
 }

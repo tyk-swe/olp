@@ -37,7 +37,7 @@ createServer(async (request, response) => {
       !['http://127.0.0.1:4182', 'http://127.0.0.1:4183'].includes(
         redirect.origin
       ) ||
-      redirect.pathname !== '/api/v3/oidc/callback' ||
+      redirect.pathname !== '/api/v1/oidc/callback' ||
       url.searchParams.get('code_challenge_method') !== 'S256'
     ) {
       response.writeHead(400).end('{}');

@@ -1,7 +1,8 @@
 # Provider compatibility
 
 OpenLLMProxy accepts OpenAI, Anthropic, Gemini, and Bedrock client protocols. A
-route can select a provider using the same protocol or translate to another
+route can select a provider using the same protocol or, when the route is
+[transformed](provider-routing.md#route-fidelity), translate to another
 supported protocol. The tables below show supported combinations; translation
 limits follow. See [concepts](concepts.md) for routes and certification.
 
@@ -13,16 +14,14 @@ not inherit the official OpenAI media discovery contract.
 
 The [gateway](gateway.md) applies shared admission and response bounds to these
 surfaces. Current protocol, connector, SDK, and media tests are described in
-[tests/README.md](../tests/README.md). The
-[dated completion record](roadmap/README.md) links historical qualification; it
-does not qualify newer source.
+[tests/README.md](../tests/README.md).
 
 ## Legend
 
 | Cell | Meaning |
 | --- | --- |
 | `native` | The provider speaks this surface's protocol. Protocol-specific fields are preserved subject to gateway validation and model rewriting. |
-| `translated` | The request is decoded into the canonical model and re-encoded for the provider. Some fields are dropped and some are refused — see the notes below. |
+| `translated` | The request is decoded into the canonical model and re-encoded for the provider; the route must be transformed. Some fields are dropped and some are refused — see the notes below. |
 | `—` | Refused. The tuple can never be certified, so it can never be activated on a route, and the gateway rejects the request. |
 | `gateway` | Answered from visible published routes; model listing is not proxied upstream. |
 | `qualified` | Restricted to the provider, model family, or resource policy described below; exact capabilities still require certification. |
@@ -163,14 +162,14 @@ gateway re-signs with the configured Bedrock credential.
 
 Only native Bedrock targets holding the exact certified ingress mode qualify.
 Unary Converse responses are validated through the same decoder as translated
-traffic before their bytes are returned to the caller. InvokeModel supports only
-the model families OLP already qualifies — Anthropic Claude generation, Titan
-embeddings, and Titan image generation — each with model-specific response
-validation; other model IDs fail with a clear protocol error. Streaming
-responses validate AWS event-stream CRC and frame size and re-encode each frame;
-a malformed or oversized frame terminates the stream rather than forwarding
-unchecked bytes. Usage is normalized from Bedrock metadata and provider terminal
-events into standard accounting.
+traffic before their bytes are returned to the caller. InvokeModel requires a
+transformed route and supports only the model families OLP qualifies —
+Anthropic Claude generation, Titan embeddings, and Titan image generation — each
+with model-specific response validation; other model IDs fail with a clear
+protocol error. Streaming responses validate AWS event-stream CRC and frame size
+and re-encode each frame; a malformed or oversized frame terminates the stream
+rather than forwarding unchecked bytes. Usage is normalized from Bedrock
+metadata and provider terminal events into standard accounting.
 
 ## What translation drops or refuses
 
@@ -187,9 +186,8 @@ such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
 `tests/fixtures/protocols/selected-operation-families.json` covers every
 operation family and surface. Keep these tables aligned with the
-[Go protocol suites](../internal/protocols/parity_test.go) and the
-[frozen certification check](../internal/providers/frozen_capabilities_test.go)
-when semantics change.
+[protocol suites](../internal/protocols/translation_test.go) when semantics
+change.
 
 ### Anthropic providers
 
@@ -198,11 +196,10 @@ required, `strict` honored only when set true — onto Anthropic's
 `output_config`, and treats `text` as no structured output. `json_object` and
 unknown formats are still refused, and whether a given model accepts the
 translated field is provider/model dependent: unsupported combinations fail
-clearly rather than silently degrading. This narrows the frozen
-`NO_ANTHROPIC_STRUCTURED_OUTPUT` exception; current enforcement is in the
-[Anthropic encoder](../internal/protocols/canonical_anthropic.go). Cached-input
-usage, provider request IDs, media parts, and oversized-response bounds remain
-part of the shared contract.
+clearly rather than silently degrading. The
+[Anthropic encoder](../internal/protocols/canonical_anthropic.go) enforces
+these rules. Cached-input usage, provider request IDs, media parts, and
+oversized-response bounds remain part of the shared contract.
 
 Beyond that, translating into Anthropic Messages refuses a request that uses a
 participant `name` on a message, a deterministic `seed`, more than one
@@ -269,14 +266,9 @@ provider error fields, malformed base64, or an image-count mismatch fail the
 attempt. Other Bedrock models, and every edit/variation/audio/video operation,
 remain refused.
 
-These are explicit changes from the frozen Rust reference: its
-`NO_BEDROCK_RESPONSE_BOUND` and `NO_BEDROCK_MEDIA` exemptions described
-unbounded SDK-owned response bodies and refusal of image input parts,
-respectively. `NO_BEDROCK_CACHED_USAGE` no longer describes the current decoder;
-`NO_BEDROCK_REQUEST_ID` remains, and `NO_BEDROCK_STRUCTURED_OUTPUT` is narrowed
-to the formats still refused. See
-[image-input tests](../internal/protocols/bedrock_test.go) and
-[stream bounds tests](../internal/protocols/stream_parity_test.go).
+The [image-input tests](../internal/protocols/bedrock_test.go) and
+[stream bounds tests](../internal/protocols/stream_translation_test.go) cover these
+rules.
 
 The [Go Converse encoder](../internal/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets a
@@ -316,23 +308,22 @@ uncertifiable. See [certification eligibility](../internal/providers/kinds.go).
 See the [Azure connector guide](providers/azure.md) for API-key and Microsoft
 Entra authentication, token caching, and identity egress.
 
-## Qualification records
+## SDK and live-provider checks
 
-The deterministic JavaScript smoke suite currently pins OpenAI `7.4.0`,
-Anthropic `0.116.0` and Google GenAI `2.16.0` in `tests/sdk-smoke/package.json`.
-These are mock protocol checks, not a claim that every upstream model or every
-SDK version has live certification. Each CI run records its source commit, test
-counts and SDK lockfile. Live-provider qualification is separately dispatched
-with selected-provider credentials; use its dated result for the actual
-provider/model/capability revision. There is no inferred live certification date
-when that workflow has not run.
+The deterministic JavaScript smoke suite pins OpenAI `7.4.0`, Anthropic
+`0.116.0` and Google GenAI `2.16.0` in `tests/sdk-smoke/package.json`. These
+are mock protocol checks, not a claim that every upstream model or every SDK
+version has live certification. Live-provider checks are dispatched separately
+with selected-provider credentials; use their result for the actual provider,
+model and capability revision. Nothing is certified live when that workflow has
+not run.
 
 Provider-owned response/conversation/file IDs are not universally portable.
 Referencing a resource across independently selected providers is unsupported
 unless the implementation pins the owning provider and credential revision, as
 the media and provider-resource paths do. Unsupported stateful fields are
 rejected by the surface's capability/translation policy; route failover cannot
-turn an upstream identifier into a gateway-owned resource. The existing
-native/translated tables and endpoint registry are the maintained support
-records; update them with the conformance fixtures when semantics change, rather
-than introducing a second independently maintained matrix.
+turn an upstream identifier into a gateway-owned resource. The native/translated
+tables above and the endpoint registry are the maintained support records;
+update them with the conformance fixtures when semantics change, rather than
+introducing a second independently maintained matrix.

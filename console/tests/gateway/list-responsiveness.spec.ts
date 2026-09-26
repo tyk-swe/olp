@@ -38,7 +38,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -60,7 +60,7 @@ async function signIn(page: Page): Promise<void> {
 async function provisionProviders(page: Page): Promise<void> {
   const created = await page.evaluate(
     async ({ count, searchable }) => {
-      const session = await fetch('/api/v3/sessions/current').then((r) =>
+      const session = await fetch('/api/v1/sessions/current').then((r) =>
         r.json()
       );
       const names = [searchable];
@@ -68,7 +68,7 @@ async function provisionProviders(page: Page): Promise<void> {
         names.push(`Responsiveness filler ${String(index).padStart(2, '0')}`);
       const results: number[] = [];
       for (const name of names) {
-        const response = await fetch('/api/v3/providers', {
+        const response = await fetch('/api/v1/providers', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -106,7 +106,7 @@ function providerGets(page: Page): {
   const finished: ListQuery[] = [];
   const record = (url: string, sink: ListQuery[]) => {
     const parsed = new URL(url);
-    if (parsed.pathname !== '/api/v3/providers') return;
+    if (parsed.pathname !== '/api/v1/providers') return;
     sink.push({
       search: parsed.searchParams.get('search') ?? '',
       cursor: parsed.searchParams.get('cursor') ?? ''
@@ -124,7 +124,7 @@ function providerGets(page: Page): {
 /// Delays every list response while letting it reach the real backend.
 async function delayListResponses(page: Page): Promise<void> {
   await page.route(
-    (url) => url.pathname === '/api/v3/providers',
+    (url) => url.pathname === '/api/v1/providers',
     async (intercept) => {
       if (intercept.request().method() !== 'GET') return intercept.continue();
       const response = await intercept.fetch();
@@ -181,7 +181,7 @@ test('provider list stays responsive under delayed responses', async ({
   const needleFinished = page.waitForResponse(
     (response) =>
       response.request().method() === 'GET' &&
-      new URL(response.url()).pathname === '/api/v3/providers' &&
+      new URL(response.url()).pathname === '/api/v1/providers' &&
       new URL(response.url()).searchParams.get('search') === 'needle'
   );
   await searchBox(page).pressSequentially('needle', { delay: KEYSTROKE_MS });

@@ -8,7 +8,7 @@ test('a later gateway owner login honors an admission retry', async ({
   await page.context().clearCookies();
 
   let attempts = 0;
-  await page.route('**/api/v3/sessions', async (route) => {
+  await page.route('**/api/v1/sessions', async (route) => {
     attempts++;
     if (attempts === 1) {
       await route.fulfill({

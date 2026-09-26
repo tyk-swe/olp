@@ -35,8 +35,8 @@ func provisionPlaygroundRoute(t *testing.T, h *accessHarness, b *browser, cfg ma
 	if projectID != nil {
 		create["project_id"] = projectID
 	}
-	detail := h.want(b, "POST", "/api/v3/providers", create, idem("pg-provider-"+uuid.NewString()[:8]), 201)
-	path := "/api/v3/providers/" + detail["id"].(string)
+	detail := h.want(b, "POST", "/api/v1/providers", create, idem("pg-provider-"+uuid.NewString()[:8]), 201)
+	path := "/api/v1/providers/" + detail["id"].(string)
 	probe := h.want(b, "POST", path+"/probe", nil, etagHeader(detail), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("provider probe: %v", probe)
@@ -60,12 +60,12 @@ func provisionPlaygroundRoute(t *testing.T, h *accessHarness, b *browser, cfg ma
 	detail = h.want(b, "GET", path, nil, nil, 200)
 	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("pg-activate-"+detail["id"].(string))), 200)
 	slug := "pg-" + uuid.NewString()[:8]
-	draft := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	draft := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	if projectID != nil {
 		draft["project_id"] = projectID
 	}
-	created := h.want(b, "POST", "/api/v3/route-drafts", draft, idem("pg-draft-"+slug), 201)
-	h.want(b, "POST", "/api/v3/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("pg-draft-activate-"+slug)), 200)
+	created := h.want(b, "POST", "/api/v1/route-drafts", draft, idem("pg-draft-"+slug), 201)
+	h.want(b, "POST", "/api/v1/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("pg-draft-activate-"+slug)), 200)
 	return slug
 }
 
@@ -98,16 +98,16 @@ func TestPlayground(t *testing.T) {
 		[]string{"generation"}, nil)
 	h.refresh()
 
-	reply := h.want(owner, "POST", "/api/v3/playground",
+	reply := h.want(owner, "POST", "/api/v1/playground",
 		map[string]any{"model": slug, "input": "hi"}, nil, 200)
 	if reply["output_text"] != vendorAnswer || reply["model"] != slug {
-		t.Fatalf("legacy playground: %v", reply)
+		t.Fatalf("basic playground: %v", reply)
 	}
 	if reply["usage"] == nil || reply["routing"] == nil {
 		t.Fatalf("usage and routing must accompany the reply: %v", reply)
 	}
 
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug,
 		"request": map[string]any{
 			"model": "injected-provider-model",
@@ -123,7 +123,7 @@ func TestPlayground(t *testing.T) {
 		t.Fatalf("raw multi-turn: %v", reply)
 	}
 
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug,
 		"request": map[string]any{
 			"model": "injected",
@@ -140,7 +140,7 @@ func TestPlayground(t *testing.T) {
 	if reply["output_text"] != vendorAnswer {
 		t.Fatalf("tool turns: %v", reply)
 	}
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug,
 		"request": map[string]any{
 			"messages": []any{map[string]any{"role": "user", "content": []any{
@@ -153,7 +153,7 @@ func TestPlayground(t *testing.T) {
 		t.Fatalf("multimodal: %v", reply)
 	}
 
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "surface": "anthropic",
 		"request": map[string]any{
 			"model": "claude-injected", "max_tokens": 64,
@@ -163,7 +163,7 @@ func TestPlayground(t *testing.T) {
 	if reply["output_text"] != vendorAnswer {
 		t.Fatalf("anthropic surface: %v", reply)
 	}
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "surface": "gemini",
 		"request": map[string]any{
 			"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "hi"}}}},
@@ -173,7 +173,7 @@ func TestPlayground(t *testing.T) {
 		t.Fatalf("gemini surface: %v", reply)
 	}
 
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "operation": "embeddings",
 		"request": map[string]any{"model": "injected", "input": []any{"a", "b"}},
 	}, nil, 200)
@@ -183,21 +183,21 @@ func TestPlayground(t *testing.T) {
 	if reply["usage"] == nil {
 		t.Fatalf("embeddings usage: %v", reply)
 	}
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "operation": "moderation",
 		"request": map[string]any{"input": "check this text"},
 	}, nil, 200)
 	if doc, ok := reply["response"].(map[string]any); !ok || doc["results"] == nil {
 		t.Fatalf("moderation response: %v", reply)
 	}
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": rerankSlug, "operation": "rerank",
 		"request": map[string]any{"query": "q", "documents": []any{"a", "b"}, "top_n": 2},
 	}, nil, 200)
 	if doc, ok := reply["response"].(map[string]any); !ok || doc["results"] == nil {
 		t.Fatalf("rerank response: %v", reply)
 	}
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "operation": "token_count",
 		"request": map[string]any{"model": "injected", "input": "hi"},
 	}, nil, 200)
@@ -214,18 +214,18 @@ func TestPlayground(t *testing.T) {
 	} {
 		body := map[string]any{"model": slug, "request": map[string]any{"messages": []any{map[string]any{"role": "user", "content": "x"}}}}
 		body[name] = extra
-		if status, out, _ := h.request(owner, "POST", "/api/v3/playground", body, nil); status != 422 {
+		if status, out, _ := h.request(owner, "POST", "/api/v1/playground", body, nil); status != 422 {
 			t.Fatalf("raw+%s conflict: %d %v", name, status, out)
 		}
 	}
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/playground", map[string]any{
+	if status, out, _ := h.request(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": genOnlySlug, "operation": "embeddings",
 		"request": map[string]any{"input": "a"},
 	}, nil); status == 200 {
 		t.Fatalf("operation must be gated by the route: %d %v", status, out)
 	}
-	if status, out, _ := h.request(owner, "POST", "/api/v3/playground", map[string]any{
+	if status, out, _ := h.request(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "operation": "rerank",
 		"request": map[string]any{"query": "q", "documents": []any{"a"}},
 	}, nil); status == 200 {
@@ -239,7 +239,7 @@ func TestPlayground(t *testing.T) {
 		[]string{"generation"}, project)
 	h.refresh()
 	outsider := h.invite(owner, "pg-outsider@example.com", "developer")
-	users := h.want(owner, "GET", "/api/v3/users", nil, nil, 200)
+	users := h.want(owner, "GET", "/api/v1/users", nil, nil, 200)
 	var outsiderID, outsiderEtag string
 	for _, item := range users["items"].([]any) {
 		record := item.(map[string]any)
@@ -248,33 +248,33 @@ func TestPlayground(t *testing.T) {
 			outsiderEtag = record["etag"].(string)
 		}
 	}
-	h.want(owner, "PATCH", "/api/v3/users/"+outsiderID, map[string]any{"access_scope": "assigned"}, etagHeader(map[string]any{"etag": outsiderEtag}), 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+outsiderID, map[string]any{"access_scope": "assigned"}, etagHeader(map[string]any{"etag": outsiderEtag}), 200)
 	outsider = login(h, "pg-outsider@example.com")
-	if status, out, _ := h.request(outsider, "POST", "/api/v3/playground", map[string]any{
+	if status, out, _ := h.request(outsider, "POST", "/api/v1/playground", map[string]any{
 		"model": scopedSlug, "input": "hi",
 	}, nil); status != 403 && status != 404 {
 		t.Fatalf("out-of-scope playground: %d %v", status, out)
 	}
-	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": scopedSlug, "input": "hi"}, nil, 200)
+	h.want(owner, "POST", "/api/v1/playground", map[string]any{"model": scopedSlug, "input": "hi"}, nil, 200)
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	if status, out, _ := h.request(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "input": "hi",
 	}, nil); status != 422 {
 		t.Fatalf("stream without stream:true: %d %v", status, out)
 	}
-	if status, out, _ := h.request(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	if status, out, _ := h.request(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "stream": true, "operation": "embeddings",
 		"request": map[string]any{"input": "a"},
 	}, nil); status != 422 {
 		t.Fatalf("non-generation stream: %d %v", status, out)
 	}
-	if status, out, _ := h.request(owner, "POST", "/api/v3/playground", map[string]any{
+	if status, out, _ := h.request(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "input": "hi", "stream": true,
 	}, nil); status != 422 {
 		t.Fatalf("unary endpoint with stream:true: %d %v", status, out)
 	}
 
-	response, raw := h.do(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	response, raw := h.do(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "input": "hi", "stream": true,
 	}, nil)
 	if response.StatusCode != 200 {
@@ -318,7 +318,7 @@ func TestPlayground(t *testing.T) {
 		t.Fatal("frames must carry the provider's client-family frame text")
 	}
 
-	response, raw = h.do(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	response, raw = h.do(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "stream": true,
 		"request": map[string]any{"model": "injected", "stream": false, "messages": []any{map[string]any{"role": "user", "content": "hi"}}},
 	}, nil)
@@ -327,7 +327,7 @@ func TestPlayground(t *testing.T) {
 	}
 
 	fixture.fail.Store(true)
-	response, raw = h.do(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	response, raw = h.do(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "input": "hi", "stream": true,
 	}, nil)
 	fixture.fail.Store(false)
@@ -336,7 +336,7 @@ func TestPlayground(t *testing.T) {
 	}
 
 	fixture.truncate.Store(true)
-	response, raw = h.do(owner, "POST", "/api/v3/playground/stream", map[string]any{
+	response, raw = h.do(owner, "POST", "/api/v1/playground/stream", map[string]any{
 		"model": slug, "input": "hi", "stream": true,
 	}, nil)
 	fixture.truncate.Store(false)
@@ -354,7 +354,7 @@ func TestPlayground(t *testing.T) {
 	}
 
 	marker := "pg-marker-8"
-	reply = h.want(owner, "POST", "/api/v3/playground", map[string]any{
+	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{
 		"model": slug, "input": "say " + marker,
 	}, nil, 200)
 	envelope, _ := json.Marshal(sink.last())
@@ -363,14 +363,14 @@ func TestPlayground(t *testing.T) {
 	}
 	var stored int
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.requests r WHERE row_to_json(r)::text LIKE '%'||$1||'%'", marker).Scan(&stored); err != nil {
+		"SELECT count(*) FROM olp.requests r WHERE row_to_json(r)::text LIKE '%'||$1||'%'", marker).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored != 0 {
 		t.Fatal("playground prompts must not persist")
 	}
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.attempt_usage_facts f WHERE row_to_json(f)::text LIKE '%'||$1||'%'", vendorAnswer).Scan(&stored); err != nil {
+		"SELECT count(*) FROM olp.attempt_usage_facts f WHERE row_to_json(f)::text LIKE '%'||$1||'%'", vendorAnswer).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored != 0 {

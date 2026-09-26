@@ -2,14 +2,12 @@
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
-    createRouteMigrationDraft,
     listRouteDraftPage,
     listRoutePage,
     retireRoute,
@@ -26,10 +24,6 @@
   const queryClient = useQueryClient();
   let retiring = $state<string | null>(null);
   let retireError = $state<string | null>(null);
-  let migrationRoute = $state<ActiveRoute | null>(null);
-  let migrationSlug = $state('');
-  let migrationBusy = $state(false);
-  let migrationError = $state<string | null>(null);
 
   const drafts = createQuery(() => {
     const cursor = listState.draft.cursor;
@@ -59,30 +53,6 @@
       retireError = `${item.slug}: ${message(error)}`;
     } finally {
       retiring = null;
-    }
-  }
-
-  function reviewMigration(item: ActiveRoute) {
-    migrationRoute = item;
-    migrationSlug = `${item.slug.slice(0, 93)}-strict`;
-    migrationError = null;
-  }
-
-  async function createMigration() {
-    if (!migrationRoute || migrationBusy) return;
-    migrationBusy = true;
-    migrationError = null;
-    try {
-      const draft = await createRouteMigrationDraft(
-        migrationRoute,
-        migrationSlug
-      );
-      await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
-      await goto(resolve(`/routes/${draft.id}`));
-    } catch (error) {
-      migrationError = message(error);
-    } finally {
-      migrationBusy = false;
     }
   }
 </script>
@@ -194,13 +164,6 @@
                     class="button button-secondary"
                     href={resolve(`/routes/${item.id}/revisions`)}
                     >History & restore</a
-                  >{#if canManage && item.latest_revision.fidelity?.mode !== 'strict'}<button
-                      class="button button-secondary"
-                      type="button"
-                      disabled={migrationBusy}
-                      onclick={() => reviewMigration(item)}
-                      >Create strict migration draft</button
-                    >{/if}
                   >{#if canManage && item.state === 'active'}<button
                       class="button button-secondary"
                       type="button"
@@ -213,51 +176,6 @@
           >
         </table>
       </div>
-    {/if}
-    {#if migrationRoute}
-      <form
-        class="card migration-form"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void createMigration();
-        }}
-      >
-        <h3>Review a strict route for {migrationRoute.slug}</h3>
-        <p>
-          The new slug lets clients move deliberately. This creates an editable
-          draft and does not activate a route or call a provider.
-        </p>
-        <div class="form-field">
-          <label for="migration-slug">New route slug</label>
-          <input
-            id="migration-slug"
-            type="text"
-            required
-            maxlength="100"
-            pattern="[a-z0-9](?:[a-z0-9._]|-)*"
-            bind:value={migrationSlug}
-            disabled={migrationBusy}
-          />
-        </div>
-        {#if migrationError}<p class="inline-problem" role="alert">
-            {migrationError}
-          </p>{/if}
-        <div class="row-actions">
-          <button
-            class="button button-primary"
-            type="submit"
-            disabled={migrationBusy}
-          >
-            {migrationBusy ? 'Creating…' : 'Create review draft'}
-          </button>
-          <button
-            class="button button-secondary"
-            type="button"
-            disabled={migrationBusy}
-            onclick={() => (migrationRoute = null)}>Cancel</button
-          >
-        </div>
-      </form>
     {/if}
     {#if !activeRoutes.isError}<CursorPagination
         {...cursorPaginationProps(
@@ -396,13 +314,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-  }
-  .migration-form {
-    margin-top: 1rem;
-    padding: 1rem;
-  }
-  .migration-form p {
-    color: var(--foreground-muted);
   }
   td small {
     color: var(--foreground-muted);

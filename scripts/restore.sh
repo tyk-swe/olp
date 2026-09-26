@@ -10,7 +10,7 @@ manifest="$backup.manifest.json"
 checksum=$(sha256sum < "$backup")
 checksum=${checksum%% *}
 jq -e --arg checksum "$checksum" '
-  .format == "olp-go-v1" and .schema == "olp_go" and .checksum == $checksum and
+  .format == "olp" and .schema == "olp" and .checksum == $checksum and
   .accounting_drained == true and (.installation | type == "string") and
   (.migration_history | type == "array" and length > 0) and
   .migrations == (.migration_history | length)' "$manifest" >/dev/null
@@ -56,7 +56,7 @@ PY
 )
 pg_restore --dbname="$staging_url" --single-transaction --exit-on-error --no-owner --no-privileges "$backup"
 actual=$(psql "$staging_url" -XAt -v ON_ERROR_STOP=1 -c \
-  "SELECT json_build_object('installation', (SELECT id FROM olp_go.installation WHERE singleton), 'migrations', (SELECT count(*) FROM olp_go.migrations), 'generation', (SELECT COALESCE(max(sequence), 0) FROM olp_go.runtime_releases), 'migration_history', (SELECT json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version) FROM olp_go.migrations))")
+  "SELECT json_build_object('installation', (SELECT id FROM olp.installation WHERE singleton), 'migrations', (SELECT count(*) FROM olp.migrations), 'generation', (SELECT COALESCE(max(sequence), 0) FROM olp.runtime_releases), 'migration_history', (SELECT json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version) FROM olp.migrations))")
 jq -e --argjson actual "$actual" \
   '.installation == $actual.installation and .migrations == $actual.migrations and .generation == $actual.generation and .migration_history == $actual.migration_history' "$manifest" >/dev/null
 export OLP_DATABASE_URL="$staging_url"
@@ -71,8 +71,8 @@ else
 fi
 "${maintenance[@]}" migrate >/dev/null
 "${maintenance[@]}" doctor >/dev/null
-pg_dump "$staging_url" --schema=olp_go --no-owner --no-privileges --file="$scratch/restore.sql"
+pg_dump "$staging_url" --schema=olp --no-owner --no-privileges --file="$scratch/restore.sql"
 # Recheck emptiness under the same lock as migrate, and restore atomically.
 psql "$OLP_RESTORE_DATABASE_URL" -Xq -v ON_ERROR_STOP=1 --single-transaction \
   -f "$scratch/empty.sql" -f "$scratch/restore.sql" >/dev/null
-printf 'Restored and verified the Go installation, keys, migration history and runtime identity.\n'
+printf 'Restored and verified the installation, keys, migration history and runtime identity.\n'

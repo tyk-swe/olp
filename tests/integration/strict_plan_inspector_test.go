@@ -57,7 +57,7 @@ func inspectorProvider(t *testing.T, h *accessHarness, owner *browser, kind, pro
 		}
 	}))
 	t.Cleanup(up.Close)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Inspector " + profile, "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": kind, "auth_mode": "api_key", "endpoint": up.URL + "/v1", "profile_id": profile, "profile_revision": "1", "options": options},
 	}, idem("create-"+profile), 201)
@@ -70,7 +70,7 @@ func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *test
 	h := newAccessHarness(t)
 	owner := h.owner()
 	providerID, calls := inspectorProvider(t, h, owner, "gemini", "gemini-generation", map[string]any{})
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any)
 	modelID := models[0].(map[string]any)["id"].(string)
 	detail := h.want(owner, "GET", path, nil, nil, 200)
@@ -83,7 +83,7 @@ func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *test
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, idem("activate-native-gemini-inspector")), 200)
 	draft := inspectorDraft(t, h, owner, providerID, "query-inspection", nil)
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-query-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-query-inspection")), 200)
 	request := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "private-query-input"}}}}}
 	for _, published := range []bool{false, true} {
 		input := map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary", "seed": "query", "dialect": "gemini-generate-content", "request": request, "query_settings": map[string]any{"$xgafv": "2"}}
@@ -91,9 +91,9 @@ func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *test
 		if published {
 			delete(input, "request")
 			input["operation"] = map[string]any{"operation": "generation", "route": "query-inspection", "request": request}
-			decision = h.list(owner, "POST", "/api/v3/routing/simulate", input, nil, 200)[0].(map[string]any)
+			decision = h.list(owner, "POST", "/api/v1/routing/simulate", input, nil, 200)[0].(map[string]any)
 		} else {
-			response := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/simulate", input, nil, 200)
+			response := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", input, nil, 200)
 			decision = response["targets"].([]any)[0].(map[string]any)["decision"].(map[string]any)
 		}
 		inspection := decision["interaction"].(map[string]any)
@@ -120,12 +120,12 @@ func inspectorDraft(t *testing.T, h *accessHarness, owner *browser, providerID, 
 	if policy != nil {
 		body["content_policy"] = policy
 	}
-	return h.want(owner, "POST", "/api/v3/route-drafts", body, idem("draft-"+slug), 201)
+	return h.want(owner, "POST", "/api/v1/route-drafts", body, idem("draft-"+slug), 201)
 }
 
 func inspectorSimulation(t *testing.T, h *accessHarness, owner *browser, draft map[string]any, published bool, request any, fields map[string]any) map[string]any {
 	t.Helper()
-	path := "/api/v3/route-drafts/" + draft["id"].(string) + "/simulate"
+	path := "/api/v1/route-drafts/" + draft["id"].(string) + "/simulate"
 	input := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "inspector"}
 	if request != nil {
 		input["request"] = request
@@ -134,7 +134,7 @@ func inspectorSimulation(t *testing.T, h *accessHarness, owner *browser, draft m
 		input[name] = value
 	}
 	if published {
-		path = "/api/v3/routing/simulate"
+		path = "/api/v1/routing/simulate"
 		if request == nil {
 			request = map[string]any{"route": draft["slug"]}
 		}
@@ -185,7 +185,7 @@ func TestStrictPlanInspectorPreservesNativeSettingsAndRedactsContent(t *testing.
 	})
 	draft := inspectorDraft(t, h, owner, providerID, "native-inspection", nil)
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-inspector")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-inspector")), 200)
 	request := map[string]any{
 		"model": "native-inspection", "messages": []any{map[string]any{"role": "user", "content": "private-prompt-marker"}},
 		"temperature": 0, "seed": json.Number("9007199254740993"), "parallel_tool_calls": false, "stop": []any{},
@@ -237,11 +237,11 @@ func TestStrictPlanInspectorPreservesNativeSettingsAndRedactsContent(t *testing.
 		}
 		conflicting["max_tokens"], conflicting["max_completion_tokens"] = 32, 32
 		invalidInput := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "invalid-native", "request": conflicting}
-		invalidPath := "/api/v3/route-drafts/" + draft["id"].(string) + "/simulate"
+		invalidPath := "/api/v1/route-drafts/" + draft["id"].(string) + "/simulate"
 		if published {
 			invalidInput["operation"] = map[string]any{"operation": "generation", "request": conflicting}
 			delete(invalidInput, "request")
-			invalidPath = "/api/v3/routing/simulate"
+			invalidPath = "/api/v1/routing/simulate"
 		}
 		h.want(owner, "POST", invalidPath, invalidInput, nil, 422)
 	}
@@ -249,9 +249,9 @@ func TestStrictPlanInspectorPreservesNativeSettingsAndRedactsContent(t *testing.
 		{"OpenAI-Beta": "bad\x01value"}, {"OpenAI-Beta": "bad\x7fvalue"},
 		{"Authorization": "private-credential-marker"}, {"OpenAI-Beta": "", "openai-beta": "duplicate"},
 	} {
-		for _, path := range []string{"/api/v3/route-drafts/" + draft["id"].(string) + "/simulate", "/api/v3/routing/simulate"} {
+		for _, path := range []string{"/api/v1/route-drafts/" + draft["id"].(string) + "/simulate", "/api/v1/routing/simulate"} {
 			input := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "headers", "request": request, "semantic_headers": headers}
-			if path == "/api/v3/routing/simulate" {
+			if path == "/api/v1/routing/simulate" {
 				input["operation"] = map[string]any{"operation": "generation", "request": request}
 				delete(input, "request")
 			}
@@ -269,7 +269,7 @@ func TestStrictPlanInspectorQualifiesTextAndRejectsSemanticLoss(t *testing.T) {
 	providerID, calls := inspectorProvider(t, h, owner, "anthropic", "anthropic-messages", map[string]any{})
 	draft := inspectorDraft(t, h, owner, providerID, "translated-inspection", nil)
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-text-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-text-inspection")), 200)
 	for _, published := range []bool{false, true} {
 		request := map[string]any{"model": "translated-inspection", "max_tokens": 64, "messages": []any{map[string]any{"role": "user", "content": "private-user-marker"}}}
 		decision := inspectorSimulation(t, h, owner, draft, published, request, nil)
@@ -308,10 +308,10 @@ func TestStrictPlanInspectorChecksProviderStatePolicyAndCurrentRevocation(t *tes
 	providerID, calls := inspectorProvider(t, h, owner, "openai_compatible", "compatible-responses", map[string]any{})
 	draft := inspectorDraft(t, h, owner, providerID, "state-inspection", nil)
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-state-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-state-inspection")), 200)
 	request := map[string]any{"model": "state-inspection", "input": "private-state-input-marker"}
 	for _, allowed := range []bool{false, true} {
-		key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "state inspector", "scopes": []string{"inference"}, "allowed_routes": []string{"state-inspection"}, "allow_provider_state": allowed}, idem(map[bool]string{false: "deny-state", true: "allow-state"}[allowed]), 201)
+		key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "state inspector", "scopes": []string{"inference"}, "allowed_routes": []string{"state-inspection"}, "allow_provider_state": allowed}, idem(map[bool]string{false: "deny-state", true: "allow-state"}[allowed]), 201)
 		for _, published := range []bool{false, true} {
 			decision := inspectorSimulation(t, h, owner, draft, published, request, map[string]any{"dialect": "openai-responses", "api_key_id": key["id"]})
 			if !allowed {
@@ -328,7 +328,7 @@ func TestStrictPlanInspectorChecksProviderStatePolicyAndCurrentRevocation(t *tes
 	if decision := inspectorSimulation(t, h, owner, draft, true, request, map[string]any{"dialect": "openai-responses"}); decision["eligible"] != true || inspectorFields(t, decision)["/store"]["value_json"] != "false" {
 		t.Fatal("explicitly stateless native request was not inspected faithfully")
 	}
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, withMatch(detail, idem("revoke-inspected-api")), 200)
@@ -380,7 +380,7 @@ func TestStrictPlanInspectorChecksNetworkRevocationWithoutDialing(t *testing.T) 
 	config["options"].(map[string]any)["network"].(map[string]any)["proxy_url"] = proxy.URL
 	created := createProfileNetworkProvider(t, h, owner, "Inspector mTLS", config)
 	providerID := created["id"].(string)
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": f.credential}, withMatch(created, idem("network-inspector")), 201)
 	networkID := stored["credential_id"].(string)
 	config["options"].(map[string]any)["network"].(map[string]any)["credential_id"] = networkID
@@ -392,7 +392,7 @@ func TestStrictPlanInspectorChecksNetworkRevocationWithoutDialing(t *testing.T) 
 	if beforeProxy == 0 {
 		t.Fatal("provider certification did not exercise the configured proxy")
 	}
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-network-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-network-inspection")), 200)
 	request := map[string]any{"model": "network-inspection", "messages": []any{map[string]any{"role": "user", "content": "private-network-input"}}}
 	if decision := inspectorSimulation(t, h, owner, draft, true, request, nil); decision["eligible"] != true {
 		t.Fatal("unrevoked network identity was not eligible")
@@ -419,7 +419,7 @@ func TestStrictPlanInspectorChecksDefaultedOutputCapacity(t *testing.T) {
 	})
 	draft := inspectorDraft(t, h, owner, providerID, "capacity-inspection", nil)
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-capacity-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-capacity-inspection")), 200)
 	request := map[string]any{"model": "capacity-inspection", "messages": []any{map[string]any{"role": "user", "content": "input"}}}
 	for _, published := range []bool{false, true} {
 		decision := inspectorSimulation(t, h, owner, draft, published, request, nil)
@@ -445,7 +445,7 @@ func TestStrictPlanInspectorChecksDefaultedToolContentPolicy(t *testing.T) {
 	})
 	draft := inspectorDraft(t, h, owner, providerID, "policy-inspection", map[string]any{"rules": []any{map[string]any{"id": "block-default", "phase": "input", "action": "block", "pattern": "blocked-default-marker"}}})
 	before := calls.Load()
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-policy-inspection")), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-policy-inspection")), 200)
 	request := map[string]any{"model": "policy-inspection", "messages": []any{map[string]any{"role": "user", "content": "innocent input"}}}
 	for _, published := range []bool{false, true} {
 		decision := inspectorSimulation(t, h, owner, draft, published, request, nil)

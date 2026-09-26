@@ -26,13 +26,13 @@ export type ConfigurationSchemas = Record<string, FieldSchema>;
 export async function listProviderProfiles(
   signal?: AbortSignal
 ): Promise<ProviderProfile[]> {
-  const response = await apiClient.GET('/api/v3/provider-profiles', { signal });
+  const response = await apiClient.GET('/api/v1/provider-profiles', { signal });
   return result(response.data, response.error, response.response).items;
 }
 export async function getConfigurationSchemas(
   signal?: AbortSignal
 ): Promise<ConfigurationSchemas> {
-  const response = await apiClient.GET('/api/v3/openapi.json', { signal });
+  const response = await apiClient.GET('/api/v1/openapi.json', { signal });
   const document = result(response.data, response.error, response.response);
   if (
     !nativeObject(document) ||
@@ -60,7 +60,7 @@ export async function listNetworkCredentials(
 ): Promise<NetworkCredential[]> {
   return collectCursorPages(async (cursor) => {
     const response = await apiClient.GET(
-      '/api/v3/providers/{provider_id}/network-credentials',
+      '/api/v1/providers/{provider_id}/network-credentials',
       {
         params: {
           path: { provider_id: providerId },
@@ -78,7 +78,7 @@ export async function createNetworkCredential(
   credential: string
 ) {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/network-credentials',
+    '/api/v1/providers/{provider_id}/network-credentials',
     {
       params: {
         path: { provider_id: providerId },
@@ -95,7 +95,7 @@ export async function revokeNetworkCredential(
   credentialId: string
 ) {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/network-credentials/{credential_id}/revoke',
+    '/api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke',
     {
       params: {
         path: { provider_id: providerId, credential_id: credentialId },

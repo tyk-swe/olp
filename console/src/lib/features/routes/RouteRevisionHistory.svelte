@@ -13,6 +13,7 @@
     type RouteRevisionDiff
   } from '$lib/features/routes/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { fidelityLabel } from '$lib/features/routes/routeEditor';
   import { formatDate, formatInteger } from '$lib/format';
 
   let { routeId }: { routeId: string } = $props();
@@ -148,7 +149,7 @@
             revisionDiff.slug_changed && 'slug',
             revisionDiff.timeout_changed && 'deadline',
             revisionDiff.max_attempts_changed && 'attempts',
-            revisionDiff.fidelity_changed && 'fidelity contract',
+            revisionDiff.fidelity_changed && 'fidelity',
             revisionDiff.routing_policy_changed && 'routing policy',
             revisionDiff.content_policy_changed && 'content policy'
           ]
@@ -158,10 +159,10 @@
       </article>
       {#if revisionDiff.fidelity_changed}
         <article class="card">
-          <p>Fidelity contract</p>
+          <p>Fidelity</p>
           <strong>
-            {revisionDiff.fidelity_before?.mode ?? 'historical legacy'} →
-            {revisionDiff.fidelity_after?.mode ?? 'historical legacy'}
+            {fidelityLabel(revisionDiff.fidelity_before)} →
+            {fidelityLabel(revisionDiff.fidelity_after)}
           </strong>
           <p>
             Review client, continuation, mutation-policy, and state obligations
@@ -235,9 +236,11 @@
     <table class="data-table revision-table">
       <thead
         ><tr
-          ><th>Revision</th><th>Activated</th><th>Operations</th><th
-            >Deadline / attempts</th
-          ><th>Targets</th><th><span class="sr-only">Actions</span></th></tr
+          ><th>Revision</th><th>Activated</th><th>Fidelity</th><th
+            >Operations</th
+          ><th>Deadline / attempts</th><th>Targets</th><th
+            ><span class="sr-only">Actions</span></th
+          ></tr
         ></thead
       ><tbody
         >{#each revisions.data as revision (revision.id)}<tr
@@ -260,6 +263,7 @@
               >{formatDate(revision.activated_at)}<br /><small
                 >By {revision.activated_by}</small
               ></td
+            ><td data-label="Fidelity">{fidelityLabel(revision.fidelity)}</td
             ><td data-label="Operations">{revision.operations.join(', ')}</td
             ><td data-label="Deadline / attempts"
               >{formatInteger(revision.overall_timeout_ms)} ms / {revision.max_attempts}</td

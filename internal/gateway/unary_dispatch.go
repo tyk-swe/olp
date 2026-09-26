@@ -83,7 +83,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	var secret []byte
 	if slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*slot.CredentialID)
@@ -147,7 +147,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	}
 	state.upstream.Store(3)
 	result, err := plan.Decode(raw)
-	fact.Usage = legacyAccountingUsage(result.Usage)
+	fact.Usage = accountingUsage(result.Usage)
 	for _, decision := range result.Decisions {
 		recordDecision(x, decision)
 	}
@@ -168,9 +168,10 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	return fact, result, nil
 }
 
-// The accounting owner predates OIF. This adapter carries only observed usage;
-// operation requests, results, vectors and token counts never enter generation.
-func legacyAccountingUsage(value *operations.Usage) *openai.Usage {
+// accountingUsage converts operation usage into the usage an accounting fact
+// records. It carries only observed usage; operation requests, results, vectors
+// and token counts never enter generation.
+func accountingUsage(value *operations.Usage) *openai.Usage {
 	if value == nil {
 		return nil
 	}

@@ -60,7 +60,7 @@ func repSetup(t *testing.T) *repFixture {
 	f := &repFixture{t: t, h: h, pool: h.Pool, Owner: h.owner()}
 	f.Base = time.Now().UTC().Truncate(time.Hour).Add(-6 * time.Hour)
 	if err := f.pool.QueryRow(context.Background(),
-		"SELECT id::text FROM olp_go.users ORDER BY created_at LIMIT 1").Scan(&f.OwnerID); err != nil {
+		"SELECT id::text FROM olp.users ORDER BY created_at LIMIT 1").Scan(&f.OwnerID); err != nil {
 		t.Fatalf("read owner: %v", err)
 	}
 	f.P1 = f.provider("primary", "openai")
@@ -78,7 +78,7 @@ func (f *repFixture) exec(query string, args ...any) {
 
 func (f *repFixture) provider(name, kind string) string {
 	id := access.NewID()
-	f.exec(`INSERT INTO olp_go.providers (id, name, kind, state, configuration, etag, slots_etag, created_by)
+	f.exec(`INSERT INTO olp.providers (id, name, kind, state, configuration, etag, slots_etag, created_by)
 	    VALUES ($1, $2, $3, 'active', '{}'::jsonb, $4, $5, $6)`,
 		id, name, kind, access.NewID(), access.NewID(), f.OwnerID)
 	return id
@@ -88,7 +88,7 @@ func (f *repFixture) apiKey(name string) string {
 	id := access.NewID()
 	digest := make([]byte, 32)
 	copy(digest, name)
-	f.exec(`INSERT INTO olp_go.api_keys (id, lookup_id, digest, name, created_by, policy, etag)
+	f.exec(`INSERT INTO olp.api_keys (id, lookup_id, digest, name, created_by, policy, etag)
 	    VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6)`,
 		id, access.NewID(), digest, name, f.OwnerID, access.NewID())
 	return id
@@ -110,7 +110,7 @@ type repRequest struct {
 
 func (f *repFixture) request(r repRequest) {
 	completed := r.StartedAt.Add(time.Second)
-	f.exec(`INSERT INTO olp_go.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
+	f.exec(`INSERT INTO olp.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
 	        surface, started_at, completed_at, status_code, error_class, total_latency_ms,
 	        first_byte_ms, attempt_count)
 	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
@@ -132,7 +132,7 @@ type repAttempt struct {
 }
 
 func (f *repFixture) attempt(a repAttempt) {
-	f.exec(`INSERT INTO olp_go.attempts (id, request_id, request_started_at, ordinal, provider_id,
+	f.exec(`INSERT INTO olp.attempts (id, request_id, request_started_at, ordinal, provider_id,
 	        upstream_model, started_at, completed_at, status_code, error_class, committed, latency_ms,
 	        first_byte_ms, routing)
 	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 120, 40, $12::jsonb)`,
@@ -141,7 +141,7 @@ func (f *repFixture) attempt(a repAttempt) {
 }
 
 func (f *repFixture) anchor(requestID string, startedAt time.Time) {
-	f.exec(`INSERT INTO olp_go.usage_request_anchors (request_id, request_started_at)
+	f.exec(`INSERT INTO olp.usage_request_anchors (request_id, request_started_at)
 	    VALUES ($1, $2) ON CONFLICT DO NOTHING`, requestID, startedAt)
 }
 
@@ -184,7 +184,7 @@ type repFact struct {
 
 func (f *repFixture) fact(v repFact) {
 	f.anchor(v.RequestID, v.StartedAt)
-	f.exec(`INSERT INTO olp_go.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
+	f.exec(`INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
 	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
 	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
 	        cached_input_tokens, media_units, estimated_cost, unpriced, pricing_revision_id, currency,
@@ -234,7 +234,7 @@ type repHourly struct {
 }
 
 func (f *repFixture) hourly(v repHourly) {
-	f.exec(`INSERT INTO olp_go.attempt_usage_hourly (bucket, route_slug, provider_id, upstream_model,
+	f.exec(`INSERT INTO olp.attempt_usage_hourly (bucket, route_slug, provider_id, upstream_model,
 	        operation, surface, api_key_id, request_count, provider_request_count, model_request_count,
 	        target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
 	        estimated_cost, request_unpriced_count, provider_unpriced_count, model_unpriced_count,
@@ -331,15 +331,15 @@ func repSeedReports(f *repFixture) {
 		Cost: repText("1.000000000000"), Currency: repText("USD"),
 		CountRequest: true, CountProvider: true, CountModel: true, CountTarget: true})
 
-	f.exec(`INSERT INTO olp_go.request_metadata_ingestion_gaps (id, gateway_instance, event_count,
+	f.exec(`INSERT INTO olp.request_metadata_ingestion_gaps (id, gateway_instance, event_count,
 	        reason, first_observed_at, last_observed_at, reported_at, certainty)
 	    VALUES ($1, 'gw-1', 3, 'writer_dropped', $2, $3, $3, 'lower_bound')`,
 		access.NewID(), base.Add(time.Hour), base.Add(time.Hour+5*time.Minute))
-	f.exec(`INSERT INTO olp_go.request_metadata_gap_hourly (bucket, gateway_instance, reason,
+	f.exec(`INSERT INTO olp.request_metadata_gap_hourly (bucket, gateway_instance, reason,
 	        event_count, uncertain_gap_count, first_observed_at, last_observed_at)
 	    VALUES ($1, 'gw-1', 'restart', 2, 0, $2, $3)`,
 		base, base.Add(10*time.Minute), base.Add(20*time.Minute))
-	f.exec(`INSERT INTO olp_go.request_metadata_consumer_health (singleton, pending_events,
+	f.exec(`INSERT INTO olp.request_metadata_consumer_health (singleton, pending_events,
 	        lag_events, checked_at) VALUES (true, 0, 0, now())`)
 }
 
@@ -562,7 +562,7 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 	window := "start=" + f.Base.Format(time.RFC3339) +
 		"&end=" + f.Base.Add(3*time.Hour).Format(time.RFC3339)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/usage/summary?"+window, nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/summary?"+window, nil, nil, 200)
 	if body["request_count"].(float64) != 5 || body["input_tokens"].(string) != "117" {
 		t.Fatalf("summary body = %v", body)
 	}
@@ -578,20 +578,20 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		t.Fatalf("coverage = %v", coverage)
 	}
 
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/usage/completeness?"+window, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/completeness?"+window, nil, nil, 200)
 	if body["priced_count"].(float64) != 3 {
 		t.Fatalf("completeness body = %v", body)
 	}
 
 	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/breakdown?"+window+"&dimension=provider&limit=5", nil, nil, 200)
+		"/api/v1/usage/breakdown?"+window+"&dimension=provider&limit=5", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("breakdown items = %v", items)
 	}
 
 	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
+		"/api/v1/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
 	wantByBucket := map[string]float64{}
 	for _, point := range []struct {
 		at    time.Time
@@ -631,9 +631,9 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		{window + "&operation=telepathy", "invalid_operation"},
 		{window + "&dimension=sideways", "invalid_dimension"},
 	} {
-		path := "/api/v3/usage/summary?" + c.query
+		path := "/api/v1/usage/summary?" + c.query
 		if strings.Contains(c.query, "dimension") {
-			path = "/api/v3/usage/breakdown?" + c.query
+			path = "/api/v1/usage/breakdown?" + c.query
 		}
 		problem := f.h.want(f.Owner, http.MethodGet, path, nil, nil, 400)
 		if code := repProblemCode(t, problem); code != c.code {
@@ -641,7 +641,7 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		}
 	}
 	problem := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/breakdown?"+window+"&dimension=route&limit=0", nil, nil, 400)
+		"/api/v1/usage/breakdown?"+window+"&dimension=route&limit=0", nil, nil, 400)
 	if code := repProblemCode(t, problem); code != "invalid_limit" {
 		t.Fatalf("limit problem = %s", code)
 	}
@@ -651,7 +651,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 	f := repSetup(t)
 	repSeedReports(f)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?limit=2", nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?limit=2", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("page = %v", items)
@@ -672,7 +672,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 	if !ok || cursor == "" {
 		t.Fatalf("next cursor = %v, want a page token", body["next_cursor"])
 	}
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?limit=2&cursor="+cursor, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?limit=2&cursor="+cursor, nil, nil, 200)
 	second := body["items"].([]any)
 	if len(second) != 2 {
 		t.Fatalf("second page = %v", second)
@@ -684,12 +684,12 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("the last page offered another cursor: %v", body["next_cursor"])
 	}
 
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?provider_id="+f.P1, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?provider_id="+f.P1, nil, nil, 200)
 	items = body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("provider filtered page = %v, want the three requests with facts", items)
 	}
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?status_code=429", nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?status_code=429", nil, nil, 200)
 	items = body["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["error_class"].(string) != "rate_limited" {
 		t.Fatalf("status filtered page = %v", items)
@@ -697,7 +697,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 
 	// Both generation requests on the alpha route, newest first: the older one
 	// carries the committed usage and the two attempt timeline.
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?route=alpha&operation=generation",
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?route=alpha&operation=generation",
 		nil, nil, 200)
 	alpha := body["items"].([]any)
 	if len(alpha) != 2 {
@@ -716,7 +716,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("an uncertain request reported settled usage: %v", uncertain)
 	}
 
-	detail := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests/"+detailed["id"].(string),
+	detail := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests/"+detailed["id"].(string),
 		nil, nil, 200)
 	attempts := detail["attempts"].([]any)
 	if len(attempts) != 2 {
@@ -746,11 +746,11 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("routing provenance = %v", routing)
 	}
 
-	missing := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests/"+access.NewID(), nil, nil, 404)
+	missing := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests/"+access.NewID(), nil, nil, 404)
 	if code := repProblemCode(t, missing); code != "not_found" {
 		t.Fatalf("missing request = %s", code)
 	}
-	bad := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?cursor=nonsense", nil, nil, 400)
+	bad := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?cursor=nonsense", nil, nil, 400)
 	if code := repProblemCode(t, bad); code != "invalid_cursor" {
 		t.Fatalf("cursor problem = %s", code)
 	}
@@ -789,7 +789,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		"prices": []any{repPrice("openai", "m1", "generation"), vendor, generic},
 	}
 	headers := map[string]string{"Idempotency-Key": "pricing-first"}
-	created := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, headers, 201)
+	created := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, headers, 201)
 	if created["revision"].(float64) != 1 {
 		t.Fatalf("revision = %v, want 1", created["revision"])
 	}
@@ -806,19 +806,19 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		}
 	}
 
-	replayed := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, headers, 201)
+	replayed := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, headers, 201)
 	if replayed["id"].(string) != created["id"].(string) {
 		t.Fatal("a replayed idempotency key created a second revision")
 	}
-	if total := f.count("SELECT count(*) FROM olp_go.pricing_revisions"); total != 1 {
+	if total := f.count("SELECT count(*) FROM olp.pricing_revisions"); total != 1 {
 		t.Fatalf("revisions = %d, want 1", total)
 	}
-	problem := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, nil, 400)
+	problem := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, nil, 400)
 	if code := repProblemCode(t, problem); code != "idempotency_key_required" {
 		t.Fatalf("missing key gave %s", code)
 	}
 
-	listed := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions", nil, nil, 200)
+	listed := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions", nil, nil, 200)
 	items := listed["items"].([]any)
 	if len(items) != 1 || len(items[0].(map[string]any)["prices"].([]any)) != 3 {
 		t.Fatalf("listed revisions = %v", items)
@@ -830,7 +830,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 	if listed["next_cursor"] != nil {
 		t.Fatalf("next cursor = %v, want none", listed["next_cursor"])
 	}
-	bad := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions?cursor=first", nil, nil, 400)
+	bad := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions?cursor=first", nil, nil, 400)
 	if code := repProblemCode(t, bad); code != "invalid_cursor" {
 		t.Fatalf("cursor problem = %s", code)
 	}
@@ -855,34 +855,34 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		{"too-many-fraction-digits", []any{oversized}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+			f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 				map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": c.prices},
 				map[string]string{"Idempotency-Key": c.name}, 422)
 		})
 	}
 
 	// The installation currency is fixed by the first revision.
-	f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+	f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 		map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []any{foreign}},
 		map[string]string{"Idempotency-Key": "pricing-euro"}, 422)
-	if total := f.count("SELECT count(*) FROM olp_go.pricing_revisions"); total != 1 {
+	if total := f.count("SELECT count(*) FROM olp.pricing_revisions"); total != 1 {
 		t.Fatalf("a rejected revision was stored: %d revisions", total)
 	}
 	if total := f.count(
-		`SELECT count(*) FROM olp_go.audit WHERE action = 'pricing_revision.create'`); total != 1 {
+		`SELECT count(*) FROM olp.audit WHERE action = 'pricing_revision.create'`); total != 1 {
 		t.Fatalf("audit rows = %d, want one create", total)
 	}
 
 	// A second revision exercises the list cursor, which is the revision number
 	// rather than a timestamp: the older revision is reachable only through it.
-	second := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+	second := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 		map[string]any{"effective_at": f.Base.Add(time.Hour).Format(time.RFC3339),
 			"prices": []any{repPrice("openai", "gpt-4o-mini", "generation")}},
 		map[string]string{"Idempotency-Key": "pricing-second"}, 201)
 	if second["revision"].(float64) != 2 {
 		t.Fatalf("second revision numbered %v", second["revision"])
 	}
-	newest := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions?limit=1", nil, nil, 200)
+	newest := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions?limit=1", nil, nil, 200)
 	page := newest["items"].([]any)
 	if len(page) != 1 || page[0].(map[string]any)["revision"].(float64) != 2 {
 		t.Fatalf("newest page = %v", page)
@@ -892,7 +892,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		t.Fatalf("next cursor = %v", newest["next_cursor"])
 	}
 	older := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/pricing/revisions?limit=1&cursor="+next, nil, nil, 200)
+		"/api/v1/pricing/revisions?limit=1&cursor="+next, nil, nil, 200)
 	page = older["items"].([]any)
 	if len(page) != 1 || page[0].(map[string]any)["revision"].(float64) != 1 {
 		t.Fatalf("page before the cursor = %v", page)
@@ -905,7 +905,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 func (f *repFixture) epoch(processEpoch string, started time.Time, accepted, persisted, abandoned int64,
 	closed, detected *time.Time, updated time.Time,
 ) {
-	f.exec(`INSERT INTO olp_go.request_metadata_gateway_epochs (gateway_instance, process_epoch,
+	f.exec(`INSERT INTO olp.request_metadata_gateway_epochs (gateway_instance, process_epoch,
 	        started_at, accepted, persisted, dropped, abandoned, retrying, writer_closed, updated_at,
 	        gracefully_closed_at, stale_detected_at)
 	    VALUES ('gw-1', $1, $2, $3, $4, 0, $5, false, $6, $7, $8, $9)`,
@@ -921,7 +921,7 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	f.epoch(closed, start, 8, 8, 0, &closedAt, nil, closedAt)
 	f.epoch(stale, start, 12, 5, 2, nil, &detectedAt, detectedAt)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/request-metadata/gateway-epochs", nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/request-metadata/gateway-epochs", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("epochs = %v", items)
@@ -945,14 +945,14 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	}
 
 	filtered := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=unresolved", nil, nil, 200)
+		"/api/v1/request-metadata/gateway-epochs?state=unresolved", nil, nil, 200)
 	if len(filtered["items"].([]any)) != 1 {
 		t.Fatalf("unresolved epochs = %v", filtered["items"])
 	}
 	f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=elsewhere", nil, nil, 400)
+		"/api/v1/request-metadata/gateway-epochs?state=elsewhere", nil, nil, 400)
 
-	path := "/api/v3/request-metadata/gateway-epochs/"
+	path := "/api/v1/request-metadata/gateway-epochs/"
 	acknowledged := f.h.want(f.Owner, http.MethodPost, path+stale+"/acknowledge", nil, nil, 200)
 	if acknowledged["acknowledged_by"].(string) != f.OwnerID {
 		t.Fatalf("acknowledged by = %v", acknowledged["acknowledged_by"])
@@ -969,11 +969,11 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	f.h.want(f.Owner, http.MethodPost, path+"not-a-uuid/acknowledge", nil, nil, 400)
 
 	resolved := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=acknowledged", nil, nil, 200)
+		"/api/v1/request-metadata/gateway-epochs?state=acknowledged", nil, nil, 200)
 	if len(resolved["items"].([]any)) != 1 {
 		t.Fatalf("acknowledged epochs = %v", resolved["items"])
 	}
-	if total := f.count(`SELECT count(*) FROM olp_go.audit
+	if total := f.count(`SELECT count(*) FROM olp.audit
 	    WHERE action = 'request_metadata.gateway_epoch_acknowledge'`); total != 2 {
 		t.Fatalf("audit rows = %d, want one per acknowledgement", total)
 	}
@@ -982,30 +982,30 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 // repSeedExpiring seeds one expired row in every table maintenance drains, plus
 // a live neighbour that must survive.
 func repSeedExpiring(f *repFixture, now time.Time) {
-	f.exec(`INSERT INTO olp_go.request_metadata_event_receipts (event_id, request_id, event_sha256,
+	f.exec(`INSERT INTO olp.request_metadata_event_receipts (event_id, request_id, event_sha256,
 	        status, observed_at, recorded_at) VALUES ($1, $2, $3, 'fact_persisted', $4, $4)`,
 		access.NewID(), access.NewID(), make([]byte, 32), now.Add(-30*24*time.Hour))
-	f.exec(`INSERT INTO olp_go.request_metadata_event_receipts (event_id, request_id, event_sha256,
+	f.exec(`INSERT INTO olp.request_metadata_event_receipts (event_id, request_id, event_sha256,
 	        status, observed_at, recorded_at) VALUES ($1, $2, $3, 'pending', $4, $4)`,
 		access.NewID(), access.NewID(), make([]byte, 32), now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp_go.sessions (id, user_id, digest, expires_at)
-	    VALUES ($1, $2, $3, $4)`, access.NewID(), f.OwnerID, []byte("expired session digest "),
+	f.exec(`INSERT INTO olp.sessions (id, user_id, digest, expires_at, browser_hint)
+	    VALUES ($1, $2, $3, $4, 'Unknown browser')`, access.NewID(), f.OwnerID, []byte("expired session digest "),
 		now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp_go.invitations (id, email, role, digest, invited_by, expires_at)
+	f.exec(`INSERT INTO olp.invitations (id, email, role, digest, invited_by, expires_at)
 	    VALUES ($1, 'stale@example.test', 'viewer', $2, $3, $4)`,
 		access.NewID(), []byte("expired invitation digest"), f.OwnerID, now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp_go.replays (actor, key, fingerprint, expires_at)
+	f.exec(`INSERT INTO olp.replays (actor, key, fingerprint, expires_at)
 	    VALUES ($1, 'expired', $2, $3)`, f.OwnerID, []byte("fingerprint"), now.Add(-time.Hour))
 	secret := access.NewID()
-	f.exec(`INSERT INTO olp_go.secrets (id, purpose, key_version, ciphertext, expires_at)
+	f.exec(`INSERT INTO olp.secrets (id, purpose, key_version, ciphertext, expires_at)
 	    VALUES ($1, 'oidc_flow', 1, $2, $3)`, secret, []byte("ciphertext"), now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp_go.oidc_flows (id, state_digest, cookie_digest, configuration_etag, expires_at)
+	f.exec(`INSERT INTO olp.oidc_flows (id, state_digest, cookie_digest, configuration_etag, expires_at)
 	    VALUES ($1, $2, $3, $4, $5)`, secret, []byte("state digest"), []byte("cookie digest"),
 		access.NewID(), now.Add(-time.Hour))
-	f.exec(`INSERT INTO olp_go.audit (id, actor_user_id, action, resource_type, resource_id, outcome,
+	f.exec(`INSERT INTO olp.audit (id, actor_user_id, action, resource_type, resource_id, outcome,
 	        occurred_at) VALUES ($1, $2, 'api_key.create', 'api_key', $3, 'success', $4)`,
 		access.NewID(), f.OwnerID, access.NewID(), now.Add(-400*24*time.Hour))
-	f.exec(`INSERT INTO olp_go.request_metadata_ingestion_gaps (id, gateway_instance, event_count,
+	f.exec(`INSERT INTO olp.request_metadata_ingestion_gaps (id, gateway_instance, event_count,
 	        reason, first_observed_at, last_observed_at, reported_at, certainty)
 	    VALUES ($1, 'gw-1', 4, 'writer_dropped', $2, $2, $2, 'lower_bound')`,
 		access.NewID(), now.Add(-100*24*time.Hour))
@@ -1102,7 +1102,7 @@ func TestUsageMaintenanceRollsUpAndPurges(t *testing.T) {
 		t.Fatalf("release maintenance lock: %v", err)
 	}
 	blocker.Release()
-	if total := f.count("SELECT count(*) FROM olp_go.attempt_usage_facts"); total != 2 {
+	if total := f.count("SELECT count(*) FROM olp.attempt_usage_facts"); total != 2 {
 		t.Fatalf("facts = %d, want the two the skipped run left alone", total)
 	}
 
@@ -1130,22 +1130,22 @@ func TestUsageMaintenanceRollsUpAndPurges(t *testing.T) {
 		t.Fatalf("read summary: %v", err)
 	}
 	repSameTotals(t, before, after)
-	if total := f.count("SELECT count(*) FROM olp_go.attempt_usage_facts"); total != 0 {
+	if total := f.count("SELECT count(*) FROM olp.attempt_usage_facts"); total != 0 {
 		t.Fatalf("facts left after the rollup = %d", total)
 	}
-	if total := f.count("SELECT count(*) FROM olp_go.attempt_usage_hourly"); total != 1 {
+	if total := f.count("SELECT count(*) FROM olp.attempt_usage_hourly"); total != 1 {
 		t.Fatalf("hourly rows = %d, want the one the facts folded into", total)
 	}
-	if total := f.count("SELECT count(*) FROM olp_go.request_metadata_event_receipts"); total != 1 {
+	if total := f.count("SELECT count(*) FROM olp.request_metadata_event_receipts"); total != 1 {
 		t.Fatalf("receipts = %d, want the recent one to survive", total)
 	}
-	if total := f.count("SELECT count(*) FROM olp_go.requests WHERE id = $1", live); total != 1 {
+	if total := f.count("SELECT count(*) FROM olp.requests WHERE id = $1", live); total != 1 {
 		t.Fatalf("a request inside the retention window was purged")
 	}
-	if total := f.count("SELECT count(*) FROM olp_go.usage_request_anchors"); total != 0 {
+	if total := f.count("SELECT count(*) FROM olp.usage_request_anchors"); total != 0 {
 		t.Fatalf("orphaned anchors = %d, want none", total)
 	}
-	if total := f.count(`SELECT count(*) FROM olp_go.request_metadata_gap_hourly`); total != 1 {
+	if total := f.count(`SELECT count(*) FROM olp.request_metadata_gap_hourly`); total != 1 {
 		t.Fatalf("gap rollup rows = %d, want one", total)
 	}
 
@@ -1172,7 +1172,7 @@ func TestUsageRetentionHonoursTheConfiguredWindow(t *testing.T) {
 	f := repSetup(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	f.exec(`UPDATE olp_go.settings SET value = '2' WHERE key = 'retention.requests_days'`)
+	f.exec(`UPDATE olp.settings SET value = '2' WHERE key = 'retention.requests_days'`)
 	recent, old := access.NewID(), access.NewID()
 	f.request(repRequest{ID: recent, StartedAt: now.Add(-24 * time.Hour), Route: "alpha",
 		Operation: "generation", Surface: "openai", StatusCode: repInt(200)})
@@ -1185,14 +1185,14 @@ func TestUsageRetentionHonoursTheConfiguredWindow(t *testing.T) {
 	if report.RequestRows != 1 {
 		t.Fatalf("purged %d requests, want only the one past the two day window", report.RequestRows)
 	}
-	if f.count("SELECT count(*) FROM olp_go.requests WHERE id = $1", recent) != 1 {
+	if f.count("SELECT count(*) FROM olp.requests WHERE id = $1", recent) != 1 {
 		t.Fatal("a request inside the window was purged")
 	}
-	if f.count("SELECT count(*) FROM olp_go.requests WHERE id = $1", old) != 0 {
+	if f.count("SELECT count(*) FROM olp.requests WHERE id = $1", old) != 0 {
 		t.Fatal("a request past the window survived")
 	}
 
-	f.exec(`UPDATE olp_go.settings SET value = '0' WHERE key = 'retention.usage_days'`)
+	f.exec(`UPDATE olp.settings SET value = '0' WHERE key = 'retention.usage_days'`)
 	if _, err = usage.RunMaintenance(ctx, f.pool, now); err == nil {
 		t.Fatal("maintenance ran with a retention setting outside its bounds")
 	}

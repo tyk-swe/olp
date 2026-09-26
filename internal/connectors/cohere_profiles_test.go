@@ -38,8 +38,8 @@ func TestCohereNativeV2ProfilesCannotUseCompatibilityEndpoint(t *testing.T) {
 			t.Fatalf("compatibility endpoint silently accepted by native v2 profile: %v", err)
 		}
 	}
-	legacy := Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "compatible-chat", ProfileRevision: "1", Endpoint: coherePresetEndpoint, VendorID: "cohere"}
-	if err := legacy.Validate(&egress.Policy{}); err != nil {
+	compatible := Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "compatible-chat", ProfileRevision: "1", Endpoint: coherePresetEndpoint, VendorID: "cohere"}
+	if err := compatible.Validate(&egress.Policy{}); err != nil {
 		t.Fatalf("existing Cohere compatibility path changed: %v", err)
 	}
 }

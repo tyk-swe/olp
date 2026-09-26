@@ -195,7 +195,7 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 }
 
 // EncodeTarget honors an explicitly linked destination dialect. Unlike the
-// legacy family selector it cannot silently fall back from Responses to Chat.
+// kind-based family selector it cannot silently fall back from Responses to Chat.
 func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object) ([]byte, openai.Family, error) {
 	prepared, family, err := PrepareTarget(r, wire, kind, vendor, model, defaults)
 	if err != nil {
@@ -204,7 +204,7 @@ func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model str
 	return prepared.Document().Bytes(), family, nil
 }
 
-func encodeTargetLegacy(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
+func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
 	var f Object
 	if r.Family.Surface() != "openai" {
 		f = r.Document()

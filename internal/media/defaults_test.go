@@ -96,7 +96,7 @@ func TestConfiguredImageUsesOrderedImmutableNativeSource(t *testing.T) {
 	}
 }
 
-func TestConfiguredJSONDefaultsUseBindingAtomsAndRetainLegacyEncoding(t *testing.T) {
+func TestConfiguredJSONDefaultsUseBindingAtomsAndKeepAutomaticProviderEncoding(t *testing.T) {
 	r, failure := DecodeImageGeneration([]byte(`{"model":"images","prompt":"p"}`))
 	if failure != nil {
 		t.Fatal(failure)
@@ -115,14 +115,14 @@ func TestConfiguredJSONDefaultsUseBindingAtomsAndRetainLegacyEncoding(t *testing
 	if string(body["model"]) != `"resolved"` || string(body["vendor_options"]) != `{"binding":true,"nested":[]}` || effective.Count == nil || *effective.Count != 2 {
 		t.Fatalf("binding defaults: %s %+v", call.JSON, effective.Count)
 	}
-	legacy := connectors.Config{Kind: "openai", OperationDefaults: cfg.OperationDefaults}
-	want, failure := Encode(r, legacy.Kind, "chosen")
+	automatic := connectors.Config{Kind: "openai", OperationDefaults: cfg.OperationDefaults}
+	want, failure := Encode(r, automatic.Kind, "chosen")
 	if failure != nil {
 		t.Fatal(failure)
 	}
-	got, _, failure := EncodeConfigured(r, legacy, "chosen")
+	got, _, failure := EncodeConfigured(r, automatic, "chosen")
 	if failure != nil || !reflect.DeepEqual(got, want) {
-		t.Fatal("legacy encoding changed")
+		t.Fatal("Automatic provider encoding changed")
 	}
 }
 

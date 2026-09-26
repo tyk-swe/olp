@@ -54,7 +54,7 @@ func TestContentPolicy(t *testing.T) {
 		[]string{"generation", "batch"},
 		map[string]any{"content_policy": map[string]any{"rules": rules}})
 
-	bad := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	bad := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": "policy-bad", "operations": []string{"generation"},
 		"overall_timeout_ms": 10000, "max_attempts": 1,
 		"targets":        []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
@@ -64,7 +64,7 @@ func TestContentPolicy(t *testing.T) {
 		t.Fatalf("uncompilable policy: %v", bad)
 	}
 
-	routes := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)
+	routes := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)
 	var routeID string
 	for _, item := range routes["items"].([]any) {
 		if item.(map[string]any)["slug"] == slug {
@@ -74,7 +74,7 @@ func TestContentPolicy(t *testing.T) {
 	if routeID == "" {
 		t.Fatalf("route %s not listed: %v", slug, routes)
 	}
-	revisions := h.want(owner, "GET", "/api/v3/routes/"+routeID+"/revisions", nil, nil, 200)
+	revisions := h.want(owner, "GET", "/api/v1/routes/"+routeID+"/revisions", nil, nil, 200)
 	rev := revisions["items"].([]any)[0].(map[string]any)
 	policyRulesEqual(t, rev["content_policy"], rules)
 
@@ -137,11 +137,11 @@ func TestContentPolicy(t *testing.T) {
 	}
 
 	restored := h.want(owner, "POST",
-		"/api/v3/routes/"+routeID+"/revisions/"+rev["id"].(string)+"/restore-as-draft",
+		"/api/v1/routes/"+routeID+"/revisions/"+rev["id"].(string)+"/restore-as-draft",
 		nil, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	policyRulesEqual(t, restored["content_policy"], rules)
 
-	exported := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	var exportedRoute map[string]any
 	for _, item := range exported["document"].(map[string]any)["routes"].([]any) {
 		if item.(map[string]any)["slug"] == slug {
@@ -155,18 +155,18 @@ func TestContentPolicy(t *testing.T) {
 
 	requestID := access.NewID()
 	now := time.Now().UTC()
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`, requestID, now); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`, requestID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
 	        surface, started_at, completed_at, status_code, attempt_count, policy_decisions)
-	    VALUES ($1, $2, (SELECT id FROM olp_go.api_keys ORDER BY created_at LIMIT 1), $3, 'generation',
+	    VALUES ($1, $2, (SELECT id FROM olp.api_keys ORDER BY created_at LIMIT 1), $3, 'generation',
 	        'openai', $4, $4, 200, 1, $5::jsonb)`,
 		requestID, access.NewID(), slug, now,
 		`[{"rule_id":"mask-in","phase":"input","action":"redact","outcome":"redacted"}]`); err != nil {
 		t.Fatal(err)
 	}
-	detail2 := h.want(owner, "GET", "/api/v3/requests/"+requestID, nil, nil, 200)
+	detail2 := h.want(owner, "GET", "/api/v1/requests/"+requestID, nil, nil, 200)
 	decisions, _ := detail2["policy_decisions"].([]any)
 	if len(decisions) != 1 {
 		t.Fatalf("history decisions %v", detail2)
@@ -178,8 +178,8 @@ func TestContentPolicy(t *testing.T) {
 	}
 
 	for _, query := range []string{
-		`SELECT coalesce(string_agg(policy_decisions::text,''),'') FROM olp_go.requests`,
-		`SELECT coalesce(string_agg(routing::text,''),'') FROM olp_go.attempts`,
+		`SELECT coalesce(string_agg(policy_decisions::text,''),'') FROM olp.requests`,
+		`SELECT coalesce(string_agg(routing::text,''),'') FROM olp.attempts`,
 	} {
 		var text string
 		if err := h.Pool.QueryRow(t.Context(), query).Scan(&text); err != nil {

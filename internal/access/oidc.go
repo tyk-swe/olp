@@ -53,7 +53,7 @@ type oidcConfiguration struct {
 func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
-	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp_go.secrets s WHERE s.id=c.id AND s.purpose='oidc_client')) FROM olp_go.oidc_configuration c JOIN olp_go.users u ON u.id=c.updated_by WHERE singleton").Scan(&data)
+	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose='oidc_client')) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton").Scan(&data)
 	if err != nil {
 		return c, err
 	}
@@ -102,7 +102,7 @@ func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provi
 	// Keep the verifier's refresh context independent of this request's
 	// cancellation; every fetch still uses the bounded identity HTTP client.
 	provider := metadata.NewProvider(oidc.ClientContext(context.Background(), s.OIDCClient))
-	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.Origin + "/api/v3/oidc/callback", Scopes: c.Scopes}
+	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.Origin + "/api/v1/oidc/callback", Scopes: c.Scopes}
 	switch {
 	case metadata.AuthMethods == nil || slices.Contains(metadata.AuthMethods, "client_secret_basic"):
 		// OIDC discovery defaults to client_secret_basic when omitted.
@@ -230,7 +230,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 			// Verified identities prove sign-in only with the old credential.
 			// Clear that evidence in the same transaction so owner protection
 			// requires an independent path until OIDC succeeds again.
-			if _, err = tx.Exec(r.Context(), "UPDATE olp_go.oidc_identities SET role_claims=NULL WHERE role_claims IS NOT NULL"); err != nil {
+			if _, err = tx.Exec(r.Context(), "UPDATE olp.oidc_identities SET role_claims=NULL WHERE role_claims IS NOT NULL"); err != nil {
 				return Reply{}, err
 			}
 		}
@@ -240,7 +240,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 				return Reply{}, err
 			}
 		} else {
-			if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE id=$1", c.ID); err != nil {
+			if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", c.ID); err != nil {
 				return Reply{}, err
 			}
 		}
@@ -249,13 +249,13 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE purpose='oidc_flow'"); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose='oidc_flow'"); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.ID, "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
@@ -342,7 +342,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		}
 		if kind == "reauthenticate" {
 			var linked bool
-			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.oidc_identities WHERE user_id=$1 AND issuer=$2)", p.ID, c.Issuer).Scan(&linked); err != nil {
+			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.oidc_identities WHERE user_id=$1 AND issuer=$2)", p.ID, c.Issuer).Scan(&linked); err != nil {
 				return Reply{}, err
 			}
 			if !linked {
@@ -357,13 +357,13 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE id IN(SELECT id FROM olp_go.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN(SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "oidc_flow", data, &expires); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest("oidc_state", flow.State), s.Auth.Digest("oidc_cookie", cookieToken), c.ETag, expires); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest("oidc_state", flow.State), s.Auth.Digest("oidc_cookie", cookieToken), c.ETag, expires); err != nil {
 		return Reply{}, err
 	}
 	options := []oauth2.AuthCodeOption{oidc.Nonce(flow.Nonce), oauth2.S256ChallengeOption(flow.Verifier)}
@@ -396,7 +396,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	state := r.URL.Query().Get("state")
 	var id, etag string
 	var digest []byte
-	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp_go.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest("oidc_state", state)).Scan(&id, &etag, &digest)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest("oidc_state", state)).Scan(&id, &etag, &digest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "This sign-in request expired or was already used.")
 	}
@@ -421,7 +421,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	if config.ETag != etag || !config.Enabled {
 		return flow, config, Fail(403, "oidc_flow_invalid", "OIDC configuration changed during sign-in.")
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE id=$1", id); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", id); err != nil {
 		return flow, config, err
 	}
 	return flow, config, tx.Commit(r.Context())
@@ -523,7 +523,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		return Reply{}, Fail(403, "oidc_flow_invalid", "The OIDC configuration changed during sign-in.")
 	}
 	var userID, identityID string
-	err = tx.QueryRow(r.Context(), "SELECT user_id::text,id::text FROM olp_go.oidc_identities WHERE issuer=$1 AND subject=$2", c.Issuer, verified.Subject).Scan(&userID, &identityID)
+	err = tx.QueryRow(r.Context(), "SELECT user_id::text,id::text FROM olp.oidc_identities WHERE issuer=$1 AND subject=$2", c.Issuer, verified.Subject).Scan(&userID, &identityID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
@@ -543,7 +543,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		}
 	}
 	if identityID != "" {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.oidc_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, roleClaims); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.oidc_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, roleClaims); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -573,7 +573,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			}
 			identityID = NewID()
 			userID = p.ID
-			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, p.ID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, p.ID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
 				return Reply{}, err
 			}
 			rotated, err := s.changeSignInMethod(r, tx, p.ID)
@@ -599,7 +599,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	} else {
 		if userID == "" {
 			var existing bool
-			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE email=$1)", address).Scan(&existing); err != nil {
+			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE email=$1)", address).Scan(&existing); err != nil {
 				return Reply{}, err
 			}
 			if existing {
@@ -610,7 +610,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 				return Reply{}, Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
 			}
 			var complete bool
-			if err = tx.QueryRow(r.Context(), "SELECT setup_complete FROM olp_go.installation WHERE singleton").Scan(&complete); err != nil {
+			if err = tx.QueryRow(r.Context(), "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete); err != nil {
 				return Reply{}, err
 			}
 			if !complete {
@@ -623,15 +623,15 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			if ValidText("display_name", name, 100) != nil {
 				name = address
 			}
-			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, address, name, role, NewID()); err != nil {
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, address, name, role, NewID()); err != nil {
 				return Reply{}, err
 			}
-			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
 				return Reply{}, err
 			}
 		}
 		var active bool
-		if err = tx.QueryRow(r.Context(), "SELECT active FROM olp_go.users WHERE id=$1", userID).Scan(&active); err != nil {
+		if err = tx.QueryRow(r.Context(), "SELECT active FROM olp.users WHERE id=$1", userID).Scan(&active); err != nil {
 			return Reply{}, err
 		}
 		if !active {
@@ -710,7 +710,7 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Query(r.Context(), "SELECT id::text,role_claims FROM olp_go.oidc_identities WHERE user_id=$1 AND issuer=$2", p.ID, c.Issuer)
+	rows, err := q.Query(r.Context(), "SELECT id::text,role_claims FROM olp.oidc_identities WHERE user_id=$1 AND issuer=$2", p.ID, c.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +739,7 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var local, localEnabled, enabled, locallyManaged bool
-	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false),role_management='local' FROM olp_go.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
+	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management='local' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	usable, err := usableOIDCIdentities(r, s.Pool, p, locallyManaged)
@@ -749,7 +749,7 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object(
         'id',i.id,'issuer',i.issuer,'email_at_link',i.email_at_link,
         'created_at',i.created_at,'last_login_at',i.last_login_at)
-        FROM olp_go.oidc_identities i WHERE i.user_id=$1 ORDER BY i.created_at,i.id LIMIT 100`, p.ID)
+        FROM olp.oidc_identities i WHERE i.user_id=$1 ORDER BY i.created_at,i.id LIMIT 100`, p.ID)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -781,7 +781,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var owner string
-	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp_go.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
 		return Reply{}, err
 	}
 	if owner != p.ID {
@@ -790,11 +790,11 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	if err = s.consumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.oidc_identities WHERE id=$1", id); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
 		return Reply{}, err
 	}
 	var local, localEnabled, locallyManaged bool
-	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),role_management='local' FROM olp_go.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management='local' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	if !local || !locallyManaged || !localEnabled || s.LocalLoginDisabled {
@@ -821,10 +821,10 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
-	if _, err := tx.Exec(r.Context(), "UPDATE olp_go.users SET etag=$2,updated_at=now() WHERE id=$1", userID, NewID()); err != nil {
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, NewID()); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", userID); err != nil {
+	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return Reply{}, err
 	}
 	if err := Audit(r.Context(), tx, r, userID, "user.authentication_method_change", "user", userID, "success"); err != nil {
@@ -838,7 +838,7 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (changed, allowed bool, err error) {
 	var management, role string
 	var authorized bool
-	err = tx.QueryRow(r.Context(), "SELECT role_management,role,oidc_authorized FROM olp_go.users WHERE id=$1", userID).Scan(&management, &role, &authorized)
+	err = tx.QueryRow(r.Context(), "SELECT role_management,role,oidc_authorized FROM olp.users WHERE id=$1", userID).Scan(&management, &role, &authorized)
 	if err != nil {
 		return false, false, err
 	}
@@ -852,10 +852,10 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 	if !allowed {
 		mapped = role
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$2,oidc_authorized=$3,etag=$4,updated_at=now() WHERE id=$1", userID, mapped, allowed, NewID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$2,oidc_authorized=$3,etag=$4,updated_at=now() WHERE id=$1", userID, mapped, allowed, NewID()); err != nil {
 		return false, false, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", userID); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return false, false, err
 	}
 	if !allowed || mapped != "owner" {

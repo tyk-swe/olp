@@ -22,7 +22,7 @@ export async function listProviderRevisionPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderRevision>> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/revisions',
+    '/api/v1/providers/{provider_id}/revisions',
     {
       params: {
         path: { provider_id: providerId },
@@ -40,7 +40,7 @@ export async function getProviderRevision(
   signal?: AbortSignal
 ): Promise<ProviderRevisionDetail> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/revisions/{revision_id}',
+    '/api/v1/providers/{provider_id}/revisions/{revision_id}',
     {
       params: {
         path: { provider_id: providerId, revision_id: revisionId }
@@ -58,7 +58,7 @@ export async function listProviderRevisionModelPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderModel>> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/revisions/{revision_id}/models',
+    '/api/v1/providers/{provider_id}/revisions/{revision_id}/models',
     {
       params: {
         path: { provider_id: providerId, revision_id: revisionId },
@@ -77,7 +77,7 @@ export async function diffProviderRevisions(
   signal?: AbortSignal
 ): Promise<ProviderRevisionDiff> {
   const response = await apiClient.GET(
-    '/api/v3/providers/{provider_id}/revisions/diff',
+    '/api/v1/providers/{provider_id}/revisions/diff',
     {
       params: { path: { provider_id: providerId }, query: { from, to } },
       signal
@@ -91,7 +91,7 @@ export async function restoreProviderRevision(
   revisionId: string
 ): Promise<ProviderRevisionRestore> {
   const response = await apiClient.POST(
-    '/api/v3/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
+    '/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
     {
       params: {
         path: { provider_id: provider.id, revision_id: revisionId },

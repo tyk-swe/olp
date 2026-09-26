@@ -54,9 +54,9 @@ func TestPublicContinuationBranchesStayOwnedAndExpire(t *testing.T) {
 	providerID := h.Runtime.Release().Snapshot.Routes[slug].Targets[0].ProviderID
 	draftInput := fidelityDraft(secondSlug, providerID)
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	keyRecord := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "branch owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug, secondSlug}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	keyRecord := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "branch owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug, secondSlug}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
 	key := keyRecord["secret"].(string)
 	otherKey := stateKey(t, h, owner, slug, true)
 	h.refresh()
@@ -148,7 +148,7 @@ func TestPublicContinuationBranchesStayOwnedAndExpire(t *testing.T) {
 	if status != 409 || !bytes.Contains(denied, []byte("continuation_mismatch")) || calls.Load() != 3 {
 		t.Fatalf("cross-route handle dispatched: %d calls=%d %s", status, calls.Load(), denied)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]); err != nil {
 		t.Fatal(err)
 	}
 	status, denied, _ = h.gatewayRaw("GET", recoveryPath, key, nil, map[string]string{"X-OLP-Continuation": continuationClientVersion})
@@ -161,7 +161,7 @@ func TestPublicContinuationBranchesStayOwnedAndExpire(t *testing.T) {
 	if status != 200 || !bytes.Contains(childState, []byte("Branch completed.")) {
 		t.Fatalf("child lost its complete branch: %d %s", status, childState)
 	}
-	keyPath := "/api/v3/api-keys/" + keyRecord["id"].(string)
+	keyPath := "/api/v1/api-keys/" + keyRecord["id"].(string)
 	keyRecord = h.want(owner, "GET", keyPath, nil, nil, 200)
 	h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(keyRecord, idem(uuid.NewString())), 200)
 	h.refresh()

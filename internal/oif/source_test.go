@@ -109,7 +109,7 @@ func TestOverlaysRetainSourceAndRejectAmbiguousArrayPointers(t *testing.T) {
 	if _, err := oif.PrepareIdentity(r, desc, []oif.Change{{Pointer: "/model", Value: `"x"`, Origin: oif.ProviderDefault, Reason: "default"}}); err == nil {
 		t.Fatal("semantic default claimed identity")
 	}
-	for _, origin := range []oif.Origin{oif.IdentityBinding, oif.ExplicitTransform, oif.LegacyMapping} {
+	for _, origin := range []oif.Origin{oif.IdentityBinding, oif.ExplicitTransform, oif.TransformedMapping} {
 		change := oif.Change{Pointer: "/native", Value: `{}`, Origin: origin, Reason: "misleading classification"}
 		if _, err := registry.PrepareIdentity(r, desc, []oif.Change{change}); err == nil {
 			t.Fatal("semantic change mislabeled as identity")

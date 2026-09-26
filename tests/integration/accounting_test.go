@@ -57,10 +57,10 @@ type acctFixture struct {
 func acctSeed(t *testing.T, pool *pgxpool.Pool) acctFixture {
 	t.Helper()
 	fixture := acctFixture{Pool: pool, User: acctID(t), Key: acctID(t)}
-	acctExec(t, pool, `INSERT INTO olp_go.users (id, email, display_name, role, etag)
+	acctExec(t, pool, `INSERT INTO olp.users (id, email, display_name, role, etag)
         VALUES ($1::uuid, $2, 'Accounting Owner', 'owner', $3::uuid)`,
 		fixture.User, "acct-"+fixture.User+"@example.test", acctID(t))
-	acctExec(t, pool, `INSERT INTO olp_go.api_keys
+	acctExec(t, pool, `INSERT INTO olp.api_keys
             (id, lookup_id, digest, name, created_by, policy, etag)
         VALUES ($1::uuid, $2, $3, 'accounting', $4::uuid, '{}'::jsonb, $5::uuid)`,
 		fixture.Key, "lookup-"+fixture.Key, []byte("digest"), fixture.User, acctID(t))
@@ -74,12 +74,12 @@ func acctSeed(t *testing.T, pool *pgxpool.Pool) acctFixture {
 func acctProvider(t *testing.T, fixture acctFixture, kind, configuration string) (string, string) {
 	t.Helper()
 	provider, revision := acctID(t), acctID(t)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.providers
+	acctExec(t, fixture.Pool, `INSERT INTO olp.providers
             (id, name, kind, state, configuration, etag, slots_etag, active_revision,
              active_revision_id, created_by)
         VALUES ($1::uuid, $2, $3, 'active', $4::jsonb, $5::uuid, $6::uuid, 1, $7::uuid, $8::uuid)`,
 		provider, "provider-"+provider, kind, configuration, acctID(t), acctID(t), revision, fixture.User)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.provider_revisions
+	acctExec(t, fixture.Pool, `INSERT INTO olp.provider_revisions
             (id, provider_id, revision, name, configuration, models, slots, source_etag, activated_by)
         VALUES ($1::uuid, $2::uuid, 1, $3, $4::jsonb, '[]'::jsonb, '[]'::jsonb, $5::uuid, $6::uuid)`,
 		revision, provider, "provider-"+provider, configuration, acctID(t), fixture.User)
@@ -107,10 +107,10 @@ func acctPricing(t *testing.T, fixture acctFixture, revision int,
 	effectiveAt time.Time, prices ...acctPrice) string {
 	t.Helper()
 	id := acctID(t)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.pricing_revisions (id, revision, effective_at, created_by)
+	acctExec(t, fixture.Pool, `INSERT INTO olp.pricing_revisions (id, revision, effective_at, created_by)
         VALUES ($1::uuid, $2, $3, $4::uuid)`, id, revision, effectiveAt, fixture.User)
 	for _, price := range prices {
-		acctExec(t, fixture.Pool, `INSERT INTO olp_go.prices
+		acctExec(t, fixture.Pool, `INSERT INTO olp.prices
                 (pricing_revision_id, provider_kind, model, operation, input_per_million,
                  output_per_million, cached_input_per_million, cache_write_input_per_million,
                  cache_write_5m_input_per_million, cache_write_1h_input_per_million,
@@ -233,7 +233,7 @@ func acctLoadFact(t *testing.T, fixture acctFixture, requestID string, ordinal i
             usage_complete, currency, pricing_revision_id::text, request_counted,
             provider_request_counted, model_request_counted, target_request_counted,
             request_unpriced_counted, request_incomplete_counted
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid AND attempt_ordinal = $2`,
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid AND attempt_ordinal = $2`,
 		requestID, ordinal).Scan(&fact.ChargeStatus, &fact.Cost, &fact.Unpriced,
 		&fact.UsageComplete, &fact.Currency, &fact.PricingRevision, &fact.Request,
 		&fact.Provider, &fact.Model, &fact.Target, &fact.RequestUnpriced, &fact.RequestPartial)
@@ -275,7 +275,7 @@ func acctWindow(t *testing.T, fixture acctFixture, kind string) (string, int64) 
 	var accrued string
 	var unpriced int64
 	err := fixture.Pool.QueryRow(t.Context(), `SELECT accrued::text, unpriced_attempts
-        FROM olp_go.api_key_cost_windows WHERE api_key_id = $1::uuid AND window_kind = $2`,
+        FROM olp.api_key_cost_windows WHERE api_key_id = $1::uuid AND window_kind = $2`,
 		fixture.Key, kind).Scan(&accrued, &unpriced)
 	if err != nil {
 		t.Fatalf("load %s window: %v", kind, err)
@@ -344,17 +344,17 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 		t.Fatalf("a fully priced request was marked incomplete: %+v", first)
 	}
 
-	if count := acctCount(t, fixture, `SELECT attempt_count FROM olp_go.requests WHERE id = $1::uuid`,
+	if count := acctCount(t, fixture, `SELECT attempt_count FROM olp.requests WHERE id = $1::uuid`,
 		event.RequestID); count != 2 {
 		t.Fatalf("request attempt count = %d, want 2", count)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempts WHERE request_id = $1::uuid`,
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempts WHERE request_id = $1::uuid`,
 		event.RequestID); count != 2 {
 		t.Fatalf("attempts = %d, want 2", count)
 	}
 	var status string
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT status
-        FROM olp_go.request_metadata_event_receipts WHERE event_id = $1::uuid`,
+        FROM olp.request_metadata_event_receipts WHERE event_id = $1::uuid`,
 		event.EventID).Scan(&status); err != nil {
 		t.Fatalf("load receipt: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	}
 	daily, _ = acctWindow(t, fixture, "day")
 	acctSameMoney(t, fixture, &daily, "0.0116")
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts
         WHERE request_id = $1::uuid`, event.RequestID); count != 2 {
 		t.Fatalf("facts after replay = %d, want 2", count)
 	}
@@ -418,17 +418,17 @@ func TestAccountingRejectsEventsOutsideTheReplayWindow(t *testing.T) {
 			if result.Outcome != usage.PersistOutcomeRejectedOutsideReplayWindow {
 				t.Fatalf("outcome = %v, want rejected", result.Outcome)
 			}
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts
+			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts
                 WHERE request_id = $1::uuid`, event.RequestID); count != 0 {
 				t.Fatalf("facts = %d, want none", count)
 			}
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.requests
+			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.requests
                 WHERE id = $1::uuid`, event.RequestID); count != 0 {
 				t.Fatalf("requests = %d, want none", count)
 			}
 			var status string
 			if err := fixture.Pool.QueryRow(t.Context(), `SELECT status
-                FROM olp_go.request_metadata_event_receipts WHERE event_id = $1::uuid`,
+                FROM olp.request_metadata_event_receipts WHERE event_id = $1::uuid`,
 				event.EventID).Scan(&status); err != nil {
 				t.Fatalf("load receipt: %v", err)
 			}
@@ -437,7 +437,7 @@ func TestAccountingRejectsEventsOutsideTheReplayWindow(t *testing.T) {
 			}
 			// The rejection is admitted as a gap of unknown size rather than
 			// being silently dropped.
-			if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
+			if count := acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_ingestion_gaps
                 WHERE reason = 'request_metadata_event_outside_replay_window'
                   AND certainty = 'lower_bound' AND event_count = 0`); count == 0 {
 				t.Fatal("the rejection recorded no completeness gap")
@@ -449,7 +449,7 @@ func TestAccountingRejectsEventsOutsideTheReplayWindow(t *testing.T) {
 			}
 		})
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.api_key_cost_windows
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.api_key_cost_windows
         WHERE api_key_id = $1::uuid`, fixture.Key); count != 0 {
 		t.Fatalf("rejected events opened %d budget windows, want none", count)
 	}

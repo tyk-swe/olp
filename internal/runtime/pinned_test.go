@@ -11,7 +11,7 @@ func TestPinnedCurrentReusesOnlyTheExactInstalledServingRevision(t *testing.T) {
 	snapshot, slug, ids := planningFixture()
 	route := snapshot.Routes[slug]
 	route.ID, route.RevisionID = uuid.NewString(), uuid.NewString()
-	route.Fidelity = &RouteFidelity{Mode: FidelityStrict}
+	route.Fidelity = RouteFidelity{Mode: FidelityStrict}
 	snapshot.Routes[slug] = route
 	provider := snapshot.Providers[ids[0]]
 	slot := Slot{ID: uuid.NewString(), Enabled: true, Weight: 1}

@@ -51,12 +51,14 @@
     )
   );
   const editDisabled = $derived(disabled || !draft?.fieldsAvailable);
-  const legacyDefaults = $derived(draft?.at(['options', 'parameter_defaults']));
-  const conflictingLegacy = $derived(
+  const parameterDefaults = $derived(
+    draft?.at(['options', 'parameter_defaults'])
+  );
+  const conflictingParameterDefaults = $derived(
     Boolean(
       values.profileId &&
-      nativeObject(legacyDefaults) &&
-      nativeEntries(legacyDefaults).length
+      nativeObject(parameterDefaults) &&
+      nativeEntries(parameterDefaults).length
     )
   );
   const scopedSettings = [
@@ -110,7 +112,7 @@
         onchange={(event) => chooseProfile(event.currentTarget.value)}
         disabled={editDisabled || profiles.isPending || profiles.isError}
       >
-        <option value="">Legacy configuration · no profile selected</option>
+        <option value="">Automatic provider · no profile selected</option>
         {#if values.profileId && !selected}<option
             value={`${values.profileId}@${values.profileRevision}`}
             >{values.profileId} · revision {values.profileRevision}</option
@@ -143,12 +145,17 @@
         <strong>{selected.label}</strong><span
           >{selected.hosting} · {selected.dialect} · API {selected.dialect_revision}</span
         >
+      </p>{:else if !values.profileId}<p class="profile-summary">
+        <strong>Automatic provider</strong><span
+          >Endpoints follow the connector kind. Only transformed routes can use
+          this provider.</span
+        >
       </p>{/if}
-    {#if conflictingLegacy}<div class="inline-problem" role="alert">
+    {#if conflictingParameterDefaults}<div class="inline-problem" role="alert">
         <p>
-          Legacy parameter defaults cannot be used with an explicit profile.
-          Move their values into operation defaults in the advanced document, or
-          explicitly remove them.
+          Parameter defaults belong to Automatic providers and cannot be used
+          with an explicit profile. Move their values into operation defaults in
+          the advanced document, or explicitly remove them.
         </p>
         <button
           class="button button-secondary"
@@ -157,14 +164,14 @@
           onclick={() => {
             draft.set(['options', 'parameter_defaults'], undefined);
             onChange();
-          }}>Remove legacy parameter defaults</button
+          }}>Remove parameter defaults</button
         >
       </div>{/if}
     {#if conflictingScoped}<div class="inline-problem" role="alert">
         <p>
           Profile-scoped settings remain in this draft. Select a profile again,
           move their values deliberately, or explicitly remove them before
-          saving legacy configuration.
+          saving an Automatic provider.
         </p>
         <button
           class="button button-secondary"
@@ -223,11 +230,11 @@
       </details>
     {:else if !values.profileId}
       <details class="configuration-group">
-        <summary>Legacy parameter defaults</summary><NativeMapEditor
+        <summary>Parameter defaults</summary><NativeMapEditor
           {draft}
           path={['options', 'parameter_defaults']}
-          title="Legacy defaults"
-          idPrefix={`${idPrefix}-legacy-defaults`}
+          title="Parameter defaults"
+          idPrefix={`${idPrefix}-parameter-defaults`}
           disabled={editDisabled}
           {onChange}
         />

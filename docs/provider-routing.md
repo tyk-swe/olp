@@ -28,11 +28,14 @@ authentication mechanism.
    route slugs. An explicitly assigned canonical model identity can group
    connections automatically. Other models start with distinct connection
    suffixes; assigning the same slug explicitly creates multiple targets.
-   Review the generated drafts before publishing them individually or in bulk.
+   Choose the route fidelity for the generated drafts. Strict is preselected;
+   choose transformed when the targets need translation or are Automatic
+   providers (providers without a provider profile). Review the generated
+   drafts before publishing them individually or in bulk.
 
 ![Reviewed models grouped under one published route name](assets/screenshots/provider-model-comparison.png)
 
-`GET /api/v3/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
+`GET /api/v1/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
 DeepInfra, Hugging Face, Perplexity, and Cohere profiles support generation;
 Cohere and Voyage support embeddings and rerank. Each model and credential still
 needs certification for the requested operation.
@@ -152,10 +155,10 @@ connector selection.
 
 ## Credential pools and limits
 
-Each connection has a default slot preserving its original credential-version
-IDs and encryption context. The existing `/credentials` endpoints remain
-available. Add, edit, rotate, and validate additional slots under
-`/api/v3/providers/{provider_id}/credential-slots` and in the provider detail
+Each connection has a default slot, whose credential versions the
+`/api/v1/providers/{provider_id}/credentials` endpoints list and rotate. Add,
+edit, rotate, and validate additional slots under
+`/api/v1/providers/{provider_id}/credential-slots` and in the provider detail
 page. Writes use ETags and idempotency keys; secrets remain encrypted and
 write-only. A connection supports up to 64 slots including the default.
 
@@ -222,12 +225,6 @@ timeout. Supported operations also include `token_count`, `embeddings`,
 `speech`, `transcription`, the `video_*` operations, `batch`, `realtime`, and
 `bedrock_invoke`; see the [compatibility matrix](compatibility.md).
 
-The optional [route fidelity declaration](qualification/fidelity/route-contracts.md)
-selects legacy, strict, or transformed behavior. Existing routes retain legacy
-semantics until an explicit transition; old-client edits preserve a configured
-contract. Strict drafts reject redaction, and activation requires the complete
-interaction planner before they can serve.
-
 The overall deadline is 1–3,600,000 milliseconds; target timeouts cannot exceed
 it. The attempt budget is 1–32,767 and counts credential attempts, so it can
 exceed the target count. Every target must reference a published model with
@@ -242,11 +239,55 @@ Revisions can be compared and restored as new drafts. The simulation endpoints
 deterministic attempt order for a given seed or key without contacting any
 provider.
 
+### Route fidelity
+
+A route's `fidelity` is `{"mode":"strict"}` or `{"mode":"transformed"}`. An
+omitted or `null` fidelity, and `{}`, mean strict in the management API,
+configuration plan and apply, and the console. Nothing is inherited from an
+earlier draft or revision: a draft body or configuration entry states the whole
+contract, and every stored revision and export carries an explicit mode. Any
+other mode is refused with `422 validation_failed` on the `fidelity` field
+(`routes.N.fidelity` in a configuration document).
+
+A strict route preserves execution, observation, permitted continuation and
+effects relative to the selected target's native invocation. Draft validation
+and activation compile an interaction contract for every target. A target on an
+Automatic provider (a provider without a provider profile) or one that needs
+translation fails with `422 target_capability`, and the detail tells you to
+declare the route transformed. Strict routes also refuse `redact` content-policy
+rules.
+
+Declare a route transformed to translate between dialects, redact content, use
+Automatic providers, use the console playground, or serve Bedrock InvokeModel.
+Stored responses, files and batches on a transformed route keep only a metadata
+mapping to the provider-owned object.
+
+A published slug moves between strict and transformed through an ordinary new
+revision, so clients keep their model name. Restoring an earlier revision
+activates it with that revision's own fidelity, and revision history shows the
+fidelity of each revision.
+
+A stored response, file, batch, continuation or video job is served only under
+the fidelity it was created with:
+
+- While its route is transformed, a strict resource cannot be retrieved,
+  downloaded or recovered, and cannot start new work such as a
+  `previous_response_id` continuation or a batch. These requests fail with
+  `409 provider_resource_unavailable` before reaching the provider.
+- While its route is strict, a resource created under the transformed route
+  cannot start new work (`409 provider_resource_unavailable`). It can still be
+  retrieved as before.
+- `GET /v1/files`, `/v1/batches` and `/v1/videos` always list the owner's
+  resources. A resource the route no longer serves shows its stored state; the
+  list does not poll the provider for it.
+- The owner can always delete or cancel a stored resource, so provider-held
+  data can be removed and running upstream work stopped after a switch.
+
 ## Policies and caller preferences
 
 Policies live at installation, route revision, and gateway-key scopes. Use
 **Settings**, the route draft editor, and the API-key editor, or
-`GET/PUT /api/v3/routing-policies/{scope}/{id}`. Scopes are `installation`,
+`GET/PUT /api/v1/routing-policies/{scope}/{id}`. Scopes are `installation`,
 `route-draft`, and `api-key`; the installation ID is the nil UUID. Installation
 and key changes publish immediately. Route policy changes are staged and
 published with the route. Policy writes require the corresponding management
@@ -309,7 +350,7 @@ Fallback never restarts a committed stream or an ambiguously created media job.
 ![Route preview showing two eligible credential slots and a policy exclusion](assets/screenshots/provider-routing-preview.png)
 
 The route editor's dry run and playground use the execution selection engine.
-`POST /api/v3/routing/simulate` accepts a canonical operation, surface, mode,
+`POST /api/v1/routing/simulate` accepts a canonical operation, surface, mode,
 preferences, optional API-key ID, and seed. It returns exclusions even when
 nothing is eligible, attempt order, slot IDs, prices, and measurement freshness.
 The playground accepts the same preferences in its `routing` field and shows the
@@ -320,21 +361,3 @@ Request history records connection, slot/version, provider revision, policy
 digest, selected price revision, fallback failure classes, and meaningful output
 timing. Prompts, outputs, secret header values, and raw preference payloads are
 absent from persisted routing telemetry.
-
-## Coordinated 3.x upgrade
-
-1. Back up PostgreSQL and the existing encryption/HMAC keys, then drain all
-   gateways and pause other old process roles.
-2. Run migrations with the new binary. Migrations after `0001_access.sql`
-   backfill default slots without changing secret IDs or AAD, add policies and
-   media pins, and wrap historical releases in the `olp-routing-v1` envelope.
-   The envelope preserves snapshot identities and facts while preventing an
-   older binary from decoding a release and silently ignoring its constraints.
-3. Upgrade every gateway, control, and worker process before resuming traffic
-   or activating new policies. Verify readiness, credential validation, route
-   previews, and one request per required client surface.
-
-This is a coordinated upgrade, not a rolling mixed-version deployment. Old
-processes must be drained, including those holding snapshots in memory. Rollback
-requires restoring the pre-upgrade database backup and matching binaries and
-keys; migrations are forward-only.

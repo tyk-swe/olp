@@ -8,8 +8,8 @@ deadline=${OLP_BACKUP_TIMEOUT_SECONDS:-600}
 umask 077
 output=${1:-backups}
 mkdir -p "$output"
-partial=$(mktemp -d "$output/.olp-go-v1-backup-XXXXXX")
-backup="$partial/olp-go-v1-$(date -u +%Y%m%dT%H%M%SZ).dump"
+partial=$(mktemp -d "$output/.olp-backup-XXXXXX")
+backup="$partial/olp-$(date -u +%Y%m%dT%H%M%SZ).dump"
 snapshot_pid=
 cleanup() {
   if [[ -n $snapshot_pid ]]; then
@@ -28,15 +28,15 @@ read_fd=${SNAPSHOT[0]}
 write_fd=${SNAPSHOT[1]}
 printf '%s\n' \
   'BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE;' \
-  "SELECT pg_export_snapshot(), current_setting('server_version'), (SELECT count(*) FROM olp_go.migrations), (SELECT COALESCE(max(sequence), 0) FROM olp_go.runtime_releases), (SELECT id FROM olp_go.installation WHERE singleton);" \
-  "SELECT COALESCE((SELECT pending_events = 0 AND lag_events = 0 AND checked_at >= clock_timestamp() - interval '30 seconds' FROM olp_go.request_metadata_consumer_health WHERE singleton), false);" \
-  "SELECT json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version) FROM olp_go.migrations;" \
+  "SELECT pg_export_snapshot(), current_setting('server_version'), (SELECT count(*) FROM olp.migrations), (SELECT COALESCE(max(sequence), 0) FROM olp.runtime_releases), (SELECT id FROM olp.installation WHERE singleton);" \
+  "SELECT COALESCE((SELECT pending_events = 0 AND lag_events = 0 AND checked_at >= clock_timestamp() - interval '30 seconds' FROM olp.request_metadata_consumer_health WHERE singleton), false);" \
+  "SELECT json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version) FROM olp.migrations;" \
   >&"$write_fd"
 IFS='|' read -r -t "$deadline" -u "$read_fd" snapshot server migrations generation installation
 IFS= read -r -t "$deadline" -u "$read_fd" drained
 IFS= read -r -t "$deadline" -u "$read_fd" migration_history
 [[ $drained == t ]] || { echo 'A fresh, drained accounting checkpoint is required.' >&2; exit 1; }
-timeout --kill-after=5s "${deadline}s" pg_dump "$OLP_DATABASE_URL" --format=custom --compress=zstd --schema=olp_go \
+timeout --kill-after=5s "${deadline}s" pg_dump "$OLP_DATABASE_URL" --format=custom --compress=zstd --schema=olp \
   --no-owner --no-privileges --snapshot="$snapshot" --file="$backup"
 printf '%s\n' 'COMMIT;' >&"$write_fd"
 exec {write_fd}>&-
@@ -49,7 +49,7 @@ jq -n --arg checksum "$checksum" --arg server "$server" --arg installation "$ins
   --argjson migration_history "$migration_history" \
   --arg application_version "${OLP_BACKUP_APP_VERSION:-$(jq -er .version "$(dirname "$0")/../package.json")}" \
   --arg image_digest "${OLP_BACKUP_IMAGE_DIGEST:-}" \
-  '{format: "olp-go-v1", schema: "olp_go", checksum: $checksum, postgres: $server, installation: $installation, migrations: $migrations, generation: $generation, accounting_drained: true, migration_history: $migration_history, application_version: $application_version, image_digest: $image_digest}' \
+  '{format: "olp", schema: "olp", checksum: $checksum, postgres: $server, installation: $installation, migrations: $migrations, generation: $generation, accounting_drained: true, migration_history: $migration_history, application_version: $application_version, image_digest: $image_digest}' \
   > "$backup.manifest.json"
 final_dir="$output/$(basename "$backup" .dump)-${partial##*-}"
 [[ ! -e $final_dir ]] || { echo 'Backup destination already exists.' >&2; exit 1; }

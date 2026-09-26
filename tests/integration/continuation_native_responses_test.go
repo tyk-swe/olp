@@ -31,11 +31,11 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 		t.Fatalf("missing strict local identifier: %s", first)
 	}
 	var encrypted bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.provider_resources r JOIN olp_go.secrets s ON s.id=r.id WHERE r.kind='strict_response' AND r.contract_version='native-responses-v1' AND s.purpose='provider_continuation')`).Scan(&encrypted); err != nil || !encrypted {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.kind='strict_response' AND r.contract_version='native-responses-v1' AND s.purpose='provider_continuation')`).Scan(&encrypted); err != nil || !encrypted {
 		t.Fatalf("contract not committed: %t %v", encrypted, err)
 	}
 	oldCalls := len(historical.captured())
-	providerPath := "/api/v3/providers/" + historical.providerID
+	providerPath := "/api/v1/providers/" + historical.providerID
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
 	oldCredential := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)

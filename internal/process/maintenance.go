@@ -99,7 +99,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 				return errors.New("cannot grant runtime privileges")
 			}
 			defer tx.Rollback(ctx)
-			for _, statement := range []string{"GRANT USAGE ON SCHEMA olp_go TO " + role, "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA olp_go TO " + role, "REVOKE INSERT,UPDATE,DELETE ON olp_go.migrations FROM " + role} {
+			for _, statement := range []string{"GRANT USAGE ON SCHEMA olp TO " + role, "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA olp TO " + role, "REVOKE INSERT,UPDATE,DELETE ON olp.migrations FROM " + role} {
 				if _, err = tx.Exec(ctx, statement); err != nil {
 					return errors.New("cannot grant runtime privileges; the runtime role must already exist")
 				}
@@ -120,11 +120,11 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 	}
 	var fingerprint []byte
 	var active *int
-	if err = pool.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp_go.installation WHERE singleton").Scan(&fingerprint, &active); err != nil {
+	if err = pool.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton").Scan(&fingerprint, &active); err != nil {
 		return errors.New("cannot inspect installation key state")
 	}
 	if fingerprint != nil && !hmac.Equal(fingerprint, auth.Digest("installation", "identity")) {
-		return errors.New("authentication key does not match the Go installation")
+		return errors.New("authentication key does not match the installation")
 	}
 	rotated := 0
 	if command == "reencrypt" && !options.DryRun {
@@ -136,7 +136,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 			return err
 		}
 	}
-	rows, err := pool.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp_go.secrets ORDER BY id")
+	rows, err := pool.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets ORDER BY id")
 	if err != nil {
 		return errors.New("cannot inspect encrypted records")
 	}

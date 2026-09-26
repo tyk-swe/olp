@@ -72,7 +72,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 		return invalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
 	}
 	route, ok := x.request.release.Snapshot.Routes[x.parsed.Route]
-	if !ok || runtime.FidelityMode(route.Fidelity) != runtime.FidelityStrict {
+	if !ok || !route.Fidelity.Strict() {
 		return invalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
 	}
 	if !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
@@ -135,7 +135,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	return nil
 }
 func (s *Server) authorizeContinuation(ctx context.Context, x *execution, res *resources.Resource, state *storedContinuation) *Error {
-	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration)
+	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration, retainedRetrieval)
 	if e != nil {
 		return e
 	}

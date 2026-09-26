@@ -56,8 +56,8 @@ func buildContracts() *oif.Registry {
 	return r
 }
 
-// PrepareTarget is the compatibility path for published legacy routes. The
-// destination source and legacy provenance make its transformations explicit;
+// PrepareTarget is the translation path for transformed routes. The
+// destination source and transformed provenance make its changes explicit;
 // strict planners use PrepareIdentity or an independently qualified lowering.
 func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object) (oif.Prepared, openai.Family, error) {
 	destination := openai.Descriptor(wire, r.Stream)
@@ -68,7 +68,7 @@ func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model st
 		return oif.Prepared{}, wire, unsupported("operation")
 	}
 	var applied []oif.Provenance
-	body, wire, err := encodeTargetLegacy(r, wire, kind, vendor, model, defaults, &applied)
+	body, wire, err := encodeTransformed(r, wire, kind, vendor, model, defaults, &applied)
 	if err != nil {
 		return oif.Prepared{}, wire, err
 	}
@@ -82,7 +82,7 @@ func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model st
 	if err != nil {
 		return oif.Prepared{}, wire, err
 	}
-	p, err := oif.PrepareDestination(r.OIF(), destination, doc, oif.LegacyMapping, "published legacy codec behavior")
+	p, err := oif.PrepareDestination(r.OIF(), destination, doc, oif.TransformedMapping, "transformed route codec")
 	slices.SortFunc(applied, func(a, b oif.Provenance) int { return strings.Compare(a.Pointer, b.Pointer) })
 	p = p.WithProvenance(applied...)
 	return p, wire, err

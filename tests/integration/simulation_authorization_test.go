@@ -13,11 +13,11 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Key simulation", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	certification := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)
@@ -26,11 +26,11 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 	}
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "provider-activate"}), 200)
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
 		"targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	for i, tc := range []struct {
@@ -54,16 +54,16 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 			if tc.state == "future" {
 				input["expires_at"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 			}
-			key := h.want(owner, "POST", "/api/v3/api-keys", input, map[string]string{"Idempotency-Key": fmt.Sprintf("key-%d", i)}, 201)
+			key := h.want(owner, "POST", "/api/v1/api-keys", input, map[string]string{"Idempotency-Key": fmt.Sprintf("key-%d", i)}, 201)
 			switch tc.state {
 			case "revoked":
-				keyPath := "/api/v3/api-keys/" + key["id"].(string)
+				keyPath := "/api/v1/api-keys/" + key["id"].(string)
 				current := h.want(owner, "GET", keyPath, nil, nil, 200)
 				h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(current, map[string]string{"Idempotency-Key": "revoke"}), 200)
 			case "expired":
 				// Advance this fixture past expiry without sleeping or changing
 				// the installation's clock.
-				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET expires_at=now()-interval '1 second' WHERE id=$1", key["id"]); err != nil {
+				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.api_keys SET expires_at=now()-interval '1 second' WHERE id=$1", key["id"]); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -71,7 +71,7 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 			calls := up.chats.Load()
 			eligible := tc.status == http.StatusOK
 			for _, mode := range []string{"unary", "streaming"} {
-				decisions := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{
+				decisions := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{
 					"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}},
 					"surface":   "openai", "mode": mode, "api_key_id": key["id"],
 				}, nil, 200)

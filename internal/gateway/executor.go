@@ -548,7 +548,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	atr.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if x.parsed.Stream {
 		req.Header.Set("Accept", "text/event-stream")

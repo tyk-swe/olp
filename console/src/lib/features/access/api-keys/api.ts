@@ -23,7 +23,7 @@ export async function listApiKeyPage(
   signal?: AbortSignal,
   createdBy?: string
 ): Promise<CursorPage<ApiKey>> {
-  const response = await apiClient.GET('/api/v3/api-keys', {
+  const response = await apiClient.GET('/api/v1/api-keys', {
     params: { query: { limit: 50, cursor, created_by: createdBy } },
     signal
   });
@@ -34,7 +34,7 @@ export async function getApiKey(
   apiKeyId: string,
   signal?: AbortSignal
 ): Promise<ApiKey> {
-  const response = await apiClient.GET('/api/v3/api-keys/{api_key_id}', {
+  const response = await apiClient.GET('/api/v1/api-keys/{api_key_id}', {
     params: { path: { api_key_id: apiKeyId } },
     signal
   });
@@ -44,7 +44,7 @@ export async function getApiKey(
 export async function createApiKey(
   input: CreateApiKeyInput
 ): Promise<ApiKeySecret> {
-  const response = await apiClient.POST('/api/v3/api-keys', {
+  const response = await apiClient.POST('/api/v1/api-keys', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -53,7 +53,7 @@ export async function createApiKey(
 
 export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
   const response = await apiClient.POST(
-    '/api/v3/api-keys/{api_key_id}/rotate',
+    '/api/v1/api-keys/{api_key_id}/rotate',
     {
       params: {
         path: { api_key_id: key.id },
@@ -68,7 +68,7 @@ export async function updateApiKey(
   key: ApiKey,
   input: UpdateApiKeyInput
 ): Promise<ApiKeyMutation> {
-  const response = await apiClient.PATCH('/api/v3/api-keys/{api_key_id}', {
+  const response = await apiClient.PATCH('/api/v1/api-keys/{api_key_id}', {
     params: {
       path: { api_key_id: key.id },
       header: { 'If-Match': key.etag }
@@ -80,7 +80,7 @@ export async function updateApiKey(
 
 export async function revokeApiKey(key: ApiKey): Promise<void> {
   const response = await apiClient.POST(
-    '/api/v3/api-keys/{api_key_id}/revoke',
+    '/api/v1/api-keys/{api_key_id}/revoke',
     {
       params: {
         path: { api_key_id: key.id },

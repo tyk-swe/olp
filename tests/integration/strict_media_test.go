@@ -27,7 +27,7 @@ import (
 func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, operation, mode string, additional ...[2]string) {
 	t.Helper()
 	var raw []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp_go.providers WHERE id=$1", providerID).Scan(&raw); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp.providers WHERE id=$1", providerID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var cfg providers.Configuration
@@ -43,7 +43,7 @@ func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, opera
 	transportSum := sha256.Sum256(transport)
 	transportFP := hex.EncodeToString(transportSum[:])[:32]
 	var credentialID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
 	}
 	credentialFP := transportFP + ":" + credentialID
@@ -63,10 +63,10 @@ func certifyStrictMediaFixture(t *testing.T, h *accessHarness, providerID, opera
 		capabilityItems = append(capabilityItems, map[string]any{"operation": item[0], "surface": "openai", "mode": item[1], "source": "certified", "certified_at": now.Format(time.RFC3339Nano), "credential_fingerprint": credentialFP})
 	}
 	capabilities, _ := json.Marshal(capabilityItems)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capabilities, providerID, vendorModel); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capabilities, providerID, vendorModel); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,12 +81,12 @@ func publishStrictMediaFixture(t *testing.T, h *accessHarness, owner *browser, f
 		}
 		configuration["options"] = map[string]any{"operation_defaults": map[string]any{operation: map[string]any{"dialect": profile.OperationDialect(operation), "values": defaults[0]}}}
 	}
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          "Strict media fixture " + uuid.NewString(),
 		"configuration": configuration,
 		"model":         vendorModel, "credential": vendorSecret,
 	}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("fixture model probe=%v", probe)
@@ -98,9 +98,9 @@ func publishStrictMediaFixture(t *testing.T, h *accessHarness, owner *browser, f
 	draftInput := fidelityDraft(slug, provider["id"])
 	draftInput["operations"] = []string{operation}
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict media fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict media fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -125,7 +125,7 @@ func TestStrictMediaPublicNativeSourcesAndAssets(t *testing.T) {
 		if len(calls) != 1 || string(calls[0].body) != want {
 			t.Fatalf("native image request=%+v", calls)
 		}
-		preview := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{
+		preview := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{
 			"operation": map[string]any{"operation": "image_generation", "request": map[string]any{"model": slug, "prompt": "private-inspector-prompt", "native": map[string]any{"opaque": "private-native-marker"}}},
 			"surface":   "openai", "mode": "unary", "seed": "strict-media-inspector",
 		}, nil, 200)

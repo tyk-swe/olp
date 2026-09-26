@@ -20,7 +20,6 @@ import (
 
 // Every operation in the current embedded contract must reach a concrete handler.
 // Feature suites exercise the authorized success and failure response schemas.
-// scripts/release-inventory.mjs independently checks frozen operation parity.
 func assertConcreteManagementHandlers(t *testing.T, origin string) {
 	t.Helper()
 	var document struct {

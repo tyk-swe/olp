@@ -22,7 +22,7 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 		return "", access.Invalid("credential", err.Error())
 	}
 	id := access.NewID()
-	if _, err := tx.Exec(ctx, "INSERT INTO olp_go.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp_go.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {
 		return "", err
 	}
 	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil); err != nil {
@@ -47,7 +47,7 @@ func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp_go.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -118,7 +118,7 @@ func (s *Server) revokeNetworkCredential(r *http.Request) (access.Reply, error) 
 			return access.Reply{}, err
 		}
 		var version int
-		if err := tx.QueryRow(ctx, "UPDATE olp_go.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
+		if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
 			return access.Reply{}, err
 		}
 		generation, err := access.AdvanceAuthority(r, tx)
@@ -138,7 +138,7 @@ func (s *Server) validateNetworkReference(ctx context.Context, q access.Queryer,
 		return nil
 	}
 	var valid bool
-	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp_go.provider_network_credentials WHERE id=$1 AND provider_id=$2", cfg.Options.Network.CredentialID, providerID).Scan(&valid)
+	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", cfg.Options.Network.CredentialID, providerID).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !valid {
 		return access.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
 	}

@@ -22,7 +22,7 @@ async function management(
 ) {
   return page.evaluate(
     async ({ method, path, source, match }) => {
-      const session = await fetch('/api/v3/sessions/current').then((response) =>
+      const session = await fetch('/api/v1/sessions/current').then((response) =>
         response.json()
       );
       const headers: Record<string, string> = {
@@ -81,12 +81,12 @@ test('configuration forms retain native source through real saves, conflicts and
   const created = await management(
     page,
     'POST',
-    '/api/v3/providers',
+    '/api/v1/providers',
     `{"name":"Native editor ${info.project.name}","configuration":${configuration},"model":"${model}","credential":"compatible-provider-secret"}`
   );
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
-  const path = `/api/v3/providers/${id}`;
+  const path = `/api/v1/providers/${id}`;
   await page.goto(`/providers/${id}`);
   await expect(page.getByLabel('API profile')).toHaveValue('compatible-chat@1');
   await page.getByText('Advanced configuration JSON', { exact: true }).click();
@@ -227,42 +227,31 @@ test('configuration forms retain native source through real saves, conflicts and
   expect(revision.status).toBe(200);
   preservesCorpus(revision.source);
 
-  // Existing omitted contracts stay omitted on an unrelated save; selecting a
-  // strict contract is an explicit migration, saved and activated separately.
-  const legacy = await management(
+  // An omitted fidelity declares a strict route. Switching the published slug
+  // to transformed is an ordinary new revision of the same route.
+  const strictDraft = await management(
     page,
     'POST',
-    '/api/v3/route-drafts',
+    '/api/v1/route-drafts',
     `{"slug":"native-editor-${info.project.name}","operations":["generation"],"overall_timeout_ms":10000,"max_attempts":1,"targets":[{"provider_id":"${id}","provider_model":"${model}","priority":0,"weight":1,"timeout_ms":5000}]}`
   );
-  expect(legacy.status, legacy.source).toBe(201);
-  const routeId = JSON.parse(legacy.source).id as string;
+  expect(strictDraft.status, strictDraft.source).toBe(201);
+  expect(JSON.parse(strictDraft.source).fidelity).toEqual({ mode: 'strict' });
+  const routeId = JSON.parse(strictDraft.source).id as string;
   await page.goto(`/routes/${routeId}`);
-  await expect(page.getByLabel('Fidelity mode')).toHaveValue('');
+  await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
   await page.getByLabel('Maximum attempts').fill('2');
   const savedRoute = page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname === `/api/v3/route-drafts/${routeId}`
+      new URL(response.url()).pathname === `/api/v1/route-drafts/${routeId}`
   );
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   const saved = await savedRoute;
   expect(saved.status()).toBe(200);
-  expect(saved.request().postData()).not.toContain('fidelity');
-  await page.getByLabel('Fidelity mode').selectOption('strict');
-  await expect(
-    page.getByText(/Draft contract: implicit legacy → strict/)
-  ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Activate route', exact: true })
-  ).toBeDisabled();
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(
-    page.getByText(
-      'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.',
-      { exact: true }
-    )
-  ).toBeVisible();
+  expect(JSON.parse(saved.request().postData()!).fidelity).toEqual({
+    mode: 'strict'
+  });
   await page
     .getByRole('button', { name: 'Validate draft', exact: true })
     .click();
@@ -271,70 +260,34 @@ test('configuration forms retain native source through real saves, conflicts and
     .getByRole('button', { name: 'Activate route', exact: true })
     .click();
   await expect(page.getByText('Revision 1 active')).toBeVisible();
+  await page.getByLabel('Fidelity mode').selectOption('transformed');
+  await expect(
+    page.getByText(/Draft fidelity: strict → transformed/)
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Activate route', exact: true })
+  ).toBeDisabled();
   await page.locator('.fidelity-editor').screenshot({
-    path: info.outputPath('strict-route-migration.png'),
+    path: info.outputPath('route-fidelity-change.png'),
     animations: 'disabled',
     style: screenshotStyle
   });
-  // A published legacy route migrates through the reviewed new-slug action.
-  const legacySlug = `native-legacy-${info.project.name}`;
-  const legacyRoute = await management(
-    page,
-    'POST',
-    '/api/v3/route-drafts',
-    `{"slug":"${legacySlug}","operations":["generation"],"overall_timeout_ms":10000,"max_attempts":1,"targets":[{"provider_id":"${id}","provider_model":"${model}","priority":0,"weight":1,"timeout_ms":5000}]}`
-  );
-  expect(legacyRoute.status, legacyRoute.source).toBe(201);
-  const legacyDraftId = JSON.parse(legacyRoute.source).id as string;
-  const legacyActivated = await management(
-    page,
-    'POST',
-    `/api/v3/route-drafts/${legacyDraftId}/activate`,
-    undefined,
-    `/api/v3/route-drafts/${legacyDraftId}`
-  );
-  expect(legacyActivated.status, legacyActivated.source).toBe(200);
-  const providerCallsBefore = await request
-    .get('http://127.0.0.1:4187/__test__/requests')
-    .then((response) => response.json());
-  await page.goto('/routes');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(
+    page.getByText(
+      'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.',
+      { exact: true }
+    )
+  ).toBeVisible();
   await page
-    .getByRole('row', { name: new RegExp(legacySlug) })
-    .getByRole('button', { name: 'Create strict migration draft' })
+    .getByRole('button', { name: 'Activate route', exact: true })
     .click();
-  const reviewedSlug = `${legacySlug}-reviewed`;
-  await page.getByLabel('New route slug').fill(reviewedSlug);
-  await page.locator('.migration-form').screenshot({
-    path: info.outputPath('strict-route-review-draft.png'),
-    animations: 'disabled',
-    style: screenshotStyle
-  });
-  const submitted = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname.endsWith('/migration-draft')
-  );
-  await page.getByRole('button', { name: 'Create review draft' }).click();
-  const review = await submitted;
-  expect(review.status(), await review.text()).toBe(201);
-  expect(review.request().headers()['if-match']).toMatch(/^"[0-9a-f-]+"$/);
-  expect(JSON.parse(review.request().postData()!)).toEqual({
-    slug: reviewedSlug,
-    fidelity: { mode: 'strict' }
-  });
-  await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
-  expect(await page.getByLabel('Public model slug').inputValue()).toBe(
-    reviewedSlug
-  );
-  const providerCallsAfter = await request
-    .get('http://127.0.0.1:4187/__test__/requests')
-    .then((response) => response.json());
-  expect(providerCallsAfter.requests).toEqual(providerCallsBefore.requests);
+  await expect(page.getByText('Revision 2 active')).toBeVisible();
   await page.goto('/routes/new');
   await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
 });
 
-test('profile migration, schema fields and write-only network credentials share one draft', async ({
+test('Automatic provider profile selection, schema fields and write-only network credentials share one draft', async ({
   page,
   request
 }, info) => {
@@ -346,13 +299,22 @@ test('profile migration, schema fields and write-only network credentials share 
   const created = await management(
     page,
     'POST',
-    '/api/v3/providers',
-    `{"name":"Profile migration ${info.project.name}","configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","options":{"parameter_defaults":{"seed":9007199254740993}}},"credential":"compatible-provider-secret","model":"${model}"}`
+    '/api/v1/providers',
+    `{"name":"Automatic provider ${info.project.name}","configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","options":{"parameter_defaults":{"seed":9007199254740993}}},"credential":"compatible-provider-secret","model":"${model}"}`
   );
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
-  const path = `/api/v3/providers/${id}`;
+  const path = `/api/v1/providers/${id}`;
   await page.goto(`/providers/${id}`);
+  await expect(page.getByLabel('API profile')).toHaveValue('');
+  await expect(
+    page.getByLabel('API profile').locator('option:checked')
+  ).toHaveText('Automatic provider · no profile selected');
+  await expect(
+    page.locator('.profile-summary').getByText('Automatic provider', {
+      exact: true
+    })
+  ).toBeVisible();
   await page.getByText('Advanced configuration JSON', { exact: true }).click();
   const json = page.getByLabel('Native configuration JSON', { exact: true });
   await page.getByLabel('API profile').selectOption('compatible-chat@1');
@@ -362,9 +324,7 @@ test('profile migration, schema fields and write-only network credentials share 
   await expect(
     page.getByRole('button', { name: 'Save draft', exact: true })
   ).toBeDisabled();
-  await page
-    .getByRole('button', { name: 'Remove legacy parameter defaults' })
-    .click();
+  await page.getByRole('button', { name: 'Remove parameter defaults' }).click();
   await page.getByText('Operation defaults', { exact: true }).click();
   await page
     .getByLabel('Operation for defaults', { exact: true })

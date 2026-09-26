@@ -34,7 +34,7 @@ func strictMediaHarness(t *testing.T, op string, policy *contentpolicy.Policy, d
 	}
 	route := snapshot.Routes[routeSlug]
 	route.Operations = []string{op}
-	route.Fidelity = &runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
 	route.ContentPolicy = policy
 	snapshot.Routes[routeSlug] = route
 	if err := snapshot.Validate(); err != nil {
@@ -286,7 +286,7 @@ func TestStrictMediaActivationRejectsUnqualifiedLifecycleAndPolicy(t *testing.T)
 		}
 		route := snapshot.Routes[routeSlug]
 		route.Operations = []string{tc.op}
-		route.Fidelity = &runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+		route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
 		route.ContentPolicy = tc.policy
 		snapshot.Routes[routeSlug] = route
 		if err := snapshot.Validate(); err == nil {
@@ -295,7 +295,7 @@ func TestStrictMediaActivationRejectsUnqualifiedLifecycleAndPolicy(t *testing.T)
 	}
 }
 
-func TestStrictMultipartRejectsLegacyNormalizationBeforeDispatch(t *testing.T) {
+func TestStrictMultipartRefusesNormalizationBeforeDispatch(t *testing.T) {
 	for _, tc := range []struct {
 		name, prompt string
 		omitType     bool

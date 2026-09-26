@@ -7,7 +7,7 @@ static `build/` output with `index.html` as the SPA fallback. Start with the
 ## Local development
 
 After `make setup`, run `make dev` from the repository root and open
-http://127.0.0.1:5173. Use `.local/go-secrets/bootstrap.token` for first-owner
+http://127.0.0.1:5173. Use `.local/secrets/bootstrap.token` for first-owner
 setup. Console edits hot reload; restart after backend changes.
 
 Vite proxies `/api/`, `/v1/`, `/anthropic/`, `/gemini/`, and `/v1beta/` to Go

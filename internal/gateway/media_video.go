@@ -99,7 +99,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		Operation:           media.OpVideoCreate,
 		Surface:             "openai",
 		CredentialVersionID: slot.CredentialID,
-		SlotID:              &slot.ID,
+		SlotID:              slot.ID,
 	})
 	if jobErr != nil {
 		// A local persistence failure before dispatch refunds the quota
@@ -339,16 +339,39 @@ func (s *Server) ownedJob(ctx context.Context, authority access.Authority, video
 	default:
 		return nil, serverError(http.StatusServiceUnavailable, "media_job_reconciliation_pending", "The video job is being reconciled; retry shortly.")
 	}
-	// Retired routes can still own live jobs, so read the durable project
-	// rather than requiring the route to remain in the active snapshot.
-	var projectID *string
-	if err := s.Media.Jobs.Pool.QueryRow(ctx, "SELECT project_id::text FROM olp_go.routes WHERE slug=$1", record.RouteSlug).Scan(&projectID); err != nil {
-		return nil, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
+	projectID, current, e := s.jobRoute(ctx, record.RouteSlug)
+	if e != nil {
+		return nil, e
 	}
 	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {
 		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+record.RouteSlug+"`.")
 	}
+	use := retainedRetrieval
+	if op == media.OpVideoDelete {
+		use = retainedHousekeeping
+	}
+	if e := retainedContract(record.StrictContract, current, use); e != nil {
+		return nil, e
+	}
 	return &record, nil
+}
+
+// jobRoute reads the project and current fidelity of a video job's route.
+// Retired routes can still own live jobs, so it reads the durable route rather
+// than requiring the route to remain in the active snapshot.
+func (s *Server) jobRoute(ctx context.Context, slug string) (*string, runtime.RouteFidelity, *Error) {
+	var projectID *string
+	var fidelity []byte
+	err := s.Media.Jobs.Pool.QueryRow(ctx, `SELECT r.project_id::text,v.fidelity FROM olp.routes r
+        JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1`, slug).Scan(&projectID, &fidelity)
+	var current runtime.RouteFidelity
+	if err == nil {
+		current, err = runtime.DecodeFidelity(fidelity)
+	}
+	if err != nil {
+		return nil, runtime.RouteFidelity{}, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
+	}
+	return projectID, current, nil
 }
 
 // jobTarget resolves the pinned upstream target for a media job operation.
@@ -374,9 +397,9 @@ func strictVideoResourceContext(x *execution, record *media.JobRecord, allowVari
 }
 
 func videoJobRoute(record *media.JobRecord) *runtime.Route {
-	route := &runtime.Route{Slug: record.RouteSlug}
+	route := &runtime.Route{Slug: record.RouteSlug, Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}}
 	if record.StrictContract {
-		route.Fidelity = &runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+		route.Fidelity.Mode = runtime.FidelityStrict
 	}
 	return route
 }
@@ -649,6 +672,13 @@ func (s *Server) refreshListRecord(ctx context.Context, x *execution, record med
 	}
 	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
 		return record, nil, false, nil
+	}
+	// A poll retrieves the job, so a job its route no longer serves is listed
+	// from its stored state, like retained files and batches.
+	if record.StrictContract {
+		if _, current, e := s.jobRoute(ctx, record.RouteSlug); e != nil || retainedContract(true, current, retainedRetrieval) != nil {
+			return record, nil, false, nil
+		}
 	}
 	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {

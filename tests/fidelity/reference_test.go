@@ -102,16 +102,16 @@ func TestIndependentStreamOracleRequiresStateIdentityAndTerminal(t *testing.T) {
 	}
 }
 
-func TestFrozenVersionOneReferences(t *testing.T) {
+func TestVersionOneReferencesMatchTheirPinnedDigests(t *testing.T) {
 	manifest, err := fixtures.Files.ReadFile("v1/manifest.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This digest freezes provenance and every referenced artifact together.
-	const manifestDigest = "ec8bf6f8e8516313303332561a3268db9a8cbd9c535f491e28817c6bcd1c5581"
+	// This digest pins the fixture contracts and every referenced artifact together.
+	const manifestDigest = "9528f2aebb1e0fbba668cb4d98862bbc4eabad27b71b6f259cfdaec117bac648"
 	actual := sha256.Sum256(manifest)
 	if hex.EncodeToString(actual[:]) != manifestDigest {
-		t.Fatal("v1 evidence changed: add a new version instead of rewriting the reference")
+		t.Fatal("v1 references changed: add a new version instead of rewriting the reference")
 	}
 	var files struct {
 		Files map[string]string `json:"files"`

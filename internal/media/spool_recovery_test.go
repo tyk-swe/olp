@@ -76,9 +76,11 @@ func TestSpoolCrashRecoveryPreservesLiveOwners(t *testing.T) {
 	}
 }
 
-func TestSpoolRecoversLegacyDeadProcess(t *testing.T) {
+func TestSpoolReclaimsDirectoryWithoutOwnerLock(t *testing.T) {
 	base := t.TempDir()
-	abandoned := filepath.Join(base, "olp-media-2147483647-dead")
+	// Registration creates the ownership lock before releasing the recovery
+	// lock, so a spool without one is abandoned even if its name has a live PID.
+	abandoned := filepath.Join(base, fmt.Sprintf("olp-media-%d-unregistered", os.Getpid()))
 	if err := os.Mkdir(abandoned, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestSpoolRecoversLegacyDeadProcess(t *testing.T) {
 	}
 	defer spool.Close()
 	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
-		t.Fatal("legacy payload was not reclaimed")
+		t.Fatal("unregistered spool was not reclaimed")
 	}
 	if _, err := spool.PutBytes(t.Context(), "new.wav", "audio/wav", []byte("new"), 3); err != nil {
 		t.Fatal(err)

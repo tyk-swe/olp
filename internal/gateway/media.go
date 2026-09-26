@@ -37,7 +37,8 @@ func (s *Server) transport() *media.Transport { return s.Media.Jobs.Transport }
 // multipartParseDeadline bounds one inbound multipart body.
 const multipartParseDeadline = 60 * time.Second
 
-// Multipart media uses the same admission estimates as the Rust gateway.
+// mediaMultipartTokens is the fixed token estimate that admits multipart and
+// video media requests.
 const mediaMultipartTokens = 2000
 
 func (s *Server) registerMedia(mux *http.ServeMux) {
@@ -250,7 +251,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
-	if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+	if route.Fidelity.Strict() {
 		if e := strictMediaContext(x); e != nil {
 			return e
 		}
@@ -274,7 +275,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
 			encode := media.EncodeConfigured
-			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+			if route.Fidelity.Strict() {
 				encode = media.EncodeStrictConfigured
 			}
 			call, effective, e := encode(request, p.Connector(), t.ProviderModel)
@@ -282,7 +283,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
-			if runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
+			if route.Fidelity.Strict() {
 				template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
 				if !ok {
 					semantic = errors.New("compiled strict media contract unavailable")
@@ -305,7 +306,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		},
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" {
-				// Legacy codecs have their historical null/default wire behavior;
+				// Automatic providers keep their codec's null/default wire behavior;
 				// only explicit profiles define an exact effective native source.
 				return mediaParameterNames(request), nil
 			}

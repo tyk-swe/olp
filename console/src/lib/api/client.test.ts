@@ -39,7 +39,7 @@ describe('generated API request boundary', () => {
       jsonResponse({ setup_required: false })
     );
 
-    await apiClient.GET('/api/v3/setup/status');
+    await apiClient.GET('/api/v1/setup/status');
 
     const request = requests[0];
     expect(request).toBeDefined();
@@ -56,11 +56,11 @@ describe('generated API request boundary', () => {
     const requests = captureRequests(() => jsonResponse({}));
     authLifecycle.establishSession(session);
 
-    await apiClient.PATCH('/api/v3/profile', {
+    await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': etag } },
       body: { display_name: 'Operator' }
     });
-    await apiClient.PUT('/api/v3/settings/{key}', {
+    await apiClient.PUT('/api/v1/settings/{key}', {
       params: {
         path: { key: 'retention_days' },
         header: { 'If-Match': `"${etag}"` }
@@ -78,25 +78,25 @@ describe('generated API request boundary', () => {
     const requests = captureRequests(() => jsonResponse({}));
     authLifecycle.establishSession(session);
 
-    await apiClient.POST('/api/v3/sessions', {
+    await apiClient.POST('/api/v1/sessions', {
       body: {
         email: 'operator@example.com',
         password: 'correct horse battery staple'
       }
     });
-    await apiClient.PATCH('/api/v3/profile', {
+    await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': 'profile-etag' } },
       body: { display_name: 'Operator' }
     });
-    await apiClient.PUT('/api/v3/settings/{key}', {
+    await apiClient.PUT('/api/v1/settings/{key}', {
       params: {
         path: { key: 'retention_days' },
         header: { 'If-Match': 'setting-etag' }
       },
       body: { value: '30' }
     });
-    await apiClient.DELETE('/api/v3/sessions/current');
-    await apiClient.GET('/api/v3/sessions/current');
+    await apiClient.DELETE('/api/v1/sessions/current');
+    await apiClient.GET('/api/v1/sessions/current');
 
     expect(requests.map((request) => request.method)).toEqual([
       'POST',
@@ -112,7 +112,7 @@ describe('generated API request boundary', () => {
     expect(requests[4]?.headers.has('x-csrf-token')).toBe(false);
 
     clearCsrfToken();
-    await apiClient.POST('/api/v3/sessions', {
+    await apiClient.POST('/api/v1/sessions', {
       body: {
         email: 'operator@example.com',
         password: 'correct horse battery staple'
@@ -130,7 +130,7 @@ describe('generated API request boundary', () => {
     );
     authLifecycle.establishSession(session);
 
-    await apiClient.PATCH('/api/v3/profile', {
+    await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': 'profile-etag' } },
       body: { display_name: 'Operator' }
     });
@@ -151,7 +151,7 @@ it('retains native configuration through the generated client without Content-Le
         }
       })
   );
-  const response = await apiClient.GET('/api/v3/providers/{provider_id}', {
+  const response = await apiClient.GET('/api/v1/providers/{provider_id}', {
     params: { path: { provider_id: 'provider' } }
   });
   expect(stringifyNativeJSON(response.data)).toBe(source);
@@ -172,7 +172,7 @@ describe('generated API error boundary', () => {
     captureRequests(() => jsonResponse(problem, { status: 412 }));
     authLifecycle.establishSession(session);
 
-    const response = await apiClient.PATCH('/api/v3/profile', {
+    const response = await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': 'stale-etag' } },
       body: { display_name: 'Operator' }
     });
@@ -205,7 +205,7 @@ describe('generated API error boundary', () => {
         })
     );
 
-    const response = await apiClient.GET('/api/v3/setup/status');
+    const response = await apiClient.GET('/api/v1/setup/status');
 
     expect(response.error).toBe('<html>upstream unavailable</html>');
     let caught: unknown;
