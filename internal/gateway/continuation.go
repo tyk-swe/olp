@@ -135,7 +135,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	return nil
 }
 func (s *Server) authorizeContinuation(ctx context.Context, x *execution, res *resources.Resource, state *storedContinuation) *Error {
-	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration)
+	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration, retainedRetrieval)
 	if e != nil {
 		return e
 	}
@@ -271,10 +271,6 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	route, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
 	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		s.stateFail(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."), x.family)
-		return
-	}
-	if !route.Fidelity.Strict() {
-		s.stateFail(x, w, strictRouteChanged(), x.family)
 		return
 	}
 	x.route = &route

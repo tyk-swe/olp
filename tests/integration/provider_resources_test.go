@@ -320,6 +320,14 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		}
 		writeJSON(w, res)
 	})
+	mux.HandleFunc("DELETE /openai/responses/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.dials.Add(1)
+		if _, ok := f.resps[r.PathValue("id")]; !ok {
+			http.Error(w, `{"error":{"message":"no such response"}}`, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]any{"id": r.PathValue("id"), "object": "response.deleted", "deleted": true})
+	})
 	mux.HandleFunc("POST /openai/responses/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
 		res, ok := f.resps[r.PathValue("id")]

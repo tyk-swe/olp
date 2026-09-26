@@ -96,11 +96,10 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must reference a response created under this model.", &param)
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() && contract == nil {
-		return invalidRequest("state_carrier", "This retained response has no historical strict interaction contract.", nil)
-	}
+	// A retained response whose contract the route no longer promises is
+	// refused when prepare resolves this pin, before any provider work.
 	if contract != nil {
-		if e := s.authorizeResponseContract(ctx, x, authority, res, contract); e != nil {
+		if e := s.authorizeResponseContract(ctx, x, authority, res, contract, retainedNewWork); e != nil {
 			return e
 		}
 		x.responseContract = contract
@@ -122,7 +121,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	if x.pin == nil {
 		return nil
 	}
-	p, historical, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation())
+	p, historical, e := s.resolveResource(ctx, x, x.authority, x.pin, x.family.Operation(), retainedNewWork)
 	if e != nil {
 		return e
 	}
@@ -304,7 +303,7 @@ func responseUsage(body []byte) *openai.Usage {
 	return usage
 }
 
-func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
+func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, openai.FamilyResponses)
 	if done {
 		return
@@ -325,13 +324,13 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 	}
 	x.authority = authority
 	if contract != nil {
-		if e := s.authorizeResponseContract(r.Context(), x, authority, res, contract); e != nil {
+		if e := s.authorizeResponseContract(r.Context(), x, authority, res, contract, use); e != nil {
 			s.stateFail(x, w, e, x.family)
 			return
 		}
 		x.responseContract = contract
 	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation")
+	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation", use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -421,7 +420,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 }
 
 func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
 		if e != nil {
 			return e
@@ -434,13 +433,13 @@ func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
 func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -472,7 +471,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, p *pin, route *runtime.Route) *Error {
 		query := url.Values{}
 		for _, name := range []string{"limit", "after", "order"} {
 			if value := r.URL.Query().Get(name); value != "" {

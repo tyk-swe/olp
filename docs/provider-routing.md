@@ -264,9 +264,23 @@ mapping to the provider-owned object.
 A published slug moves between strict and transformed through an ordinary new
 revision, so clients keep their model name. Restoring an earlier revision
 activates it with that revision's own fidelity, and revision history shows the
-fidelity of each revision. While a route is transformed, stored strict
-responses, files, batches, continuations and video jobs created under it are
-refused with `409 provider_resource_unavailable`.
+fidelity of each revision.
+
+A stored response, file, batch, continuation or video job is served only under
+the fidelity it was created with:
+
+- While its route is transformed, a strict resource cannot be retrieved,
+  downloaded or recovered, and cannot start new work such as a
+  `previous_response_id` continuation or a batch. These requests fail with
+  `409 provider_resource_unavailable` before reaching the provider.
+- While its route is strict, a resource created under the transformed route
+  cannot start new work (`409 provider_resource_unavailable`). It can still be
+  retrieved as before.
+- `GET /v1/files`, `/v1/batches` and `/v1/videos` always list the owner's
+  resources. A resource the route no longer serves shows its stored state; the
+  list does not poll the provider for it.
+- The owner can always delete or cancel a stored resource, so provider-held
+  data can be removed and running upstream work stopped after a switch.
 
 ## Policies and caller preferences
 

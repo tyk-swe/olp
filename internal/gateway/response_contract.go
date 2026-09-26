@@ -118,15 +118,12 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	}
 	return r, &contract, nil
 }
-func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, contract *storedResponseContract) *Error {
+func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
 	current, ok := x.request.release.Snapshot.Routes[res.RouteSlug]
 	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 		return notFoundError("not_found", "The stored response is unavailable to this key.")
 	}
-	if !current.Fidelity.Strict() {
-		return strictRouteChanged()
-	}
-	p, _, e := s.resolveResource(ctx, x, authority, res, operationGeneration)
+	p, _, e := s.resolveResource(ctx, x, authority, res, operationGeneration, use)
 	if e != nil {
 		return e
 	}

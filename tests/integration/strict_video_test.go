@@ -336,7 +336,7 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 	}
 }
 
-func TestStrictVideoJobIsRefusedOnceItsRouteIsTransformed(t *testing.T) {
+func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	upstream := newStrictVideoUpstream(t)
@@ -364,17 +364,27 @@ func TestStrictVideoJobIsRefusedOnceItsRouteIsTransformed(t *testing.T) {
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	h.refresh()
 	_, getsBefore, contentsBefore, deletesBefore, _, _ := upstream.snapshot()
-	for _, request := range []struct{ method, path string }{
-		{"GET", "/v1/videos/" + created.ID},
-		{"GET", "/v1/videos/" + created.ID + "/content"},
-		{"DELETE", "/v1/videos/" + created.ID},
-	} {
-		status, raw, _ = h.gatewayRaw(request.method, request.path, key, nil, nil)
+	for _, path := range []string{"/v1/videos/" + created.ID, "/v1/videos/" + created.ID + "/content"} {
+		status, raw, _ = h.gatewayRaw("GET", path, key, nil, nil)
 		if status != http.StatusConflict || !strings.Contains(string(raw), "now transformed") {
-			t.Fatalf("%s %s served a strict job on a transformed route: %d %s", request.method, request.path, status, raw)
+			t.Fatalf("GET %s served a strict job on a transformed route: %d %s", path, status, raw)
 		}
 	}
+	// The list keeps the queued job and shows its stored state instead of
+	// polling the provider through a contract the route no longer promises.
+	status, raw, _ = h.gatewayRaw("GET", "/v1/videos", key, nil, nil)
+	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) || !strings.Contains(string(raw), `"status":"queued"`) {
+		t.Fatalf("video list after the route became transformed: %d %s", status, raw)
+	}
 	if _, gets, contents, deletes, _, _ := upstream.snapshot(); gets != getsBefore || contents != contentsBefore || deletes != deletesBefore {
-		t.Fatal("refused strict video job reached the provider")
+		t.Fatal("refused or listed strict video job reached the provider")
+	}
+	// Its owner can still delete it, so the provider-held video is removed.
+	status, raw, _ = h.gatewayRaw("DELETE", "/v1/videos/"+created.ID, key, nil, nil)
+	if status != http.StatusOK || !strings.Contains(string(raw), created.ID) {
+		t.Fatalf("delete of a strict job on a transformed route: %d %s", status, raw)
+	}
+	if _, _, _, deletes, _, _ := upstream.snapshot(); deletes != deletesBefore+1 {
+		t.Fatal("strict video delete did not reach the provider")
 	}
 }

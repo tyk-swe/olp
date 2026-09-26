@@ -49,7 +49,9 @@ interaction contract during draft validation, activation and release
 installation; a target without an admitted contract fails closed. Transformed
 routes translate between dialects, apply redaction and use Automatic providers.
 A published slug switches between strict and transformed through a new
-revision; stored strict resources are refused while their route is transformed.
+revision. A stored resource is served only under the fidelity it was created
+with, and its owner can always list, delete or cancel it; see
+[route fidelity](provider-routing.md#route-fidelity).
 
 Key authority (API keys, expiry, revocation, and revoked credential versions) is
 polled every five seconds independently of release installation. Authority older
