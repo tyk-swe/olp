@@ -502,7 +502,7 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	}
 
 	epoch := unresolved["process_epoch"].(string)
-	path := "/api/v3/request-metadata/gateway-epochs/" + epoch + "/acknowledge"
+	path := "/api/v1/request-metadata/gateway-epochs/" + epoch + "/acknowledge"
 	acknowledged := in.h.want(in.owner, http.MethodPost, path, nil, nil, 200)
 	if acknowledged["process_epoch"] != epoch || acknowledged["gateway_instance"] != lostInstance {
 		t.Fatalf("acknowledgement: %v", acknowledged)
@@ -554,7 +554,7 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 func m4Epoch(t *testing.T, in *m4Install, state, instance string) map[string]any {
 	t.Helper()
 	listed := in.h.want(in.owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state="+state, nil, nil, 200)
+		"/api/v1/request-metadata/gateway-epochs?state="+state, nil, nil, 200)
 	items, ok := listed["items"].([]any)
 	if !ok && listed["items"] != nil {
 		t.Fatalf("%s epochs are not a list: %v", state, listed["items"])

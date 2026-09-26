@@ -64,25 +64,25 @@ func TestPricingSourceLifecycle(t *testing.T) {
 	owner := h.owner()
 	fixture := newSourceFixture(t, sourceDocumentV1)
 
-	status, problem, _ := h.request(owner, "POST", "/api/v3/pricing/sources",
+	status, problem, _ := h.request(owner, "POST", "/api/v1/pricing/sources",
 		map[string]any{"name": "internal feed", "url": "http://10.0.0.4/prices.json"},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
 	if status != 422 {
 		t.Fatalf("internal source = %d %v", status, problem)
 	}
-	status, problem, _ = h.request(owner, "POST", "/api/v3/pricing/sources",
+	status, problem, _ = h.request(owner, "POST", "/api/v1/pricing/sources",
 		map[string]any{"name": "credentialed feed", "url": "https://user:pass@127.0.0.1/prices.json"},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
 	if status != 422 {
 		t.Fatalf("credentialed source = %d %v", status, problem)
 	}
 
-	source := h.want(owner, "POST", "/api/v3/pricing/sources",
+	source := h.want(owner, "POST", "/api/v1/pricing/sources",
 		map[string]any{"name": "vendor feed", "url": fixture.URL + "/prices.json"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	sourceID := source["id"].(string)
 
-	refresh := h.want(owner, "POST", "/api/v3/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
+	refresh := h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
 	snapshot := refresh["snapshot"].(map[string]any)
 	if len(snapshot["sha256"].(string)) != 64 || snapshot["price_count"].(float64) != 2 || snapshot["currency"] != "USD" {
 		t.Fatalf("snapshot = %v", snapshot)
@@ -93,17 +93,17 @@ func TestPricingSourceLifecycle(t *testing.T) {
 	}
 	snapshotID := snapshot["id"].(string)
 
-	refresh = h.want(owner, "POST", "/api/v3/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
+	refresh = h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
 	if refresh["snapshot"].(map[string]any)["id"] != snapshotID {
 		t.Fatalf("same digest stored a second snapshot")
 	}
 
-	published := h.want(owner, "POST", "/api/v3/pricing/source-snapshots/"+snapshotID+"/publish",
+	published := h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshotID+"/publish",
 		map[string]any{}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	if published["source_snapshot_id"] != snapshotID {
 		t.Fatalf("published revision = %v", published)
 	}
-	revisions := h.want(owner, "GET", "/api/v3/pricing/revisions", nil, nil, 200)
+	revisions := h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
 	latest := revisions["items"].([]any)[0].(map[string]any)
 	if latest["source_name"] != "vendor feed" || latest["source_snapshot_id"] != snapshotID {
 		t.Fatalf("revision provenance = %v", latest)
@@ -113,7 +113,7 @@ func TestPricingSourceLifecycle(t *testing.T) {
 	}
 
 	fixture.document.Store(sourceDocumentV2)
-	refresh = h.want(owner, "POST", "/api/v3/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
+	refresh = h.want(owner, "POST", "/api/v1/pricing/sources/"+sourceID+"/refresh", nil, nil, 200)
 	snapshot = refresh["snapshot"].(map[string]any)
 	if snapshot["id"] == snapshotID {
 		t.Fatalf("changed document reused a snapshot")
@@ -124,7 +124,7 @@ func TestPricingSourceLifecycle(t *testing.T) {
 	}
 	snapshotID = snapshot["id"].(string)
 
-	published = h.want(owner, "POST", "/api/v3/pricing/source-snapshots/"+snapshotID+"/publish",
+	published = h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshotID+"/publish",
 		map[string]any{"overrides": []any{
 			map[string]any{"provider_kind": "openai", "model": "gpt-source", "operation": "generation",
 				"currency": "USD", "input_per_million": "9.000000", "output_per_million": "9.000000"},
@@ -145,11 +145,11 @@ func TestPricingSourceLifecycle(t *testing.T) {
 		}
 	}
 
-	snapshots := h.want(owner, "GET", "/api/v3/pricing/sources/"+sourceID+"/snapshots", nil, nil, 200)
+	snapshots := h.want(owner, "GET", "/api/v1/pricing/sources/"+sourceID+"/snapshots", nil, nil, 200)
 	if len(snapshots["items"].([]any)) != 2 {
 		t.Fatalf("snapshots = %v", snapshots)
 	}
-	revisions = h.want(owner, "GET", "/api/v3/pricing/revisions", nil, nil, 200)
+	revisions = h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
 	if len(revisions["items"].([]any)) != 2 {
 		t.Fatalf("revisions = %v", revisions)
 	}
@@ -160,12 +160,12 @@ func TestPricingSourceFetchFailures(t *testing.T) {
 	owner := h.owner()
 
 	create := func(name, url string) map[string]any {
-		return h.want(owner, "POST", "/api/v3/pricing/sources",
+		return h.want(owner, "POST", "/api/v1/pricing/sources",
 			map[string]any{"name": name, "url": url},
 			map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	}
 	refresh := func(source map[string]any, want int) map[string]any {
-		status, body, _ := h.request(owner, "POST", "/api/v3/pricing/sources/"+source["id"].(string)+"/refresh", nil, nil)
+		status, body, _ := h.request(owner, "POST", "/api/v1/pricing/sources/"+source["id"].(string)+"/refresh", nil, nil)
 		if status != want {
 			t.Fatalf("refresh = %d, want %d: %v", status, want, body)
 		}
@@ -207,7 +207,7 @@ func TestPricingSourceFetchFailures(t *testing.T) {
 	source = create("dead feed", dead.URL+"/prices.json")
 	refresh(source, 502)
 
-	snapshots := h.want(owner, "GET", "/api/v3/pricing/sources/"+source["id"].(string)+"/snapshots", nil, nil, 200)
+	snapshots := h.want(owner, "GET", "/api/v1/pricing/sources/"+source["id"].(string)+"/snapshots", nil, nil, 200)
 	if len(snapshots["items"].([]any)) != 0 {
 		t.Fatalf("failed refresh stored snapshots: %v", snapshots)
 	}

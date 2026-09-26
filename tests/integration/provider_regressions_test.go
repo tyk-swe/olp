@@ -18,7 +18,7 @@ import (
 func TestProviderCataloguePaginationUsesRecordIdentifiers(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	paths := []string{"/api/v3/provider-models", "/api/v3/provider-health"}
+	paths := []string{"/api/v1/provider-models", "/api/v1/provider-health"}
 	for _, path := range paths {
 		empty := h.want(owner, "GET", path+"?limit=1", nil, nil, 200)
 		if len(empty["items"].([]any)) != 0 || empty["next_cursor"] != nil {
@@ -27,7 +27,7 @@ func TestProviderCataloguePaginationUsesRecordIdentifiers(t *testing.T) {
 	}
 	up := newVendor(t)
 	for i := range 2 {
-		h.want(owner, "POST", "/api/v3/providers", map[string]any{
+		h.want(owner, "POST", "/api/v1/providers", map[string]any{
 			"name": fmt.Sprintf("Paginated provider %d", i), "model": vendorModel, "credential": vendorSecret,
 			"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 		}, map[string]string{"Idempotency-Key": fmt.Sprintf("provider-%d", i)}, 201)
@@ -47,14 +47,14 @@ func TestProviderCataloguePaginationUsesRecordIdentifiers(t *testing.T) {
 				}
 				item := expected.(map[string]any)
 				id := item["provider_id"].(string)
-				if path == "/api/v3/provider-models" {
+				if path == "/api/v1/provider-models" {
 					id = item["model"].(map[string]any)["id"].(string)
 				}
 				cursor = base64.RawURLEncoding.EncodeToString([]byte(id))
 				if i == 0 && page["next_cursor"] != cursor || i == 1 && page["next_cursor"] != nil {
 					t.Fatalf("wrong cursor on page %d: %v", i, page)
 				}
-				if path == "/api/v3/provider-health" && page["window_minutes"] != float64(15) {
+				if path == "/api/v1/provider-health" && page["window_minutes"] != float64(15) {
 					t.Fatalf("health window lost: %v", page)
 				}
 			}
@@ -82,11 +82,11 @@ func TestProviderDiagnosticsDoNotPersistUpstreamCredentialEchoes(t *testing.T) {
 		}})
 	}))
 	defer up.Close()
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Credential echo", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	const safeDetail = "The upstream rejected the credential (HTTP 401)."
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(created), 200)
 	if probe["succeeded"] != false || probe["detail"] != safeDetail {
@@ -100,7 +100,7 @@ func TestProviderDiagnosticsDoNotPersistUpstreamCredentialEchoes(t *testing.T) {
 	if detail["last_probe_status"] != "failed" || detail["last_probe_detail"] != safeDetail {
 		t.Fatalf("unsafe stored probe diagnostic: %v", detail)
 	}
-	health := h.want(owner, "GET", "/api/v3/provider-health", nil, nil, 200)
+	health := h.want(owner, "GET", "/api/v1/provider-health", nil, nil, 200)
 	if health["items"].([]any)[0].(map[string]any)["last_probe_detail"] != safeDetail {
 		t.Fatalf("unsafe health diagnostic: %v", health)
 	}
@@ -150,11 +150,11 @@ func TestCertificationAllowsBothProbeBudgetsAndPersistsEvidence(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Slow certification", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)

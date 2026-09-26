@@ -15,7 +15,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 
-	h.want(nil, http.MethodGet, "/api/v3/overview", nil, nil, 401)
+	h.want(nil, http.MethodGet, "/api/v1/overview", nil, nil, 401)
 
 	want := func(body map[string]any, providers, routes, models float64, key bool) {
 		t.Helper()
@@ -26,7 +26,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 		}
 	}
 	overview := func() map[string]any {
-		return h.want(owner, http.MethodGet, "/api/v3/overview", nil, nil, 200)
+		return h.want(owner, http.MethodGet, "/api/v1/overview", nil, nil, 200)
 	}
 
 	want(overview(), 0, 0, 0, false)
@@ -34,13 +34,13 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	// A draft provider's seed model counts toward enabled_models; the provider
 	// itself stays inactive until activation.
 	up := newVendor(t)
-	created := h.want(owner, http.MethodPost, "/api/v3/providers", map[string]any{
+	created := h.want(owner, http.MethodPost, "/api/v1/providers", map[string]any{
 		"name": "Overview vendor", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key",
 			"endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	provider := created["id"].(string)
-	providerPath := "/api/v3/providers/" + provider
+	providerPath := "/api/v1/providers/" + provider
 	want(overview(), 0, 0, 1, false)
 
 	if probe := h.want(owner, http.MethodPost, providerPath+"/probe", nil, etagHeader(created), 200); probe["succeeded"] != true {
@@ -57,12 +57,12 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 		withMatch(detail, map[string]string{"Idempotency-Key": "activate"}), 200)
 	want(overview(), 1, 0, 1, false)
 
-	draft := h.want(owner, http.MethodPost, "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
 		"slug": "overview-chat", "overall_timeout_ms": 20000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": provider, "provider_model": vendorModel,
 			"priority": 0, "weight": 1, "timeout_ms": 15000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, http.MethodPost, draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, http.MethodPost, draftPath+"/activate", nil,
 		withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
@@ -70,7 +70,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 
 	// Setup counts non-revoked keys, including expired keys. This flag does
 	// not grant inference authority; revocation alone clears the setup step.
-	key := h.want(owner, http.MethodPost, "/api/v3/api-keys", map[string]any{
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{
 		"name": "Overview key", "scopes": []string{"inference"}, "allowed_routes": []string{"overview-chat"},
 	}, map[string]string{"Idempotency-Key": "key"}, 201)
 	want(overview(), 1, 1, 1, true)
@@ -82,8 +82,8 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	if err != nil || authority.Allows("inference", "overview-chat", nil, time.Now()) {
 		t.Fatal("setup completion must not authorize an expired key", err)
 	}
-	keyRecord := h.want(owner, http.MethodGet, "/api/v3/api-keys/"+key["id"].(string), nil, nil, 200)
-	h.want(owner, http.MethodPost, "/api/v3/api-keys/"+key["id"].(string)+"/revoke", nil,
+	keyRecord := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+key["id"].(string), nil, nil, 200)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+key["id"].(string)+"/revoke", nil,
 		withMatch(keyRecord, map[string]string{"Idempotency-Key": "revoke"}), 200)
 	want(overview(), 1, 1, 1, false)
 

@@ -46,14 +46,14 @@ func TestAPIKeyBudgetReportsLiveSpend(t *testing.T) {
 		monthly, unpriced = "3.780000000000", 2
 	}
 
-	path := "/api/v3/api-keys/" + key
+	path := "/api/v1/api-keys/" + key
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	validateManagementResponse(t, "GET", path, 200, detail)
 	kbAssert(t, detail, kbExpect{daily: daily, monthly: monthly, dailyLimit: "5.00",
 		monthlyLimit: "50.00", unpriced: unpriced, enforced: true}, now)
 
 	// The inventory reports the same accounting as the detail page.
-	list := h.want(owner, "GET", "/api/v3/api-keys", nil, nil, 200)
+	list := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)
 	items, ok := list["items"].([]any)
 	if !ok || len(items) != 1 {
 		t.Fatalf("api key inventory: %v", list)
@@ -69,7 +69,7 @@ func TestAPIKeyBudgetWithoutEnforcement(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	key := kbKey(t, h, owner, "5.00", "")
-	path := "/api/v3/api-keys/" + key
+	path := "/api/v1/api-keys/" + key
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	validateManagementResponse(t, "GET", path, 200, detail)
 	kbAssert(t, detail, kbExpect{daily: "0", monthly: "0", dailyLimit: "5.00",
@@ -144,7 +144,7 @@ func kbKey(t *testing.T, h *accessHarness, owner *browser, daily, monthly string
 	if monthly != "" {
 		body["monthly_cost_limit"] = monthly
 	}
-	created := h.want(owner, "POST", "/api/v3/api-keys", body, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	created := h.want(owner, "POST", "/api/v1/api-keys", body, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	id, ok := created["id"].(string)
 	if !ok {
 		t.Fatalf("created key: %v", created)

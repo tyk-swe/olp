@@ -36,14 +36,14 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.route_drafts WHERE slug=$1", routeSlug).Scan(&draftID); err != nil {
 		t.Fatal(err)
 	}
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "policy client", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "policy client", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.refresh()
 	secret := key["secret"].(string)
 	capture := &policyCapture{}
 	h.Gateway.Sink = capture
-	installationPath := "/api/v3/routing-policies/installation/" + uuid.Nil.String()
-	routePath := "/api/v3/routing-policies/route-draft/" + draftID
-	keyPath := "/api/v3/routing-policies/api-key/" + key["id"].(string)
+	installationPath := "/api/v1/routing-policies/installation/" + uuid.Nil.String()
+	routePath := "/api/v1/routing-policies/route-draft/" + draftID
+	keyPath := "/api/v1/routing-policies/api-key/" + key["id"].(string)
 	update := func(path string, body any) map[string]any {
 		t.Helper()
 		current := h.want(owner, "GET", path, nil, nil, 200)
@@ -63,13 +63,13 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 	if h.Runtime.Release().Sequence != before || string(afterPolicy) != string(beforePolicy) {
 		t.Fatal("staged route policy changed live serving")
 	}
-	draft := h.want(owner, "GET", "/api/v3/route-drafts/"+draftID, nil, nil, 200)
-	preview := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "policy"}, nil, 200)
+	draft := h.want(owner, "GET", "/api/v1/route-drafts/"+draftID, nil, nil, 200)
+	preview := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "policy"}, nil, 200)
 	target := preview["targets"].([]any)[0].(map[string]any)
 	if target["decision"].(map[string]any)["strategy"] != "price" {
 		t.Fatalf("draft did not use staged policy: %v", preview)
 	}
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 	h.refresh()
 	if p := h.Runtime.Release().Snapshot.Routes[routeSlug].Policy; p == nil || p.Defaults.Strategy == nil || *p.Defaults.Strategy != "price" {
 		t.Fatal("revision omitted its policy")

@@ -1,7 +1,7 @@
 const LOGIN_LOOP_PATHS = [
   '/login',
-  '/api/v3/oidc/login',
-  '/api/v3/oidc/callback'
+  '/api/v1/oidc/login',
+  '/api/v1/oidc/callback'
 ] as const;
 const MAX_RELATIVE_RETURN_TO_BYTES = 2_048;
 // The control ranges are intentional input-validation boundaries.

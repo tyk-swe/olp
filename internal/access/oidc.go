@@ -102,7 +102,7 @@ func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provi
 	// Keep the verifier's refresh context independent of this request's
 	// cancellation; every fetch still uses the bounded identity HTTP client.
 	provider := metadata.NewProvider(oidc.ClientContext(context.Background(), s.OIDCClient))
-	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.Origin + "/api/v3/oidc/callback", Scopes: c.Scopes}
+	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.Origin + "/api/v1/oidc/callback", Scopes: c.Scopes}
 	switch {
 	case metadata.AuthMethods == nil || slices.Contains(metadata.AuthMethods, "client_secret_basic"):
 		// OIDC discovery defaults to client_secret_basic when omitted.

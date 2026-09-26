@@ -182,7 +182,7 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
 		return r, cancel, Fail(403, "origin_denied", "Use the configured console origin.")
 	}
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v3/oidc/callback" {
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" {
 		return r, cancel, Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
 	return r, cancel, nil

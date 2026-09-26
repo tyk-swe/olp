@@ -18,7 +18,7 @@ async function changeRemote(
     async ({ path, method, body }) => {
       const [resource, session] = await Promise.all([
         fetch(path).then((response) => response.json()),
-        fetch('/api/v3/sessions/current').then((response) => response.json())
+        fetch('/api/v1/sessions/current').then((response) => response.json())
       ]);
       const response = await fetch(path, {
         method,
@@ -44,7 +44,7 @@ async function signIn(page: Page, email: string) {
     const completed = page.waitForResponse(
       (response) =>
         response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/v3/sessions'
+        new URL(response.url()).pathname === '/api/v1/sessions'
     );
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     const response = await completed;
@@ -75,7 +75,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   const failures: string[] = [];
   page.on('pageerror', (error) => failures.push(error.message));
   page.on('response', (response) => {
-    if (response.url().includes('/api/v3/') && response.status() >= 500)
+    if (response.url().includes('/api/v1/') && response.status() >= 500)
       failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
   await page.goto('/');
@@ -119,7 +119,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     invited.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
   expect(
-    await invited.evaluate(async () => (await fetch('/api/v3/users')).status)
+    await invited.evaluate(async () => (await fetch('/api/v1/users')).status)
   ).toBe(403);
   // Invitation success must remain usable after the initial session ends.
   await signOut(invited);
@@ -155,12 +155,12 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
 
   await page.goto('/settings/profile');
   await page.getByLabel('Display name').fill('Unsaved owner');
-  await changeRemote(page, '/api/v3/profile', 'PATCH', {
+  await changeRemote(page, '/api/v1/profile', 'PATCH', {
     display_name: 'Remote Owner'
   });
   const staleProfile = page.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/profile') &&
+      response.url().endsWith('/api/v1/profile') &&
       response.request().method() === 'PATCH'
   );
   await page.getByRole('button', { name: 'Save profile' }).click();
@@ -181,7 +181,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await expect(sibling.getByLabel('Display name')).toHaveValue('Updated Owner');
   const siblingVerified = sibling.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/sessions/current') &&
+      response.url().endsWith('/api/v1/sessions/current') &&
       response.status() === 200
   );
   await page.getByLabel('Current password', { exact: true }).fill(password);
@@ -194,7 +194,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await sibling.getByLabel('Display name').fill('Owner from sibling');
   const siblingWrite = sibling.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/profile') &&
+      response.url().endsWith('/api/v1/profile') &&
       response.request().method() === 'PATCH'
   );
   await sibling.getByRole('button', { name: 'Save profile' }).click();
@@ -210,7 +210,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await sibling.getByLabel('Display name').fill('Owner from sibling');
   const refreshedWrite = sibling.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/profile') &&
+      response.url().endsWith('/api/v1/profile') &&
       response.request().method() === 'PATCH'
   );
   await sibling.getByRole('button', { name: 'Save profile' }).click();
@@ -248,12 +248,12 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     .locator('.setting-row')
     .filter({ has: page.locator('[id="setting-retention.audit_days"]') });
   await retention.locator('input').fill('180');
-  await changeRemote(page, '/api/v3/settings/retention.audit_days', 'PUT', {
+  await changeRemote(page, '/api/v1/settings/retention.audit_days', 'PUT', {
     value: '190'
   });
   const staleSetting = page.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/settings/retention.audit_days') &&
+      response.url().endsWith('/api/v1/settings/retention.audit_days') &&
       response.request().method() === 'PUT'
   );
   await retention.getByRole('button', { name: 'Save', exact: true }).click();
@@ -297,7 +297,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     page.getByText('OIDC configuration validated and enabled.')
   ).toBeVisible();
   await page.getByLabel('Client ID').fill('unsaved-client');
-  await changeRemote(page, '/api/v3/oidc/configuration', 'PUT', {
+  await changeRemote(page, '/api/v1/oidc/configuration', 'PUT', {
     issuer: 'http://127.0.0.1:4186',
     discovery_url: 'http://127.0.0.1:4186/.well-known/openid-configuration',
     client_id: 'remote-browser-client',
@@ -306,7 +306,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   });
   const staleOidc = page.waitForResponse(
     (response) =>
-      response.url().endsWith('/api/v3/oidc/configuration') &&
+      response.url().endsWith('/api/v1/oidc/configuration') &&
       response.request().method() === 'PUT'
   );
   await page.getByRole('button', { name: 'Save and validate' }).click();
@@ -330,13 +330,13 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     const rejected = await page.evaluate(async (returnTo) => {
       // Chromium strips these controls and would navigate to another origin.
       const destination = new URL(returnTo, location.href);
-      const post = await fetch('/api/v3/oidc/login', {
+      const post = await fetch('/api/v1/oidc/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ return_to: returnTo })
       });
       const get = await fetch(
-        '/api/v3/oidc/login?return_to=' + encodeURIComponent(returnTo),
+        '/api/v1/oidc/login?return_to=' + encodeURIComponent(returnTo),
         {
           redirect: 'manual'
         }
@@ -375,7 +375,7 @@ test('capabilities and passive verification recover without losing loaded conten
   page
 }, info) => {
   let capabilitiesFailed = false;
-  await page.route('**/api/v3/auth/capabilities', async (route) => {
+  await page.route('**/api/v1/auth/capabilities', async (route) => {
     if (!capabilitiesFailed) {
       capabilitiesFailed = true;
       await route.fulfill({
@@ -400,7 +400,7 @@ test('capabilities and passive verification recover without losing loaded conten
     'Owner from sibling'
   );
   let unavailable = true;
-  await page.route('**/api/v3/sessions/current', async (route) => {
+  await page.route('**/api/v1/sessions/current', async (route) => {
     if (unavailable && route.request().method() === 'GET')
       await route.fulfill({
         status: 503,
@@ -423,7 +423,7 @@ test('capabilities and passive verification recover without losing loaded conten
   let writes = 0;
   page.on('request', (request) => {
     if (
-      request.url().endsWith('/api/v3/profile') &&
+      request.url().endsWith('/api/v1/profile') &&
       request.method() === 'PATCH'
     )
       writes++;
@@ -445,7 +445,7 @@ test('capabilities and passive verification recover without losing loaded conten
   await expect(page.getByText('Profile updated.')).toBeVisible();
   expect(writes).toBe(1);
   // A CSRF rejection is an explicit retry, never an automatic replay.
-  await page.route('**/api/v3/profile', async (route) => {
+  await page.route('**/api/v1/profile', async (route) => {
     if (route.request().method() === 'PATCH') {
       await route.fulfill({
         status: 403,
@@ -456,7 +456,7 @@ test('capabilities and passive verification recover without losing loaded conten
           type: 'https://openllmproxy.dev/problems/csrf_invalid'
         })
       });
-      await page.unroute('**/api/v3/profile');
+      await page.unroute('**/api/v1/profile');
     } else await route.continue();
   });
   await page.getByLabel('Display name').fill('Explicit retry');

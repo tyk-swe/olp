@@ -22,7 +22,7 @@ async function management(
 ) {
   return page.evaluate(
     async ({ method, path, source, match }) => {
-      const session = await fetch('/api/v3/sessions/current').then((response) =>
+      const session = await fetch('/api/v1/sessions/current').then((response) =>
         response.json()
       );
       const headers: Record<string, string> = {
@@ -81,12 +81,12 @@ test('configuration forms retain native source through real saves, conflicts and
   const created = await management(
     page,
     'POST',
-    '/api/v3/providers',
+    '/api/v1/providers',
     `{"name":"Native editor ${info.project.name}","configuration":${configuration},"model":"${model}","credential":"compatible-provider-secret"}`
   );
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
-  const path = `/api/v3/providers/${id}`;
+  const path = `/api/v1/providers/${id}`;
   await page.goto(`/providers/${id}`);
   await expect(page.getByLabel('API profile')).toHaveValue('compatible-chat@1');
   await page.getByText('Advanced configuration JSON', { exact: true }).click();
@@ -232,7 +232,7 @@ test('configuration forms retain native source through real saves, conflicts and
   const legacy = await management(
     page,
     'POST',
-    '/api/v3/route-drafts',
+    '/api/v1/route-drafts',
     `{"slug":"native-editor-${info.project.name}","operations":["generation"],"overall_timeout_ms":10000,"max_attempts":1,"targets":[{"provider_id":"${id}","provider_model":"${model}","priority":0,"weight":1,"timeout_ms":5000}]}`
   );
   expect(legacy.status, legacy.source).toBe(201);
@@ -243,7 +243,7 @@ test('configuration forms retain native source through real saves, conflicts and
   const savedRoute = page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname === `/api/v3/route-drafts/${routeId}`
+      new URL(response.url()).pathname === `/api/v1/route-drafts/${routeId}`
   );
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   const saved = await savedRoute;
@@ -281,7 +281,7 @@ test('configuration forms retain native source through real saves, conflicts and
   const legacyRoute = await management(
     page,
     'POST',
-    '/api/v3/route-drafts',
+    '/api/v1/route-drafts',
     `{"slug":"${legacySlug}","operations":["generation"],"overall_timeout_ms":10000,"max_attempts":1,"targets":[{"provider_id":"${id}","provider_model":"${model}","priority":0,"weight":1,"timeout_ms":5000}]}`
   );
   expect(legacyRoute.status, legacyRoute.source).toBe(201);
@@ -289,9 +289,9 @@ test('configuration forms retain native source through real saves, conflicts and
   const legacyActivated = await management(
     page,
     'POST',
-    `/api/v3/route-drafts/${legacyDraftId}/activate`,
+    `/api/v1/route-drafts/${legacyDraftId}/activate`,
     undefined,
-    `/api/v3/route-drafts/${legacyDraftId}`
+    `/api/v1/route-drafts/${legacyDraftId}`
   );
   expect(legacyActivated.status, legacyActivated.source).toBe(200);
   const providerCallsBefore = await request
@@ -346,12 +346,12 @@ test('profile migration, schema fields and write-only network credentials share 
   const created = await management(
     page,
     'POST',
-    '/api/v3/providers',
+    '/api/v1/providers',
     `{"name":"Profile migration ${info.project.name}","configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"${endpoint}","options":{"parameter_defaults":{"seed":9007199254740993}}},"credential":"compatible-provider-secret","model":"${model}"}`
   );
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
-  const path = `/api/v3/providers/${id}`;
+  const path = `/api/v1/providers/${id}`;
   await page.goto(`/providers/${id}`);
   await page.getByText('Advanced configuration JSON', { exact: true }).click();
   const json = page.getByLabel('Native configuration JSON', { exact: true });

@@ -145,7 +145,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 		}
 		children = append(children, r)
 	}
-	other := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "other owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)["id"].(string)
+	other := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other owner", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)["id"].(string)
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, other, claimed.ID); !errors.Is(err, resources.ErrNotFound) {
 		t.Fatalf("cross owner read: %v", err)
 	}

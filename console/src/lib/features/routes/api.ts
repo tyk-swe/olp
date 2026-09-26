@@ -23,7 +23,7 @@ export async function listRouteDraftPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<RouteDraft>> {
-  const response = await apiClient.GET('/api/v3/route-drafts', {
+  const response = await apiClient.GET('/api/v1/route-drafts', {
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
@@ -38,7 +38,7 @@ export async function listRoutePage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<ActiveRoute>> {
-  const response = await apiClient.GET('/api/v3/routes', {
+  const response = await apiClient.GET('/api/v1/routes', {
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
@@ -49,7 +49,7 @@ export async function getRouteDraft(
   id: string,
   signal?: AbortSignal
 ): Promise<RouteDraft> {
-  const response = await apiClient.GET('/api/v3/route-drafts/{draft_id}', {
+  const response = await apiClient.GET('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id } },
     signal
   });
@@ -59,7 +59,7 @@ export async function getRouteDraft(
 export async function createRouteDraft(
   input: CreateRouteDraftInput
 ): Promise<RouteDraftValidation> {
-  const response = await apiClient.POST('/api/v3/route-drafts', {
+  const response = await apiClient.POST('/api/v1/route-drafts', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -71,7 +71,7 @@ export async function createRouteMigrationDraft(
   slug: string
 ): Promise<RouteDraft> {
   const response = await apiClient.POST(
-    '/api/v3/routes/{route_id}/migration-draft',
+    '/api/v1/routes/{route_id}/migration-draft',
     {
       params: {
         path: { route_id: route.id },
@@ -91,7 +91,7 @@ export async function replaceRouteDraft(
   etag: string,
   input: ReplaceRouteDraftInput
 ): Promise<RouteDraft> {
-  const response = await apiClient.PUT('/api/v3/route-drafts/{draft_id}', {
+  const response = await apiClient.PUT('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } },
     body: input
   });
@@ -102,7 +102,7 @@ export async function deleteRouteDraft(
   id: string,
   etag: string
 ): Promise<void> {
-  const response = await apiClient.DELETE('/api/v3/route-drafts/{draft_id}', {
+  const response = await apiClient.DELETE('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } }
   });
   ensureSuccess(response.error, response.response);
@@ -113,7 +113,7 @@ export async function simulateRoute(
   input: RouteSimulationInput
 ): Promise<RouteSimulation> {
   const response = await apiClient.POST(
-    '/api/v3/route-drafts/{draft_id}/simulate',
+    '/api/v1/route-drafts/{draft_id}/simulate',
     {
       params: { path: { draft_id: id } },
       body: input
@@ -167,7 +167,7 @@ export async function simulateRouting(
       response_format: input.response_format
     }
   } as unknown as Schemas['SimulationRequest']['operation'];
-  const response = await apiClient.POST('/api/v3/routing/simulate', {
+  const response = await apiClient.POST('/api/v1/routing/simulate', {
     body: {
       operation,
       surface: input.surface,
@@ -185,7 +185,7 @@ export async function validateRoute(
   draft: RouteDraft
 ): Promise<RouteDraftValidation> {
   const response = await apiClient.POST(
-    '/api/v3/route-drafts/{draft_id}/validate',
+    '/api/v1/route-drafts/{draft_id}/validate',
     {
       params: {
         path: { draft_id: draft.id },
@@ -200,7 +200,7 @@ export async function activateRoute(
   draft: Pick<RouteDraft, 'id' | 'etag'>
 ): Promise<RouteActivation> {
   const response = await apiClient.POST(
-    '/api/v3/route-drafts/{draft_id}/activate',
+    '/api/v1/route-drafts/{draft_id}/activate',
     {
       params: {
         path: { draft_id: draft.id },
@@ -218,7 +218,7 @@ export async function retireRoute(
   routeID: string,
   etag: string
 ): Promise<RouteRetire> {
-  const response = await apiClient.POST('/api/v3/routes/{route_id}/retire', {
+  const response = await apiClient.POST('/api/v1/routes/{route_id}/retire', {
     params: {
       path: { route_id: routeID },
       header: {
@@ -244,7 +244,7 @@ async function listRouteRevisionPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<RouteRevision>> {
-  const response = await apiClient.GET('/api/v3/routes/{route_id}/revisions', {
+  const response = await apiClient.GET('/api/v1/routes/{route_id}/revisions', {
     params: {
       path: { route_id: routeId },
       query: { cursor, limit: ROUTE_REVISION_PAGE_SIZE }
@@ -261,7 +261,7 @@ export async function diffRouteRevisions(
   signal?: AbortSignal
 ): Promise<RouteRevisionDiff> {
   const response = await apiClient.GET(
-    '/api/v3/routes/{route_id}/revisions/diff',
+    '/api/v1/routes/{route_id}/revisions/diff',
     {
       params: { path: { route_id: routeId }, query: { from, to } },
       signal
@@ -275,7 +275,7 @@ export async function restoreRouteRevision(
   revisionId: string
 ): Promise<RouteDraft> {
   const response = await apiClient.POST(
-    '/api/v3/routes/{route_id}/revisions/{revision_id}/restore-as-draft',
+    '/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft',
     {
       params: {
         path: { route_id: routeId, revision_id: revisionId },

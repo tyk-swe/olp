@@ -15,11 +15,11 @@ func TestLargeCredentialPoolWritesReplayOriginalResponse(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Large credential pool", "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string) + "/credential-slots"
+	path := "/api/v1/providers/" + created["id"].(string) + "/credential-slots"
 	pool := h.want(owner, "GET", path, nil, nil, 200)
 	defaultID := pool["items"].([]any)[0].(map[string]any)["id"].(string)
 	models := make([]string, 2000)

@@ -138,8 +138,8 @@ func provisionVideo(t *testing.T, h *accessHarness, b *browser, endpoint string,
 	if projectID != nil {
 		create["project_id"] = projectID
 	}
-	detail := h.want(b, "POST", "/api/v3/providers", create, idem("video-provider"), 201)
-	path := "/api/v3/providers/" + detail["id"].(string)
+	detail := h.want(b, "POST", "/api/v1/providers", create, idem("video-provider"), 201)
+	path := "/api/v1/providers/" + detail["id"].(string)
 	probe := h.want(b, "POST", path+"/probe", nil, etagHeader(detail), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("probe must succeed: %v", probe)
@@ -156,8 +156,8 @@ func provisionVideo(t *testing.T, h *accessHarness, b *browser, endpoint string,
 	if projectID != nil {
 		draft["project_id"] = projectID
 	}
-	created := h.want(b, "POST", "/api/v3/route-drafts", draft, idem("video-draft-"+slug), 201)
-	h.want(b, "POST", "/api/v3/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("video-draft-activate")), 200)
+	created := h.want(b, "POST", "/api/v1/route-drafts", draft, idem("video-draft-"+slug), 201)
+	h.want(b, "POST", "/api/v1/route-drafts/"+created["id"].(string)+"/activate", nil, withMatch(created, idem("video-draft-activate")), 200)
 	return detail, slug
 }
 
@@ -200,7 +200,7 @@ func (h *accessHarness) videoCreate(slug, secret string) (int, map[string]any) {
 
 func mediaJobIDs(t *testing.T, h *accessHarness, b *browser) []string {
 	t.Helper()
-	list := h.want(b, "GET", "/api/v3/media-jobs", nil, nil, 200)
+	list := h.want(b, "GET", "/api/v1/media-jobs", nil, nil, 200)
 	ids := []string{}
 	for _, item := range list["items"].([]any) {
 		ids = append(ids, item.(map[string]any)["id"].(string))
@@ -217,14 +217,14 @@ func TestMediaManagement(t *testing.T) {
 	op := h.invite(owner, "media-op@example.com", "operator")
 	viewer := h.invite(owner, "media-viewer@example.com", "operator")
 	outsider := h.invite(owner, "media-outsider@example.com", "operator")
-	users := h.want(owner, "GET", "/api/v3/users", nil, nil, 200)
+	users := h.want(owner, "GET", "/api/v1/users", nil, nil, 200)
 	ids := map[string]map[string]any{}
 	for _, item := range users["items"].([]any) {
 		record := item.(map[string]any)
 		ids[record["email"].(string)] = record
 	}
 	for _, email := range []string{"media-op@example.com", "media-viewer@example.com", "media-outsider@example.com"} {
-		h.want(owner, "PATCH", "/api/v3/users/"+ids[email]["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(ids[email]), 200)
+		h.want(owner, "PATCH", "/api/v1/users/"+ids[email]["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(ids[email]), 200)
 	}
 	addMember(h, owner, projectA, ids["media-op@example.com"]["id"].(string), "manager")
 	addMember(h, owner, projectA, ids["media-viewer@example.com"]["id"].(string), "viewer")
@@ -233,7 +233,7 @@ func TestMediaManagement(t *testing.T) {
 	outsider = login(h, "media-outsider@example.com")
 
 	_, slug := provisionVideo(t, h, op, up.URL+"/v1", projectA)
-	key := h.want(op, "POST", "/api/v3/api-keys", map[string]any{
+	key := h.want(op, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "media key", "scopes": []string{"inference"},
 		"project_id": projectA, "allowed_routes": []string{slug},
 	}, idem("media-key"), 201)
@@ -263,8 +263,8 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatalf("out-of-scope principal must see no jobs, got %v", got)
 	}
 	jobID, job2ID := jobIDs[0], jobIDs[1]
-	jobPath := "/api/v3/media-jobs/" + jobID
-	job2Path := "/api/v3/media-jobs/" + job2ID
+	jobPath := "/api/v1/media-jobs/" + jobID
+	job2Path := "/api/v1/media-jobs/" + job2ID
 
 	h.want(outsider, "GET", jobPath, nil, nil, 404)
 	h.want(outsider, "POST", jobPath+"/refresh", nil, idem("refresh-out"), 404)

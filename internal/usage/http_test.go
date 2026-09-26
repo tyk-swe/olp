@@ -10,7 +10,7 @@ import (
 
 func usageRequest(t *testing.T, query string) *http.Request {
 	t.Helper()
-	return httptest.NewRequest(http.MethodGet, "/api/v3/usage/summary?"+query, nil)
+	return httptest.NewRequest(http.MethodGet, "/api/v1/usage/summary?"+query, nil)
 }
 
 func TestUsageQueryRequiresABoundedRange(t *testing.T) {

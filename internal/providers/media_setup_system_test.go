@@ -131,9 +131,9 @@ func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 		}
 		return result
 	}
-	call("POST", "/api/v3/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": "correct horse battery staple", "installation_name": "Media setup"}, "", 201)
-	created := call("POST", "/api/v3/providers", map[string]any{"name": "Native media", "model": "media-model", "credential": "test-credential", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key"}}, "", 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	call("POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": "correct horse battery staple", "installation_name": "Media setup"}, "", 201)
+	created := call("POST", "/api/v1/providers", map[string]any{"name": "Native media", "model": "media-model", "credential": "test-credential", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key"}}, "", 201)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	models := call("GET", providerPath+"/models", nil, "", 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	var tuples []CapabilityInput
@@ -156,8 +156,8 @@ func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	groups := [][]string{{"image_generation", "image_edit", "image_variation"}, {"speech"}, {"transcription"}, {"video_create", "video_list", "video_get", "video_content", "video_delete"}}
 	for _, ops := range groups {
 		slug := strings.ReplaceAll(ops[0], "_", "-")
-		draft := call("POST", "/api/v3/route-drafts", map[string]any{"slug": slug, "operations": ops, "overall_timeout_ms": 5000, "max_attempts": 1, "targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}}}, "", 201)
-		path := "/api/v3/route-drafts/" + draft["id"].(string)
+		draft := call("POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": ops, "overall_timeout_ms": 5000, "max_attempts": 1, "targets": []any{map[string]any{"provider_model_id": modelID, "priority": 0, "weight": 1, "timeout_ms": 2000}}}, "", 201)
+		path := "/api/v1/route-drafts/" + draft["id"].(string)
 		draft = call("POST", path+"/validate", nil, draft["etag"].(string), 200)
 		mode := "unary"
 		if ops[0] == "video_create" {

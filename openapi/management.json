@@ -10352,7 +10352,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v3/api-keys": {
+    "/api/v1/api-keys": {
       "get": {
         "operationId": "list_api_keys",
         "parameters": [
@@ -10520,7 +10520,7 @@
         ]
       }
     },
-    "/api/v3/api-keys/{api_key_id}": {
+    "/api/v1/api-keys/{api_key_id}": {
       "get": {
         "operationId": "get_api_key",
         "parameters": [
@@ -10650,7 +10650,7 @@
         ]
       }
     },
-    "/api/v3/api-keys/{api_key_id}/revoke": {
+    "/api/v1/api-keys/{api_key_id}/revoke": {
       "post": {
         "operationId": "revoke_api_key",
         "parameters": [
@@ -10746,7 +10746,7 @@
         ]
       }
     },
-    "/api/v3/api-keys/{api_key_id}/rotate": {
+    "/api/v1/api-keys/{api_key_id}/rotate": {
       "post": {
         "operationId": "rotate_api_key",
         "parameters": [
@@ -10865,7 +10865,7 @@
         ]
       }
     },
-    "/api/v3/audit": {
+    "/api/v1/audit": {
       "get": {
         "operationId": "list_audit_events",
         "parameters": [
@@ -10999,7 +10999,7 @@
         ]
       }
     },
-    "/api/v3/auth/capabilities": {
+    "/api/v1/auth/capabilities": {
       "get": {
         "operationId": "authentication_capabilities",
         "responses": {
@@ -11030,7 +11030,7 @@
         ]
       }
     },
-    "/api/v3/budget-groups": {
+    "/api/v1/budget-groups": {
       "get": {
         "operationId": "list_budget_groups",
         "parameters": [
@@ -11199,7 +11199,7 @@
         ]
       }
     },
-    "/api/v3/budget-groups/{budget_group_id}": {
+    "/api/v1/budget-groups/{budget_group_id}": {
       "get": {
         "operationId": "get_budget_group",
         "parameters": [
@@ -11339,7 +11339,7 @@
         ]
       }
     },
-    "/api/v3/configuration/apply": {
+    "/api/v1/configuration/apply": {
       "post": {
         "operationId": "apply_configuration",
         "parameters": [
@@ -11429,7 +11429,7 @@
         ]
       }
     },
-    "/api/v3/configuration/export": {
+    "/api/v1/configuration/export": {
       "get": {
         "operationId": "export_configuration",
         "responses": {
@@ -11467,7 +11467,7 @@
         ]
       }
     },
-    "/api/v3/configuration/plan": {
+    "/api/v1/configuration/plan": {
       "post": {
         "operationId": "plan_configuration",
         "requestBody": {
@@ -11526,7 +11526,7 @@
         ]
       }
     },
-    "/api/v3/health/ready": {
+    "/api/v1/health/ready": {
       "get": {
         "operationId": "management_readiness",
         "responses": {
@@ -11581,7 +11581,7 @@
         ]
       }
     },
-    "/api/v3/invitations": {
+    "/api/v1/invitations": {
       "get": {
         "operationId": "list_invitations",
         "parameters": [
@@ -11732,7 +11732,7 @@
         ]
       }
     },
-    "/api/v3/invitations/accept": {
+    "/api/v1/invitations/accept": {
       "post": {
         "operationId": "accept_invitation",
         "requestBody": {
@@ -11803,7 +11803,7 @@
         ]
       }
     },
-    "/api/v3/invitations/{invitation_id}": {
+    "/api/v1/invitations/{invitation_id}": {
       "delete": {
         "operationId": "revoke_invitation",
         "parameters": [
@@ -11870,7 +11870,7 @@
         ]
       }
     },
-    "/api/v3/management-tokens": {
+    "/api/v1/management-tokens": {
       "get": {
         "operationId": "list_management_tokens",
         "parameters": [
@@ -12039,7 +12039,7 @@
         ]
       }
     },
-    "/api/v3/management-tokens/{management_token_id}": {
+    "/api/v1/management-tokens/{management_token_id}": {
       "get": {
         "operationId": "get_management_token",
         "parameters": [
@@ -12095,7 +12095,7 @@
         ]
       }
     },
-    "/api/v3/management-tokens/{management_token_id}/revoke": {
+    "/api/v1/management-tokens/{management_token_id}/revoke": {
       "post": {
         "operationId": "revoke_management_token",
         "parameters": [
@@ -12210,7 +12210,7 @@
         ]
       }
     },
-    "/api/v3/media-jobs": {
+    "/api/v1/media-jobs": {
       "get": {
         "operationId": "list_media_jobs",
         "parameters": [
@@ -12358,7 +12358,7 @@
         ]
       }
     },
-    "/api/v3/media-jobs/{job_id}": {
+    "/api/v1/media-jobs/{job_id}": {
       "get": {
         "operationId": "get_media_job",
         "parameters": [
@@ -12484,7 +12484,7 @@
         ]
       }
     },
-    "/api/v3/media-jobs/{job_id}/refresh": {
+    "/api/v1/media-jobs/{job_id}/refresh": {
       "post": {
         "operationId": "refresh_media_job",
         "parameters": [
@@ -12542,7 +12542,7 @@
         ]
       }
     },
-    "/api/v3/media-jobs/{job_id}/content": {
+    "/api/v1/media-jobs/{job_id}/content": {
       "get": {
         "operationId": "download_media_job_content",
         "parameters": [
@@ -12624,7 +12624,7 @@
         ]
       }
     },
-    "/api/v3/notifications/deliveries": {
+    "/api/v1/notifications/deliveries": {
       "get": {
         "operationId": "list_budget_alert_deliveries",
         "parameters": [
@@ -12729,7 +12729,7 @@
         ]
       }
     },
-    "/api/v3/notifications/destinations": {
+    "/api/v1/notifications/destinations": {
       "get": {
         "operationId": "list_notification_destinations",
         "parameters": [
@@ -12908,7 +12908,7 @@
         ]
       }
     },
-    "/api/v3/notifications/destinations/{notification_destination_id}": {
+    "/api/v1/notifications/destinations/{notification_destination_id}": {
       "get": {
         "operationId": "get_notification_destination",
         "parameters": [
@@ -13076,7 +13076,7 @@
         ]
       }
     },
-    "/api/v3/notifications/rules": {
+    "/api/v1/notifications/rules": {
       "get": {
         "operationId": "list_budget_alert_rules",
         "parameters": [
@@ -13245,7 +13245,7 @@
         ]
       }
     },
-    "/api/v3/notifications/rules/{budget_alert_rule_id}": {
+    "/api/v1/notifications/rules/{budget_alert_rule_id}": {
       "get": {
         "operationId": "get_budget_alert_rule",
         "parameters": [
@@ -13413,7 +13413,7 @@
         ]
       }
     },
-    "/api/v3/oidc/callback": {
+    "/api/v1/oidc/callback": {
       "get": {
         "operationId": "callback",
         "parameters": [
@@ -13496,7 +13496,7 @@
         ]
       }
     },
-    "/api/v3/oidc/configuration": {
+    "/api/v1/oidc/configuration": {
       "get": {
         "operationId": "get_configuration",
         "responses": {
@@ -13629,7 +13629,7 @@
         ]
       }
     },
-    "/api/v3/oidc/identities": {
+    "/api/v1/oidc/identities": {
       "get": {
         "operationId": "list_identities",
         "responses": {
@@ -13664,7 +13664,7 @@
         ]
       }
     },
-    "/api/v3/oidc/identities/{identity_id}": {
+    "/api/v1/oidc/identities/{identity_id}": {
       "delete": {
         "operationId": "unlink_identity",
         "parameters": [
@@ -13745,7 +13745,7 @@
         ]
       }
     },
-    "/api/v3/oidc/link": {
+    "/api/v1/oidc/link": {
       "post": {
         "operationId": "begin_link",
         "responses": {
@@ -13811,7 +13811,7 @@
         ]
       }
     },
-    "/api/v3/oidc/login": {
+    "/api/v1/oidc/login": {
       "get": {
         "operationId": "begin_login",
         "parameters": [
@@ -13936,7 +13936,7 @@
         ]
       }
     },
-    "/api/v3/oidc/reauthenticate": {
+    "/api/v1/oidc/reauthenticate": {
       "post": {
         "operationId": "begin_reauthentication",
         "requestBody": {
@@ -14012,7 +14012,7 @@
         ]
       }
     },
-    "/api/v3/openapi.json": {
+    "/api/v1/openapi.json": {
       "get": {
         "operationId": "openapi",
         "responses": {
@@ -14028,7 +14028,7 @@
         "security": []
       }
     },
-    "/api/v3/overview": {
+    "/api/v1/overview": {
       "get": {
         "operationId": "overview",
         "responses": {
@@ -14073,7 +14073,7 @@
         ]
       }
     },
-    "/api/v3/playground": {
+    "/api/v1/playground": {
       "post": {
         "operationId": "execute_playground",
         "requestBody": {
@@ -14159,7 +14159,7 @@
         ]
       }
     },
-    "/api/v3/playground/stream": {
+    "/api/v1/playground/stream": {
       "post": {
         "description": "Generation-only streaming playground: each transient provider frame is wrapped as `event: frame`, then a metadata-only `event: done` or `event: error` terminates the stream. Frames and prompts are never stored.",
         "operationId": "stream_playground",
@@ -14236,7 +14236,7 @@
         ]
       }
     },
-    "/api/v3/pricing/revisions": {
+    "/api/v1/pricing/revisions": {
       "get": {
         "operationId": "list_pricing_revisions",
         "parameters": [
@@ -14379,7 +14379,7 @@
         ]
       }
     },
-    "/api/v3/pricing/source-snapshots/{pricing_source_snapshot_id}/publish": {
+    "/api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish": {
       "post": {
         "operationId": "publish_pricing_source_snapshot",
         "parameters": [
@@ -14489,7 +14489,7 @@
         ]
       }
     },
-    "/api/v3/pricing/sources": {
+    "/api/v1/pricing/sources": {
       "get": {
         "operationId": "list_pricing_sources",
         "parameters": [
@@ -14658,7 +14658,7 @@
         ]
       }
     },
-    "/api/v3/pricing/sources/{pricing_source_id}": {
+    "/api/v1/pricing/sources/{pricing_source_id}": {
       "get": {
         "operationId": "get_pricing_source",
         "parameters": [
@@ -14826,7 +14826,7 @@
         ]
       }
     },
-    "/api/v3/pricing/sources/{pricing_source_id}/refresh": {
+    "/api/v1/pricing/sources/{pricing_source_id}/refresh": {
       "post": {
         "operationId": "refresh_pricing_source",
         "parameters": [
@@ -14937,7 +14937,7 @@
         ]
       }
     },
-    "/api/v3/pricing/sources/{pricing_source_id}/snapshots": {
+    "/api/v1/pricing/sources/{pricing_source_id}/snapshots": {
       "get": {
         "operationId": "list_pricing_source_snapshots",
         "parameters": [
@@ -15028,7 +15028,7 @@
         ]
       }
     },
-    "/api/v3/profile": {
+    "/api/v1/profile": {
       "get": {
         "operationId": "profile",
         "responses": {
@@ -15128,7 +15128,7 @@
         ]
       }
     },
-    "/api/v3/profile/password": {
+    "/api/v1/profile/password": {
       "post": {
         "operationId": "change_password",
         "parameters": [
@@ -15215,7 +15215,7 @@
         ]
       }
     },
-    "/api/v3/profile/password/enroll": {
+    "/api/v1/profile/password/enroll": {
       "post": {
         "operationId": "enroll_password",
         "parameters": [
@@ -15312,7 +15312,7 @@
         ]
       }
     },
-    "/api/v3/profile/reauthenticate": {
+    "/api/v1/profile/reauthenticate": {
       "post": {
         "operationId": "recent_authentication",
         "requestBody": {
@@ -15381,7 +15381,7 @@
         ]
       }
     },
-    "/api/v3/project-memberships": {
+    "/api/v1/project-memberships": {
       "get": {
         "operationId": "list_project_memberships",
         "responses": {
@@ -15416,7 +15416,7 @@
         ]
       }
     },
-    "/api/v3/projects": {
+    "/api/v1/projects": {
       "get": {
         "operationId": "list_projects",
         "parameters": [
@@ -15575,7 +15575,7 @@
         ]
       }
     },
-    "/api/v3/projects/{project_id}": {
+    "/api/v1/projects/{project_id}": {
       "get": {
         "operationId": "get_project",
         "parameters": [
@@ -15745,7 +15745,7 @@
         ]
       }
     },
-    "/api/v3/projects/{project_id}/members": {
+    "/api/v1/projects/{project_id}/members": {
       "get": {
         "operationId": "list_project_members",
         "parameters": [
@@ -15830,7 +15830,7 @@
         ]
       }
     },
-    "/api/v3/projects/{project_id}/members/{user_id}": {
+    "/api/v1/projects/{project_id}/members/{user_id}": {
       "delete": {
         "operationId": "delete_project_member",
         "parameters": [
@@ -16051,7 +16051,7 @@
         ]
       }
     },
-    "/api/v3/provider-health": {
+    "/api/v1/provider-health": {
       "get": {
         "operationId": "provider_health",
         "parameters": [
@@ -16141,7 +16141,7 @@
         ]
       }
     },
-    "/api/v3/provider-kinds": {
+    "/api/v1/provider-kinds": {
       "get": {
         "operationId": "list_provider_kinds",
         "responses": {
@@ -16186,7 +16186,7 @@
         ]
       }
     },
-    "/api/v3/provider-kinds/{provider_kind}/capabilities": {
+    "/api/v1/provider-kinds/{provider_kind}/capabilities": {
       "get": {
         "operationId": "list_provider_kind_capabilities",
         "parameters": [
@@ -16252,7 +16252,7 @@
         ]
       }
     },
-    "/api/v3/provider-models": {
+    "/api/v1/provider-models": {
       "get": {
         "operationId": "list_provider_model_inventory",
         "parameters": [
@@ -16335,7 +16335,7 @@
         ]
       }
     },
-    "/api/v3/provider-profiles": {
+    "/api/v1/provider-profiles": {
       "get": {
         "operationId": "list_provider_profiles",
         "responses": {
@@ -16380,7 +16380,7 @@
         ]
       }
     },
-    "/api/v3/provider-resources": {
+    "/api/v1/provider-resources": {
       "get": {
         "description": "Metadata-only provider resources: files, batches, responses and encrypted continuation contracts. Native state and projected delivery are never included.",
         "operationId": "list_provider_resources",
@@ -16518,7 +16518,7 @@
         ]
       }
     },
-    "/api/v3/provider-vendors": {
+    "/api/v1/provider-vendors": {
       "get": {
         "operationId": "provider_vendors",
         "responses": {
@@ -16546,7 +16546,7 @@
         ]
       }
     },
-    "/api/v3/providers": {
+    "/api/v1/providers": {
       "get": {
         "operationId": "list_providers",
         "parameters": [
@@ -16743,7 +16743,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}": {
+    "/api/v1/providers/{provider_id}": {
       "get": {
         "operationId": "get_provider",
         "parameters": [
@@ -16862,7 +16862,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/activate": {
+    "/api/v1/providers/{provider_id}/activate": {
       "post": {
         "operationId": "activate_provider",
         "parameters": [
@@ -16958,7 +16958,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/credential-slots": {
+    "/api/v1/providers/{provider_id}/credential-slots": {
       "get": {
         "operationId": "credential_slots",
         "parameters": [
@@ -16994,7 +16994,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/credential-slots/{slot_id}": {
+    "/api/v1/providers/{provider_id}/credential-slots/{slot_id}": {
       "put": {
         "operationId": "put_credential_slot",
         "parameters": [
@@ -17050,7 +17050,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/credential-slots/{slot_id}/validate": {
+    "/api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate": {
       "post": {
         "operationId": "validate_credential_slot",
         "parameters": [
@@ -17096,7 +17096,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/credentials": {
+    "/api/v1/providers/{provider_id}/credentials": {
       "get": {
         "operationId": "list_provider_credentials",
         "parameters": [
@@ -17274,7 +17274,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/credentials/{credential_id}/revoke": {
+    "/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke": {
       "post": {
         "operationId": "revoke_provider_credential",
         "parameters": [
@@ -17366,7 +17366,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/disable": {
+    "/api/v1/providers/{provider_id}/disable": {
       "post": {
         "operationId": "disable_provider",
         "parameters": [
@@ -17449,7 +17449,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/discovery": {
+    "/api/v1/providers/{provider_id}/discovery": {
       "post": {
         "operationId": "discover_provider_models",
         "parameters": [
@@ -17524,7 +17524,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/models": {
+    "/api/v1/providers/{provider_id}/models": {
       "get": {
         "operationId": "list_provider_models",
         "parameters": [
@@ -17601,7 +17601,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/models/{model_id}": {
+    "/api/v1/providers/{provider_id}/models/{model_id}": {
       "patch": {
         "operationId": "set_provider_model",
         "parameters": [
@@ -17675,7 +17675,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/models/{model_id}/certify": {
+    "/api/v1/providers/{provider_id}/models/{model_id}/certify": {
       "post": {
         "operationId": "certify_provider_model",
         "parameters": [
@@ -17760,7 +17760,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/network-credentials": {
+    "/api/v1/providers/{provider_id}/network-credentials": {
       "get": {
         "operationId": "list_provider_network_credentials",
         "parameters": [
@@ -17998,7 +17998,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/network-credentials/{credential_id}/revoke": {
+    "/api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke": {
       "post": {
         "operationId": "revoke_provider_network_credential",
         "parameters": [
@@ -18130,7 +18130,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/probe": {
+    "/api/v1/providers/{provider_id}/probe": {
       "post": {
         "operationId": "probe_provider",
         "parameters": [
@@ -18196,7 +18196,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/restore-as-draft": {
+    "/api/v1/providers/{provider_id}/restore-as-draft": {
       "post": {
         "operationId": "restore_provider_as_draft",
         "parameters": [
@@ -18279,7 +18279,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/revisions": {
+    "/api/v1/providers/{provider_id}/revisions": {
       "get": {
         "operationId": "list_provider_revisions",
         "parameters": [
@@ -18356,7 +18356,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/revisions/diff": {
+    "/api/v1/providers/{provider_id}/revisions/diff": {
       "get": {
         "description": "Compares two immutable provider revisions. Each revision is limited to 2,000 models and 32,000 capability tuples; larger revisions fail with 422 instead of producing an unbounded response.",
         "operationId": "diff_provider_revisions",
@@ -18431,7 +18431,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/revisions/{revision_id}": {
+    "/api/v1/providers/{provider_id}/revisions/{revision_id}": {
       "get": {
         "operationId": "get_provider_revision",
         "parameters": [
@@ -18486,7 +18486,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/revisions/{revision_id}/models": {
+    "/api/v1/providers/{provider_id}/revisions/{revision_id}/models": {
       "get": {
         "operationId": "list_provider_revision_models",
         "parameters": [
@@ -18572,7 +18572,7 @@
         ]
       }
     },
-    "/api/v3/providers/{provider_id}/revisions/{revision_id}/restore-as-draft": {
+    "/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft": {
       "post": {
         "operationId": "restore_provider_revision",
         "parameters": [
@@ -18675,7 +18675,7 @@
         ]
       }
     },
-    "/api/v3/provisioning/{source}/users/{external_id}": {
+    "/api/v1/provisioning/{source}/users/{external_id}": {
       "delete": {
         "operationId": "deprovision_user",
         "parameters": [
@@ -18854,7 +18854,7 @@
         ]
       }
     },
-    "/api/v3/request-metadata/gateway-epochs": {
+    "/api/v1/request-metadata/gateway-epochs": {
       "get": {
         "operationId": "list_request_metadata_gateway_epochs",
         "parameters": [
@@ -18919,7 +18919,7 @@
         ]
       }
     },
-    "/api/v3/request-metadata/gateway-epochs/{process_epoch}/acknowledge": {
+    "/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge": {
       "post": {
         "operationId": "acknowledge_request_metadata_gateway_epoch",
         "parameters": [
@@ -18966,7 +18966,7 @@
         ]
       }
     },
-    "/api/v3/requests": {
+    "/api/v1/requests": {
       "get": {
         "operationId": "list_requests",
         "parameters": [
@@ -19140,7 +19140,7 @@
         ]
       }
     },
-    "/api/v3/requests/{request_id}": {
+    "/api/v1/requests/{request_id}": {
       "get": {
         "operationId": "get_request",
         "parameters": [
@@ -19187,7 +19187,7 @@
         ]
       }
     },
-    "/api/v3/route-drafts": {
+    "/api/v1/route-drafts": {
       "get": {
         "operationId": "list_route_drafts",
         "parameters": [
@@ -19338,7 +19338,7 @@
         ]
       }
     },
-    "/api/v3/route-drafts/{draft_id}": {
+    "/api/v1/route-drafts/{draft_id}": {
       "delete": {
         "operationId": "delete_route_draft",
         "parameters": [
@@ -19513,7 +19513,7 @@
         ]
       }
     },
-    "/api/v3/route-drafts/{draft_id}/activate": {
+    "/api/v1/route-drafts/{draft_id}/activate": {
       "post": {
         "operationId": "activate_route_draft",
         "parameters": [
@@ -19599,7 +19599,7 @@
         ]
       }
     },
-    "/api/v3/route-drafts/{draft_id}/simulate": {
+    "/api/v1/route-drafts/{draft_id}/simulate": {
       "post": {
         "operationId": "simulate_route_draft",
         "parameters": [
@@ -19656,7 +19656,7 @@
         ]
       }
     },
-    "/api/v3/route-drafts/{draft_id}/validate": {
+    "/api/v1/route-drafts/{draft_id}/validate": {
       "post": {
         "operationId": "validate_route_draft",
         "parameters": [
@@ -19723,7 +19723,7 @@
         ]
       }
     },
-    "/api/v3/routes": {
+    "/api/v1/routes": {
       "get": {
         "operationId": "list_routes",
         "parameters": [
@@ -19801,7 +19801,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}": {
+    "/api/v1/routes/{route_id}": {
       "get": {
         "operationId": "get_route",
         "parameters": [
@@ -19847,7 +19847,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/retire": {
+    "/api/v1/routes/{route_id}/retire": {
       "post": {
         "operationId": "retire_route",
         "parameters": [
@@ -19940,7 +19940,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/revisions": {
+    "/api/v1/routes/{route_id}/revisions": {
       "get": {
         "operationId": "list_route_revisions",
         "parameters": [
@@ -20017,7 +20017,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/revisions/diff": {
+    "/api/v1/routes/{route_id}/revisions/diff": {
       "get": {
         "operationId": "diff_route_revisions",
         "parameters": [
@@ -20081,7 +20081,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/revisions/{revision_id}": {
+    "/api/v1/routes/{route_id}/revisions/{revision_id}": {
       "get": {
         "operationId": "get_route_revision",
         "parameters": [
@@ -20136,7 +20136,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/revisions/{revision_id}/restore-as-draft": {
+    "/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft": {
       "post": {
         "operationId": "restore_route_revision",
         "parameters": [
@@ -20218,7 +20218,7 @@
         ]
       }
     },
-    "/api/v3/routing-policies/{scope}/{id}": {
+    "/api/v1/routing-policies/{scope}/{id}": {
       "get": {
         "operationId": "get_routing_policy",
         "parameters": [
@@ -20315,7 +20315,7 @@
         ]
       }
     },
-    "/api/v3/routing/simulate": {
+    "/api/v1/routing/simulate": {
       "post": {
         "operationId": "simulate_routing",
         "requestBody": {
@@ -20354,7 +20354,7 @@
         ]
       }
     },
-    "/api/v3/runtime-generations": {
+    "/api/v1/runtime-generations": {
       "get": {
         "operationId": "list_runtime_generations",
         "parameters": [
@@ -20412,7 +20412,7 @@
         ]
       }
     },
-    "/api/v3/sessions": {
+    "/api/v1/sessions": {
       "get": {
         "operationId": "list_sessions",
         "parameters": [
@@ -20559,7 +20559,7 @@
         ]
       }
     },
-    "/api/v3/sessions/current": {
+    "/api/v1/sessions/current": {
       "delete": {
         "operationId": "logout",
         "responses": {
@@ -20631,7 +20631,7 @@
         ]
       }
     },
-    "/api/v3/sessions/{session_id}": {
+    "/api/v1/sessions/{session_id}": {
       "delete": {
         "operationId": "revoke_session",
         "parameters": [
@@ -20682,7 +20682,7 @@
         ]
       }
     },
-    "/api/v3/settings": {
+    "/api/v1/settings": {
       "get": {
         "operationId": "list_settings",
         "responses": {
@@ -20707,7 +20707,7 @@
         ]
       }
     },
-    "/api/v3/settings/{key}": {
+    "/api/v1/settings/{key}": {
       "get": {
         "operationId": "get_setting",
         "parameters": [
@@ -20807,7 +20807,7 @@
         ]
       }
     },
-    "/api/v3/setup": {
+    "/api/v1/setup": {
       "post": {
         "operationId": "setup",
         "parameters": [
@@ -20893,7 +20893,7 @@
         ]
       }
     },
-    "/api/v3/setup/status": {
+    "/api/v1/setup/status": {
       "get": {
         "operationId": "setup_status",
         "responses": {
@@ -20924,7 +20924,7 @@
         ]
       }
     },
-    "/api/v3/usage/breakdown": {
+    "/api/v1/usage/breakdown": {
       "get": {
         "operationId": "usage_breakdown",
         "parameters": [
@@ -21060,7 +21060,7 @@
         ]
       }
     },
-    "/api/v3/usage/completeness": {
+    "/api/v1/usage/completeness": {
       "get": {
         "operationId": "usage_completeness",
         "parameters": [
@@ -21147,7 +21147,7 @@
         ]
       }
     },
-    "/api/v3/usage/summary": {
+    "/api/v1/usage/summary": {
       "get": {
         "operationId": "usage_summary",
         "parameters": [
@@ -21252,7 +21252,7 @@
         ]
       }
     },
-    "/api/v3/usage/time-series": {
+    "/api/v1/usage/time-series": {
       "get": {
         "operationId": "usage_time_series",
         "parameters": [
@@ -21366,7 +21366,7 @@
         ]
       }
     },
-    "/api/v3/users": {
+    "/api/v1/users": {
       "get": {
         "operationId": "list_users",
         "parameters": [
@@ -21444,7 +21444,7 @@
         ]
       }
     },
-    "/api/v3/users/{user_id}": {
+    "/api/v1/users/{user_id}": {
       "get": {
         "operationId": "get_user",
         "parameters": [
@@ -21576,7 +21576,7 @@
         ]
       }
     },
-    "/api/v3/routes/{route_id}/migration-draft": {
+    "/api/v1/routes/{route_id}/migration-draft": {
       "post": {
         "operationId": "create_route_migration_draft",
         "parameters": [
@@ -21689,7 +21689,7 @@
         }
       }
     },
-    "/api/v3/operation-dialects": {
+    "/api/v1/operation-dialects": {
       "get": {
         "operationId": "listOperationDialects",
         "responses": {

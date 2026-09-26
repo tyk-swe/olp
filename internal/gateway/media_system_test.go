@@ -587,7 +587,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 	t.Cleanup(management.Close)
 
 	setupBody := `{"email":"admin@example.test","password":"correct horse battery staple","display_name":"Owner","installation_name":"Media test"}`
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, management.URL+"/api/v3/setup", strings.NewReader(setupBody))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, management.URL+"/api/v1/setup", strings.NewReader(setupBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://127.0.0.1")
 	req.Header.Set("X-OLP-Setup-Token", "test-bootstrap-token")
@@ -633,7 +633,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 		return resp
 	}
 
-	resp = managementGet("/api/v3/media-jobs?state=queued&limit=50")
+	resp = managementGet("/api/v1/media-jobs?state=queued&limit=50")
 	listed := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("management list: status %d body %v", resp.StatusCode, listed)
@@ -653,7 +653,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 		t.Fatal("management list must never embed content")
 	}
 
-	resp = managementGet("/api/v3/media-jobs/" + job.ID)
+	resp = managementGet("/api/v1/media-jobs/" + job.ID)
 	etag := resp.Header.Get("ETag")
 	detail := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK || etag == "" || detail["surface"] != "openai" {
@@ -661,7 +661,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 	}
 
 	// No session: the surface refuses authentication instead of listing.
-	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, management.URL+"/api/v3/media-jobs", nil)
+	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, management.URL+"/api/v1/media-jobs", nil)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

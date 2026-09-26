@@ -247,7 +247,7 @@ Production Compose can generate database credentials and their encoded URL using
 
 ## Configuration promotion artifacts
 
-`GET /api/v3/configuration/export` returns a secret-free desired-state artifact
+`GET /api/v1/configuration/export` returns a secret-free desired-state artifact
 (`openllmproxy.dev/config/v1`) and its canonical digest: SHA-256 lowercase hex
 of the canonical JSON with `exported_at` blanked and every collection sorted
 deterministically. Projects, providers, routes, and targets are identified by
@@ -270,7 +270,7 @@ without this field preserves an existing staged or published contract; explicit
 mode changes remain visible in revision history. Configuration staging never
 activates a strict route or bypasses its policy checks.
 
-`POST /api/v3/configuration/plan` validates an artifact and reports
+`POST /api/v1/configuration/plan` validates an artifact and reports
 `{digest, actions, conflicts, blockers}` without mutating. Validation rejects
 unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
@@ -279,7 +279,7 @@ does not declare, and secrets over 64 KiB. Plan reports
 `secret_binding_required` blockers for credential refs that do not already
 resolve to a current same-named slot credential on the destination.
 
-`POST /api/v3/configuration/apply` requires an Idempotency-Key and stages the
+`POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
 desired state in one installation-serialized transaction:
 
 - Missing projects are created; existing case-insensitive names are reused.

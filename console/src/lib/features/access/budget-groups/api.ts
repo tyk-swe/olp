@@ -20,7 +20,7 @@ export async function listBudgetGroupPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<BudgetGroup>> {
-  const response = await apiClient.GET('/api/v3/budget-groups', {
+  const response = await apiClient.GET('/api/v1/budget-groups', {
     params: { query: { limit: 50, cursor } },
     signal
   });
@@ -30,7 +30,7 @@ export async function listBudgetGroupPage(
 export async function createBudgetGroup(
   input: CreateBudgetGroupInput
 ): Promise<{ id: string; etag: string }> {
-  const response = await apiClient.POST('/api/v3/budget-groups', {
+  const response = await apiClient.POST('/api/v1/budget-groups', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
@@ -42,7 +42,7 @@ export async function updateBudgetGroup(
   input: UpdateBudgetGroupInput
 ): Promise<{ etag: string }> {
   const response = await apiClient.PATCH(
-    '/api/v3/budget-groups/{budget_group_id}',
+    '/api/v1/budget-groups/{budget_group_id}',
     {
       params: {
         path: { budget_group_id: group.id },

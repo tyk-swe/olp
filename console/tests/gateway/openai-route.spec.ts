@@ -43,7 +43,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -70,7 +70,7 @@ async function manage(
 ): Promise<ManagementResult> {
   return page.evaluate(
     async ({ method, path, options }) => {
-      const session = await fetch('/api/v3/sessions/current').then((r) =>
+      const session = await fetch('/api/v1/sessions/current').then((r) =>
         r.json()
       );
       const headers: Record<string, string> = {
@@ -223,7 +223,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const created = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/v3/providers'
+      new URL(response.url()).pathname === '/api/v1/providers'
   );
   await page.getByRole('button', { name: /Save and test connection/ }).click();
   const providerId = ((await (await created).json()) as { id: string }).id;
@@ -292,7 +292,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await verifyDraftSave(page, 'route', route);
 
-  const providerPath = `/api/v3/providers/${providerId}`;
+  const providerPath = `/api/v1/providers/${providerId}`;
   const disabled = await manage(page, 'POST', `${providerPath}/disable`, {
     match: providerPath,
     idempotency: `disable-${Date.now()}`
@@ -462,9 +462,9 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const historyRequests: string[] = [];
   page.on('request', (outgoing) => {
     const path = new URL(outgoing.url()).pathname;
-    if (path.startsWith('/api/v3/requests')) historyRequests.push(path);
+    if (path.startsWith('/api/v1/requests')) historyRequests.push(path);
   });
-  const capabilitiesPattern = '**/api/v3/auth/capabilities';
+  const capabilitiesPattern = '**/api/v1/auth/capabilities';
   await page.route(capabilitiesPattern, (intercept) =>
     intercept.fulfill({
       status: 503,
@@ -487,7 +487,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   const listed = page.waitForResponse(
     (response) =>
       response.request().method() === 'GET' &&
-      new URL(response.url()).pathname === '/api/v3/requests'
+      new URL(response.url()).pathname === '/api/v1/requests'
   );
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
   expect((await listed).status()).toBe(200);

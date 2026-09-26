@@ -112,9 +112,9 @@ func TestNativeConfigurationPublicRevisionReplayPromotionAndReload(t *testing.T)
 			"bindings":           map[string]any{vendorModel: map[string]any{"defaults": map[string]any{"generation": map[string]any{"dialect": "openai-chat", "native_options": map[string]any{"fixture_binding": json.RawMessage(nativeConfigurationCorpus)}}}}},
 		},
 	}
-	created := nativeWant(t, h, owner, "POST", "/api/v3/providers", map[string]any{"name": "Native source", "model": vendorModel, "credential": vendorSecret, "configuration": configuration}, idem("native-corpus-create"), 201)
+	created := nativeWant(t, h, owner, "POST", "/api/v1/providers", map[string]any{"name": "Native source", "model": vendorModel, "credential": vendorSecret, "configuration": configuration}, idem("native-corpus-create"), 201)
 	providerID := nativeJSONString(t, created, "id")
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	detail := nativeWant(t, h, owner, "GET", path, nil, nil, 200)
 	requireNativeConfiguration(t, nativeJSONAt(t, detail, "configuration"), nativeConfigurationCorpus)
 	detail = nativeWant(t, h, owner, "PATCH", path, map[string]any{"name": "Native source renamed", "configuration": nativeJSONAt(t, detail, "configuration")}, nativeETag(t, detail), 200)
@@ -170,26 +170,26 @@ func TestNativeConfigurationPublicRevisionReplayPromotionAndReload(t *testing.T)
 	requireNativeConfiguration(t, nativeJSONAt(t, revision, "configuration"), secondCorpus)
 	certifyProfileNetworkProvider(t, h, owner, providerID)
 
-	exported := nativeWant(t, h, owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	exported := nativeWant(t, h, owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	document := nativeJSONAt(t, exported, "document")
 	requireNativeConfiguration(t, nativeJSONAt(t, document, "providers", "0", "configuration"), nativeConfigurationCorpus)
 	destination := newAccessHarness(t)
 	destinationOwner := destination.owner()
-	planned := nativeWant(t, destination, destinationOwner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	planned := nativeWant(t, destination, destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
 	binding := nativeJSONString(t, planned, "blockers", "0", "key")
 	apply := map[string]any{"document": document, "secret_bindings": map[string]any{binding: vendorSecret}}
-	nativeWant(t, destination, destinationOwner, "POST", "/api/v3/configuration/apply", apply, idem("native-promote"), 200)
-	providers := nativeWant(t, destination, destinationOwner, "GET", "/api/v3/providers", nil, nil, 200)
+	nativeWant(t, destination, destinationOwner, "POST", "/api/v1/configuration/apply", apply, idem("native-promote"), 200)
+	providers := nativeWant(t, destination, destinationOwner, "GET", "/api/v1/providers", nil, nil, 200)
 	destinationID := nativeJSONString(t, providers, "items", "0", "id")
-	destinationPath := "/api/v3/providers/" + destinationID
+	destinationPath := "/api/v1/providers/" + destinationID
 	promoted := nativeWant(t, destination, destinationOwner, "GET", destinationPath, nil, nil, 200)
 	requireNativeConfiguration(t, nativeJSONAt(t, promoted, "configuration"), nativeConfigurationCorpus)
-	nativeWant(t, destination, destinationOwner, "POST", "/api/v3/configuration/apply", apply, idem("native-promote-again"), 200)
+	nativeWant(t, destination, destinationOwner, "POST", "/api/v1/configuration/apply", apply, idem("native-promote-again"), 200)
 	repeated := nativeWant(t, destination, destinationOwner, "GET", destinationPath, nil, nil, 200)
 	if nativeJSONString(t, repeated, "etag") != nativeJSONString(t, promoted, "etag") {
 		t.Fatal("identical native source import was treated as a configuration change")
 	}
-	exported = nativeWant(t, destination, destinationOwner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	exported = nativeWant(t, destination, destinationOwner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	requireNativeConfiguration(t, nativeJSONAt(t, exported, "document", "providers", "0", "configuration"), nativeConfigurationCorpus)
 
 	// Corrupt source without changing its recorded digest. A new reader must
@@ -219,7 +219,7 @@ func TestNativeConfigurationPublicRevisionReplayPromotionAndReload(t *testing.T)
 func TestPublicProviderNativeConfigurationRetainsNegativeZero(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	response, raw := h.do(owner, "POST", "/api/v3/providers", json.RawMessage(`{
+	response, raw := h.do(owner, "POST", "/api/v1/providers", json.RawMessage(`{
 		"name":"Native configuration source","model":"fixture-model","credential":"fixture-secret",
 		"configuration":{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:1/v1","profile_id":"compatible-chat","profile_revision":"1",
 		"options":{"operation_defaults":{"generation":{"dialect":"openai-chat","native_options":{"fixture_negative_zero":-0}}}}}
@@ -235,7 +235,7 @@ func TestPublicProviderNativeConfigurationRetainsNegativeZero(t *testing.T) {
 	if err := json.Unmarshal(fields["id"], &id); err != nil {
 		t.Fatal(err)
 	}
-	response, raw = h.do(owner, "GET", "/api/v3/providers/"+id, nil, nil)
+	response, raw = h.do(owner, "GET", "/api/v1/providers/"+id, nil, nil)
 	if response.StatusCode != 200 {
 		t.Fatalf("read provider: status %d", response.StatusCode)
 	}

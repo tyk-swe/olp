@@ -35,7 +35,7 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 		t.Fatalf("contract not committed: %t %v", encrypted, err)
 	}
 	oldCalls := len(historical.captured())
-	providerPath := "/api/v3/providers/" + historical.providerID
+	providerPath := "/api/v1/providers/" + historical.providerID
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
 	oldCredential := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)

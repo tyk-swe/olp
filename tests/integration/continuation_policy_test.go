@@ -27,12 +27,12 @@ func TestContinuationRequiresCurrentProviderStatePolicy(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write(stream)
 	})
-	keyRecord := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{
+	keyRecord := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "continuation policy owner", "scopes": []string{"inference"},
 		"allowed_routes": []string{slug}, "allow_provider_state": true,
 	}, idem(uuid.NewString()), 201)
 	key := keyRecord["secret"].(string)
-	keyPath := "/api/v3/api-keys/" + keyRecord["id"].(string)
+	keyPath := "/api/v1/api-keys/" + keyRecord["id"].(string)
 	deniedKey := stateKey(t, h, owner, slug, false)
 	h.refresh()
 	source := strings.Replace(continuationInput, "ROUTE", slug, 1)

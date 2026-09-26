@@ -11,10 +11,10 @@ test('console hydrates and uses the Go origin through packaged assets and Vite',
       throw new Error(`CSP blocked ${event.blockedURI}`);
     });
   });
-  const definition = await request.get('/api/v3/openapi.json');
+  const definition = await request.get('/api/v1/openapi.json');
   expect(definition.status()).toBe(200);
   expect((await definition.json()).openapi).toBe('3.1.0');
-  const deferred = await request.get('/api/v3/sessions/current');
+  const deferred = await request.get('/api/v1/sessions/current');
   expect(deferred.status()).toBe(401);
   expect((await deferred.json()).status).toBe(401);
   await page.goto('/login');

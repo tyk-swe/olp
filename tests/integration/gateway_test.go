@@ -319,7 +319,7 @@ func (h *accessHarness) stream(key string) (string, bool, int) {
 // control process cannot observe one.
 func TestCapabilitiesReportConfiguredEnforcement(t *testing.T) {
 	unconfigured := newAccessHarness(t)
-	caps := unconfigured.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
+	caps := unconfigured.want(nil, "GET", "/api/v1/auth/capabilities", nil, nil, 200)
 	if caps["limits_enforced"] != false || caps["retention_enforced"] != false {
 		t.Fatalf("capabilities without shared state: %v", caps)
 	}
@@ -327,7 +327,7 @@ func TestCapabilitiesReportConfiguredEnforcement(t *testing.T) {
 	// which is what setting them on a fresh harness stands in for here.
 	configured := newAccessHarness(t)
 	configured.Server.LimitsEnforced, configured.Server.RetentionEnforced = true, true
-	caps = configured.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
+	caps = configured.want(nil, "GET", "/api/v1/auth/capabilities", nil, nil, 200)
 	if caps["limits_enforced"] != true || caps["retention_enforced"] != true {
 		t.Fatalf("capabilities with shared state: %v", caps)
 	}
@@ -343,30 +343,30 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	// This harness composes the surfaces without the shared state that
 	// admission and the worker plane both need, so neither stored limits nor
 	// retention are reported as enforced here.
-	caps := h.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
+	caps := h.want(nil, "GET", "/api/v1/auth/capabilities", nil, nil, 200)
 	if caps["gateway_available"] != true || caps["limits_enforced"] != false || caps["retention_enforced"] != false {
 		t.Fatalf("capabilities %v", caps)
 	}
-	if h.want(owner, "GET", "/api/v3/provider-kinds/openai_compatible/capabilities", nil, nil, 200)["provider_kind"] != "openai_compatible" {
+	if h.want(owner, "GET", "/api/v1/provider-kinds/openai_compatible/capabilities", nil, nil, 200)["provider_kind"] != "openai_compatible" {
 		t.Fatal("kind capabilities")
 	}
-	h.want(owner, "GET", "/api/v3/provider-kinds/bedrock/capabilities", nil, nil, 200)
+	h.want(owner, "GET", "/api/v1/provider-kinds/bedrock/capabilities", nil, nil, 200)
 
 	// Unsafe egress is rejected at configuration time without any dispatch.
 	configuration := func(endpoint string) map[string]any {
 		return map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": endpoint}
 	}
-	unsafe := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Metadata", "configuration": configuration("http://169.254.169.254/latest"), "credential": vendorSecret}, map[string]string{"Idempotency-Key": "unsafe"}, 422)
+	unsafe := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Metadata", "configuration": configuration("http://169.254.169.254/latest"), "credential": vendorSecret}, map[string]string{"Idempotency-Key": "unsafe"}, 422)
 	if problemCode(t, unsafe) != "validation_failed" {
 		t.Fatalf("unsafe endpoint: %v", unsafe)
 	}
-	h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Unsupported", "configuration": map[string]any{"kind": "unsupported", "auth_mode": "api_key"}, "credential": "x"}, map[string]string{"Idempotency-Key": "unsupported"}, 422)
+	h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Unsupported", "configuration": map[string]any{"kind": "unsupported", "auth_mode": "api_key"}, "credential": "x"}, map[string]string{"Idempotency-Key": "unsupported"}, 422)
 
 	// Certification and inference must agree on a base URL with a trailing slash.
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Fixture vendor", "configuration": configuration(up.URL + "/v1/"), "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	validateManagementResponse(t, "POST", "/api/v3/providers", 201, created)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Fixture vendor", "configuration": configuration(up.URL + "/v1/"), "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	validateManagementResponse(t, "POST", "/api/v1/providers", 201, created)
 	pid := created["id"].(string)
-	providerPath := "/api/v3/providers/" + pid
+	providerPath := "/api/v1/providers/" + pid
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	validateManagementResponse(t, "GET", providerPath, 200, detail)
 	if detail["state"] != "draft" || detail["connector_ready"] != true || detail["model_count"] != float64(0) {
@@ -448,13 +448,13 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	// Route drafts: invalid targets cannot publish, stale edits cannot overwrite.
 	target := map[string]any{"provider_id": pid, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}
 	draftInput := map[string]any{"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 2, "targets": []any{target}}
-	unknown := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{"slug": "bad", "overall_timeout_ms": 5000, "max_attempts": 2, "targets": []any{map[string]any{"provider_id": pid, "provider_model": "missing", "priority": 0, "weight": 1, "timeout_ms": 2000}}}, map[string]string{"Idempotency-Key": "draft-unknown"}, 422)
+	unknown := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": "bad", "overall_timeout_ms": 5000, "max_attempts": 2, "targets": []any{map[string]any{"provider_id": pid, "provider_model": "missing", "priority": 0, "weight": 1, "timeout_ms": 2000}}}, map[string]string{"Idempotency-Key": "draft-unknown"}, 422)
 	if problemCode(t, unknown) != "validation_failed" {
 		t.Fatalf("unknown model %v", unknown)
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, map[string]string{"Idempotency-Key": "draft"}, 201)
-	validateManagementResponse(t, "POST", "/api/v3/route-drafts", 201, draft)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, map[string]string{"Idempotency-Key": "draft"}, 201)
+	validateManagementResponse(t, "POST", "/api/v1/route-drafts", 201, draft)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	draftDetail := h.want(owner, "GET", draftPath, nil, nil, 200)
 	validateManagementResponse(t, "GET", draftPath, 200, draftDetail)
 	staleETag := etagHeader(draft)
@@ -476,19 +476,19 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if activated["revision"] != float64(1) || activated["runtime_generation"].(map[string]any)["sequence"] != float64(2) {
 		t.Fatalf("route activation %v", activated)
 	}
-	routes := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)
-	validateManagementResponse(t, "GET", "/api/v3/routes", 200, routes)
-	generations := h.want(owner, "GET", "/api/v3/runtime-generations", nil, nil, 200)
-	validateManagementResponse(t, "GET", "/api/v3/runtime-generations", 200, generations)
+	routes := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)
+	validateManagementResponse(t, "GET", "/api/v1/routes", 200, routes)
+	generations := h.want(owner, "GET", "/api/v1/runtime-generations", nil, nil, 200)
+	validateManagementResponse(t, "GET", "/api/v1/runtime-generations", 200, generations)
 	if len(generations["items"].([]any)) != 2 {
 		t.Fatalf("generations %v", generations)
 	}
 
 	// Keys: explicit scopes and allowlists gate model listing and inference.
-	fullKey := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "sdk", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": "key-full"}, 201)
-	otherKey := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "other", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{"another-route"}}, map[string]string{"Idempotency-Key": "key-other"}, 201)
-	readKey := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "read", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": "key-read"}, 201)
-	unrestrictedKey := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "unrestricted", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{}}, map[string]string{"Idempotency-Key": "key-unrestricted"}, 201)
+	fullKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "sdk", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": "key-full"}, 201)
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{"another-route"}}, map[string]string{"Idempotency-Key": "key-other"}, 201)
+	readKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "read", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": "key-read"}, 201)
+	unrestrictedKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "unrestricted", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{}}, map[string]string{"Idempotency-Key": "key-unrestricted"}, 201)
 	secret, other, read := fullKey["secret"].(string), otherKey["secret"].(string), readKey["secret"].(string)
 	if status, body, _ := h.gateway("GET", "/v1/models", secret, nil); status != 503 || h.gatewayCode(status, body) != "authority_unavailable" {
 		t.Fatalf("authority must be loaded before admission: %d %v", status, body)
@@ -511,7 +511,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 		key      map[string]any
 		eligible bool
 	}{{fullKey, true}, {unrestrictedKey, true}, {otherKey, false}} {
-		decisions := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "seed": "tenant-a", "api_key_id": tc.key["id"]}, nil, 200)
+		decisions := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "seed": "tenant-a", "api_key_id": tc.key["id"]}, nil, 200)
 		if len(decisions) != 1 {
 			t.Fatalf("simulation for key %v: %v", tc.key["id"], decisions)
 		}
@@ -545,10 +545,10 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	}
 
 	// Playground uses the same runtime through the console session.
-	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "unknown"}}, nil, 422)
-	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"only": []string{"vendor"}}}, nil, 422)
-	play := h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "weighted", "allow_fallbacks": false}}, nil, 200)
-	validateManagementResponse(t, "POST", "/api/v3/playground", 200, play)
+	h.want(owner, "POST", "/api/v1/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "unknown"}}, nil, 422)
+	h.want(owner, "POST", "/api/v1/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"only": []string{"vendor"}}}, nil, 422)
+	play := h.want(owner, "POST", "/api/v1/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "weighted", "allow_fallbacks": false}}, nil, 200)
+	validateManagementResponse(t, "POST", "/api/v1/playground", 200, play)
 	if play["output_text"] != vendorAnswer || play["model"] != routeSlug || len(play["routing"].([]any)) != 1 {
 		t.Fatalf("playground %v", play)
 	}
@@ -562,8 +562,8 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if snapshot := emitter.Snapshot(); snapshot.Persisted < 3 || snapshot.Lost() != 0 {
 		t.Fatalf("health accounting did not persist: %+v", snapshot)
 	}
-	health := h.want(owner, "GET", "/api/v3/provider-health", nil, nil, 200)
-	validateManagementResponse(t, "GET", "/api/v3/provider-health", 200, health)
+	health := h.want(owner, "GET", "/api/v1/provider-health", nil, nil, 200)
+	validateManagementResponse(t, "GET", "/api/v1/provider-health", 200, health)
 	if items := health["items"].([]any); len(items) != 1 || items[0].(map[string]any)["attempt_count"].(float64) < 3 {
 		t.Fatalf("health %v", health)
 	}
@@ -614,7 +614,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	}
 
 	// Revocation: keys and credential versions are authority state, not releases.
-	keyPath := "/api/v3/api-keys/" + fullKey["id"].(string)
+	keyPath := "/api/v1/api-keys/" + fullKey["id"].(string)
 	keyRecord := h.want(owner, "GET", keyPath, nil, nil, 200)
 	h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(keyRecord, map[string]string{"Idempotency-Key": "key-revoke"}), 200)
 	if status, _, _ := h.gateway("POST", "/v1/chat/completions", secret, chat); status != 200 {
@@ -624,7 +624,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if status, body, _ := h.gateway("POST", "/v1/chat/completions", secret, chat); status != 401 || h.gatewayCode(status, body) != "invalid_api_key" {
 		t.Fatalf("revoked key %d %v", status, body)
 	}
-	replacement := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "sdk-2", "scopes": []string{"inference", "models_read"}}, map[string]string{"Idempotency-Key": "key-2"}, 201)["secret"].(string)
+	replacement := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "sdk-2", "scopes": []string{"inference", "models_read"}}, map[string]string{"Idempotency-Key": "key-2"}, 201)["secret"].(string)
 	h.refresh()
 	credentials := h.want(owner, "GET", providerPath+"/credentials", nil, nil, 200)
 	validateManagementResponse(t, "GET", providerPath+"/credentials", 200, credentials)
@@ -703,15 +703,15 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if diff["credential_changed"] != true || diff["endpoint_changed"] != false {
 		t.Fatalf("diff %v", diff)
 	}
-	routeRevisions := h.want(owner, "GET", "/api/v3/routes/"+routeID+"/revisions", nil, nil, 200)
-	validateManagementResponse(t, "GET", "/api/v3/routes/"+routeID+"/revisions", 200, routeRevisions)
+	routeRevisions := h.want(owner, "GET", "/api/v1/routes/"+routeID+"/revisions", nil, nil, 200)
+	validateManagementResponse(t, "GET", "/api/v1/routes/"+routeID+"/revisions", 200, routeRevisions)
 	revisionID := routeRevisions["items"].([]any)[0].(map[string]any)["id"].(string)
-	restoredDraft := h.want(owner, "POST", "/api/v3/routes/"+routeID+"/revisions/"+revisionID+"/restore-as-draft", nil, map[string]string{"Idempotency-Key": "route-restore"}, 201)
-	validateManagementResponse(t, "POST", "/api/v3/routes/"+routeID+"/revisions/"+revisionID+"/restore-as-draft", 201, restoredDraft)
+	restoredDraft := h.want(owner, "POST", "/api/v1/routes/"+routeID+"/revisions/"+revisionID+"/restore-as-draft", nil, map[string]string{"Idempotency-Key": "route-restore"}, 201)
+	validateManagementResponse(t, "POST", "/api/v1/routes/"+routeID+"/revisions/"+revisionID+"/restore-as-draft", 201, restoredDraft)
 	if restoredDraft["based_on_revision_id"] != revisionID || restoredDraft["slug"] != routeSlug {
 		t.Fatalf("restored draft %v", restoredDraft)
 	}
-	decisions := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "seed": "tenant-a"}, nil, 200)
+	decisions := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}}, "surface": "openai", "mode": "unary", "seed": "tenant-a"}, nil, 200)
 	if len(decisions) != 1 {
 		t.Fatalf("decisions %v", decisions)
 	}

@@ -110,12 +110,12 @@ func (f *strictVideoUpstream) snapshot() (int, int, int, int, []string, [][]byte
 
 func publishStrictVideo(t *testing.T, h *accessHarness, owner *browser, upstream *strictVideoUpstream) (string, string) {
 	t.Helper()
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          "Strict video " + uuid.NewString(),
 		"configuration": map[string]any{"kind": "openai_compatible", "profile_id": "compatible-chat", "profile_revision": "1", "auth_mode": "api_key", "endpoint": upstream.URL + "/v1"},
 		"model":         vendorModel, "credential": vendorSecret,
 	}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), 200)
 	if probe["succeeded"] != true {
 		t.Fatal("video fixture model probe failed", probe)
@@ -130,15 +130,15 @@ func publishStrictVideo(t *testing.T, h *accessHarness, owner *browser, upstream
 	unsupported := fidelityDraft("strict-video-list-"+uuid.NewString(), provider["id"])
 	unsupported["operations"] = []string{"video_create", "video_list", "video_get", "video_content", "video_delete"}
 	unsupported["fidelity"] = map[string]any{"mode": "strict"}
-	draftList := h.want(owner, "POST", "/api/v3/route-drafts", unsupported, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draftList["id"].(string)+"/activate", nil, withMatch(draftList, idem(uuid.NewString())), 422)
+	draftList := h.want(owner, "POST", "/api/v1/route-drafts", unsupported, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draftList["id"].(string)+"/activate", nil, withMatch(draftList, idem(uuid.NewString())), 422)
 	slug := "strict-video-" + uuid.NewString()
 	draftInput := fidelityDraft(slug, provider["id"])
 	draftInput["operations"] = []string{"video_create", "video_get", "video_content", "video_delete"}
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict video", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict video", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }

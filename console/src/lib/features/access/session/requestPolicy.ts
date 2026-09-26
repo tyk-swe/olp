@@ -4,13 +4,13 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 type AuthenticationPath = Extract<
   keyof paths,
-  | '/api/v3/setup/status'
-  | '/api/v3/setup'
-  | '/api/v3/sessions'
-  | '/api/v3/invitations/accept'
-  | '/api/v3/auth/capabilities'
-  | '/api/v3/oidc/login'
-  | '/api/v3/oidc/callback'
+  | '/api/v1/setup/status'
+  | '/api/v1/setup'
+  | '/api/v1/sessions'
+  | '/api/v1/invitations/accept'
+  | '/api/v1/auth/capabilities'
+  | '/api/v1/oidc/login'
+  | '/api/v1/oidc/callback'
 >;
 
 type AuthenticationRoute = Readonly<{
@@ -19,14 +19,14 @@ type AuthenticationRoute = Readonly<{
 }>;
 
 const AUTHENTICATION_ROUTES = [
-  { method: 'GET', path: '/api/v3/setup/status' },
-  { method: 'POST', path: '/api/v3/setup' },
-  { method: 'POST', path: '/api/v3/sessions' },
-  { method: 'POST', path: '/api/v3/invitations/accept' },
-  { method: 'GET', path: '/api/v3/auth/capabilities' },
-  { method: 'GET', path: '/api/v3/oidc/login' },
-  { method: 'POST', path: '/api/v3/oidc/login' },
-  { method: 'GET', path: '/api/v3/oidc/callback' }
+  { method: 'GET', path: '/api/v1/setup/status' },
+  { method: 'POST', path: '/api/v1/setup' },
+  { method: 'POST', path: '/api/v1/sessions' },
+  { method: 'POST', path: '/api/v1/invitations/accept' },
+  { method: 'GET', path: '/api/v1/auth/capabilities' },
+  { method: 'GET', path: '/api/v1/oidc/login' },
+  { method: 'POST', path: '/api/v1/oidc/login' },
+  { method: 'GET', path: '/api/v1/oidc/callback' }
 ] as const satisfies readonly AuthenticationRoute[];
 
 function endpoint(request: Request): { method: string; pathname: string } {
@@ -43,12 +43,12 @@ export function isAuthenticationEndpoint(request: Request): boolean {
 
 export function isSessionValidationEndpoint(request: Request): boolean {
   const { method, pathname } = endpoint(request);
-  return method === 'GET' && pathname === '/api/v3/sessions/current';
+  return method === 'GET' && pathname === '/api/v1/sessions/current';
 }
 
 export function isCurrentSessionDeletion(request: Request): boolean {
   const { method, pathname } = endpoint(request);
-  return method === 'DELETE' && pathname === '/api/v3/sessions/current';
+  return method === 'DELETE' && pathname === '/api/v1/sessions/current';
 }
 
 export function isMutationRequest(request: Request): boolean {

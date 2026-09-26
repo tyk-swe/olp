@@ -111,8 +111,8 @@ func TestStrictBackgroundResponseStreamRecoversAfterReaderLoss(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp_go.providers p JOIN olp_go.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
 		t.Fatal(err)
 	}
-	detail := restarted.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, http.StatusOK)
-	restarted.want(owner, "POST", "/api/v3/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	detail := restarted.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, http.StatusOK)
+	restarted.want(owner, "POST", "/api/v1/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	restarted.refresh()
 	before = fixture.dials.Load()
 	if status, _, _ := restarted.gatewayRaw(http.MethodGet, "/v1/responses/"+local+"?stream=true", key, nil, nil); status != http.StatusConflict || fixture.dials.Load() != before {

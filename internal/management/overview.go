@@ -15,7 +15,7 @@ type Overview struct {
 
 // Register mounts the overview summary on the management surface.
 func (o *Overview) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/overview", o.Access.Handle(o.summary))
+	mux.HandleFunc("GET /api/v1/overview", o.Access.Handle(o.summary))
 }
 
 func (o *Overview) summary(r *http.Request) (access.Reply, error) {

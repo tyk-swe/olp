@@ -7,12 +7,12 @@ import (
 )
 
 func Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(openapi.Document)
 	})
-	mux.HandleFunc("/api/v3/", NotFound)
+	mux.HandleFunc("/api/v1/", NotFound)
 }
 
 func NotFound(w http.ResponseWriter, r *http.Request) {

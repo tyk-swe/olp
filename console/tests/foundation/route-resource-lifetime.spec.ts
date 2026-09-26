@@ -28,7 +28,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -55,7 +55,7 @@ async function manage(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   return page.evaluate(
     async ({ method, path, options }) => {
-      const session = await fetch('/api/v3/sessions/current').then((r) =>
+      const session = await fetch('/api/v1/sessions/current').then((r) =>
         r.json()
       );
       const headers: Record<string, string> = {
@@ -99,7 +99,7 @@ test('route editor state stays scoped to the draft being viewed across parameter
   await signIn(page);
 
   // Seed one provider model and two drafts through the management API.
-  const provider = await manage(page, 'POST', '/api/v3/providers', {
+  const provider = await manage(page, 'POST', '/api/v1/providers', {
     idempotency: crypto.randomUUID(),
     body: {
       name: 'Lifetime provider',
@@ -111,9 +111,9 @@ test('route editor state stays scoped to the draft being viewed across parameter
   const discovered = await manage(
     page,
     'POST',
-    `/api/v3/providers/${providerId}/discovery`,
+    `/api/v1/providers/${providerId}/discovery`,
     {
-      match: `/api/v3/providers/${providerId}`,
+      match: `/api/v1/providers/${providerId}`,
       body: {
         models: [
           { upstream_model: 'lifetime-model', display_name: 'Lifetime model' }
@@ -137,12 +137,12 @@ test('route editor state stays scoped to the draft being viewed across parameter
       }
     ]
   });
-  const draftA = await manage(page, 'POST', '/api/v3/route-drafts', {
+  const draftA = await manage(page, 'POST', '/api/v1/route-drafts', {
     idempotency: crypto.randomUUID(),
     body: draftBody('lifetime-alpha')
   });
   expect(draftA.status).toBe(201);
-  const draftB = await manage(page, 'POST', '/api/v3/route-drafts', {
+  const draftB = await manage(page, 'POST', '/api/v1/route-drafts', {
     idempotency: crypto.randomUUID(),
     body: draftBody('lifetime-beta')
   });
@@ -191,7 +191,7 @@ test('route editor state stays scoped to the draft being viewed across parameter
   await slug.fill('lifetime-alpha-saved');
   const release = Promise.withResolvers<void>();
   const sawSave = Promise.withResolvers<void>();
-  await page.route(`**/api/v3/route-drafts/${idA}`, async (route) => {
+  await page.route(`**/api/v1/route-drafts/${idA}`, async (route) => {
     if (route.request().method() !== 'PUT') return route.continue();
     sawSave.resolve();
     await release.promise;
@@ -212,7 +212,7 @@ test('route editor state stays scoped to the draft being viewed across parameter
     await expect
       .poll(async () => {
         const refreshed = await page.evaluate(async (id) => {
-          const response = await fetch(`/api/v3/route-drafts/${id}`);
+          const response = await fetch(`/api/v1/route-drafts/${id}`);
           return response.ok
             ? ((await response.json()) as { slug: string }).slug
             : '';
@@ -228,7 +228,7 @@ test('route editor state stays scoped to the draft being viewed across parameter
     await expect(saveButton).toBeEnabled();
   } finally {
     release.resolve();
-    await page.unroute(`**/api/v3/route-drafts/${idA}`);
+    await page.unroute(`**/api/v1/route-drafts/${idA}`);
   }
   await page.screenshot({
     path: info.outputPath('route-resource-lifetime.png'),

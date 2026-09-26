@@ -37,7 +37,7 @@ describe('createRouteMigrationDraft', () => {
     const request = requests[0];
     expect(request.method).toBe('POST');
     expect(new URL(request.url).pathname).toBe(
-      '/api/v3/routes/route-1/migration-draft'
+      '/api/v1/routes/route-1/migration-draft'
     );
     expect(request.headers.get('If-Match')).toBe(
       '"019b036f-fcad-72a0-9a35-734fa53adf5f"'
@@ -87,7 +87,7 @@ describe('simulateRouting', () => {
       apiKeyId: '01980000-0000-7000-8000-000000000402',
       seed: 'repeatable'
     });
-    expect(new URL(requests[0].url).pathname).toBe('/api/v3/routing/simulate');
+    expect(new URL(requests[0].url).pathname).toBe('/api/v1/routing/simulate');
     expect(await requests[0].json()).toEqual({
       operation: {
         operation: 'generation',

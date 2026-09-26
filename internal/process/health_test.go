@@ -9,7 +9,7 @@ import (
 
 func TestRejectPublicShapesSurfaceError(t *testing.T) {
 	w := httptest.NewRecorder()
-	rejectPublic(w, httptest.NewRequest("POST", "/api/v3/routes", nil), "management")
+	rejectPublic(w, httptest.NewRequest("POST", "/api/v1/routes", nil), "management")
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("management rejection: %d", w.Code)
 	}

@@ -44,7 +44,7 @@ func TestAttributionIngress(t *testing.T) {
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
 		[]string{"generation"})
 
-	key := h.want(owner, "POST", "/api/v3/api-keys",
+	key := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "attributed key", "scopes": []string{"inference"}, "allowed_routes": []string{slug},
 			"allowed_attribution_keys": []string{"team", "env"}},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
@@ -93,7 +93,7 @@ func TestAttributionIngress(t *testing.T) {
 		})
 	}
 
-	plain := h.want(owner, "POST", "/api/v3/api-keys",
+	plain := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "plain key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.refresh()
@@ -130,10 +130,10 @@ func TestAttributionReporting(t *testing.T) {
 	start := now.Add(-time.Hour).Format(time.RFC3339)
 	end := now.Add(time.Hour).Format(time.RFC3339)
 
-	project := h.want(owner, "POST", "/api/v3/projects",
+	project := h.want(owner, "POST", "/api/v1/projects",
 		map[string]any{"name": "Labelled"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	projectID := project["id"].(string)
-	projectKey := h.want(owner, "POST", "/api/v3/api-keys",
+	projectKey := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "project key", "scopes": []string{"inference"}, "project_id": projectID},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	projectKeyID := projectKey["id"].(string)
@@ -144,7 +144,7 @@ func TestAttributionReporting(t *testing.T) {
 	attributionSeed(t, f, f.Key, now, `{"team":"core"}`)
 
 	summary := func(query string) map[string]any {
-		return h.want(owner, "GET", "/api/v3/usage/summary?start="+start+"&end="+end+query, nil, nil, 200)
+		return h.want(owner, "GET", "/api/v1/usage/summary?start="+start+"&end="+end+query, nil, nil, 200)
 	}
 
 	filtered := summary("&attribution_key=team&attribution_value=core")
@@ -162,7 +162,7 @@ func TestAttributionReporting(t *testing.T) {
 	}
 
 	breakdown := h.want(owner, "GET",
-		"/api/v3/usage/breakdown?start="+start+"&end="+end+"&dimension=attribution&attribution_key=team",
+		"/api/v1/usage/breakdown?start="+start+"&end="+end+"&dimension=attribution&attribution_key=team",
 		nil, nil, 200)
 	items := breakdown["items"].([]any)
 	counts := map[string]float64{}
@@ -175,12 +175,12 @@ func TestAttributionReporting(t *testing.T) {
 	}
 
 	status, _, _ := h.request(owner, "GET",
-		"/api/v3/usage/breakdown?start="+start+"&end="+end+"&dimension=attribution", nil, nil)
+		"/api/v1/usage/breakdown?start="+start+"&end="+end+"&dimension=attribution", nil, nil)
 	if status != 400 {
 		t.Fatalf("attribution breakdown without key = %d", status)
 	}
 	status, _, _ = h.request(owner, "GET",
-		"/api/v3/usage/summary?start="+start+"&end="+end+"&attribution_value=core", nil, nil)
+		"/api/v1/usage/summary?start="+start+"&end="+end+"&attribution_value=core", nil, nil)
 	if status != 400 {
 		t.Fatalf("value without key = %d", status)
 	}
@@ -190,7 +190,7 @@ func TestAttributionReporting(t *testing.T) {
 		Operation: "generation", Surface: "openai", AttemptCount: 1})
 	f.exec("UPDATE olp_go.requests SET attribution=$2::jsonb WHERE id=$1",
 		requestID, `{"team":"core"}`)
-	list := h.want(owner, "GET", "/api/v3/requests", nil, nil, 200)
+	list := h.want(owner, "GET", "/api/v1/requests", nil, nil, 200)
 	var row map[string]any
 	for _, raw := range list["items"].([]any) {
 		candidate := raw.(map[string]any)
@@ -203,7 +203,7 @@ func TestAttributionReporting(t *testing.T) {
 	}
 
 	viewer := h.invite(owner, "viewer@example.com", "viewer")
-	viewerID := h.want(owner, "GET", "/api/v3/users", nil, nil, 200)["items"].([]any)
+	viewerID := h.want(owner, "GET", "/api/v1/users", nil, nil, 200)["items"].([]any)
 	var memberID string
 	for _, raw := range viewerID {
 		u := raw.(map[string]any)
@@ -211,15 +211,15 @@ func TestAttributionReporting(t *testing.T) {
 			memberID = u["id"].(string)
 		}
 	}
-	user := h.want(owner, "GET", "/api/v3/users/"+memberID, nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v3/users/"+memberID,
+	user := h.want(owner, "GET", "/api/v1/users/"+memberID, nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+memberID,
 		map[string]any{"access_scope": "assigned"}, withMatch(user, nil), 200)
-	h.want(owner, "PUT", "/api/v3/projects/"+projectID+"/members/"+memberID,
+	h.want(owner, "PUT", "/api/v1/projects/"+projectID+"/members/"+memberID,
 		map[string]any{"role": "viewer"}, projectEtag(h, owner, projectID), 200)
-	h.want(viewer, "POST", "/api/v3/sessions",
+	h.want(viewer, "POST", "/api/v1/sessions",
 		map[string]any{"email": "viewer@example.com", "password": accessPassword}, nil, 201)
 	scoped := h.want(viewer, "GET",
-		"/api/v3/usage/summary?start="+start+"&end="+end+"&attribution_key=team&attribution_value=core",
+		"/api/v1/usage/summary?start="+start+"&end="+end+"&attribution_key=team&attribution_value=core",
 		nil, nil, 200)
 	if scoped["request_count"].(float64) != 2 {
 		t.Fatalf("scoped summary = %v (global key rows must be invisible)", scoped)

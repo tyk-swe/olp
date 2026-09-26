@@ -32,7 +32,7 @@ authentication mechanism.
 
 ![Reviewed models grouped under one published route name](assets/screenshots/provider-model-comparison.png)
 
-`GET /api/v3/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
+`GET /api/v1/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
 DeepInfra, Hugging Face, Perplexity, and Cohere profiles support generation;
 Cohere and Voyage support embeddings and rerank. Each model and credential still
 needs certification for the requested operation.
@@ -155,7 +155,7 @@ connector selection.
 Each connection has a default slot preserving its original credential-version
 IDs and encryption context. The existing `/credentials` endpoints remain
 available. Add, edit, rotate, and validate additional slots under
-`/api/v3/providers/{provider_id}/credential-slots` and in the provider detail
+`/api/v1/providers/{provider_id}/credential-slots` and in the provider detail
 page. Writes use ETags and idempotency keys; secrets remain encrypted and
 write-only. A connection supports up to 64 slots including the default.
 
@@ -246,7 +246,7 @@ provider.
 
 Policies live at installation, route revision, and gateway-key scopes. Use
 **Settings**, the route draft editor, and the API-key editor, or
-`GET/PUT /api/v3/routing-policies/{scope}/{id}`. Scopes are `installation`,
+`GET/PUT /api/v1/routing-policies/{scope}/{id}`. Scopes are `installation`,
 `route-draft`, and `api-key`; the installation ID is the nil UUID. Installation
 and key changes publish immediately. Route policy changes are staged and
 published with the route. Policy writes require the corresponding management
@@ -309,7 +309,7 @@ Fallback never restarts a committed stream or an ambiguously created media job.
 ![Route preview showing two eligible credential slots and a policy exclusion](assets/screenshots/provider-routing-preview.png)
 
 The route editor's dry run and playground use the execution selection engine.
-`POST /api/v3/routing/simulate` accepts a canonical operation, surface, mode,
+`POST /api/v1/routing/simulate` accepts a canonical operation, surface, mode,
 preferences, optional API-key ID, and seed. It returns exclusions even when
 nothing is eligible, attempt order, slot IDs, prices, and measurement freshness.
 The playground accepts the same preferences in its `routing` field and shows the

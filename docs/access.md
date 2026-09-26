@@ -159,7 +159,7 @@ preserves the existing evidence.
 
 OIDC uses maintained `coreos/go-oidc` verification and `x/oauth2` code exchange.
 Configure discovery, the exact issuer, client ID, client secret when required,
-and the callback `<public origin>/api/v3/oidc/callback`. The client selects
+and the callback `<public origin>/api/v1/oidc/callback`. The client selects
 `client_secret_basic` or `client_secret_post` authentication as advertised;
 omitting the supported-methods field defaults to `client_secret_basic`.
 Unsupported token authentication methods are rejected during configuration.
@@ -189,12 +189,12 @@ project managers can write resources and project viewers can read them, subject
 to installation-role permissions. Assigned users cannot administer installation
 membership, OIDC, or global settings. Keep at least one manager per project.
 
-Manage projects and membership through `/api/v3/projects` and
-`/api/v3/projects/{id}/members`. Providers, routes, and gateway keys carry a
+Manage projects and membership through `/api/v1/projects` and
+`/api/v1/projects/{id}/members`. Providers, routes, and gateway keys carry a
 project boundary; a key can use only routes in its own project, including the
 unassigned boundary. Management tokens can also be limited to named projects.
 
-`GET/POST /api/v3/budget-groups` and `GET/PATCH /api/v3/budget-groups/{id}`
+`GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
 manage shared accrued-cost budgets. A group requires a positive daily or monthly
 limit, uses the installation currency, and belongs to one project or the
 unassigned boundary. Attach a key through `budget_group_id`; key and group must
@@ -205,7 +205,7 @@ access. Group limits supplement individual key limits and share their
 ## Management tokens and provisioning
 
 Owners create management tokens from the Access console tab or
-`POST /api/v3/management-tokens`. A token carries 1–8 unique management
+`POST /api/v1/management-tokens`. A token carries 1–8 unique management
 operation scopes (`read`, `access_read`, `access`, `settings`, `configure`,
 `keys`, `playground`, `usage`), a name, and an expiry no more than 366 days
 ahead. The `olpm_` secret is displayed once; only its HMAC digest is stored.
@@ -226,7 +226,7 @@ access to those projects with manager-equivalent project access, still bounded
 by operation scopes. Project-scoped tokens cannot perform installation-wide
 access or settings operations or configuration promotion.
 
-`PUT /api/v3/provisioning/{source}/users/{external_id}` reconciles a provisioned
+`PUT /api/v1/provisioning/{source}/users/{external_id}` reconciles a provisioned
 identity without waiting for a sign-in. An owner session or a management token
 with the `access` scope may call it. The body is the authoritative desired state
 (`email`, `display_name`, `role`, `active`): a missing `(source, external_id)`

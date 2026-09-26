@@ -42,9 +42,9 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	h := newAccessHarness(t)
 	fixture := newOpenAIFixture(t, "")
 	owner, provider, slug, secret := provisionOpenAI(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"})
-	listed := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any)
+	listed := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)
 	route := listed[0].(map[string]any)
-	routePath := "/api/v3/routes/" + route["id"].(string)
+	routePath := "/api/v1/routes/" + route["id"].(string)
 	if route["latest_revision"].(map[string]any)["fidelity"] != nil {
 		t.Fatal("historical route acquired an explicit contract")
 	}
@@ -62,11 +62,11 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 		body := fidelityDraft(slug, provider["id"])
 		body["fidelity"] = map[string]any{}
 		body["content_policy"] = fidelityPolicy("redact", phase)
-		draft := h.want(owner, "POST", "/api/v3/route-drafts", body, idem(uuid.NewString()), 201)
+		draft := h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), 201)
 		if routeFidelityMode(t, draft["fidelity"]) != "strict" {
 			t.Fatal("explicit empty contract did not default to strict")
 		}
-		path := "/api/v3/route-drafts/" + draft["id"].(string)
+		path := "/api/v1/route-drafts/" + draft["id"].(string)
 		for _, action := range []string{"validate", "activate"} {
 			problem := h.want(owner, "POST", path+"/"+action, nil, withMatch(draft, idem(uuid.NewString())), 422)
 			if problemCode(t, problem) != "fidelity_policy_conflict" {
@@ -77,8 +77,8 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	body := fidelityDraft(slug, provider["id"])
 	body["fidelity"] = map[string]any{}
 	body["content_policy"] = fidelityPolicy("block", "input")
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", body, idem(uuid.NewString()), 201)
-	path := "/api/v3/route-drafts/" + draft["id"].(string)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), 201)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
 	beforeValidation := draft
 	if problemCode(t, h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 422)) != "target_capability" {
 		t.Fatal("strict draft accepted an implicit legacy provider profile")
@@ -119,7 +119,7 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 		t.Fatal(err)
 	}
 	duplicate = []byte(strings.TrimSuffix(string(duplicate), "}") + `,"fidelity":{"mode":"strict"},"fidelity":{"mode":"legacy"}}`)
-	if problemCode(t, h.want(owner, "POST", "/api/v3/route-drafts", json.RawMessage(duplicate), idem(uuid.NewString()), 400)) != "invalid_json" {
+	if problemCode(t, h.want(owner, "POST", "/api/v1/route-drafts", json.RawMessage(duplicate), idem(uuid.NewString()), 400)) != "invalid_json" {
 		t.Fatal("duplicate fidelity members were decoded last-wins")
 	}
 
@@ -147,13 +147,13 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	if routeFidelityMode(t, restored["fidelity"]) != "transformed" {
 		t.Fatal("restore changed the revision contract")
 	}
-	created := h.want(owner, "POST", "/api/v3/route-drafts", fidelityDraft(slug, provider["id"]), idem(uuid.NewString()), 201)
+	created := h.want(owner, "POST", "/api/v1/route-drafts", fidelityDraft(slug, provider["id"]), idem(uuid.NewString()), 201)
 	if routeFidelityMode(t, created["fidelity"]) != "transformed" {
 		t.Fatal("same-slug old-client draft silently downgraded the published contract")
 	}
 	rollback := fidelityDraft(slug, provider["id"])
 	rollback["fidelity"] = map[string]any{"mode": "legacy"}
-	restorePath := "/api/v3/route-drafts/" + restored["id"].(string)
+	restorePath := "/api/v1/route-drafts/" + restored["id"].(string)
 	restored = h.want(owner, "PUT", restorePath, rollback, etagHeader(restored), 200)
 	h.want(owner, "POST", restorePath+"/activate", nil, withMatch(restored, idem(uuid.NewString())), 200)
 	diff = h.want(owner, "GET", routePath+"/revisions/diff?from=2&to=3", nil, nil, 200)
@@ -166,19 +166,19 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	h := newAccessHarness(t)
 	fixture := newOpenAIFixture(t, "")
 	owner, provider, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
-	export := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	document := export["document"].(map[string]any)
 	route := document["routes"].([]any)[0].(map[string]any)
 	if routeFidelityMode(t, route["fidelity"]) != "transformed" {
 		t.Fatal("export omitted explicit fidelity")
 	}
-	if digest := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)["digest"]; digest != export["digest"] {
+	if digest := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["digest"]; digest != export["digest"] {
 		t.Fatal("unchanged export digest drifted")
 	}
 	delete(route, "fidelity")
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	var inherited bool
-	for _, item := range h.want(owner, "GET", "/api/v3/route-drafts", nil, nil, 200)["items"].([]any) {
+	for _, item := range h.want(owner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any) {
 		d := item.(map[string]any)
 		if d["slug"] == slug && d["state"] == "draft" && d["based_on_revision_id"] == nil {
 			inherited = routeFidelityMode(t, d["fidelity"]) == "transformed"
@@ -189,18 +189,18 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	}
 	route["fidelity"] = map[string]any{}
 	route["content_policy"] = fidelityPolicy("block", "input")
-	planned := h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	planned := h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
 	if !strings.Contains(fmt.Sprint(planned["conflicts"]), "route_fidelity_migration_required") {
 		t.Fatal("import did not require a new strict identity", planned)
 	}
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 409)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 409)
 	// Review the same proposed contract under an unpublished identity. Existing
 	// non-strict readers continue to serve only the original route.
 	migrationSlug := slug + "-strict"
 	route["slug"] = migrationSlug
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	var draft map[string]any
-	for _, item := range h.want(owner, "GET", "/api/v3/route-drafts", nil, nil, 200)["items"].([]any) {
+	for _, item := range h.want(owner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any) {
 		d := item.(map[string]any)
 		if d["slug"] == migrationSlug && d["state"] == "draft" && d["based_on_revision_id"] == nil {
 			draft = d
@@ -210,13 +210,13 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	if draft == nil || routeFidelityMode(t, draft["fidelity"]) != "strict" {
 		t.Fatal("import did not stage strict contract", draft)
 	}
-	path := "/api/v3/route-drafts/" + draft["id"].(string)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
 	if problemCode(t, h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)) != "target_capability" {
 		t.Fatal("imported strict draft activated")
 	}
 	// Explicitly migrate the provider profile so this draft can be validated by
 	// the real strict compiler while leaving the published route unchanged.
-	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
 	currentProvider := h.want(owner, "GET", providerPath, nil, nil, 200)
 	config := currentProvider["configuration"].(map[string]any)
 	config["profile_id"], config["profile_revision"] = "azure-legacy-chat", "1"
@@ -227,28 +227,28 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
 	delete(route, "fidelity")
 	route["max_attempts"] = 2
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	draft = h.want(owner, "GET", path, nil, nil, 200)
 	if routeFidelityMode(t, draft["fidelity"]) != "strict" || draft["max_attempts"] != float64(2) {
 		t.Fatal("old artifact edit downgraded staged contract", draft)
 	}
 
 	route["content_policy"] = fidelityPolicy("redact", "input")
-	planned = h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	planned = h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
 	if !strings.Contains(fmt.Sprint(planned["conflicts"]), "fidelity_policy_conflict") {
 		t.Fatal("import plan ignored inherited strict policy conflict", planned)
 	}
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 409)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 409)
 	unchanged := h.want(owner, "GET", path, nil, nil, 200)
 	if unchanged["etag"] != draft["etag"] {
 		t.Fatal("conflicting import mutated the draft")
 	}
 	route["fidelity"] = map[string]any{"mode": "strict"}
-	if problemCode(t, h.want(owner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 422)) != "fidelity_policy_conflict" {
+	if problemCode(t, h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422)) != "fidelity_policy_conflict" {
 		t.Fatal("explicit imported strict redaction was accepted")
 	}
 	route["fidelity"] = map[string]any{"mode": "legacy"}
-	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
 	draft = h.want(owner, "GET", path, nil, nil, 200)
 	if routeFidelityMode(t, draft["fidelity"]) != "legacy" {
 		t.Fatal("explicit import transition was ignored")

@@ -166,12 +166,12 @@ func profileNetworkConfiguration(f *profileNetworkFixture) map[string]any {
 
 func createProfileNetworkProvider(t *testing.T, h *accessHarness, owner *browser, name string, config map[string]any) map[string]any {
 	t.Helper()
-	return h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": name, "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem("create-"+name), http.StatusCreated)
+	return h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": name, "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem("create-"+name), http.StatusCreated)
 }
 
 func certifyProfileNetworkProvider(t *testing.T, h *accessHarness, owner *browser, providerID string) {
 	t.Helper()
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
 	if probe["succeeded"] != true {
@@ -195,12 +195,12 @@ func certifyProfileNetworkProvider(t *testing.T, h *accessHarness, owner *browse
 func publishProfileNetworkRoute(t *testing.T, h *accessHarness, owner *browser, providerID string) (string, string) {
 	t.Helper()
 	const slug = "profile-network"
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
 	}, idem("profile-route"), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("profile-route-activate")), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "profile request", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("profile-key"), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("profile-route-activate")), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "profile request", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("profile-key"), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -230,7 +230,7 @@ func TestProviderProfileTLSDefaultsAndNetworkCredentialLifecycle(t *testing.T) {
 			config := profileNetworkConfiguration(f)
 			created := createProfileNetworkProvider(t, h, owner, "Profile network", config)
 			providerID := created["id"].(string)
-			path := "/api/v3/providers/" + providerID
+			path := "/api/v1/providers/" + providerID
 			var networkID string
 			if mutualTLS {
 				stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": f.credential}, withMatch(created, idem("network-create")), 201)
@@ -330,7 +330,7 @@ func TestProviderProfileTLSDefaultsAndNetworkCredentialLifecycle(t *testing.T) {
 func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *browser, f *profileNetworkFixture, providerID, networkID string) {
 	t.Helper()
 	before := len(f.captured())
-	exported := source.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	exported := source.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	document := exported["document"].(map[string]any)
 	encoded, err := json.Marshal(document)
 	if err != nil {
@@ -354,8 +354,8 @@ func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *b
 			t.Fatal("profile fixture was missing its explicit profile")
 		}
 		body := json.RawMessage(`{"document":` + ambiguous + `}`)
-		destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", body, nil, 400)
-		destination.want(destinationOwner, "POST", "/api/v3/configuration/apply", body, idem("ambiguous-"+member), 400)
+		destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", body, nil, 400)
+		destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", body, idem("ambiguous-"+member), 400)
 	}
 	var colliding map[string]any
 	if err := json.Unmarshal(encoded, &colliding); err != nil {
@@ -365,9 +365,9 @@ func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *b
 	collidingSlot := collidingProvider["slots"].([]any)[0].(map[string]any)
 	collidingSlot["name"], collidingSlot["credential_ref"] = "network", networkRef
 	collidingBody := map[string]any{"document": colliding, "secret_bindings": map[string]any{networkRef: f.credential}}
-	destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", collidingBody, nil, 422)
-	destination.want(destinationOwner, "POST", "/api/v3/configuration/apply", collidingBody, idem("network-api-ref-collision"), 422)
-	planned := destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", map[string]any{"document": document}, nil, 200)
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", collidingBody, nil, 422)
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", collidingBody, idem("network-api-ref-collision"), 422)
+	planned := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
 	bindings := map[string]any{}
 	for _, raw := range planned["blockers"].([]any) {
 		blocker := raw.(map[string]any)
@@ -385,20 +385,20 @@ func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *b
 		t.Fatal("plan did not separate API and network secret bindings")
 	}
 	input := map[string]any{"document": document, "secret_bindings": bindings}
-	ready := destination.want(destinationOwner, "POST", "/api/v3/configuration/plan", input, nil, 200)
+	ready := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", input, nil, 200)
 	if len(ready["blockers"].([]any)) != 0 || len(ready["conflicts"].([]any)) != 0 {
 		t.Fatalf("bound configuration is not applicable: %v", ready)
 	}
-	applied := destination.want(destinationOwner, "POST", "/api/v3/configuration/apply", input, idem("apply-network-profile"), 200)
+	applied := destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", input, idem("apply-network-profile"), 200)
 	appliedJSON, err := json.Marshal(applied)
 	if err != nil || bytes.Contains(appliedJSON, []byte("PRIVATE KEY")) || bytes.Contains(appliedJSON, []byte("profile-rotated-api-secret")) {
 		t.Fatal("configuration apply returned a secret binding")
 	}
-	providers := destination.want(destinationOwner, "GET", "/api/v3/providers", nil, nil, 200)["items"].([]any)
+	providers := destination.want(destinationOwner, "GET", "/api/v1/providers", nil, nil, 200)["items"].([]any)
 	if len(providers) != 1 || providers[0].(map[string]any)["state"] != "draft" {
 		t.Fatal("import must stage exactly one draft provider")
 	}
-	path := "/api/v3/providers/" + providers[0].(map[string]any)["id"].(string)
+	path := "/api/v1/providers/" + providers[0].(map[string]any)["id"].(string)
 	detail := destination.want(destinationOwner, "GET", path, nil, nil, 200)
 	config := detail["configuration"].(map[string]any)
 	importedID := config["options"].(map[string]any)["network"].(map[string]any)["credential_id"].(string)
@@ -413,18 +413,18 @@ func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *b
 			}
 		}
 	}
-	if routes := destination.want(destinationOwner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any); len(routes) != 0 {
+	if routes := destination.want(destinationOwner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any); len(routes) != 0 {
 		t.Fatal("configuration apply published an inference route")
 	}
-	drafts := destination.want(destinationOwner, "GET", "/api/v3/route-drafts", nil, nil, 200)["items"].([]any)
+	drafts := destination.want(destinationOwner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any)
 	if len(drafts) != 1 || drafts[0].(map[string]any)["slug"] != "profile-network" {
 		t.Fatal("configuration apply did not retain the route as a draft")
 	}
-	reexported := destination.want(destinationOwner, "GET", "/api/v3/configuration/export", nil, nil, 200)
+	reexported := destination.want(destinationOwner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	if !reflect.DeepEqual(document["providers"], reexported["document"].(map[string]any)["providers"]) {
 		t.Fatal("profile, semantic defaults or portable network reference changed in roundtrip")
 	}
-	destination.want(destinationOwner, "POST", "/api/v3/configuration/apply", input, idem("reapply-network-profile"), 200)
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", input, idem("reapply-network-profile"), 200)
 	if current := destination.want(destinationOwner, "GET", path, nil, nil, 200); current["etag"] != detail["etag"] {
 		t.Fatal("applying identical bindings rotated the provider or network credential")
 	}
@@ -438,20 +438,20 @@ func TestProviderNetworkCredentialsRejectForeignReferences(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	first := createProfileNetworkProvider(t, h, owner, "First owner", profileNetworkConfiguration(f))
-	firstPath := "/api/v3/providers/" + first["id"].(string)
+	firstPath := "/api/v1/providers/" + first["id"].(string)
 	stored := h.want(owner, "POST", firstPath+"/network-credentials", map[string]any{"credential": f.credential}, withMatch(first, idem("foreign-network")), 201)
 	secondConfig := profileNetworkConfiguration(f)
 	second := createProfileNetworkProvider(t, h, owner, "Second owner", secondConfig)
 	secondConfig["options"].(map[string]any)["network"].(map[string]any)["credential_id"] = stored["credential_id"]
-	h.want(owner, "PATCH", "/api/v3/providers/"+second["id"].(string), map[string]any{"name": "Second owner", "configuration": secondConfig}, etagHeader(second), 422)
+	h.want(owner, "PATCH", "/api/v1/providers/"+second["id"].(string), map[string]any{"name": "Second owner", "configuration": secondConfig}, etagHeader(second), 422)
 	third := map[string]any{"name": "Third owner", "configuration": secondConfig, "model": vendorModel, "credential": vendorSecret}
-	h.want(owner, "POST", "/api/v3/providers", third, idem("foreign-network-create"), 422)
+	h.want(owner, "POST", "/api/v1/providers", third, idem("foreign-network-create"), 422)
 	apiCredentials := h.want(owner, "GET", firstPath+"/credentials", nil, nil, 200)["items"].([]any)
 	apiAsNetwork := profileNetworkConfiguration(f)
 	apiAsNetwork["options"].(map[string]any)["network"].(map[string]any)["credential_id"] = apiCredentials[0].(map[string]any)["id"]
 	h.want(owner, "PATCH", firstPath, map[string]any{"name": "First owner", "configuration": apiAsNetwork}, etagHeader(stored), 422)
 	for _, provider := range []map[string]any{first, second} {
-		detail := h.want(owner, "GET", "/api/v3/providers/"+provider["id"].(string), nil, nil, 200)
+		detail := h.want(owner, "GET", "/api/v1/providers/"+provider["id"].(string), nil, nil, 200)
 		if reference := detail["configuration"].(map[string]any)["options"].(map[string]any)["network"].(map[string]any)["credential_id"]; reference != nil {
 			t.Fatal("rejected credential reference changed the provider configuration")
 		}
@@ -484,10 +484,10 @@ func TestProviderProfilesRejectAmbiguousAndCollidingConfiguration(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			body := json.RawMessage(`{"name":"ambiguous profile","credential":"fixture-secret","configuration":{` + test.config + `}}`)
-			h.want(owner, "POST", "/api/v3/providers", body, idem(test.name), test.status)
+			h.want(owner, "POST", "/api/v1/providers", body, idem(test.name), test.status)
 		})
 	}
-	if providers := h.want(owner, "GET", "/api/v3/providers", nil, nil, 200)["items"].([]any); len(providers) != 0 {
+	if providers := h.want(owner, "GET", "/api/v1/providers", nil, nil, 200)["items"].([]any); len(providers) != 0 {
 		t.Fatal("invalid configuration persisted a provider")
 	}
 }

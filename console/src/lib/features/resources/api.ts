@@ -20,7 +20,7 @@ export async function listProviderResources(
   filters: ProviderResourceFilters
 ): Promise<CursorPage<ProviderResource>> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v3/provider-resources',
+    '/api/v1/provider-resources',
     { params: { query: compactQuery(filters) } }
   );
   return pageResult(result(data, error, response));

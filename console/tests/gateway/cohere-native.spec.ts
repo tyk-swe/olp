@@ -5,7 +5,7 @@ test('Cohere native playground shows typed storage groups and exact result bytes
   page
 }, info) => {
   await signInGatewayOwner(page);
-  await page.route('**/api/v3/routes?*', async (route) => {
+  await page.route('**/api/v1/routes?*', async (route) => {
     await route.fulfill({
       headers: { 'cache-control': 'no-store' },
       json: {

@@ -258,7 +258,7 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile', {
+      new Request('https://console.example.test/api/v1/profile', {
         method: 'PATCH'
       })
     );
@@ -272,7 +272,7 @@ describe('authentication lifecycle', () => {
   it('allows a public authentication request without a session', async () => {
     const lifecycle = new AuthenticationLifecycle();
     const request = new Request(
-      'https://console.example.test/api/v3/sessions',
+      'https://console.example.test/api/v1/sessions',
       { method: 'POST' }
     );
 
@@ -293,12 +293,12 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const firstPreparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/providers/one', {
+      new Request('https://console.example.test/api/v1/providers/one', {
         method: 'PATCH'
       })
     );
     const secondPreparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/providers/two', {
+      new Request('https://console.example.test/api/v1/providers/two', {
         method: 'DELETE'
       })
     );
@@ -328,7 +328,7 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile', {
+      new Request('https://console.example.test/api/v1/profile', {
         method: 'PATCH'
       })
     );
@@ -359,7 +359,7 @@ describe('authentication lifecycle', () => {
     vi.advanceTimersByTime(60_001);
 
     const preparation = lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile', {
+      new Request('https://console.example.test/api/v1/profile', {
         method: 'PATCH'
       })
     );
@@ -382,7 +382,7 @@ describe('authentication lifecycle', () => {
 
     await lifecycle.signOut(async (signal) => {
       prepared = await lifecycle.prepareRequest(
-        new Request('https://console.example.test/api/v3/sessions/current', {
+        new Request('https://console.example.test/api/v1/sessions/current', {
           method: 'DELETE',
           signal
         })
@@ -398,7 +398,7 @@ describe('authentication lifecycle', () => {
     const lifecycle = new AuthenticationLifecycle();
     lifecycle.establishSession(session('csrf-original'));
     const request = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile', {
+      new Request('https://console.example.test/api/v1/profile', {
         method: 'PATCH'
       })
     );
@@ -415,7 +415,7 @@ describe('authentication lifecycle', () => {
     const lifecycle = new AuthenticationLifecycle();
     lifecycle.establishSession(session('csrf-original'));
     const staleRequest = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile', {
+      new Request('https://console.example.test/api/v1/profile', {
         method: 'PATCH'
       })
     );
@@ -436,7 +436,7 @@ describe('authentication lifecycle', () => {
     lifecycle.registerBoundary(registeredBoundary);
     lifecycle.establishSession(session('csrf-stale'));
     const staleRequest = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile')
+      new Request('https://console.example.test/api/v1/profile')
     );
 
     await lifecycle.handleResponse(
@@ -460,7 +460,7 @@ describe('authentication lifecycle', () => {
     lifecycle.registerBoundary(registeredBoundary);
     lifecycle.establishSession(session('csrf-old'));
     const staleRequest = await lifecycle.prepareRequest(
-      new Request('https://console.example.test/api/v3/profile')
+      new Request('https://console.example.test/api/v1/profile')
     );
     await lifecycle.authenticate(async () => session('csrf-current'));
 
@@ -547,7 +547,7 @@ describe('authentication lifecycle', () => {
 
     const error = await lifecycle
       .prepareRequest(
-        new Request('https://console.example.test/api/v3/profile', {
+        new Request('https://console.example.test/api/v1/profile', {
           method: 'PATCH'
         })
       )
@@ -666,7 +666,7 @@ describe('rotation and required verification', () => {
     lifecycle.establishSession(session('old'));
     // The password mutation is already dispatched when a passive read begins.
     const password = await lifecycle.prepareRequest(
-      new Request('https://console.test/api/v3/profile/password', {
+      new Request('https://console.test/api/v1/profile/password', {
         method: 'POST'
       })
     );
@@ -679,7 +679,7 @@ describe('rotation and required verification', () => {
     await validation;
     expect(getCsrfToken()).toBe('rotated');
     const next = await lifecycle.prepareRequest(
-      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
     );
     expect(next.headers.get('X-CSRF-Token')).toBe('rotated');
   });
@@ -693,7 +693,7 @@ describe('rotation and required verification', () => {
     const dispatched = vi.fn();
     const mutation = lifecycle
       .prepareRequest(
-        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+        new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
       )
       .then(dispatched);
     await Promise.resolve();
@@ -722,14 +722,14 @@ describe('rotation and required verification', () => {
     });
     await expect(
       lifecycle.prepareRequest(
-        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+        new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
       )
     ).rejects.toThrow('Verification unavailable');
     load.mockResolvedValue(session('recovered'));
     await lifecycle.validateSession();
     expect(lifecycle.snapshot().error).toBe('');
     const mutation = await lifecycle.prepareRequest(
-      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
     );
     expect(mutation.headers.get('X-CSRF-Token')).toBe('recovered');
     load.mockRejectedValue(unauthorizedProblem());
@@ -747,7 +747,7 @@ describe('rotation and required verification', () => {
     lifecycle.registerBoundary(boundary(load));
     lifecycle.establishSession(session('old'));
     const request = await lifecycle.prepareRequest(
-      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
     );
     await lifecycle.handleResponse(
       request,
@@ -792,7 +792,7 @@ describe('rotation and required verification', () => {
       lifecycle.registerBoundary(boundary(load));
       lifecycle.establishSession(session('old'));
       const request = await lifecycle.prepareRequest(
-        new Request('https://console.test/api/v3/profile/password', {
+        new Request('https://console.test/api/v1/profile/password', {
           method: 'POST'
         })
       );
@@ -803,7 +803,7 @@ describe('rotation and required verification', () => {
       expect(postMessage).toHaveBeenCalledExactlyOnceWith('rotated');
       channels[0]!.onmessage!({ data: 'rotated' });
       const mutation = await lifecycle.prepareRequest(
-        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+        new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
       );
       expect(load).toHaveBeenCalledOnce();
       expect(mutation.headers.get('X-CSRF-Token')).toBe('sibling');
@@ -826,7 +826,7 @@ it('supersedes a pending old verification when the server rejects its CSRF', asy
   lifecycle.registerBoundary(boundary(load));
   lifecycle.establishSession(session('old-cookie-csrf'));
   const request = await lifecycle.prepareRequest(
-    new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
   );
   const validation = lifecycle.validateSession({ passive: true });
   await expect(
@@ -850,7 +850,7 @@ it('ignores a CSRF response whose body finishes after a new login', async () => 
   lifecycle.registerBoundary(boundary(load));
   lifecycle.establishSession(session('old'));
   const request = await lifecycle.prepareRequest(
-    new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
   );
   let body!: ReadableStreamDefaultController<Uint8Array>;
   const response = new Response(
@@ -904,7 +904,7 @@ it('announces the first verified session after full-page navigation without echo
     expect(postMessage).toHaveBeenCalledExactlyOnceWith('rotated');
     channels[0]!.onmessage!({ data: 'rotated' });
     const mutation = await lifecycle.prepareRequest(
-      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      new Request('https://console.test/api/v1/profile', { method: 'PATCH' })
     );
     expect(mutation.headers.get('X-CSRF-Token')).toBe('current-cookie');
     expect(load).toHaveBeenCalledTimes(2);

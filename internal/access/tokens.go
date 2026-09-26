@@ -152,7 +152,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "name": strings.TrimSpace(input.Name), "scopes": input.Scopes, "all_projects": allProjects, "project_ids": projectIDs, "created_by": p.ID, "created_by_email": p.Email, "etag": etag, "expires_at": input.ExpiresAt, "revoked_at": nil, "created_at": createdAt, "secret": secret}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/management-tokens/" + id, Body: body}
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/management-tokens/" + id, Body: body}
 	if err = Audit(r.Context(), tx, r, p.ID, "management_token.create", "management_token", id, "success"); err != nil {
 		return Reply{}, err
 	}

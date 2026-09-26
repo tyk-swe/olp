@@ -16,7 +16,7 @@ import (
 func TestSharedBudgetAdmission(t *testing.T) {
 	c := limClient(t)
 	f := glSeed(t, limLimiter(t, c, limNamespace(t, c, "shared-budget")), limits.FailClosed)
-	group := f.h.want(f.owner, "POST", "/api/v3/budget-groups",
+	group := f.h.want(f.owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "shared spend", "daily_cost_limit": "5.00"},
 		idem("group-shared"), 201)
 	groupID := group["id"].(string)
@@ -72,11 +72,11 @@ func TestSharedBudgetAPI(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 
-	group := h.want(owner, "POST", "/api/v3/budget-groups",
+	group := h.want(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "ops budget", "daily_cost_limit": "10", "monthly_cost_limit": "100"},
 		idem("group-ops"), 201)
 	groupID := group["id"].(string)
-	path := "/api/v3/budget-groups/" + groupID
+	path := "/api/v1/budget-groups/" + groupID
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	if detail["name"] != "ops budget" || detail["project_id"] != nil {
 		t.Fatalf("group detail: %v", detail)
@@ -116,29 +116,29 @@ func TestSharedBudgetAPI(t *testing.T) {
 		t.Fatalf("project_id patch: %d %v", status, out)
 	}
 
-	list := h.want(owner, "GET", "/api/v3/budget-groups", nil, nil, 200)
+	list := h.want(owner, "GET", "/api/v1/budget-groups", nil, nil, 200)
 	items, ok := list["items"].([]any)
 	if !ok || len(items) != 1 || items[0].(map[string]any)["id"] != groupID {
 		t.Fatalf("group list: %v", list)
 	}
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "OPS BUDGET", "daily_cost_limit": "1"},
 		idem("group-dup")); status != 409 {
 		t.Fatalf("duplicate group name: %d %v", status, out)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "no limits"}, idem("group-none")); status != 422 {
 		t.Fatalf("group without a limit: %d", status)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/budget-groups",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "bad amount", "daily_cost_limit": "0"},
 		idem("group-zero")); status != 422 {
 		t.Fatalf("zero limit: %d", status)
 	}
 
 	project := createProject(h, owner, "team")
-	projectGroup := h.want(owner, "POST", "/api/v3/budget-groups",
+	projectGroup := h.want(owner, "POST", "/api/v1/budget-groups",
 		map[string]any{"name": "team budget", "project_id": project, "daily_cost_limit": "3"},
 		idem("group-team"), 201)
 	projectGroupID := projectGroup["id"].(string)
@@ -148,39 +148,39 @@ func TestSharedBudgetAPI(t *testing.T) {
 		for k, v := range body {
 			base[k] = v
 		}
-		return h.want(owner, "POST", "/api/v3/api-keys", base, idem("key-"+uuid.NewString()), want)
+		return h.want(owner, "POST", "/api/v1/api-keys", base, idem("key-"+uuid.NewString()), want)
 	}
 	keyA := newKey(map[string]any{"budget_group_id": projectGroupID, "project_id": project}, 201)
 	newKey(map[string]any{"budget_group_id": projectGroupID, "project_id": project}, 201)
 
-	if status, out, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "mismatch", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"project_id": project, "budget_group_id": groupID}, idem("key-mismatch")); status != 422 {
 		t.Fatalf("project-mismatched group: %d %v", status, out)
 	}
-	if status, out, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, out, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "cross", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"budget_group_id": projectGroupID}, idem("key-cross")); status != 422 {
 		t.Fatalf("project group on a global key: %d %v", status, out)
 	}
-	if status, _, _ := h.request(owner, "POST", "/api/v3/api-keys",
+	if status, _, _ := h.request(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "ghost", "scopes": []string{"inference"}, "allowed_routes": []string{},
 			"budget_group_id": uuid.NewString()}, idem("key-ghost")); status != 404 {
 		t.Fatalf("unknown group: %d", status)
 	}
 
 	keyID := keyA["id"].(string)
-	keyDetail := h.want(owner, "GET", "/api/v3/api-keys/"+keyID, nil, nil, 200)
+	keyDetail := h.want(owner, "GET", "/api/v1/api-keys/"+keyID, nil, nil, 200)
 	if keyDetail["budget_group_id"] != projectGroupID {
 		t.Fatalf("assigned group: %v", keyDetail["budget_group_id"])
 	}
-	if status, out, _ := h.request(owner, "PATCH", "/api/v3/api-keys/"+keyID,
+	if status, out, _ := h.request(owner, "PATCH", "/api/v1/api-keys/"+keyID,
 		map[string]any{"budget_group_id": groupID}, etagHeader(keyDetail)); status != 422 {
 		t.Fatalf("cross-project group assignment: %d %v", status, out)
 	}
-	h.want(owner, "PATCH", "/api/v3/api-keys/"+keyID,
+	h.want(owner, "PATCH", "/api/v1/api-keys/"+keyID,
 		map[string]any{"budget_group_id": nil}, etagHeader(keyDetail), 200)
-	keyDetail = h.want(owner, "GET", "/api/v3/api-keys/"+keyID, nil, nil, 200)
+	keyDetail = h.want(owner, "GET", "/api/v1/api-keys/"+keyID, nil, nil, 200)
 	if keyDetail["budget_group_id"] != nil {
 		t.Fatalf("group not cleared: %v", keyDetail["budget_group_id"])
 	}

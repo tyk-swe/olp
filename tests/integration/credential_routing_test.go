@@ -24,12 +24,12 @@ func TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions(
 		vendor.Config.Handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(up.Close)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Custom headers", "model": vendorModel,
 		"credential":    `{"x-api-key":"header-secret","X-TENANT":"tenant-secret"}`,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "headers", "endpoint": up.URL + "/v1", "options": map[string]any{"credential_headers": []string{"x-api-key", "X-Tenant"}}},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	probe := h.want(owner, "POST", providerPath+"/probe", nil, etagHeader(created), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("custom-header probe failed: %v", probe)
@@ -46,14 +46,14 @@ func TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions(
 		h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": key}), 200)
 	}
 	activateProvider("activate-initial")
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": created["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": "key"}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": "key"}, 201)
 	h.refresh()
 	checkDecision := func(decision map[string]any, eligible bool) {
 		t.Helper()
@@ -78,7 +78,7 @@ func TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions(
 				if withKey {
 					input["api_key_id"], want = key["id"], eligible
 				}
-				decisions := h.list(owner, "POST", "/api/v3/routing/simulate", input, nil, 200)
+				decisions := h.list(owner, "POST", "/api/v1/routing/simulate", input, nil, 200)
 				checkDecision(decisions[0].(map[string]any), want)
 			}
 		}

@@ -562,7 +562,7 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 	window := "start=" + f.Base.Format(time.RFC3339) +
 		"&end=" + f.Base.Add(3*time.Hour).Format(time.RFC3339)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/usage/summary?"+window, nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/summary?"+window, nil, nil, 200)
 	if body["request_count"].(float64) != 5 || body["input_tokens"].(string) != "117" {
 		t.Fatalf("summary body = %v", body)
 	}
@@ -578,20 +578,20 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		t.Fatalf("coverage = %v", coverage)
 	}
 
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/usage/completeness?"+window, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/usage/completeness?"+window, nil, nil, 200)
 	if body["priced_count"].(float64) != 3 {
 		t.Fatalf("completeness body = %v", body)
 	}
 
 	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/breakdown?"+window+"&dimension=provider&limit=5", nil, nil, 200)
+		"/api/v1/usage/breakdown?"+window+"&dimension=provider&limit=5", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("breakdown items = %v", items)
 	}
 
 	body = f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
+		"/api/v1/usage/time-series?"+window+"&granularity=day", nil, nil, 200)
 	wantByBucket := map[string]float64{}
 	for _, point := range []struct {
 		at    time.Time
@@ -631,9 +631,9 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		{window + "&operation=telepathy", "invalid_operation"},
 		{window + "&dimension=sideways", "invalid_dimension"},
 	} {
-		path := "/api/v3/usage/summary?" + c.query
+		path := "/api/v1/usage/summary?" + c.query
 		if strings.Contains(c.query, "dimension") {
-			path = "/api/v3/usage/breakdown?" + c.query
+			path = "/api/v1/usage/breakdown?" + c.query
 		}
 		problem := f.h.want(f.Owner, http.MethodGet, path, nil, nil, 400)
 		if code := repProblemCode(t, problem); code != c.code {
@@ -641,7 +641,7 @@ func repCheckUsageReportsOverHTTP(t *testing.T, f *repFixture) {
 		}
 	}
 	problem := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/usage/breakdown?"+window+"&dimension=route&limit=0", nil, nil, 400)
+		"/api/v1/usage/breakdown?"+window+"&dimension=route&limit=0", nil, nil, 400)
 	if code := repProblemCode(t, problem); code != "invalid_limit" {
 		t.Fatalf("limit problem = %s", code)
 	}
@@ -651,7 +651,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 	f := repSetup(t)
 	repSeedReports(f)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?limit=2", nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?limit=2", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("page = %v", items)
@@ -672,7 +672,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 	if !ok || cursor == "" {
 		t.Fatalf("next cursor = %v, want a page token", body["next_cursor"])
 	}
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?limit=2&cursor="+cursor, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?limit=2&cursor="+cursor, nil, nil, 200)
 	second := body["items"].([]any)
 	if len(second) != 2 {
 		t.Fatalf("second page = %v", second)
@@ -684,12 +684,12 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("the last page offered another cursor: %v", body["next_cursor"])
 	}
 
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?provider_id="+f.P1, nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?provider_id="+f.P1, nil, nil, 200)
 	items = body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("provider filtered page = %v, want the three requests with facts", items)
 	}
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?status_code=429", nil, nil, 200)
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?status_code=429", nil, nil, 200)
 	items = body["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["error_class"].(string) != "rate_limited" {
 		t.Fatalf("status filtered page = %v", items)
@@ -697,7 +697,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 
 	// Both generation requests on the alpha route, newest first: the older one
 	// carries the committed usage and the two attempt timeline.
-	body = f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?route=alpha&operation=generation",
+	body = f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?route=alpha&operation=generation",
 		nil, nil, 200)
 	alpha := body["items"].([]any)
 	if len(alpha) != 2 {
@@ -716,7 +716,7 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("an uncertain request reported settled usage: %v", uncertain)
 	}
 
-	detail := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests/"+detailed["id"].(string),
+	detail := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests/"+detailed["id"].(string),
 		nil, nil, 200)
 	attempts := detail["attempts"].([]any)
 	if len(attempts) != 2 {
@@ -746,11 +746,11 @@ func TestRequestHistoryPagesAndDetails(t *testing.T) {
 		t.Fatalf("routing provenance = %v", routing)
 	}
 
-	missing := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests/"+access.NewID(), nil, nil, 404)
+	missing := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests/"+access.NewID(), nil, nil, 404)
 	if code := repProblemCode(t, missing); code != "not_found" {
 		t.Fatalf("missing request = %s", code)
 	}
-	bad := f.h.want(f.Owner, http.MethodGet, "/api/v3/requests?cursor=nonsense", nil, nil, 400)
+	bad := f.h.want(f.Owner, http.MethodGet, "/api/v1/requests?cursor=nonsense", nil, nil, 400)
 	if code := repProblemCode(t, bad); code != "invalid_cursor" {
 		t.Fatalf("cursor problem = %s", code)
 	}
@@ -789,7 +789,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		"prices": []any{repPrice("openai", "m1", "generation"), vendor, generic},
 	}
 	headers := map[string]string{"Idempotency-Key": "pricing-first"}
-	created := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, headers, 201)
+	created := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, headers, 201)
 	if created["revision"].(float64) != 1 {
 		t.Fatalf("revision = %v, want 1", created["revision"])
 	}
@@ -806,19 +806,19 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		}
 	}
 
-	replayed := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, headers, 201)
+	replayed := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, headers, 201)
 	if replayed["id"].(string) != created["id"].(string) {
 		t.Fatal("a replayed idempotency key created a second revision")
 	}
 	if total := f.count("SELECT count(*) FROM olp_go.pricing_revisions"); total != 1 {
 		t.Fatalf("revisions = %d, want 1", total)
 	}
-	problem := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, nil, 400)
+	problem := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions", body, nil, 400)
 	if code := repProblemCode(t, problem); code != "idempotency_key_required" {
 		t.Fatalf("missing key gave %s", code)
 	}
 
-	listed := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions", nil, nil, 200)
+	listed := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions", nil, nil, 200)
 	items := listed["items"].([]any)
 	if len(items) != 1 || len(items[0].(map[string]any)["prices"].([]any)) != 3 {
 		t.Fatalf("listed revisions = %v", items)
@@ -830,7 +830,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 	if listed["next_cursor"] != nil {
 		t.Fatalf("next cursor = %v, want none", listed["next_cursor"])
 	}
-	bad := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions?cursor=first", nil, nil, 400)
+	bad := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions?cursor=first", nil, nil, 400)
 	if code := repProblemCode(t, bad); code != "invalid_cursor" {
 		t.Fatalf("cursor problem = %s", code)
 	}
@@ -855,14 +855,14 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		{"too-many-fraction-digits", []any{oversized}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+			f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 				map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": c.prices},
 				map[string]string{"Idempotency-Key": c.name}, 422)
 		})
 	}
 
 	// The installation currency is fixed by the first revision.
-	f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+	f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 		map[string]any{"effective_at": f.Base.Format(time.RFC3339), "prices": []any{foreign}},
 		map[string]string{"Idempotency-Key": "pricing-euro"}, 422)
 	if total := f.count("SELECT count(*) FROM olp_go.pricing_revisions"); total != 1 {
@@ -875,14 +875,14 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 
 	// A second revision exercises the list cursor, which is the revision number
 	// rather than a timestamp: the older revision is reachable only through it.
-	second := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions",
+	second := f.h.want(f.Owner, http.MethodPost, "/api/v1/pricing/revisions",
 		map[string]any{"effective_at": f.Base.Add(time.Hour).Format(time.RFC3339),
 			"prices": []any{repPrice("openai", "gpt-4o-mini", "generation")}},
 		map[string]string{"Idempotency-Key": "pricing-second"}, 201)
 	if second["revision"].(float64) != 2 {
 		t.Fatalf("second revision numbered %v", second["revision"])
 	}
-	newest := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions?limit=1", nil, nil, 200)
+	newest := f.h.want(f.Owner, http.MethodGet, "/api/v1/pricing/revisions?limit=1", nil, nil, 200)
 	page := newest["items"].([]any)
 	if len(page) != 1 || page[0].(map[string]any)["revision"].(float64) != 2 {
 		t.Fatalf("newest page = %v", page)
@@ -892,7 +892,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		t.Fatalf("next cursor = %v", newest["next_cursor"])
 	}
 	older := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/pricing/revisions?limit=1&cursor="+next, nil, nil, 200)
+		"/api/v1/pricing/revisions?limit=1&cursor="+next, nil, nil, 200)
 	page = older["items"].([]any)
 	if len(page) != 1 || page[0].(map[string]any)["revision"].(float64) != 1 {
 		t.Fatalf("page before the cursor = %v", page)
@@ -921,7 +921,7 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	f.epoch(closed, start, 8, 8, 0, &closedAt, nil, closedAt)
 	f.epoch(stale, start, 12, 5, 2, nil, &detectedAt, detectedAt)
 
-	body := f.h.want(f.Owner, http.MethodGet, "/api/v3/request-metadata/gateway-epochs", nil, nil, 200)
+	body := f.h.want(f.Owner, http.MethodGet, "/api/v1/request-metadata/gateway-epochs", nil, nil, 200)
 	items := body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("epochs = %v", items)
@@ -945,14 +945,14 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	}
 
 	filtered := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=unresolved", nil, nil, 200)
+		"/api/v1/request-metadata/gateway-epochs?state=unresolved", nil, nil, 200)
 	if len(filtered["items"].([]any)) != 1 {
 		t.Fatalf("unresolved epochs = %v", filtered["items"])
 	}
 	f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=elsewhere", nil, nil, 400)
+		"/api/v1/request-metadata/gateway-epochs?state=elsewhere", nil, nil, 400)
 
-	path := "/api/v3/request-metadata/gateway-epochs/"
+	path := "/api/v1/request-metadata/gateway-epochs/"
 	acknowledged := f.h.want(f.Owner, http.MethodPost, path+stale+"/acknowledge", nil, nil, 200)
 	if acknowledged["acknowledged_by"].(string) != f.OwnerID {
 		t.Fatalf("acknowledged by = %v", acknowledged["acknowledged_by"])
@@ -969,7 +969,7 @@ func TestGatewayEpochsOverHTTP(t *testing.T) {
 	f.h.want(f.Owner, http.MethodPost, path+"not-a-uuid/acknowledge", nil, nil, 400)
 
 	resolved := f.h.want(f.Owner, http.MethodGet,
-		"/api/v3/request-metadata/gateway-epochs?state=acknowledged", nil, nil, 200)
+		"/api/v1/request-metadata/gateway-epochs?state=acknowledged", nil, nil, 200)
 	if len(resolved["items"].([]any)) != 1 {
 		t.Fatalf("acknowledged epochs = %v", resolved["items"])
 	}

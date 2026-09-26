@@ -94,7 +94,7 @@ func (s *Server) migrationDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	result.Status, result.Location = 201, "/api/v3/route-drafts/"+draftID
+	result.Status, result.Location = 201, "/api/v1/route-drafts/"+draftID
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}

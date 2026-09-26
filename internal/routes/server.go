@@ -417,7 +417,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.create", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v3/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
+	result := access.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}

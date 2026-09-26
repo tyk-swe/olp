@@ -92,7 +92,7 @@ func (s *Server) createProject(r *http.Request) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, Location: "/api/v3/projects/" + id, ETag: etag, Body: json.RawMessage(data)}
+	result := Reply{Status: 201, Location: "/api/v1/projects/" + id, ETag: etag, Body: json.RawMessage(data)}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}

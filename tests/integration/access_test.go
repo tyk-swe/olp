@@ -291,13 +291,13 @@ const accessPassword = "a long integration password"
 
 func (h *accessHarness) owner() *browser {
 	b := &browser{}
-	h.want(b, "POST", "/api/v3/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword, "installation_name": "Go control"}, map[string]string{"X-OLP-Setup-Token": h.Bootstrap}, 201)
+	h.want(b, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword, "installation_name": "Go control"}, map[string]string{"X-OLP-Setup-Token": h.Bootstrap}, 201)
 	return b
 }
 func (h *accessHarness) invite(owner *browser, address, role string) *browser {
-	result := h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": address, "role": role}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	result := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": address, "role": role}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	b := &browser{}
-	h.want(b, "POST", "/api/v3/invitations/accept", map[string]any{"token": result["token"], "display_name": role, "password": accessPassword}, nil, 201)
+	h.want(b, "POST", "/api/v1/invitations/accept", map[string]any{"token": result["token"], "display_name": role, "password": accessPassword}, nil, 201)
 	return b
 }
 func etagHeader(record map[string]any) map[string]string {
@@ -307,8 +307,8 @@ func etagHeader(record map[string]any) map[string]string {
 func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "null routes", "allowed_routes": nil}, map[string]string{"Idempotency-Key": "routes-omitted"}, 422)
-	if items := h.want(owner, "GET", "/api/v3/api-keys", nil, nil, 200)["items"].([]any); len(items) != 0 {
+	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "null routes", "allowed_routes": nil}, map[string]string{"Idempotency-Key": "routes-omitted"}, 422)
+	if items := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any); len(items) != 0 {
 		t.Fatal("a rejected null allowlist persisted a key")
 	}
 	for _, tc := range []struct {
@@ -324,8 +324,8 @@ func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
 			if tc.routes != nil {
 				input["allowed_routes"] = tc.routes
 			}
-			created := h.want(owner, "POST", "/api/v3/api-keys", input, map[string]string{"Idempotency-Key": "routes-" + tc.name}, 201)
-			path := "/api/v3/api-keys/" + created["id"].(string)
+			created := h.want(owner, "POST", "/api/v1/api-keys", input, map[string]string{"Idempotency-Key": "routes-" + tc.name}, 201)
+			path := "/api/v1/api-keys/" + created["id"].(string)
 			record := h.want(owner, "GET", path, nil, nil, 200)
 			routes, ok := record["allowed_routes"].([]any)
 			if !ok || len(routes) != len(tc.routes) {
@@ -342,7 +342,7 @@ func TestAPIKeyRouteAllowlistsRejectNull(t *testing.T) {
 			}
 		})
 	}
-	if items := h.want(owner, "GET", "/api/v3/api-keys", nil, nil, 200)["items"].([]any); len(items) != 3 {
+	if items := h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any); len(items) != 3 {
 		t.Fatal("the inventory must contain only the valid keys")
 	}
 }
@@ -352,19 +352,19 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	owner := h.owner()
 	developer := h.invite(owner, "dev@example.com", "developer")
 	viewer := h.invite(owner, "viewer@example.com", "viewer")
-	h.want(nil, "GET", "/api/v3/users", nil, nil, 401)
-	h.want(viewer, "GET", "/api/v3/users", nil, nil, 403)
-	h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "denied"}, map[string]string{"Origin": "https://evil.test", "Idempotency-Key": "bad"}, 403)
-	h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "denied"}, map[string]string{"X-CSRF-Token": "bad", "Idempotency-Key": "bad"}, 403)
+	h.want(nil, "GET", "/api/v1/users", nil, nil, 401)
+	h.want(viewer, "GET", "/api/v1/users", nil, nil, 403)
+	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "denied"}, map[string]string{"Origin": "https://evil.test", "Idempotency-Key": "bad"}, 403)
+	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "denied"}, map[string]string{"X-CSRF-Token": "bad", "Idempotency-Key": "bad"}, 403)
 	headers := map[string]string{"Idempotency-Key": "create-one"}
 	input := map[string]any{"name": "application", "scopes": []string{"models_read"}, "allowed_routes": []string{"private"}, "requests_per_minute": 12, "daily_cost_limit": "10.25000000"}
-	first := h.want(developer, "POST", "/api/v3/api-keys", input, headers, 201)
-	second := h.want(developer, "POST", "/api/v3/api-keys", input, headers, 201)
+	first := h.want(developer, "POST", "/api/v1/api-keys", input, headers, 201)
+	second := h.want(developer, "POST", "/api/v1/api-keys", input, headers, 201)
 	if first["secret"] != second["secret"] || first["id"] != second["id"] {
 		t.Fatal("replay changed secret or side effect")
 	}
-	h.want(developer, "POST", "/api/v3/api-keys", map[string]any{"name": "different"}, headers, 409)
-	path := "/api/v3/api-keys/" + first["id"].(string)
+	h.want(developer, "POST", "/api/v1/api-keys", map[string]any{"name": "different"}, headers, 409)
+	path := "/api/v1/api-keys/" + first["id"].(string)
 	record := h.want(owner, "GET", path, nil, nil, 200)
 	if _, ok := record["secret"]; ok {
 		t.Fatal("read exposed secret")
@@ -398,17 +398,17 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if err != nil || authority.Allows("models_read", "private", nil, time.Now()) {
 		t.Fatal("revoked key admitted", err)
 	}
-	profile := h.want(developer, "GET", "/api/v3/profile", nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v3/users/"+profile["id"].(string), map[string]any{"active": false}, etagHeader(profile), 200)
-	h.want(developer, "POST", "/api/v3/api-keys", input, headers, 401)
-	h.want(&browser{}, "POST", "/api/v3/sessions", map[string]any{"email": "dev@example.com", "password": accessPassword}, nil, 401)
-	self := h.want(owner, "GET", "/api/v3/profile", nil, nil, 200)
-	h.want(owner, "PATCH", "/api/v3/users/"+self["id"].(string), map[string]any{"role": "viewer"}, etagHeader(self), 409)
-	settings := h.want(owner, "GET", "/api/v3/settings/auth.local_login_enabled", nil, nil, 200)
-	h.want(owner, "PUT", "/api/v3/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(settings), 409)
-	h.want(owner, "GET", "/api/v3/users?limit=201", nil, nil, 422)
-	h.want(owner, "GET", "/api/v3/users?cursor=malformed", nil, nil, 422)
-	events := h.want(owner, "GET", "/api/v3/audit?action=api_key.create", nil, nil, 200)
+	profile := h.want(developer, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"active": false}, etagHeader(profile), 200)
+	h.want(developer, "POST", "/api/v1/api-keys", input, headers, 401)
+	h.want(&browser{}, "POST", "/api/v1/sessions", map[string]any{"email": "dev@example.com", "password": accessPassword}, nil, 401)
+	self := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+self["id"].(string), map[string]any{"role": "viewer"}, etagHeader(self), 409)
+	settings := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "false"}, etagHeader(settings), 409)
+	h.want(owner, "GET", "/api/v1/users?limit=201", nil, nil, 422)
+	h.want(owner, "GET", "/api/v1/users?cursor=malformed", nil, nil, 422)
+	events := h.want(owner, "GET", "/api/v1/audit?action=api_key.create", nil, nil, 200)
 	if len(events["items"].([]any)) != 1 {
 		t.Fatal("idempotency duplicated audit")
 	}
@@ -429,7 +429,7 @@ func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
 	statuses := make(chan int, 2)
 	for range 2 {
 		wg.Go(func() {
-			status, _, _ := h.request(nil, "POST", "/api/v3/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword}, map[string]string{"X-OLP-Setup-Token": h.Bootstrap})
+			status, _, _ := h.request(nil, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword}, map[string]string{"X-OLP-Setup-Token": h.Bootstrap})
 			statuses <- status
 		})
 	}
@@ -443,12 +443,12 @@ func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
 		t.Fatal("setup race", counts)
 	}
 	owner := &browser{}
-	h.want(owner, "POST", "/api/v3/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
-	invite := h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": "invite@example.com", "role": "operator"}, map[string]string{"Idempotency-Key": "invite-race"}, 201)
+	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
+	invite := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "invite@example.com", "role": "operator"}, map[string]string{"Idempotency-Key": "invite-race"}, 201)
 	statuses = make(chan int, 2)
 	for range 2 {
 		wg.Go(func() {
-			status, _, _ := h.request(nil, "POST", "/api/v3/invitations/accept", map[string]any{"token": invite["token"], "display_name": "Member", "password": accessPassword}, nil)
+			status, _, _ := h.request(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": invite["token"], "display_name": "Member", "password": accessPassword}, nil)
 			statuses <- status
 		})
 	}
@@ -461,17 +461,17 @@ func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
 	if counts[201] != 1 || counts[410] != 1 {
 		t.Fatal("invitation race", counts)
 	}
-	retired := h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": "retired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "retired"}, 201)
+	retired := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "retired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "retired"}, 201)
 	id := retired["invitation"].(map[string]any)["id"].(string)
-	h.want(owner, "DELETE", "/api/v3/invitations/"+id, nil, map[string]string{"Idempotency-Key": "retire"}, 200)
-	h.want(nil, "POST", "/api/v3/invitations/accept", map[string]any{"token": retired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
-	expired := h.want(owner, "POST", "/api/v3/invitations", map[string]any{"email": "expired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "expired"}, 201)
+	h.want(owner, "DELETE", "/api/v1/invitations/"+id, nil, map[string]string{"Idempotency-Key": "retire"}, 200)
+	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": retired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
+	expired := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "expired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "expired"}, 201)
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.invitations SET expires_at=now()-interval '1 second' WHERE id=$1", expired["invitation"].(map[string]any)["id"]); err != nil {
 		t.Fatal(err)
 	}
-	h.want(nil, "POST", "/api/v3/invitations/accept", map[string]any{"token": expired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
+	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": expired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
 	for _, token := range []string{invite["token"].(string), secrets.Token()} {
-		problem := h.want(nil, "POST", "/api/v3/invitations/accept", map[string]any{"token": token, "display_name": "Member", "password": accessPassword}, nil, 410)
+		problem := h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": token, "display_name": "Member", "password": accessPassword}, nil, 410)
 		if problem["status"] != float64(410) {
 			t.Fatal("unavailable invitation problem must expose the terminal status")
 		}
@@ -480,16 +480,16 @@ func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
 	for name, c := range owner.Cookies {
 		previous.Cookies[name] = c
 	}
-	profile := h.want(owner, "GET", "/api/v3/profile", nil, nil, 200)
-	h.want(owner, "POST", "/api/v3/profile/password", map[string]any{"current_password": accessPassword, "new_password": "new long integration password"}, etagHeader(profile), 200)
-	h.want(previous, "GET", "/api/v3/sessions/current", nil, nil, 401)
-	h.want(owner, "GET", "/api/v3/sessions/current", nil, nil, 200)
-	h.want(owner, "DELETE", "/api/v3/sessions/current", nil, nil, 204)
-	h.want(owner, "GET", "/api/v3/sessions/current", nil, nil, 401)
+	profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "POST", "/api/v1/profile/password", map[string]any{"current_password": accessPassword, "new_password": "new long integration password"}, etagHeader(profile), 200)
+	h.want(previous, "GET", "/api/v1/sessions/current", nil, nil, 401)
+	h.want(owner, "GET", "/api/v1/sessions/current", nil, nil, 200)
+	h.want(owner, "DELETE", "/api/v1/sessions/current", nil, nil, 204)
+	h.want(owner, "GET", "/api/v1/sessions/current", nil, nil, 401)
 	for range 5 {
-		h.want(nil, "POST", "/api/v3/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 401)
+		h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 401)
 	}
-	h.want(nil, "POST", "/api/v3/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 429)
+	h.want(nil, "POST", "/api/v1/sessions", map[string]any{"email": "nobody@example.com", "password": "wrong"}, nil, 429)
 }
 
 func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
@@ -536,7 +536,7 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	}
 	h := newAccessHarness(t)
 	owner := h.owner()
-	created := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "survives rotation"}, map[string]string{"Idempotency-Key": "retained"}, 201)
+	created := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "survives rotation"}, map[string]string{"Idempotency-Key": "retained"}, 201)
 	dir := t.TempDir()
 	write := func(name, value string) string {
 		path := filepath.Join(dir, name)
@@ -580,7 +580,7 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.Server.Keys = newRing
-	replayed := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "survives rotation"}, map[string]string{"Idempotency-Key": "retained"}, 201)
+	replayed := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "survives rotation"}, map[string]string{"Idempotency-Key": "retained"}, 201)
 	if created["secret"] != replayed["secret"] {
 		t.Fatal("rotation lost encrypted replay")
 	}

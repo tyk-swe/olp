@@ -24,12 +24,12 @@ func TestAPIKeyListingsPreserveIntegerPrecision(t *testing.T) {
 			limit = &tokens
 			input["tokens_per_minute"] = tokens
 		}
-		created := h.want(owner, "POST", "/api/v3/api-keys", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+		created := h.want(owner, "POST", "/api/v1/api-keys", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 		expected[created["id"].(string)] = limit
 	}
 	cursor := ""
 	for page := 0; page < 3; page++ {
-		request, err := http.NewRequest("GET", h.HTTP.URL+"/api/v3/api-keys?limit=1&cursor="+url.QueryEscape(cursor), nil)
+		request, err := http.NewRequest("GET", h.HTTP.URL+"/api/v1/api-keys?limit=1&cursor="+url.QueryEscape(cursor), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,12 +80,12 @@ func TestAPIKeyListingsPreserveIntegerPrecision(t *testing.T) {
 func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	created := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "precise budgets", "daily_cost_limit": "01.50",
 		"monthly_cost_limit": "1.000000000001", "tokens_per_minute": int64(math.MaxInt32) + 1,
 		"requests_per_minute": math.MaxInt32, "max_concurrency": math.MaxInt32,
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	path := "/api/v3/api-keys/" + created["id"].(string)
+	path := "/api/v1/api-keys/" + created["id"].(string)
 	secret := created["secret"].(string)
 	assertPolicy := func(daily, monthly string, tokens int64) map[string]any {
 		t.Helper()

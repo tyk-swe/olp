@@ -309,7 +309,7 @@ describe('baseline: overview', () => {
     // providers or routes exist.
     const requests = captureRequests(async (request) => {
       const url = new URL(request.url);
-      if (url.pathname === '/api/v3/overview') {
+      if (url.pathname === '/api/v1/overview') {
         await new Promise((resolve) => setTimeout(resolve, SERVER_DELAY));
         return jsonResponse({
           active_providers: 120,
@@ -318,10 +318,10 @@ describe('baseline: overview', () => {
           usable_api_key: true
         });
       }
-      if (url.pathname === '/api/v3/requests') {
+      if (url.pathname === '/api/v1/requests') {
         return jsonResponse({ items: [], next_cursor: null });
       }
-      if (url.pathname === '/api/v3/auth/capabilities') {
+      if (url.pathname === '/api/v1/auth/capabilities') {
         return jsonResponse({
           local_login_enabled: true,
           oidc_login_enabled: false,
@@ -347,13 +347,13 @@ describe('baseline: overview', () => {
       requests.filter((request) => new URL(request.url).pathname === path)
         .length;
     console.log(
-      `[baseline] overview: ${count('/api/v3/overview')} summary + ${count('/api/v3/providers')} provider + ${count('/api/v3/routes')} route + ${count('/api/v3/api-keys')} key + ${count('/api/v3/requests')} request calls, counts visible after ~${settledAt}ms`
+      `[baseline] overview: ${count('/api/v1/overview')} summary + ${count('/api/v1/providers')} provider + ${count('/api/v1/routes')} route + ${count('/api/v1/api-keys')} key + ${count('/api/v1/requests')} request calls, counts visible after ~${settledAt}ms`
     );
     // The full collections stay untouched: only the aggregate and the recent
     // requests feed the page.
-    expect(count('/api/v3/providers')).toBe(0);
-    expect(count('/api/v3/routes')).toBe(0);
-    expect(count('/api/v3/api-keys')).toBe(0);
-    expect(count('/api/v3/overview')).toBe(1);
+    expect(count('/api/v1/providers')).toBe(0);
+    expect(count('/api/v1/routes')).toBe(0);
+    expect(count('/api/v1/api-keys')).toBe(0);
+    expect(count('/api/v1/overview')).toBe(1);
   });
 });

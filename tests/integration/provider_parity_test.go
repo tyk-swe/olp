@@ -79,8 +79,8 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			if credential != nil {
 				create["credential"] = credential
 			}
-			detail := h.want(owner, "POST", "/api/v3/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			path := "/api/v3/providers/" + detail["id"].(string)
+			detail := h.want(owner, "POST", "/api/v1/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			path := "/api/v1/providers/" + detail["id"].(string)
 			probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
 			if probe["succeeded"] != true {
 				t.Fatalf("native discovery/proof: %v", probe)
@@ -89,7 +89,7 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			if kind == "openai" || kind == "openai_compatible" || kind == "azure_openai" {
 				operations = append(operations, "embeddings", "moderation")
 			}
-			options := h.want(owner, "GET", "/api/v3/provider-kinds/"+kind+"/capabilities", nil, nil, 200)["capabilities"].([]any)
+			options := h.want(owner, "GET", "/api/v1/provider-kinds/"+kind+"/capabilities", nil, nil, 200)["capabilities"].([]any)
 			capabilities := []any{}
 			for _, option := range options {
 				v := option.(map[string]any)
@@ -109,10 +109,10 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			}
 			detail = h.want(owner, "GET", path, nil, nil, 200)
 			h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{"slug": routeSlug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "native inference", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			read := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "models only", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": routeSlug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
+			key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "native inference", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			read := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "models only", "scopes": []string{"models_read"}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.refresh()
 			for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration} {
 				for _, stream := range []bool{false, true} {

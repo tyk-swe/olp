@@ -82,7 +82,7 @@ requirements. `/openai/v1` and `x-litellm-api-key` are retired.
 
 | Interface | Path |
 | --- | --- |
-| Management API and OpenAPI | `/api/v3` and `/api/v3/openapi.json` |
+| Management API and OpenAPI | `/api/v1` and `/api/v1/openapi.json` |
 | OpenAI | `/v1` |
 | Anthropic | `/anthropic/v1` |
 | Gemini | `/gemini/v1beta` and `/gemini/v1` |

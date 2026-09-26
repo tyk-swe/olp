@@ -27,11 +27,11 @@ func TestNoAuthPublicationIgnoresRetainedRevokedCredential(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 	config := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Switchable auth", "model": vendorModel, "credential": vendorSecret, "configuration": config,
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	providerID := created["id"].(string)
-	providerPath := "/api/v3/providers/" + providerID
+	providerPath := "/api/v1/providers/" + providerID
 	models := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	certifyAndActivate := func(key string) {
@@ -45,14 +45,14 @@ func TestNoAuthPublicationIgnoresRetainedRevokedCredential(t *testing.T) {
 		h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": key}), 200)
 	}
 	certifyAndActivate("activate-authenticated")
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": routeSlug, "overall_timeout_ms": 5000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
 	}, map[string]string{"Idempotency-Key": "route"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "activate-route"}), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}}, map[string]string{"Idempotency-Key": "key"}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}}, map[string]string{"Idempotency-Key": "key"}, 201)
 	checkInference := func(wantStatus int) {
 		t.Helper()
 		calls := vendor.chats.Load()

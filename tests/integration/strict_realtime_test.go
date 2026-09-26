@@ -114,8 +114,8 @@ func provisionStrictRealtime(t *testing.T, h *accessHarness, kind, endpoint stri
 		profile = "azure-v1-responses"
 	}
 	configuration := map[string]any{"kind": kind, "profile_id": profile, "profile_revision": "1", "auth_mode": "api_key", "endpoint": endpoint}
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Strict native realtime", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Strict native realtime", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	if len(networkCredential) != 0 {
 		stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": networkCredential[0]}, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusCreated)
 		configuration["options"] = map[string]any{"network": map[string]any{"credential_id": stored["credential_id"]}}
@@ -133,13 +133,13 @@ func provisionStrictRealtime(t *testing.T, h *accessHarness, kind, endpoint stri
 	provider = h.want(owner, "GET", path, nil, nil, http.StatusOK)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	slug := "strict-realtime-" + uuid.NewString()[:8]
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": slug, "operations": []string{"realtime"}, "fidelity": map[string]any{"mode": "strict"},
 		"overall_timeout_ms": 30000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 20000}},
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict native realtime", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)["secret"].(string)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict native realtime", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)["secret"].(string)
 	h.refresh()
 	return slug, key
 }
@@ -152,7 +152,7 @@ func TestStrictRealtimeCurrentNetworkCredentialRevocation(t *testing.T) {
 	network := newProfileNetworkFixture(t, false)
 	slug, key := provisionStrictRealtime(t, h, "openai", fixture.URL+"/v1", network.credential)
 	owner := &browser{}
-	h.want(owner, "POST", "/api/v3/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
 	var providerID, networkID string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,n.id::text FROM olp_go.providers p JOIN olp_go.provider_network_credentials n ON n.provider_id=p.id`).Scan(&providerID, &networkID); err != nil {
 		t.Fatal(err)
@@ -172,8 +172,8 @@ func TestStrictRealtimeCurrentNetworkCredentialRevocation(t *testing.T) {
 	if fixture.dials.Load() != before+1 {
 		t.Fatalf("active strict session did not reach one provider: %d", fixture.dials.Load()-before)
 	}
-	detail := h.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, http.StatusOK)
-	h.want(owner, "POST", "/api/v3/providers/"+providerID+"/network-credentials/"+networkID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	detail := h.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, http.StatusOK)
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/network-credentials/"+networkID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	h.refresh()
 	_, _, err = conn.Read(ctx)
 	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
@@ -297,7 +297,7 @@ func TestStrictRealtimeCurrentProviderCredentialRevocation(t *testing.T) {
 	fixture := newStrictRealtimeFixture(t, "openai")
 	slug, key := provisionStrictRealtime(t, h, "openai", fixture.URL+"/v1")
 	owner := &browser{}
-	h.want(owner, "POST", "/api/v3/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
 	var providerID, credentialID string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp_go.providers p JOIN olp_go.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
 		t.Fatal(err)
@@ -317,8 +317,8 @@ func TestStrictRealtimeCurrentProviderCredentialRevocation(t *testing.T) {
 	if fixture.dials.Load() != before+1 {
 		t.Fatalf("active strict session did not reach exactly one provider: %d", fixture.dials.Load()-before)
 	}
-	detail := h.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, http.StatusOK)
-	h.want(owner, "POST", "/api/v3/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
+	detail := h.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, http.StatusOK)
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	h.refresh()
 	_, _, err = conn.Read(ctx)
 	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {

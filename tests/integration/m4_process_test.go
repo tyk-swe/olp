@@ -123,13 +123,13 @@ func m4Provisioned(t *testing.T) *m4Install {
 	t.Helper()
 	in := m4Installation(t)
 	in.vendor = newVendor(t)
-	created := in.h.want(in.owner, http.MethodPost, "/api/v3/providers", map[string]any{
+	created := in.h.want(in.owner, http.MethodPost, "/api/v1/providers", map[string]any{
 		"name": "Fixture vendor", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key",
 			"endpoint": in.vendor.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	in.provider = created["id"].(string)
-	in.path = "/api/v3/providers/" + in.provider
+	in.path = "/api/v1/providers/" + in.provider
 	if probe := in.h.want(in.owner, http.MethodPost, in.path+"/probe", nil,
 		etagHeader(created), 200); probe["succeeded"] != true {
 		t.Fatalf("probe failed: %v", probe)
@@ -144,12 +144,12 @@ func m4Provisioned(t *testing.T) *m4Install {
 	detail = in.h.want(in.owner, http.MethodGet, in.path, nil, nil, 200)
 	in.h.want(in.owner, http.MethodPost, in.path+"/activate", nil,
 		withMatch(detail, map[string]string{"Idempotency-Key": "activate"}), 200)
-	draft := in.h.want(in.owner, http.MethodPost, "/api/v3/route-drafts", map[string]any{
+	draft := in.h.want(in.owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
 		"slug": routeSlug, "overall_timeout_ms": 20000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": in.provider, "provider_model": vendorModel,
 			"priority": 0, "weight": 1, "timeout_ms": 15000}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := in.h.want(in.owner, http.MethodPost, draftPath+"/validate", nil, etagHeader(draft), 200)
 	in.h.want(in.owner, http.MethodPost, draftPath+"/activate", nil,
 		withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
@@ -166,7 +166,7 @@ func (in *m4Install) key(name string, policy map[string]any) (string, string) {
 	for field, value := range policy {
 		body[field] = value
 	}
-	created := in.h.want(in.owner, http.MethodPost, "/api/v3/api-keys", body,
+	created := in.h.want(in.owner, http.MethodPost, "/api/v1/api-keys", body,
 		map[string]string{"Idempotency-Key": "key-" + name}, 201)
 	return created["id"].(string), created["secret"].(string)
 }
@@ -629,7 +629,7 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 	// Pricing is published before any traffic, so every attempt is priced at
 	// ingestion against a revision that was already in force when it was made.
 	effective := time.Now().UTC().Add(-time.Hour)
-	in.h.want(in.owner, http.MethodPost, "/api/v3/pricing/revisions", map[string]any{
+	in.h.want(in.owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{
 		"effective_at": effective.Format(time.RFC3339),
 		"prices": []any{map[string]any{"provider_kind": "openai_compatible", "model": vendorModel,
 			"operation": "generation", "currency": "USD",
@@ -710,5 +710,5 @@ func (in *m4Install) summary(from time.Time) map[string]any {
 	in.t.Helper()
 	query := "?start=" + url.QueryEscape(from.Add(-time.Hour).Format(time.RFC3339)) +
 		"&end=" + url.QueryEscape(time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
-	return in.h.want(in.owner, http.MethodGet, "/api/v3/usage/summary"+query, nil, nil, 200)
+	return in.h.want(in.owner, http.MethodGet, "/api/v1/usage/summary"+query, nil, nil, 200)
 }

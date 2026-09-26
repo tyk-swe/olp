@@ -62,8 +62,8 @@ func TestContinuationHandleRechecksHistoricalNetworkCredentialRevocation(t *test
 		"operation_defaults": map[string]any{"generation": map[string]any{"dialect": "anthropic-messages", "values": map[string]any{"max_tokens": 2048, "thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}}},
 	}
 	config := map[string]any{"kind": "anthropic", "profile_id": "anthropic-messages", "profile_revision": "1", "endpoint": provider.URL + "/v1", "auth_mode": "api_key", "options": options}
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "continuation network", "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "continuation network", "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + created["id"].(string)
 	stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": identity.credential}, withMatch(created, idem(uuid.NewString())), 201)
 	networkID := stored["credential_id"].(string)
 	options["network"].(map[string]any)["credential_id"] = networkID
@@ -83,8 +83,8 @@ func TestContinuationHandleRechecksHistoricalNetworkCredentialRevocation(t *test
 	slug := "strict-network-" + uuid.NewString()
 	draft := fidelityDraft(slug, created["id"].(string))
 	draft["fidelity"] = map[string]any{"mode": "strict"}
-	createdRoute := h.want(owner, "POST", "/api/v3/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+createdRoute["id"].(string)+"/activate", nil, withMatch(createdRoute, idem(uuid.NewString())), 200)
+	createdRoute := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+createdRoute["id"].(string)+"/activate", nil, withMatch(createdRoute, idem(uuid.NewString())), 200)
 	key := stateKey(t, h, owner, slug, true)
 	h.refresh()
 	source := strings.Replace(continuationInput, "ROUTE", slug, 1)

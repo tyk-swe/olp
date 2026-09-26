@@ -68,7 +68,7 @@ async function signIn(page: Page): Promise<void> {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;
@@ -335,9 +335,9 @@ test('a browser user prices gateway traffic and reads the accounting it produced
       async () =>
         page.evaluate(async (routeSlug) => {
           const session = await (
-            await fetch('/api/v3/sessions/current')
+            await fetch('/api/v1/sessions/current')
           ).json();
-          const response = await fetch('/api/v3/routing/simulate', {
+          const response = await fetch('/api/v1/routing/simulate', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -537,7 +537,7 @@ test('retained media records expose metadata, filters, and accessible details', 
     page.locator('.job-detail audio, .job-detail video, .job-detail img')
   ).toHaveCount(0);
   const detail = await page.evaluate(async (id) => {
-    const response = await fetch(`/api/v3/media-jobs/${id}`);
+    const response = await fetch(`/api/v1/media-jobs/${id}`);
     if (!response.ok)
       throw new Error(`Media metadata failed: ${response.status}`);
     return response.json();
@@ -546,7 +546,7 @@ test('retained media records expose metadata, filters, and accessible details', 
   for (const field of ['prompt', 'content', 'credential', 'raw_response'])
     expect(detail).not.toHaveProperty(field);
   expect(JSON.stringify(detail)).not.toContain(upstream.credential);
-  expect((await request.get(`/api/v3/media-jobs/${succeeded}`)).status()).toBe(
+  expect((await request.get(`/api/v1/media-jobs/${succeeded}`)).status()).toBe(
     401
   );
   for (const width of [320, 1440]) {

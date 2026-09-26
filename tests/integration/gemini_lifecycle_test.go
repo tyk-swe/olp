@@ -265,8 +265,8 @@ func (p *geminiLifecycleProvider) captured() []geminiLifecycleCall {
 func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, profile string, provider *geminiLifecycleProvider) (string, string, string) {
 	t.Helper()
 	config := map[string]any{"kind": "gemini", "profile_id": profile, "profile_revision": "1", "endpoint": provider.URL + "/v1beta", "auth_mode": "api_key"}
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": profile + uuid.NewString(), "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
-	providerPath := "/api/v3/providers/" + created["id"].(string)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": profile + uuid.NewString(), "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
+	providerPath := "/api/v1/providers/" + created["id"].(string)
 	modelID := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
 	operation, mode := "generation", "unary"
 	capabilities := []any{map[string]any{"operation": operation, "surface": "gemini", "mode": mode}}
@@ -284,9 +284,9 @@ func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, pr
 	draftInput := fidelityDraft(slug, created["id"])
 	draftInput["operations"] = []string{operation}
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": profile + " key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": profile + " key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string), created["id"].(string)
 }
@@ -594,8 +594,8 @@ func TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWor
 	if json.Unmarshal(raw, &local) != nil || !strings.HasPrefix(local.ID, "interaction_") {
 		t.Fatalf("owner mapping %s", raw)
 	}
-	other := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "other Gemini owner", "scopes": []string{"inference"}, "allowed_routes": []string{interactionRoute}, "allow_provider_state": true}, idem(uuid.NewString()), 201)["secret"].(string)
-	noState := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "stateless Gemini owner", "scopes": []string{"inference"}, "allowed_routes": []string{interactionRoute}}, idem(uuid.NewString()), 201)["secret"].(string)
+	other := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other Gemini owner", "scopes": []string{"inference"}, "allowed_routes": []string{interactionRoute}, "allow_provider_state": true}, idem(uuid.NewString()), 201)["secret"].(string)
+	noState := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "stateless Gemini owner", "scopes": []string{"inference"}, "allowed_routes": []string{interactionRoute}}, idem(uuid.NewString()), 201)["secret"].(string)
 	h.refresh()
 	before := len(provider.captured())
 	response, _ := geminiPublic(t, h, http.MethodGet, path+"/"+local.ID, other, nil)
@@ -661,8 +661,8 @@ func TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWor
 	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default`, providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
 	}
-	detail := h.want(owner, "GET", "/api/v3/providers/"+providerID, nil, nil, 200)
-	h.want(owner, "POST", "/api/v3/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	detail := h.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
 	h.refresh()
 	response, raw = geminiPublic(t, h, http.MethodGet, path+"/"+local.ID, ownerKey, nil)
 	if response.StatusCode != 409 || !bytes.Contains(raw, []byte("provider_resource_credential_unavailable")) || len(provider.captured()) != before {
@@ -866,7 +866,7 @@ func TestGeminiLifecyclePinnedOfficialSDKsThroughTrustedTLS(t *testing.T) {
 	owner := h.owner()
 	interactionRoute, _, _ := provisionGeminiLifecycle(t, h, owner, "gemini-interactions", provider)
 	liveRoute, _, _ := provisionGeminiLifecycle(t, h, owner, "gemini-live", provider)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Gemini SDK lifecycle", "scopes": []string{"inference"},
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Gemini SDK lifecycle", "scopes": []string{"inference"},
 		"allowed_routes": []string{interactionRoute, liveRoute}, "allow_provider_state": true}, idem(uuid.NewString()), 201)["secret"].(string)
 	h.refresh()
 	var pathsMu sync.Mutex

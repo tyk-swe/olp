@@ -235,7 +235,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
 	if err = Audit(r.Context(), tx, r, p.ID, "api_key.create", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}

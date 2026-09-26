@@ -217,7 +217,7 @@ pinned historical credential through rotation and provider changes, obeys
 explicit revocation guards, and finishes accounting. `GET /v1/videos`,
 `GET /v1/videos/{video_id}`, `GET /v1/videos/{video_id}/content`, and
 `DELETE /v1/videos/{video_id}` expose the durable record, which the management
-`/api/v3/media-jobs` reads mirror for operators. The console provides
+`/api/v1/media-jobs` reads mirror for operators. The console provides
 metadata-only list/detail views, filters, and manual refresh. It has no
 automatic polling, content download/delete controls, video cancellation
 workflow, or video playground controls. The Advanced playground provides a
@@ -287,9 +287,9 @@ revision, release sequence, family, mode, outcome, status, whether the response
 was committed, timing, observed usage when the upstream reported it, and one
 record per attempt with target, provider revision, slot, credential version,
 status class, and timing. Prompts, outputs, tool data, headers, and credentials
-are never included. `GET /api/v3/provider-health` summarizes the same facts per
-provider for the requested window, `GET /api/v3/health/ready` serves the cached
-readiness snapshot, and `GET /api/v3/media-jobs` lists and reads durable video
+are never included. `GET /api/v1/provider-health` summarizes the same facts per
+provider for the requested window, `GET /api/v1/health/ready` serves the cached
+readiness snapshot, and `GET /api/v1/media-jobs` lists and reads durable video
 jobs. The same envelope is the source of the durable request, attempt, and
 priced usage records described in
 [accounting delivery](operations.md#accounting-delivery-and-shutdown).

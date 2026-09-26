@@ -13,7 +13,7 @@ and release format.
 
 A route slug is a published contract identity. To move a legacy or transformed
 route to strict, fetch its current ETag and create a review draft with
-`POST /api/v3/routes/{route_id}/migration-draft`, `If-Match`, an idempotency key,
+`POST /api/v1/routes/{route_id}/migration-draft`, `If-Match`, an idempotency key,
 and a body such as `{"slug":"new-route","fidelity":{"mode":"strict"}}`. The
 destination slug must never have been published, including as a retired route.
 The response is an editable draft that copies the current revision, targets,
@@ -156,7 +156,7 @@ The consumer retries delivery failures internally; its outer process launcher
 has no restart supervisor. If it exits (currently only startup misconfiguration
 returns an error), correct the cause and restart the process.
 
-`GET /api/v3/auth/capabilities` reports `limits_enforced` and
+`GET /api/v1/auth/capabilities` reports `limits_enforced` and
 `retention_enforced` from configured Valkey, not live worker health. Configuring
 Valkey without running a worker still reports these flags as true. Use task
 checkpoints to confirm retention is running. Without Valkey, `all` starts only
@@ -195,11 +195,11 @@ synthetic zero spend to bypass initialization.
 
 ### Budget threshold notifications
 
-`GET/POST /api/v3/notifications/destinations` and
-`GET/PATCH /api/v3/notifications/destinations/{id}` manage webhook endpoints;
-`GET/POST /api/v3/notifications/rules` and
-`GET/PATCH /api/v3/notifications/rules/{id}` manage alert rules, and
-`GET /api/v3/notifications/deliveries` lists delivery metadata only.
+`GET/POST /api/v1/notifications/destinations` and
+`GET/PATCH /api/v1/notifications/destinations/{id}` manage webhook endpoints;
+`GET/POST /api/v1/notifications/rules` and
+`GET/PATCH /api/v1/notifications/rules/{id}` manage alert rules, and
+`GET /api/v1/notifications/deliveries` lists delivery metadata only.
 Installation-wide destinations and rules require settings permission;
 project-scoped ones require project-manager access, and a rule's subject (an API
 key or budget group) and destination must belong to the same project.
@@ -216,7 +216,7 @@ responses are drained bounded. Delivery failures persist only a safe category
 response bodies or raw error text.
 
 The delivery worker runs only where Valkey-backed shared state exists.
-`GET /api/v3/auth/capabilities` reports `notifications_active`; when it is
+`GET /api/v1/auth/capabilities` reports `notifications_active`; when it is
 false, destinations and rules still save but nothing is delivered — monitor
 `olp_worker_task_healthy{task="budget_alert_delivery"}` and the
 `budget_alert_deliveries` status counters for live health.
@@ -231,10 +231,10 @@ in latency. Events carry identifiers, timing, token counts, and per-attempt
 evidence only — never prompts, outputs, tool data, or headers.
 
 Management processes serve the results: the usage summary, breakdown, time
-series, and completeness endpoints under `/api/v3/usage/`, request listing and
-detail under `/api/v3/requests`, pricing revisions under
-`/api/v3/pricing/revisions`, and gateway epochs and their acknowledgement under
-`/api/v3/request-metadata/gateway-epochs`. Reports mark a partial boundary
+series, and completeness endpoints under `/api/v1/usage/`, request listing and
+detail under `/api/v1/requests`, pricing revisions under
+`/api/v1/pricing/revisions`, and gateway epochs and their acknowledgement under
+`/api/v1/request-metadata/gateway-epochs`. Reports mark a partial boundary
 bucket as approximate and report what they excluded, and carry gap evidence and
 consumer health so incompleteness stays visible after aggregation. Usage
 endpoints accept `attribution_key` with an optional `attribution_value` to
@@ -244,13 +244,13 @@ are omitted). Request list and detail expose each request's stored labels.
 Project-scoped readers see only their own projects' rows in every report.
 
 Pricing can also come from managed sources rather than hand-entered revisions.
-`GET/POST /api/v3/pricing/sources` and `GET/PATCH /api/v3/pricing/sources/{id}`
-register an external price document; `POST /api/v3/pricing/sources/{id}/refresh`
+`GET/POST /api/v1/pricing/sources` and `GET/PATCH /api/v1/pricing/sources/{id}`
+register an external price document; `POST /api/v1/pricing/sources/{id}/refresh`
 fetches it through the egress policy (bounded size, JSON schema, redirect
 validation), stores an immutable SHA-256-keyed snapshot, and returns a diff
 against the latest published revision without publishing anything.
-`GET /api/v3/pricing/sources/{id}/snapshots` lists retained snapshots and
-`POST /api/v3/pricing/source-snapshots/{id}/publish` mints a new immutable
+`GET /api/v1/pricing/sources/{id}/snapshots` lists retained snapshots and
+`POST /api/v1/pricing/source-snapshots/{id}/publish` mints a new immutable
 pricing revision from one snapshot, optionally merged with scoped per-entry
 overrides. A source is advisory: negotiated rates need publish-time overrides,
 because the published revision — not the raw source document — is what
@@ -295,7 +295,7 @@ balance.
 3. Review usage completeness and pricing coverage before exporting costs.
    Missing upstream usage is incomplete and unpriced, never zero.
 4. Review provider health, authentication, role/key changes, credential
-   rotations, and route activations in the audit stream. `GET /api/v3/audit`
+   rotations, and route activations in the audit stream. `GET /api/v1/audit`
    narrows a page by `action`, `resource_type`, `resource_id`,
    `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
    each category can be reviewed on its own. Session-driven actions also

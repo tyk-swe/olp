@@ -45,7 +45,7 @@ export const test = base.extend({
           '/gemini/'
         ].some((prefix) => url.pathname.startsWith(prefix)) &&
         // The public, static contract is intentionally served with no-cache.
-        url.pathname !== '/api/v3/openapi.json' &&
+        url.pathname !== '/api/v1/openapi.json' &&
         response.headers()['cache-control'] !== 'no-store'
       ) {
         runtimeFailures.push(

@@ -23,7 +23,7 @@ type Management struct {
 }
 
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/provider-resources", m.Access.Handle(m.list))
+	mux.HandleFunc("GET /api/v1/provider-resources", m.Access.Handle(m.list))
 }
 
 type manageFilters struct {

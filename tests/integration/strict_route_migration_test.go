@@ -16,16 +16,16 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	owner := h.owner()
 	provider := newStrictProviderFixture(t, "compatible-chat")
 	slug, oldKey := publishStrictProvider(t, h, owner, provider, nil, nil, "legacy")
-	route := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
-	routePath := "/api/v3/routes/" + route["id"].(string)
+	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	routePath := "/api/v1/routes/" + route["id"].(string)
 	before := len(provider.captured())
 	sequence := h.Runtime.Release().Sequence
 
 	// Saving a proposed change is safe; publication under a cached identity is not.
 	input := fidelityDraft(slug, provider.providerID)
 	input["fidelity"] = map[string]any{"mode": "strict"}
-	unsafeDraft := h.want(owner, "POST", "/api/v3/route-drafts", input, idem(uuid.NewString()), 201)
-	unsafePath := "/api/v3/route-drafts/" + unsafeDraft["id"].(string)
+	unsafeDraft := h.want(owner, "POST", "/api/v1/route-drafts", input, idem(uuid.NewString()), 201)
+	unsafePath := "/api/v1/route-drafts/" + unsafeDraft["id"].(string)
 	for _, action := range []string{"validate", "activate"} {
 		problem := h.want(owner, "POST", unsafePath+"/"+action, nil, withMatch(unsafeDraft, idem(uuid.NewString())), 422)
 		if problemCode(t, problem) != "route_fidelity_migration_required" {
@@ -46,11 +46,11 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	// either route. The model slug is the only caller identity change.
 	shadowSeed := "migration-shadow-v1"
 	message := []any{map[string]any{"role": "user", "content": "same native input"}}
-	oldPlan := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{
+	oldPlan := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{
 		"operation": map[string]any{"operation": "generation", "route": slug, "request": map[string]any{"model": slug, "messages": message}},
 		"surface":   "openai", "mode": "unary", "seed": shadowSeed,
 	}, nil, 200)
-	newPlan := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
+	newPlan := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
 		"operation": "generation", "surface": "openai", "mode": "unary", "seed": shadowSeed,
 		"request": map[string]any{"model": newSlug, "messages": message},
 	}, nil, 200)
@@ -68,7 +68,7 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	if len(provider.captured()) != before || h.Runtime.Release().Sequence != sequence {
 		t.Fatal("migration draft, shadow plan, or rejected publication performed work")
 	}
-	path := "/api/v3/route-drafts/" + draft["id"].(string)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
 	draft = h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
 	activated := h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	newKey := stateKey(t, h, owner, newSlug, false)
@@ -118,7 +118,7 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	}
 	transformedSlug, _ := publishStrictProvider(t, h, owner, provider, nil, fidelityPolicy("redact", "input"), "transformed")
 	var transformedRoute map[string]any
-	for _, item := range h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any) {
+	for _, item := range h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any) {
 		candidate := item.(map[string]any)
 		if candidate["slug"] == transformedSlug {
 			transformedRoute = candidate
@@ -128,12 +128,12 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	if transformedRoute == nil {
 		t.Fatal("transformed source route not found")
 	}
-	copy := h.want(owner, "POST", "/api/v3/routes/"+transformedRoute["id"].(string)+"/migration-draft",
+	copy := h.want(owner, "POST", "/api/v1/routes/"+transformedRoute["id"].(string)+"/migration-draft",
 		map[string]any{"slug": transformedSlug + "-strict"}, withMatch(transformedRoute, idem(uuid.NewString())), 201)
 	if routeFidelityMode(t, copy["fidelity"]) != "strict" || copy["content_policy"] == nil {
 		t.Fatal("migration draft silently dropped a source mutation policy", copy)
 	}
-	path = "/api/v3/route-drafts/" + copy["id"].(string)
+	path = "/api/v1/route-drafts/" + copy["id"].(string)
 	if problemCode(t, h.want(owner, "POST", path+"/validate", nil, etagHeader(copy), 422)) != "fidelity_policy_conflict" {
 		t.Fatal("copied incompatible policy was silently accepted")
 	}
@@ -144,7 +144,7 @@ func TestExplicitNonStrictContractSurvivesOlderWriters(t *testing.T) {
 	fixture := newStrictProviderFixture(t, "compatible-chat")
 	owner := h.owner()
 	slug, _ := publishStrictProvider(t, h, owner, fixture, nil, fidelityPolicy("redact", "input"), "transformed")
-	route := h.want(owner, "GET", "/api/v3/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
 	revision := route["latest_revision"].(map[string]any)
 	_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.route_revisions
         (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,routing_policy)

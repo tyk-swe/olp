@@ -73,7 +73,7 @@ for mode in all gateway control worker; do
     echo 'Unpublished gateway passed readiness' >&2; exit 1
   fi
   if [[ $mode == all || $mode == control ]]; then
-    curl --fail --silent "http://$public/api/v3/openapi.json" | cmp - openapi/management.json
+    curl --fail --silent "http://$public/api/v1/openapi.json" | cmp - openapi/management.json
     curl --fail --silent "http://$public/login" | grep -q 'svelte-root'
   fi
   if [[ $mode != worker ]]; then

@@ -31,11 +31,11 @@ const operatorJobTimeout = 5 * time.Minute
 
 // Register mounts the media-job routes on the management surface.
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v3/media-jobs", m.Access.Handle(m.list))
-	mux.HandleFunc("GET /api/v3/media-jobs/{job_id}", m.Access.Handle(m.get))
-	mux.HandleFunc("POST /api/v3/media-jobs/{job_id}/refresh", m.Access.HandleTimeout(1024, operatorJobTimeout, m.refresh))
-	mux.HandleFunc("GET /api/v3/media-jobs/{job_id}/content", m.Access.HandleStream(1024, operatorJobTimeout, m.content))
-	mux.HandleFunc("DELETE /api/v3/media-jobs/{job_id}", m.Access.HandleTimeout(1024, operatorJobTimeout, m.delete))
+	mux.HandleFunc("GET /api/v1/media-jobs", m.Access.Handle(m.list))
+	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}", m.Access.Handle(m.get))
+	mux.HandleFunc("POST /api/v1/media-jobs/{job_id}/refresh", m.Access.HandleTimeout(1024, operatorJobTimeout, m.refresh))
+	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}/content", m.Access.HandleStream(1024, operatorJobTimeout, m.content))
+	mux.HandleFunc("DELETE /api/v1/media-jobs/{job_id}", m.Access.HandleTimeout(1024, operatorJobTimeout, m.delete))
 }
 
 func (m *Management) log() *slog.Logger {

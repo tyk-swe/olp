@@ -81,12 +81,12 @@ func publishStrictMediaFixture(t *testing.T, h *accessHarness, owner *browser, f
 		}
 		configuration["options"] = map[string]any{"operation_defaults": map[string]any{operation: map[string]any{"dialect": profile.OperationDialect(operation), "values": defaults[0]}}}
 	}
-	provider := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name":          "Strict media fixture " + uuid.NewString(),
 		"configuration": configuration,
 		"model":         vendorModel, "credential": vendorSecret,
 	}, idem(uuid.NewString()), 201)
-	path := "/api/v3/providers/" + provider["id"].(string)
+	path := "/api/v1/providers/" + provider["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), 200)
 	if probe["succeeded"] != true {
 		t.Fatalf("fixture model probe=%v", probe)
@@ -98,9 +98,9 @@ func publishStrictMediaFixture(t *testing.T, h *accessHarness, owner *browser, f
 	draftInput := fidelityDraft(slug, provider["id"])
 	draftInput["operations"] = []string{operation}
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", draftInput, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Strict media fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict media fixture", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string)
 }
@@ -125,7 +125,7 @@ func TestStrictMediaPublicNativeSourcesAndAssets(t *testing.T) {
 		if len(calls) != 1 || string(calls[0].body) != want {
 			t.Fatalf("native image request=%+v", calls)
 		}
-		preview := h.list(owner, "POST", "/api/v3/routing/simulate", map[string]any{
+		preview := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{
 			"operation": map[string]any{"operation": "image_generation", "request": map[string]any{"model": slug, "prompt": "private-inspector-prompt", "native": map[string]any{"opaque": "private-native-marker"}}},
 			"surface":   "openai", "mode": "unary", "seed": "strict-media-inspector",
 		}, nil, 200)

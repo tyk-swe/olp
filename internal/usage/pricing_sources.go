@@ -203,7 +203,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, ETag: source.ETag,
-		Location: "/api/v3/pricing/sources/" + source.ID, Body: source}
+		Location: "/api/v1/pricing/sources/" + source.ID, Body: source}
 	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.create",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err

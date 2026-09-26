@@ -36,12 +36,12 @@ func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, t
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Fixture vendor", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	f := &glFixture{h: h, owner: owner, vendor: up, limiter: limiter, provider: created["id"].(string)}
-	f.path = "/api/v3/providers/" + f.provider
+	f.path = "/api/v1/providers/" + f.provider
 	if probe := h.want(owner, "POST", f.path+"/probe", nil, etagHeader(created), 200); probe["succeeded"] != true {
 		t.Fatalf("probe failed: %v", probe)
 	}
@@ -56,11 +56,11 @@ func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, t
 	if len(targetTimeout) > 0 {
 		timeout = targetTimeout[0]
 	}
-	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
 		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": timeout}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
-	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return policy }, slog.New(slog.DiscardHandler))
@@ -83,7 +83,7 @@ func (f *glFixture) key(name string, policy map[string]any) (string, string) {
 	for field, value := range policy {
 		body[field] = value
 	}
-	created := f.h.want(f.owner, "POST", "/api/v3/api-keys", body, map[string]string{"Idempotency-Key": "key-" + name}, 201)
+	created := f.h.want(f.owner, "POST", "/api/v1/api-keys", body, map[string]string{"Idempotency-Key": "key-" + name}, 201)
 	f.h.refresh()
 	return created["id"].(string), created["secret"].(string)
 }

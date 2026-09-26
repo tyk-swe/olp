@@ -119,7 +119,7 @@ it.each([false, true])(
       else expect(publish().disabled).toBe(true);
     });
     expect(post).toHaveBeenLastCalledWith(
-      '/api/v3/route-drafts/{draft_id}/activate',
+      '/api/v1/route-drafts/{draft_id}/activate',
       expect.objectContaining({
         params: {
           path: { draft_id: receipt.id },
@@ -136,7 +136,7 @@ it.each([false, true])(
       await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(3));
       expect(post).toHaveBeenNthCalledWith(
         3,
-        '/api/v3/route-drafts/{draft_id}/activate',
+        '/api/v1/route-drafts/{draft_id}/activate',
         expect.objectContaining({
           params: expect.objectContaining({
             header: expect.objectContaining({ 'If-Match': receipt.etag })

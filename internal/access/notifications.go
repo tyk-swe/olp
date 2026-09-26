@@ -191,7 +191,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/notifications/destinations/" + id,
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/destinations/" + id,
 		Body: json.RawMessage(data)}
 	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.create",
 		"notification_destination", id, "success"); err != nil {
@@ -462,7 +462,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+ruleFields+")"+ruleFrom+" WHERE r.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/notifications/rules/" + id,
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/rules/" + id,
 		Body: json.RawMessage(data)}
 	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.create",
 		"budget_alert_rule", id, "success"); err != nil {

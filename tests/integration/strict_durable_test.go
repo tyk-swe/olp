@@ -204,7 +204,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"resource_transition"`)) || fixture.dials.Load() != before {
 		t.Fatalf("terminal strict batch was cancelled again: %d %s", status, raw)
 	}
-	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, http.StatusOK)
 	credentialID := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
 	provider = h.want(owner, "GET", providerPath, nil, nil, http.StatusOK)

@@ -244,7 +244,7 @@ test.describe('Go-hosted console integration', () => {
       const completed = page.waitForResponse(
         (response) =>
           response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v3/sessions'
+          new URL(response.url()).pathname === '/api/v1/sessions'
       );
       await page.getByRole('button', { name: 'Sign in' }).click();
       const response = await completed;

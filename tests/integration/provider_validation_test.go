@@ -20,12 +20,12 @@ func TestActivationRequiresCurrentCredentialSlotValidation(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Validated slots", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	providerID := created["id"].(string)
-	path := "/api/v3/providers/" + providerID
+	path := "/api/v1/providers/" + providerID
 	listPath := path + "/credential-slots"
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
@@ -124,11 +124,11 @@ func TestSlotValidationProbesAllowedEnabledCapabilities(t *testing.T) {
 		}
 	}))
 	t.Cleanup(up.Close)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Scoped access", "model": "allowed", "credential": "full",
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	detail := h.want(owner, "POST", path+"/discovery", map[string]any{"models": []any{}}, etagHeader(created), 200)
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelIDs := map[string]string{}
@@ -212,11 +212,11 @@ func TestSlotValidationRejectsDraftChangesDuringTheProbe(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 	t.Cleanup(release)
-	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Concurrent validation", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
-	path := "/api/v3/providers/" + created["id"].(string)
+	path := "/api/v1/providers/" + created["id"].(string)
 	listPath := path + "/credential-slots"
 	slots := h.want(owner, "GET", listPath, nil, nil, 200)
 	slotID := uuid.NewString()
@@ -276,11 +276,11 @@ func TestCertificationRejectsMalformedUnaryChoices(t *testing.T) {
 				}
 			}))
 			t.Cleanup(up.Close)
-			created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
+			created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 				"name": "Malformed certification", "model": vendorModel, "credential": vendorSecret,
 				"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
 			}, map[string]string{"Idempotency-Key": "provider"}, 201)
-			path := "/api/v3/providers/" + created["id"].(string)
+			path := "/api/v1/providers/" + created["id"].(string)
 			models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 			modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 			result := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)

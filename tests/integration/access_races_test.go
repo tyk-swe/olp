@@ -17,18 +17,18 @@ func TestConcurrentOwnerChangesKeepUsableAuthority(t *testing.T) {
 	h := newAccessHarness(t)
 	a := h.owner()
 	b := h.invite(a, "second-owner@example.com", "owner")
-	aUser := h.want(a, "GET", "/api/v3/profile", nil, nil, 200)
-	bUser := h.want(b, "GET", "/api/v3/profile", nil, nil, 200)
+	aUser := h.want(a, "GET", "/api/v1/profile", nil, nil, 200)
+	bUser := h.want(b, "GET", "/api/v1/profile", nil, nil, 200)
 	start := make(chan struct{})
 	results := make(chan int, 2)
 	go func() {
 		<-start
-		status, _, _ := h.request(a, "PATCH", "/api/v3/users/"+bUser["id"].(string), map[string]any{"role": "viewer"}, etagHeader(bUser))
+		status, _, _ := h.request(a, "PATCH", "/api/v1/users/"+bUser["id"].(string), map[string]any{"role": "viewer"}, etagHeader(bUser))
 		results <- status
 	}()
 	go func() {
 		<-start
-		status, _, _ := h.request(b, "PATCH", "/api/v3/users/"+aUser["id"].(string), map[string]any{"role": "viewer"}, etagHeader(aUser))
+		status, _, _ := h.request(b, "PATCH", "/api/v1/users/"+aUser["id"].(string), map[string]any{"role": "viewer"}, etagHeader(aUser))
 		results <- status
 	}()
 	close(start)
@@ -81,7 +81,7 @@ func TestInterruptedRotationResumesAndRejectsStaleWriters(t *testing.T) {
 	if err == nil || count != 100 {
 		t.Fatalf("expected interrupted rotation after one committed batch: count=%d", count)
 	}
-	h.want(b, "POST", "/api/v3/api-keys", map[string]any{"name": "stale writer"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 503)
+	h.want(b, "POST", "/api/v1/api-keys", map[string]any{"name": "stale writer"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 503)
 	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$1 WHERE id=$2", original, damaged); err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestInterruptedRotationResumesAndRejectsStaleWriters(t *testing.T) {
 		t.Fatalf("resume count=%d error=%v", count, err)
 	}
 	h.Server.Keys = ring
-	h.want(b, "GET", "/api/v3/sessions/current", nil, nil, 200)
-	h.want(b, "POST", "/api/v3/api-keys", map[string]any{"name": "current writer"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	h.want(b, "GET", "/api/v1/sessions/current", nil, nil, 200)
+	h.want(b, "POST", "/api/v1/api-keys", map[string]any{"name": "current writer"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 }
 
 func TestFailedMigrationLeavesNoPartialInstallationAndRecovers(t *testing.T) {

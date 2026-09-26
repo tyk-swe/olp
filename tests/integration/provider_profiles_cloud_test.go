@@ -188,8 +188,8 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			if credential != nil {
 				input["credential"] = credential
 			}
-			created := h.want(owner, "POST", "/api/v3/providers", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			providerPath := "/api/v3/providers/" + created["id"].(string)
+			created := h.want(owner, "POST", "/api/v1/providers", input, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			providerPath := "/api/v1/providers/" + created["id"].(string)
 			models := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)
 			modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 			h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)
@@ -203,9 +203,9 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			if strict {
 				routeInput["fidelity"] = map[string]any{}
 			}
-			draft := h.want(owner, "POST", "/api/v3/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-			h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "Profile inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			draft := h.want(owner, "POST", "/api/v1/route-drafts", routeInput, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
+			key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Profile inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.refresh()
 			path := "/v1/chat/completions"
 			body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"capture"}],"max_tokens":32}`

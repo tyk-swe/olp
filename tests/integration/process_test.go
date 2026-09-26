@@ -50,7 +50,7 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 				return body
 			}
 			get(p.PrivateOrigin, "/health/live", 200)
-			get(p.PrivateOrigin, "/api/v3/openapi.json", 404)
+			get(p.PrivateOrigin, "/api/v1/openapi.json", 404)
 			// This installation has no published runtime. Only modes serving
 			// inference must stay unready; management and workers can operate.
 			readyStatus := http.StatusOK
@@ -89,20 +89,20 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 				}
 				management := mode == "all" || mode == "control"
 				if management {
-					body := get(p.PublicOrigin, "/api/v3/openapi.json", 200)
+					body := get(p.PublicOrigin, "/api/v1/openapi.json", 200)
 					if string(body) != string(openapi.Document) {
 						t.Fatal("served contract differs")
 					}
-					get(p.PublicOrigin, "/api/v3/bootstrap", 404)
+					get(p.PublicOrigin, "/api/v1/bootstrap", 404)
 					assertConcreteManagementHandlers(t, p.PublicOrigin)
 					// Usage, pricing and request history must claim their own
 					// paths ahead of the catch-all that answers 404 for every
 					// management path no surface owns.
-					get(p.PublicOrigin, "/api/v3/usage/summary", 401)
+					get(p.PublicOrigin, "/api/v1/usage/summary", 401)
 					get(p.PublicOrigin, "/health", 200)
 					get(p.PublicOrigin, "/providers", 200)
 				} else {
-					get(p.PublicOrigin, "/api/v3/openapi.json", 404)
+					get(p.PublicOrigin, "/api/v1/openapi.json", 404)
 					get(p.PublicOrigin, "/", 404)
 				}
 				if mode == "control" {

@@ -33,7 +33,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 Feature packages own their SQL, transactions, and workflows; mutations receive
 explicit audit provenance. `openapi/management.json` defines the management
 contract. `make api` generates Go transport types and ignored TypeScript
-declarations; `/api/v3/openapi.json` serves the embedded contract. Integration
+declarations; `/api/v1/openapi.json` serves the embedded contract. Integration
 tests check handler/contract parity.
 
 Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`

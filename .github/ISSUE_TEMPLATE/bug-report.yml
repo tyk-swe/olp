@@ -34,7 +34,7 @@ body:
         - OpenAI-compatible API (/v1)
         - Anthropic-compatible API (/anthropic/v1)
         - Gemini-compatible API (/gemini/v1 or /gemini/v1beta)
-        - Management API (/api/v3)
+        - Management API (/api/v1)
         - Console
         - Worker / background jobs
         - other (name it below)

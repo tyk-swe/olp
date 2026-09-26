@@ -13,7 +13,7 @@ Vertex publisher path, and undeclared operations fail validation. OpenAI Chat
 and Responses are separate generation dialects; a Responses profile cannot fall
 back to the Chat endpoint.
 
-`GET /api/v3/provider-profiles` returns profile revisions, operation dialects,
+`GET /api/v1/provider-profiles` returns profile revisions, operation dialects,
 allowed semantic headers/query settings and JSON schemas for operation defaults.
 Those schemas also describe the controls the console can present. Model
 certification and credential-slot validation remain explicit activation gates.
@@ -173,7 +173,7 @@ is confined to tunnel establishment. Reusable pools are bounded and isolated by
 provider/serving revision/credential scope, even when network settings match.
 A cached connection is never a substitute for current credential authority.
 
-Create network material with `POST /api/v3/providers/{id}/network-credentials`
+Create network material with `POST /api/v1/providers/{id}/network-credentials`
 using the current provider `If-Match` and an `Idempotency-Key`. Its `credential`
 string contains a JSON object with `proxy_username`/`proxy_password` and/or
 `client_certificate_pem`/`client_key_pem`. The endpoint encrypts it through the

@@ -120,7 +120,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	result := Reply{Status: 201, ETag: etag, Location: "/api/v3/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
+	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
 	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.create", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
