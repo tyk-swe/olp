@@ -2,16 +2,16 @@
 -- Convert the existing authoritative columns rather than adding a competing
 -- mutable representation. Historic jsonb values remain exactly as they exist;
 -- number spellings already normalized by jsonb cannot be reconstructed.
-ALTER TABLE olp_go.providers
+ALTER TABLE olp.providers
     ALTER COLUMN configuration TYPE json USING configuration::json;
-ALTER TABLE olp_go.provider_revisions
+ALTER TABLE olp.provider_revisions
     ALTER COLUMN configuration TYPE json USING configuration::json;
-ALTER TABLE olp_go.runtime_releases
+ALTER TABLE olp.runtime_releases
     ALTER COLUMN snapshot TYPE json USING snapshot::json;
 
-COMMENT ON COLUMN olp_go.providers.configuration IS
+COMMENT ON COLUMN olp.providers.configuration IS
     'Authoritative provider configuration; native JSON number spellings and subtrees are preserved.';
-COMMENT ON COLUMN olp_go.provider_revisions.configuration IS
+COMMENT ON COLUMN olp.provider_revisions.configuration IS
     'Immutable authoritative provider configuration at activation; never normalize through jsonb.';
-COMMENT ON COLUMN olp_go.runtime_releases.snapshot IS
+COMMENT ON COLUMN olp.runtime_releases.snapshot IS
     'Authoritative serving snapshot. Preserve native JSON source and its recorded sha256; never rewrite a digest after normalization.';

@@ -170,7 +170,7 @@ func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 		call("POST", path+"/activate", nil, draft["etag"].(string), 200)
 	}
 	var encoded []byte
-	if err := pool.QueryRow(t.Context(), "SELECT snapshot FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&encoded); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&encoded); err != nil {
 		t.Fatal(err)
 	}
 	var snapshot runtime.Snapshot

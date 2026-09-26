@@ -30,7 +30,7 @@ the checked-in source of truth. Update it alongside handlers and regenerate with
 ## Local development
 
 After `make setup` and `make dev`, open http://127.0.0.1:5173 and use
-`.local/go-secrets/bootstrap.token` to create the first owner. Use this origin
+`.local/secrets/bootstrap.token` to create the first owner. Use this origin
 so management requests pass the origin check. Vite proxies management, OIDC
 callbacks, and the configured inference paths; console edits hot reload, while
 backend edits require a restart. See the [console guide](console/README.md) for
@@ -44,7 +44,7 @@ and loopback ports 54321/63791. Stop them with:
 docker compose -f deploy/compose.dev.yaml stop
 ```
 
-Go uses schema `olp_go` and Valkey namespace `olp:go:v1:<installation UUID>:`.
+Go uses schema `olp` and Valkey namespace `olp:<installation UUID>:`.
 Provision fresh storage when replacing any Rust release, including Rust 3.0.
 Startup rejects Rust schemas before writes. Back up the old installation with
 its own version and retain it until the independent replacement is verified.

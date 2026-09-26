@@ -178,7 +178,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	defer tx.Rollback(ctx)
 	var id string
 	var sequence int64
-	if err = tx.QueryRow(ctx, "SELECT COALESCE(authority_id::text,''),authority_sequence FROM olp_go.installation WHERE singleton").Scan(&id, &sequence); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT COALESCE(authority_id::text,''),authority_sequence FROM olp.installation WHERE singleton").Scan(&id, &sequence); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	m.mu.Lock()
@@ -191,7 +191,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		return nil
 	}
 	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}, revoked: map[string]struct{}{}}
-	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp_go.api_keys k LEFT JOIN olp_go.budget_groups g ON g.id=k.budget_group_id")
+	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
@@ -212,7 +212,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
-	rows, err = tx.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE revoked_at IS NOT NULL UNION SELECT id::text FROM olp_go.provider_network_credentials WHERE revoked_at IS NOT NULL")
+	rows, err = tx.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE revoked_at IS NOT NULL")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
@@ -239,7 +239,7 @@ func (m *Manager) refreshRelease(ctx context.Context) error {
 	var id, digest string
 	var sequence int64
 	var raw []byte
-	err := m.pool.QueryRow(ctx, "SELECT id::text,sequence,sha256,snapshot FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw)
+	err := m.pool.QueryRow(ctx, "SELECT id::text,sequence,sha256,snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -315,7 +315,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		if provider.Network != nil && provider.Network.CredentialID != "" {
 			id := provider.Network.CredentialID
 			var owner string
-			if err := tx.QueryRow(ctx, "SELECT provider_id::text FROM olp_go.provider_network_credentials WHERE id=$1", id).Scan(&owner); err != nil || owner != provider.ID {
+			if err := tx.QueryRow(ctx, "SELECT provider_id::text FROM olp.provider_network_credentials WHERE id=$1", id).Scan(&owner); err != nil || owner != provider.ID {
 				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
 			}
 			secret, err := m.keys.Read(ctx, tx, m.installation, id, "provider_credential")

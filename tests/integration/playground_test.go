@@ -363,14 +363,14 @@ func TestPlayground(t *testing.T) {
 	}
 	var stored int
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.requests r WHERE row_to_json(r)::text LIKE '%'||$1||'%'", marker).Scan(&stored); err != nil {
+		"SELECT count(*) FROM olp.requests r WHERE row_to_json(r)::text LIKE '%'||$1||'%'", marker).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored != 0 {
 		t.Fatal("playground prompts must not persist")
 	}
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.attempt_usage_facts f WHERE row_to_json(f)::text LIKE '%'||$1||'%'", vendorAnswer).Scan(&stored); err != nil {
+		"SELECT count(*) FROM olp.attempt_usage_facts f WHERE row_to_json(f)::text LIKE '%'||$1||'%'", vendorAnswer).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored != 0 {

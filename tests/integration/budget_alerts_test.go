@@ -79,7 +79,7 @@ func (f *webhookFixture) hit(i int) webhookHit {
 func alertInstallation(t *testing.T, h *accessHarness) string {
 	t.Helper()
 	var installation string
-	if err := h.Pool.QueryRow(context.Background(), "SELECT id::text FROM olp_go.installation WHERE singleton").Scan(&installation); err != nil {
+	if err := h.Pool.QueryRow(context.Background(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
 		t.Fatalf("installation: %v", err)
 	}
 	return installation
@@ -93,7 +93,7 @@ func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	}
 	var baseline int64
 	_ = h.Pool.QueryRow(context.Background(),
-		"SELECT successes_total+failures_total+skipped_total FROM olp_go.worker_task_health WHERE task='budget_alert_delivery'").Scan(&baseline)
+		"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&baseline)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
@@ -105,7 +105,7 @@ func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	for {
 		var checked int64
 		err := h.Pool.QueryRow(context.Background(),
-			"SELECT successes_total+failures_total+skipped_total FROM olp_go.worker_task_health WHERE task='budget_alert_delivery'").Scan(&checked)
+			"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&checked)
 		if err == nil && checked > baseline {
 			break
 		}
@@ -126,7 +126,7 @@ func alertDeliveries(t *testing.T, h *accessHarness, ruleID string) []map[string
 		`SELECT jsonb_build_object('id',id,'status',status,'attempts',attempts,'last_error_code',last_error_code,
 		 'window_id',window_id,'threshold_percent',threshold_percent,'delivered_at',delivered_at,
 		 'accrued',accrued::text,'limit',limit_amount::text,'currency',currency)
-		 FROM olp_go.budget_alert_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
+		 FROM olp.budget_alert_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
 	if err != nil {
 		t.Fatalf("deliveries: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestBudgetAlertDelivery(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	exec("INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
 
 	keyHit := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "alerted key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
@@ -174,16 +174,16 @@ func TestBudgetAlertDelivery(t *testing.T) {
 		map[string]any{"name": "shared spend", "monthly_cost_limit": "5.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	windows := limits.BudgetWindows(time.Now())
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '8.000000000000', 0)`, keyHit["id"], windows.DailyID)
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '7.900000000000', 0)`, keyMiss["id"], windows.DailyID)
 
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '9.500000000000', 0)`, keyStale["id"], windows.DailyID-1)
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '1.000000000000', 0)`, keyStale["id"], windows.DailyID)
-	exec(`INSERT INTO olp_go.budget_group_cost_windows (budget_group_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.budget_group_cost_windows (budget_group_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'month', $2, '5.000000000000', 0)`, group["id"], windows.MonthlyID)
 
 	signed := h.want(owner, "POST", "/api/v1/notifications/destinations",
@@ -332,12 +332,12 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	exec("INSERT INTO olp_go.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
 	key := h.want(owner, "POST", "/api/v1/api-keys",
 		map[string]any{"name": "retry key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	windows := limits.BudgetWindows(time.Now())
-	exec(`INSERT INTO olp_go.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
 	      VALUES ($1, 'day', $2, '9.000000000000', 0)`, key["id"], windows.DailyID)
 	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
 		map[string]any{"name": "flaky hook", "url": hook.URL + "/flaky"},
@@ -359,10 +359,10 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		t.Fatalf("retry fired inside backoff: %d", hook.count())
 	}
 
-	exec("DELETE FROM olp_go.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'", key["id"])
-	exec(`UPDATE olp_go.api_keys SET policy = jsonb_set(policy, '{daily_cost_limit}', '"999.00"') WHERE id=$1`, key["id"])
+	exec("DELETE FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'", key["id"])
+	exec(`UPDATE olp.api_keys SET policy = jsonb_set(policy, '{daily_cost_limit}', '"999.00"') WHERE id=$1`, key["id"])
 
-	exec("UPDATE olp_go.budget_alert_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusBadRequest)
 	alertPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)
@@ -377,7 +377,7 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		t.Fatalf("retry did not report claim-time evidence: %v", retryBody)
 	}
 
-	exec("UPDATE olp_go.budget_alert_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusNoContent)
 	alertPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)

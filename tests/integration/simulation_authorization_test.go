@@ -63,7 +63,7 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 			case "expired":
 				// Advance this fixture past expiry without sleeping or changing
 				// the installation's clock.
-				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET expires_at=now()-interval '1 second' WHERE id=$1", key["id"]); err != nil {
+				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.api_keys SET expires_at=now()-interval '1 second' WHERE id=$1", key["id"]); err != nil {
 					t.Fatal(err)
 				}
 			}

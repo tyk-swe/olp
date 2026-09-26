@@ -413,7 +413,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 		t.Fatal("idempotency duplicated audit")
 	}
 	var dump string
-	if err = h.Pool.QueryRow(t.Context(), `SELECT jsonb_build_object('users',(SELECT jsonb_agg(u) FROM olp_go.users u),'sessions',(SELECT jsonb_agg(s) FROM olp_go.sessions s),'keys',(SELECT jsonb_agg(k) FROM olp_go.api_keys k),'audit',(SELECT jsonb_agg(a) FROM olp_go.audit a),'secrets',(SELECT jsonb_agg(s) FROM olp_go.secrets s))::text`).Scan(&dump); err != nil {
+	if err = h.Pool.QueryRow(t.Context(), `SELECT jsonb_build_object('users',(SELECT jsonb_agg(u) FROM olp.users u),'sessions',(SELECT jsonb_agg(s) FROM olp.sessions s),'keys',(SELECT jsonb_agg(k) FROM olp.api_keys k),'audit',(SELECT jsonb_agg(a) FROM olp.audit a),'secrets',(SELECT jsonb_agg(s) FROM olp.secrets s))::text`).Scan(&dump); err != nil {
 		t.Fatal(err)
 	}
 	for _, secret := range []string{accessPassword, first["secret"].(string), rotated["secret"].(string), owner.Cookies["__Host-olp_session"].Value, "test-private-agent"} {
@@ -466,7 +466,7 @@ func TestConcurrentSetupInvitationsAndPasswordSessionTransitions(t *testing.T) {
 	h.want(owner, "DELETE", "/api/v1/invitations/"+id, nil, map[string]string{"Idempotency-Key": "retire"}, 200)
 	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": retired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
 	expired := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "expired@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "expired"}, 201)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.invitations SET expires_at=now()-interval '1 second' WHERE id=$1", expired["invitation"].(map[string]any)["id"]); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.invitations SET expires_at=now()-interval '1 second' WHERE id=$1", expired["invitation"].(map[string]any)["id"]); err != nil {
 		t.Fatal(err)
 	}
 	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": expired["token"], "display_name": "Member", "password": accessPassword}, nil, 410)
@@ -517,7 +517,7 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	if err != nil || first != second {
 		t.Fatal("installation identity changed")
 	}
-	if _, err = pool.Exec(t.Context(), "UPDATE olp_go.migrations SET checksum='broken'"); err != nil {
+	if _, err = pool.Exec(t.Context(), "UPDATE olp.migrations SET checksum='broken'"); err != nil {
 		t.Fatal(err)
 	}
 	if database.Migrate(t.Context(), pool) == nil {
@@ -531,7 +531,7 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 		t.Fatal("accepted reference installation")
 	}
 	var wrote bool
-	if err = foreign.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp_go')").Scan(&wrote); err != nil || wrote {
+	if err = foreign.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp')").Scan(&wrote); err != nil || wrote {
 		t.Fatal("wrote before rejection", err)
 	}
 	h := newAccessHarness(t)
@@ -584,7 +584,7 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	if created["secret"] != replayed["secret"] {
 		t.Fatal("rotation lost encrypted replay")
 	}
-	if err = h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.secrets WHERE key_version<>2)").Scan(&wrote); err != nil || wrote {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.secrets WHERE key_version<>2)").Scan(&wrote); err != nil || wrote {
 		t.Fatal("rotation left old records", err)
 	}
 	// Runtime privileges allow feature transactions but cannot alter migrations.
@@ -611,10 +611,10 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	if _, err = tx.Exec(t.Context(), "SET LOCAL ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(t.Context(), "SELECT id FROM olp_go.users"); err != nil {
+	if _, err = tx.Exec(t.Context(), "SELECT id FROM olp.users"); err != nil {
 		t.Fatal("runtime cannot read", err)
 	}
-	if _, err = tx.Exec(t.Context(), "DELETE FROM olp_go.migrations"); err == nil {
+	if _, err = tx.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
 		t.Fatal("runtime can mutate migration history")
 	}
 	_ = fmt.Sprintf("%s", database.ValkeyNamespace(first))

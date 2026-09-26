@@ -363,7 +363,7 @@ func glBrokenLimiter(t *testing.T) *limits.Limiter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	limiter, err := limits.New(c, "olp-go-test:limits:broken:"+rand.Text())
+	limiter, err := limits.New(c, "olp-test:limits:broken:"+rand.Text())
 	if err != nil {
 		t.Fatal(err)
 	}

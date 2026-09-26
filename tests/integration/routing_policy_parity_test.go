@@ -33,7 +33,7 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 	fixture := glSeed(t, nil, limits.FailClosed)
 	h, owner := fixture.h, fixture.owner
 	var draftID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.route_drafts WHERE slug=$1", routeSlug).Scan(&draftID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.route_drafts WHERE slug=$1", routeSlug).Scan(&draftID); err != nil {
 		t.Fatal(err)
 	}
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "policy client", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)

@@ -35,12 +35,12 @@ func TestOIDCSecretReplacementRequiresFreshOwnerSignIn(t *testing.T) {
 		t.Fatal("rejected replacement changed the configuration")
 	}
 	var updates int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 2 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 2 {
 		t.Fatalf("configuration update audits=%d, error=%v", updates, err)
 	}
 	expireSessions := func() {
 		t.Helper()
-		if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.sessions SET expires_at=now()-interval '1 second'"); err != nil {
+		if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET expires_at=now()-interval '1 second'"); err != nil {
 			t.Fatal(err)
 		}
 	}

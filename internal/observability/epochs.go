@@ -29,10 +29,10 @@ func ReadEpochHealth(ctx context.Context, q access.Queryer) (EpochHealth, error)
 			COALESCE(sum(GREATEST(accepted - persisted - abandoned, 0))
 				FILTER (WHERE stale_detected_at IS NOT NULL
 					AND acknowledged_at IS NULL), 0)::bigint,
-			((SELECT COUNT(*) FROM olp_go.request_metadata_ingestion_gaps
+			((SELECT COUNT(*) FROM olp.request_metadata_ingestion_gaps
 				WHERE certainty = 'lower_bound')
-				+ (SELECT COALESCE(sum(uncertain_gap_count), 0) FROM olp_go.request_metadata_gap_hourly))::bigint
-		FROM olp_go.request_metadata_gateway_epochs`).Scan(
+				+ (SELECT COALESCE(sum(uncertain_gap_count), 0) FROM olp.request_metadata_gap_hourly))::bigint
+		FROM olp.request_metadata_gateway_epochs`).Scan(
 		&health.OpenEpochs, &health.UnresolvedEpochs, &unresolvedLower, &historical)
 	if err != nil {
 		return health, fmt.Errorf("read gateway epoch health: %w", err)

@@ -33,7 +33,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			continue
 		}
 		id := access.NewID()
-		if _, err = tx.Exec(ctx, "INSERT INTO olp_go.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, project.Name, access.NewID(), p.UserID()); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, project.Name, access.NewID(), p.UserID()); err != nil {
 			return err
 		}
 		projectIDs[key] = id
@@ -58,7 +58,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		switch {
 		case !ok:
 			providerID = access.NewID()
-			if _, err = tx.Exec(ctx, "INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", providerID, entry.Name, entry.Configuration.Kind, configuration, access.NewID(), access.NewID(), p.UserID(), projectID); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", providerID, entry.Name, entry.Configuration.Kind, configuration, access.NewID(), access.NewID(), p.UserID(), projectID); err != nil {
 				return err
 			}
 		default:
@@ -68,7 +68,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				return err
 			}
 			if !canonicalEqualProvider(entry, current) {
-				if _, err = tx.Exec(ctx, "UPDATE olp_go.providers SET name=$2,configuration=$3,etag=$4,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, entry.Name, configuration, access.NewID()); err != nil {
+				if _, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,configuration=$3,etag=$4,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, entry.Name, configuration, access.NewID()); err != nil {
 					return err
 				}
 			} else {
@@ -140,22 +140,22 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		var draftID string
 		if staged {
 			draftID = draft.ID
-			if _, err = tx.Exec(ctx, "UPDATE olp_go.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity); err != nil {
+			if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity); err != nil {
 				return err
 			}
 		} else {
 			draftID = access.NewID()
-			if _, err = tx.Exec(ctx, "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity); err != nil {
 				return err
 			}
 		}
 		if route.RoutingPolicy == nil {
-			if _, err = tx.Exec(ctx, "DELETE FROM olp_go.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID); err != nil {
+			if _, err = tx.Exec(ctx, "DELETE FROM olp.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID); err != nil {
 				return err
 			}
 		} else {
 			policy, _ := json.Marshal(route.RoutingPolicy)
-			if _, err = tx.Exec(ctx, "INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()", draftID, policy, access.NewID(), p.UserID()); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()", draftID, policy, access.NewID(), p.UserID()); err != nil {
 				return err
 			}
 		}
@@ -254,13 +254,13 @@ func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, provider
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "UPDATE olp_go.provider_slots SET credential_id=$3 WHERE provider_id=$1 AND id=$2", providerID, current.ID, stored); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET credential_id=$3 WHERE provider_id=$1 AND id=$2", providerID, current.ID, stored); err != nil {
 			return err
 		}
 		changed = true
 	}
 	if changed {
-		if _, err := tx.Exec(ctx, "UPDATE olp_go.providers SET slots_etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID()); err != nil {
+		if _, err := tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID()); err != nil {
 			return err
 		}
 	}
@@ -272,7 +272,7 @@ func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID
 	for _, m := range entry.Models {
 		desired = append(desired, m.UpstreamModel)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE olp_go.provider_models SET enabled=false,capabilities='[]'::jsonb WHERE provider_id=$1 AND NOT (upstream_model = ANY($2::text[]))", providerID, desired); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE olp.provider_models SET enabled=false,capabilities='[]'::jsonb WHERE provider_id=$1 AND NOT (upstream_model = ANY($2::text[]))", providerID, desired); err != nil {
 		return err
 	}
 	for _, m := range entry.Models {
@@ -292,12 +292,12 @@ func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID
 			declared = append(declared, capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: "declared"})
 		}
 		capabilities, _ := json.Marshal(declared)
-		if _, err := tx.Exec(ctx, `INSERT INTO olp_go.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,$5,$6)
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,$5,$6)
             ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,enabled=excluded.enabled,capabilities=excluded.capabilities`, access.NewID(), providerID, m.UpstreamModel, display, m.Enabled, capabilities); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp_go.provider_slots WHERE provider_id=$1", providerID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE provider_id=$1", providerID); err != nil {
 		return err
 	}
 	for _, slot := range resolved {
@@ -307,7 +307,7 @@ func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID
 			AllowedRoutes  []string `json:"allowed_routes"`
 		}{orEmpty(slot.entry.Restrictions.AllowedAPIKeys), orEmpty(slot.entry.Restrictions.AllowedModels), orEmpty(slot.entry.Restrictions.AllowedRoutes)})
 		limits, _ := json.Marshal(slot.entry.Limits)
-		if _, err := tx.Exec(ctx, "INSERT INTO olp_go.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", slot.id, providerID, slot.entry.IsDefault, slot.entry.Position, slot.entry.Name, slot.entry.Enabled, slot.entry.Priority, slot.entry.Weight, slot.credentialID, restrictions, limits); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", slot.id, providerID, slot.entry.IsDefault, slot.entry.Position, slot.entry.Name, slot.entry.Enabled, slot.entry.Priority, slot.entry.Weight, slot.credentialID, restrictions, limits); err != nil {
 			return err
 		}
 	}

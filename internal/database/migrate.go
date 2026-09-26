@@ -31,9 +31,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err = rejectReference(ctx, tx); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS olp_go;
-        REVOKE ALL ON SCHEMA olp_go FROM PUBLIC;
-        CREATE TABLE IF NOT EXISTS olp_go.migrations (
+	if _, err = tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS olp;
+        REVOKE ALL ON SCHEMA olp FROM PUBLIC;
+        CREATE TABLE IF NOT EXISTS olp.migrations (
             version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
         )`); err != nil {
 		return errors.New("migration role cannot initialize Go schema")
@@ -53,7 +53,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		checksum := sha256.Sum256(sql)
 		var stored []byte
-		err = tx.QueryRow(ctx, "SELECT checksum FROM olp_go.migrations WHERE version=$1", name).Scan(&stored)
+		err = tx.QueryRow(ctx, "SELECT checksum FROM olp.migrations WHERE version=$1", name).Scan(&stored)
 		if err == nil {
 			if missingSeen {
 				return errors.New("Go migration history is not a sequential prefix")
@@ -70,18 +70,18 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
 			return fmt.Errorf("migration %s failed; transaction rolled back", name)
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO olp_go.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
 			return err
 		}
 	}
 	var unknown bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.migrations WHERE NOT(version=ANY($1)))", known).Scan(&unknown); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.migrations WHERE NOT(version=ANY($1)))", known).Scan(&unknown); err != nil {
 		return err
 	}
 	if unknown {
 		return errors.New("database requires a newer Go binary")
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO olp_go.installation(singleton,id,authority_id) VALUES(true,$1,$2) ON CONFLICT DO NOTHING", uuid.NewString(), uuid.NewString()); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.installation(singleton,id,authority_id) VALUES(true,$1,$2) ON CONFLICT DO NOTHING", uuid.NewString(), uuid.NewString()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -112,14 +112,14 @@ func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 		return "", err
 	}
 	var id string
-	if err := pool.QueryRow(ctx, "SELECT id::text FROM olp_go.installation WHERE singleton").Scan(&id); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton").Scan(&id); err != nil {
 		return "", errors.New("Go installation is not initialized; run olp migrate using the migration role")
 	}
 	entries, err := migrations.ReadDir("migrations")
 	if err != nil {
 		return "", err
 	}
-	rows, err := pool.Query(ctx, "SELECT version,checksum FROM olp_go.migrations")
+	rows, err := pool.Query(ctx, "SELECT version,checksum FROM olp.migrations")
 	if err != nil {
 		return "", errors.New("cannot read Go migration history")
 	}
@@ -150,4 +150,4 @@ func Installation(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	return id, nil
 }
 
-func ValkeyNamespace(installation string) string { return "olp:go:v1:" + installation + ":" }
+func ValkeyNamespace(installation string) string { return "olp:" + installation + ":" }

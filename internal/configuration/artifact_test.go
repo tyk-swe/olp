@@ -279,7 +279,7 @@ func TestPlanProviderKindConflict(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil, nil}}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil, nil}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
 	if err != nil {
@@ -297,8 +297,8 @@ func TestPlanProviderProjectMismatch(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil}}},
-		{match: "FROM olp_go.projects", rows: [][]any{{"other-id", "Core"}, {"edge-id", "Edge"}}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil}}},
+		{match: "FROM olp.projects", rows: [][]any{{"other-id", "Core"}, {"edge-id", "Edge"}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
 	if err != nil {
@@ -403,15 +403,15 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 		{"provider_id": "provider-id", "provider_name": "acme", "provider_model": "gpt-x", "provider_model_id": "model-id", "priority": 0, "weight": 1, "timeout_ms": 30000},
 	})
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
+		{match: "FROM olp.providers WHERE", row: []any{configuration}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
-		{match: "FROM olp_go.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
+		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, nil}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
-		{match: "FROM olp_go.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
-		{match: "FROM olp_go.projects", rows: [][]any{{"edge-id", "Edge"}}},
+		{match: "FROM olp.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
+		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
 	if err != nil {

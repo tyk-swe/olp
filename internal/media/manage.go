@@ -54,7 +54,7 @@ func (m *Management) scopedJob(r *http.Request, p access.Principal, write bool) 
 		return nil, mapJobError(err)
 	}
 	var keyProject *string
-	if err = m.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp_go.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
+	if err = m.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
 		return nil, mapJobError(err)
 	}
 	if err := access.ProjectAccess(p, keyProject, write); err != nil {

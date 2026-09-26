@@ -20,7 +20,7 @@ make setup
 make dev
 ```
 
-Open http://127.0.0.1:5173 and use `.local/go-secrets/bootstrap.token` to create
+Open http://127.0.0.1:5173 and use `.local/secrets/bootstrap.token` to create
 the first owner. Vite serves the console with hot reload and proxies the
 configured API paths to Go. Restart after backend edits.
 

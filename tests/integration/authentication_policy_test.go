@@ -26,7 +26,7 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 			h.want(owner, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)
 			// A locally provisioned account stays locally managed even without a mapping.
 			var management string
-			if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE email='owner@example.com'").Scan(&management); err != nil || management != "local" {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp.users WHERE email='owner@example.com'").Scan(&management); err != nil || management != "local" {
 				t.Fatalf("local ownership=%s: %v", management, err)
 			}
 			setting := h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
@@ -72,7 +72,7 @@ func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
 				}
 			}
 			var identitiesCount, grants int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp_go.oidc_identities),(SELECT count(*) FROM olp_go.recent_auth)").Scan(&identitiesCount, &grants); err != nil || identitiesCount != 1 || grants != 1 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp.oidc_identities),(SELECT count(*) FROM olp.recent_auth)").Scan(&identitiesCount, &grants); err != nil || identitiesCount != 1 || grants != 1 {
 				t.Fatalf("rollback identities=%d grants=%d err=%v", identitiesCount, grants, err)
 			}
 			if current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200); current["etag"] != saved["etag"] || current["enabled"] != true {
@@ -96,7 +96,7 @@ func TestInvitationAcceptanceRechecksEffectivePolicy(t *testing.T) {
 			invitation := h.want(owner, "POST", "/api/v1/invitations", map[string]any{"email": "policy@example.com", "role": "viewer"}, map[string]string{"Idempotency-Key": "policy"}, 201)
 			h.Server.LocalLoginDisabled = processDisabled
 			if !processDisabled {
-				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
+				if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -105,11 +105,11 @@ func TestInvitationAcceptanceRechecksEffectivePolicy(t *testing.T) {
 			h.want(nil, "POST", "/api/v1/invitations/accept", input, nil, 409)
 			var consumed bool
 			var users int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT accepted_at IS NOT NULL,(SELECT count(*) FROM olp_go.users WHERE email='policy@example.com') FROM olp_go.invitations WHERE id=$1", invitation["invitation"].(map[string]any)["id"]).Scan(&consumed, &users); err != nil || consumed || users != 0 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT accepted_at IS NOT NULL,(SELECT count(*) FROM olp.users WHERE email='policy@example.com') FROM olp.invitations WHERE id=$1", invitation["invitation"].(map[string]any)["id"]).Scan(&consumed, &users); err != nil || consumed || users != 0 {
 				t.Fatalf("consumed=%v users=%d err=%v", consumed, users, err)
 			}
 			h.Server.LocalLoginDisabled = false
-			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.settings SET value='true' WHERE key='auth.local_login_enabled'"); err != nil {
+			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.settings SET value='true' WHERE key='auth.local_login_enabled'"); err != nil {
 				t.Fatal(err)
 			}
 			member := &browser{}
@@ -151,7 +151,7 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 		attempt(fmt.Sprintf("2001:db8:1::%x", i+1), "distributed@example.com", status)
 	}
 	// A denied attempt does not slide the window or permanently lock the account.
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.auth_admission SET window_started_at=now()-interval '61 seconds'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.auth_admission SET window_started_at=now()-interval '61 seconds'"); err != nil {
 		t.Fatal(err)
 	}
 	attempt("2001:db8:2::1", "distributed@example.com", 401)

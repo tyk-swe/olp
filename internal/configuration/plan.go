@@ -125,7 +125,7 @@ func routeKey(slug string, project *string) string {
 
 func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	v := &stateView{projects: map[string]string{}, projectName: map[string]string{}, providers: map[string]*existingProvider{}, routes: map[string]*existingRoute{}, drafts: map[string]*existingDraft{}}
-	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp_go.projects")
+	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.projects")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	providers, err := q.Query(ctx, "SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,(SELECT c.id::text FROM olp_go.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL) FROM olp_go.providers p")
+	providers, err := q.Query(ctx, "SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL) FROM olp.providers p")
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 		return nil, err
 	}
 	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text
-        FROM olp_go.provider_slots s LEFT JOIN olp_go.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL`)
+        FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = slots.Err(); err != nil {
 		return nil, err
 	}
-	routes, err := q.Query(ctx, "SELECT r.id::text,r.slug,r.project_id::text,r.state,v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id")
+	routes, err := q.Query(ctx, "SELECT r.id::text,r.slug,r.project_id::text,r.state,v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id")
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = routes.Err(); err != nil {
 		return nil, err
 	}
-	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp_go.route_drafts WHERE state IN ('draft','validated') AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
+	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp.route_drafts WHERE state IN ('draft','validated') AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +799,7 @@ func canonicalEqualRoute(desired, current *RouteEntry) bool {
 
 func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *existingProvider, project *string) (*ProviderEntry, error) {
 	var configuration []byte
-	if err := q.QueryRow(ctx, "SELECT configuration FROM olp_go.providers WHERE id=$1", p.ID).Scan(&configuration); err != nil {
+	if err := q.QueryRow(ctx, "SELECT configuration FROM olp.providers WHERE id=$1", p.ID).Scan(&configuration); err != nil {
 		return nil, err
 	}
 	entry := &ProviderEntry{Name: p.Name, Project: project}
@@ -823,7 +823,7 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftID string, desired *RouteEntry, state *stateView) (*RouteEntry, error) {
 	entry := &RouteEntry{Slug: desired.Slug, Project: desired.Project}
 	var operations, targets []byte
-	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity FROM olp_go.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity); err != nil {
+	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &entry.Operations); err != nil {
@@ -837,7 +837,7 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 		entry.Targets = append(entry.Targets, TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS)})
 	}
 	var policy []byte
-	err := q.QueryRow(ctx, "SELECT policy FROM olp_go.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID).Scan(&policy)
+	err := q.QueryRow(ctx, "SELECT policy FROM olp.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID).Scan(&policy)
 	switch {
 	case err == nil:
 		var p runtime.Policy
@@ -861,7 +861,7 @@ func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentia
 	}
 	var version int
 	var encrypted []byte
-	err := q.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp_go.secrets WHERE id=$1 AND purpose='provider_credential' AND (expires_at IS NULL OR expires_at>now())", *credentialID).Scan(&version, &encrypted)
+	err := q.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp.secrets WHERE id=$1 AND purpose='provider_credential' AND (expires_at IS NULL OR expires_at>now())", *credentialID).Scan(&version, &encrypted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

@@ -24,7 +24,7 @@ import (
 func acctKeyspace(t *testing.T) (*coordination.Client, string, string) {
 	t.Helper()
 	valkey := acctValkey(t)
-	prefix := "olp-go-test:" + rand.Text() + ":"
+	prefix := "olp-test:" + rand.Text() + ":"
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -123,7 +123,7 @@ func acctCounters(t *testing.T, pool *pgxpool.Pool) (reclaimed, recovered, dupli
 	err := pool.QueryRow(t.Context(), `SELECT request_metadata_reclaimed_total,
             request_metadata_recovered_total, request_metadata_duplicates_total,
             request_metadata_processed_total
-        FROM olp_go.async_worker_counters WHERE singleton`).
+        FROM olp.async_worker_counters WHERE singleton`).
 		Scan(&reclaimed, &recovered, &duplicates, &processed)
 	if err != nil {
 		t.Fatalf("load counters: %v", err)
@@ -134,7 +134,7 @@ func acctCounters(t *testing.T, pool *pgxpool.Pool) (reclaimed, recovered, dupli
 // acctGapCount counts the gaps recorded for one reason.
 func acctGapCount(t *testing.T, fixture acctFixture, reason string) int64 {
 	t.Helper()
-	return acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
+	return acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_ingestion_gaps
         WHERE reason = $1`, reason)
 }
 
@@ -179,14 +179,14 @@ func TestRequestMetadataConsumerDrainsTheGroupAcrossWorkers(t *testing.T) {
 	}
 
 	acctEventually(t, "every delivery to become durable usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == deliveries
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == deliveries
 	})
 	// Acknowledged deliveries are deleted, so a drained group empties the stream.
 	acctEventually(t, "the stream to drain", func() bool {
 		return acctStreamLength(t, valkey, stream) == 0
 	})
 	acctEventually(t, "the consumers to publish their health", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_consumer_health
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_consumer_health
             WHERE singleton AND pending_events = 0`) == 1
 	})
 
@@ -234,14 +234,14 @@ func TestRequestMetadataConsumerReclaimsADeadOwnersDeliveries(t *testing.T) {
 	// even when that owner is slow, so an impatient replica must leave it alone.
 	patient := acctConsumer(t, fixture.Pool, acctValkey(t), stream, "patient", nil, usage.ReclaimIdle)
 	time.Sleep(2 * time.Second)
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`); count != 0 {
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != 0 {
 		t.Fatalf("facts = %d, want the delivery left with its owner until it goes idle", count)
 	}
 	patient()
 
 	acctConsumer(t, fixture.Pool, acctValkey(t), stream, "survivor", nil, 0)
 	acctEventually(t, "the survivor to reclaim the delivery", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == 1
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
 	})
 	acctEventually(t, "the reclaimed delivery to be acknowledged", func() bool {
 		return acctStreamLength(t, valkey, stream) == 0
@@ -300,7 +300,7 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 
 	acctConsumer(t, fixture.Pool, valkey, stream, "recorder", nil, usage.ReclaimIdle)
 	acctEventually(t, "the good delivery to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == 1
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
 	})
 	acctEventually(t, "every unusable delivery to be resolved", func() bool {
 		return acctStreamLength(t, valkey, stream) == 0
@@ -317,7 +317,7 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	if count := acctGapCount(t, fixture, "invalid_request_metadata_event"); count != 1 {
 		t.Fatalf("invalid event gaps = %d, want one", count)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_ingestion_gaps
         WHERE event_count <> 1 OR certainty <> 'exact'`); count != 0 {
 		t.Fatalf("%d gaps did not count exactly one lost event", count)
 	}
@@ -345,7 +345,7 @@ func TestRequestMetadataConsumerReplaysACommittedEventAsADuplicate(t *testing.T)
 	acctEventually(t, "the redelivery to be acknowledged", func() bool {
 		return acctStreamLength(t, valkey, stream) == 0
 	})
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`); count != 1 {
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != 1 {
 		t.Fatalf("facts = %d, want the redelivery to charge nothing new", count)
 	}
 	acctEventually(t, "the duplicate to be counted", func() bool {
@@ -371,7 +371,7 @@ func TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream(t *testing.T) {
 
 	acctConsumer(t, fixture.Pool, acctValkey(t), stream, "survivor", nil, usage.ReclaimIdle)
 	acctEventually(t, "the first delivery to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == 1
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
 	})
 
 	// Valkey came back without the stream, which took the consumer group with
@@ -388,7 +388,7 @@ func TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream(t *testing.T) {
 	acctPublish(t, valkey, stream, secondPayload)
 
 	acctEventually(t, "the delivery published after the loss to become usage", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_facts`) == 2
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 2
 	})
 	acctEventually(t, "the rebuilt group to drain the stream", func() bool {
 		return acctStreamLength(t, valkey, stream) == 0
@@ -396,7 +396,7 @@ func TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream(t *testing.T) {
 	// The consumer keeps its own identity across the loss, so its health is
 	// published again rather than left stale at the moment of the outage.
 	acctEventually(t, "the consumer to publish its health against the new group", func() bool {
-		return acctCount(t, fixture, `SELECT count(*) FROM olp_go.request_metadata_consumer_health
+		return acctCount(t, fixture, `SELECT count(*) FROM olp.request_metadata_consumer_health
             WHERE singleton AND pending_events = 0 AND checked_at > now() - interval '10 seconds'`) == 1
 	})
 }

@@ -1,7 +1,7 @@
 -- Durable media jobs. Job state is client-visible; lifecycle_state tracks
 -- provider identity ownership independently of what the client sees.
 -- Transition guards mirror olp_v3 so Go and Rust enforce identical invariants.
-CREATE FUNCTION olp_go.enforce_media_job_lifecycle_transition() RETURNS trigger
+CREATE FUNCTION olp.enforce_media_job_lifecycle_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -51,7 +51,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION olp_go.enforce_media_job_transition() RETURNS trigger
+CREATE FUNCTION olp.enforce_media_job_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -82,11 +82,11 @@ BEGIN
 END;
 $$;
 
-CREATE TABLE olp_go.media_jobs (
+CREATE TABLE olp.media_jobs (
     id uuid PRIMARY KEY,
     upstream_job_id text,
-    api_key_id uuid NOT NULL REFERENCES olp_go.api_keys,
-    provider_id uuid NOT NULL REFERENCES olp_go.providers,
+    api_key_id uuid NOT NULL REFERENCES olp.api_keys,
+    provider_id uuid NOT NULL REFERENCES olp.providers,
     provider_model text NOT NULL,
     route_slug text NOT NULL,
     operation text NOT NULL,
@@ -107,9 +107,9 @@ CREATE TABLE olp_go.media_jobs (
     reconciliation_error text,
     deleted_at timestamptz,
     etag uuid NOT NULL,
-    runtime_generation_id uuid NOT NULL REFERENCES olp_go.runtime_releases,
-    provider_revision_id uuid NOT NULL REFERENCES olp_go.provider_revisions,
-    credential_version_id uuid REFERENCES olp_go.provider_credentials,
+    runtime_generation_id uuid NOT NULL REFERENCES olp.runtime_releases,
+    provider_revision_id uuid NOT NULL REFERENCES olp.provider_revisions,
+    credential_version_id uuid REFERENCES olp.provider_credentials,
     reconciliation_claim_id uuid,
     reconciliation_claimed_until timestamptz,
     reconciliation_attempts integer NOT NULL DEFAULT 0 CHECK (reconciliation_attempts >= 0),
@@ -125,31 +125,31 @@ CREATE TABLE olp_go.media_jobs (
         OR (reconciliation_claim_id IS NOT NULL AND reconciliation_claimed_until IS NOT NULL)),
     CHECK (lifecycle_state IN ('creating','create_ambiguous','deleted') OR upstream_job_id IS NOT NULL)
 );
-CREATE UNIQUE INDEX media_jobs_upstream_unique_idx ON olp_go.media_jobs
+CREATE UNIQUE INDEX media_jobs_upstream_unique_idx ON olp.media_jobs
     (provider_id, upstream_job_id) WHERE upstream_job_id IS NOT NULL;
-CREATE INDEX media_jobs_api_key_created_idx ON olp_go.media_jobs
+CREATE INDEX media_jobs_api_key_created_idx ON olp.media_jobs
     (api_key_id, created_at DESC, id DESC);
-CREATE INDEX media_jobs_created_idx ON olp_go.media_jobs (created_at DESC, id DESC);
-CREATE INDEX media_jobs_state_created_idx ON olp_go.media_jobs
+CREATE INDEX media_jobs_created_idx ON olp.media_jobs (created_at DESC, id DESC);
+CREATE INDEX media_jobs_state_created_idx ON olp.media_jobs
     (state, created_at DESC, id DESC);
-CREATE INDEX media_jobs_provider_live_idx ON olp_go.media_jobs
+CREATE INDEX media_jobs_provider_live_idx ON olp.media_jobs
     (provider_id, provider_revision_id) WHERE lifecycle_state <> 'deleted';
-CREATE INDEX media_jobs_reconciliation_due_idx ON olp_go.media_jobs
+CREATE INDEX media_jobs_reconciliation_due_idx ON olp.media_jobs
     (next_reconciliation_at, created_at, id) WHERE lifecycle_state <> 'deleted';
-CREATE INDEX media_jobs_reconciliation_idx ON olp_go.media_jobs
+CREATE INDEX media_jobs_reconciliation_idx ON olp.media_jobs
     (lifecycle_state, updated_at, id)
     WHERE lifecycle_state NOT IN ('active','deleted');
-CREATE TRIGGER media_jobs_lifecycle_guard BEFORE UPDATE ON olp_go.media_jobs
-    FOR EACH ROW EXECUTE FUNCTION olp_go.enforce_media_job_lifecycle_transition();
-CREATE TRIGGER media_jobs_transition_guard BEFORE UPDATE ON olp_go.media_jobs
-    FOR EACH ROW EXECUTE FUNCTION olp_go.enforce_media_job_transition();
+CREATE TRIGGER media_jobs_lifecycle_guard BEFORE UPDATE ON olp.media_jobs
+    FOR EACH ROW EXECUTE FUNCTION olp.enforce_media_job_lifecycle_transition();
+CREATE TRIGGER media_jobs_transition_guard BEFORE UPDATE ON olp.media_jobs
+    FOR EACH ROW EXECUTE FUNCTION olp.enforce_media_job_transition();
 
-ALTER TABLE olp_go.worker_task_health DROP CONSTRAINT worker_task_health_task_check;
-ALTER TABLE olp_go.worker_task_health
+ALTER TABLE olp.worker_task_health DROP CONSTRAINT worker_task_health_task_check;
+ALTER TABLE olp.worker_task_health
     ADD CONSTRAINT worker_task_health_task_check CHECK (task IN (
         'request_metadata_consumer','maintenance','cost_reconciliation',
         'request_metadata_gateway_epoch_detection','media_reconciliation'));
 
-ALTER TABLE olp_go.async_worker_counters
+ALTER TABLE olp.async_worker_counters
     ADD COLUMN media_reconciliation_gaps_total bigint NOT NULL DEFAULT 0
         CHECK (media_reconciliation_gaps_total >= 0);

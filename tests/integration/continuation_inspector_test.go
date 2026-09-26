@@ -47,7 +47,7 @@ func TestPlanInspectorShowsNegotiatedActionabilityWithoutCreatingWork(t *testing
 	input["client_contract"] = "future-v2"
 	h.want(owner, "POST", "/api/v1/routing/simulate", input, nil, 422)
 	var claims int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE route_slug=$1 AND kind='continuation'`, slug).Scan(&claims); err != nil || claims != 0 || calls.Load() != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE route_slug=$1 AND kind='continuation'`, slug).Scan(&claims); err != nil || claims != 0 || calls.Load() != 0 {
 		t.Fatalf("no-inference inspector created work: claims=%d provider=%d err=%v", claims, calls.Load(), err)
 	}
 }

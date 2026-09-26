@@ -264,7 +264,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await expect(page.getByText('2/2 certified', { exact: true })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: info.outputPath('go-provider-onboarding.png'),
+    path: info.outputPath('provider-onboarding.png'),
     fullPage: true
   });
   await page.getByRole('button', { name: 'Continue to activation' }).click();
@@ -305,7 +305,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     page.getByText(/belongs to a connection that is not active\./)
   ).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-route-activation-blocked.png'),
+    path: info.outputPath('route-activation-blocked.png'),
     fullPage: true
   });
   const reactivated = await manage(page, 'POST', `${providerPath}/activate`, {
@@ -329,7 +329,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     .click();
   await expect(page.getByText('Revision 1 active')).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-route-active.png'),
+    path: info.outputPath('route-active.png'),
     fullPage: true
   });
 
@@ -370,7 +370,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     secretDialog.getByText(`OpenAI request succeeded through route ${route}.`)
   ).toBeVisible();
   await secretDialog.screenshot({
-    path: info.outputPath('go-key-connection-test.png')
+    path: info.outputPath('key-connection-test.png')
   });
   await secretDialog
     .getByRole('button', { name: 'I have saved the key' })
@@ -437,7 +437,7 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await page.getByRole('button', { name: 'Run test' }).click();
   await expect(page.locator('.output pre').first()).toHaveText(upstream.reply);
   await page.screenshot({
-    path: info.outputPath('go-playground.png'),
+    path: info.outputPath('playground.png'),
     fullPage: true
   });
 

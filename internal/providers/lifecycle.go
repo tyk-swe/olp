@@ -42,7 +42,7 @@ func ValidCredential(value string) error {
 
 func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
 	id = access.NewID()
-	if err = tx.QueryRow(ctx, "INSERT INTO olp_go.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp_go.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
+	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
 		return "", 0, err
 	}
 	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil)
@@ -158,7 +158,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, input.Configuration.Kind, configuration, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, input.Configuration.Kind, configuration, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	var credentialID *string
@@ -169,7 +169,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		}
 		credentialID = &stored
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", access.NewID(), id, credentialID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", access.NewID(), id, credentialID); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Model != nil {
@@ -201,7 +201,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
 		}
 		declared, _ := json.Marshal(capabilities)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, *input.DisplayName, declared); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, *input.DisplayName, declared); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -219,7 +219,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 // change. Slot evidence is already bound to the transport fingerprint; retaining
 // it lets a restored draft reuse validation only when all inputs match again.
 func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error {
-	_, err := tx.Exec(ctx, "UPDATE olp_go.provider_models SET capabilities=(SELECT coalesce(jsonb_agg(c||'{\"source\":\"declared\",\"certified_at\":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c) WHERE provider_id=$1", providerID)
+	_, err := tx.Exec(ctx, "UPDATE olp.provider_models SET capabilities=(SELECT coalesce(jsonb_agg(c||'{\"source\":\"declared\",\"certified_at\":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c) WHERE provider_id=$1", providerID)
 	return err
 }
 
@@ -272,7 +272,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	etag := access.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, input.Name, input.Configuration.Kind, configuration, etag); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, input.Name, input.Configuration.Kind, configuration, etag); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.update", "provider", id, "success"); err != nil {
@@ -351,7 +351,7 @@ type storedModel struct {
 }
 
 func loadModels(ctx context.Context, q access.Queryer, providerID string, enabledOnly bool) ([]storedModel, error) {
-	rows, err := q.Query(ctx, "SELECT id::text,upstream_model,display_name,enabled,capabilities,discovered_at FROM olp_go.provider_models WHERE provider_id=$1 AND (enabled OR NOT $2) ORDER BY upstream_model", providerID, enabledOnly)
+	rows, err := q.Query(ctx, "SELECT id::text,upstream_model,display_name,enabled,capabilities,discovered_at FROM olp.provider_models WHERE provider_id=$1 AND (enabled OR NOT $2) ORDER BY upstream_model", providerID, enabledOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +398,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp_go.provider_slots s LEFT JOIN olp_go.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,10 +491,10 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 		configuration, _ := json.Marshal(current.Configuration)
 		revisionID, etag := access.NewID(), access.NewID()
 		var revision int
-		if err = tx.QueryRow(ctx, "INSERT INTO olp_go.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp_go.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configuration, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
+		if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configuration, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
 			return access.Reply{}, err
 		}
-		if _, err = tx.Exec(ctx, "UPDATE olp_go.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
 			return access.Reply{}, err
 		}
 		generation, err := runtime.Publish(ctx, tx, p.UserID())
@@ -511,7 +511,7 @@ func (s *Server) disableProvider(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
 		}
 		etag := access.NewID()
-		if _, err := tx.Exec(ctx, "UPDATE olp_go.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
+		if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
 			return access.Reply{}, err
 		}
 		generation, err := runtime.Publish(ctx, tx, p.UserID())
@@ -561,13 +561,13 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 // loadRevision accepts a revision id or number scoped to the provider.
 func loadRevision(ctx context.Context, q access.Queryer, providerID, ref string) (*revisionRow, error) {
 	if n, err := strconv.Atoi(ref); err == nil {
-		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp_go.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
+		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
 	}
 	id, err := access.ParseUUID(ref)
 	if err != nil {
 		return nil, access.Fail(404, "not_found", "Unknown revision.")
 	}
-	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp_go.provider_revisions WHERE provider_id=$1 AND id=$2", providerID, id))
+	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id=$2", providerID, id))
 }
 
 func (v *revisionRow) counts() (models, capabilities, certified int64) {
@@ -612,7 +612,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp_go.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -796,12 +796,12 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	// that have never been published, and disable the retained rows until the
 	// restored revision selects them again. Evidence outside that revision is
 	// no longer certified against the restored transport.
-	if _, err := tx.Exec(ctx, `DELETE FROM olp_go.provider_models WHERE provider_id=$1 AND id NOT IN (
-		SELECT (m->>'id')::uuid FROM olp_go.provider_revisions r,jsonb_array_elements(r.models) m WHERE r.provider_id=$1
+	if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_models WHERE provider_id=$1 AND id NOT IN (
+		SELECT (m->>'id')::uuid FROM olp.provider_revisions r,jsonb_array_elements(r.models) m WHERE r.provider_id=$1
 	)`, current.ID); err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE olp_go.provider_models SET enabled=false,
+	if _, err := tx.Exec(ctx, `UPDATE olp.provider_models SET enabled=false,
 		capabilities=(SELECT coalesce(jsonb_agg(c||'{"source":"declared","certified_at":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c)
 		WHERE provider_id=$1`, current.ID); err != nil {
 		return "", err
@@ -812,7 +812,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
 		}
 		encoded, _ := json.Marshal(capabilities)
-		if _, err := tx.Exec(ctx, `INSERT INTO olp_go.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)
 			ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,enabled=true,capabilities=excluded.capabilities`, m.ID, current.ID, m.UpstreamModel, m.DisplayName, encoded); err != nil {
 			return "", err
 		}
@@ -834,7 +834,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 		activeSlots, _ := json.Marshal(v.Slots)
 		dirty = string(draftSlots) != string(activeSlots)
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp_go.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=$6,updated_at=now() WHERE id=$1", current.ID, v.Name, v.Configuration.Kind, configuration, etag, dirty)
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=$6,updated_at=now() WHERE id=$1", current.ID, v.Name, v.Configuration.Kind, configuration, etag, dirty)
 	return etag, err
 }
 

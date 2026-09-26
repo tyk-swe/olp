@@ -203,7 +203,7 @@ func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var keyProject *string
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp_go.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
 		return access.Reply{}, err
 	}
 	if !p.CanProject(keyProject, false) {

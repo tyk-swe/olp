@@ -53,7 +53,7 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 	if len(copy.Metadata) == 0 {
 		copy.Metadata = []byte(`{}`)
 	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp_go.provider_resources
+	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
  (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
 		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID,
@@ -88,7 +88,7 @@ func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID st
 	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
 		return nil, nil, err
 	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
@@ -149,7 +149,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
 		return nil, nil, err
 	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR UPDATE`, id, kind, owner, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
@@ -167,7 +167,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 		}
 		return r, current, nil
 	}
-	if _, err = tx.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, id, state); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, id, state); err != nil {
 		return nil, nil, err
 	}
 	if err = s.keys.Store(ctx, tx, s.installation, id.String(), continuationPurpose, payload, r.ExpiresAt); err != nil {

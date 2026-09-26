@@ -83,15 +83,15 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 		t.Fatal("migration duplicated or suppressed provider dispatch")
 	}
 	// Omitting fidelity from the old revision writer must fail at storage too.
-	_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.route_revisions
+	_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.route_revisions
         (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,routing_policy)
         SELECT $2,route_id,revision+1,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,routing_policy
-        FROM olp_go.route_revisions WHERE id=$1`, activated["revision_id"], uuid.NewString())
+        FROM olp.route_revisions WHERE id=$1`, activated["revision_id"], uuid.NewString())
 	var failure *pgconn.PgError
 	if !errors.As(err, &failure) || failure.ConstraintName != "route_revision_contract_identity" {
 		t.Fatal("old writer was not fenced", err)
 	}
-	_, err = h.Pool.Exec(t.Context(), "UPDATE olp_go.routes SET strict_contract=false WHERE id=$1", activated["route_id"])
+	_, err = h.Pool.Exec(t.Context(), "UPDATE olp.routes SET strict_contract=false WHERE id=$1", activated["route_id"])
 	if !errors.As(err, &failure) || failure.ConstraintName != "route_contract_identity" {
 		t.Fatal("strict identity could be rewritten", err)
 	}
@@ -111,8 +111,8 @@ func TestStrictRouteMigrationRequiresUnseenIdentity(t *testing.T) {
 	delete(oldRoutes[newSlug], "fidelity")
 	oldSnapshot["routes"], _ = json.Marshal(oldRoutes)
 	oldBody, _ := json.Marshal(oldSnapshot)
-	_, err = h.Pool.Exec(t.Context(), `INSERT INTO olp_go.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at)
-        SELECT $1,sequence+1,sha256,$2,created_by,now(),now() FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1`, uuid.NewString(), oldBody)
+	_, err = h.Pool.Exec(t.Context(), `INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at)
+        SELECT $1,sequence+1,sha256,$2,created_by,now(),now() FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1`, uuid.NewString(), oldBody)
 	if !errors.As(err, &failure) || failure.ConstraintName != "runtime_route_contract_identity" {
 		t.Fatal("old-shaped publication was not fenced", err)
 	}
@@ -146,10 +146,10 @@ func TestExplicitNonStrictContractSurvivesOlderWriters(t *testing.T) {
 	slug, _ := publishStrictProvider(t, h, owner, fixture, nil, fidelityPolicy("redact", "input"), "transformed")
 	route := h.want(owner, "GET", "/api/v1/routes", nil, nil, 200)["items"].([]any)[0].(map[string]any)
 	revision := route["latest_revision"].(map[string]any)
-	_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.route_revisions
+	_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.route_revisions
         (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,routing_policy)
         SELECT $2,route_id,revision+1,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy,routing_policy
-        FROM olp_go.route_revisions WHERE id=$1`, revision["id"], uuid.NewString())
+        FROM olp.route_revisions WHERE id=$1`, revision["id"], uuid.NewString())
 	var failure *pgconn.PgError
 	if !errors.As(err, &failure) || failure.ConstraintName != "route_revision_contract_identity" {
 		t.Fatal("older revision writer erased explicit transformed contract", err)
@@ -169,8 +169,8 @@ func TestExplicitNonStrictContractSurvivesOlderWriters(t *testing.T) {
 	delete(oldRoutes[slug], "fidelity")
 	oldSnapshot["routes"], _ = json.Marshal(oldRoutes)
 	oldBody, _ := json.Marshal(oldSnapshot)
-	_, err = h.Pool.Exec(t.Context(), `INSERT INTO olp_go.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at)
-        SELECT $1,sequence+1,sha256,$2,created_by,now(),now() FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1`, uuid.NewString(), oldBody)
+	_, err = h.Pool.Exec(t.Context(), `INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at)
+        SELECT $1,sequence+1,sha256,$2,created_by,now(),now() FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1`, uuid.NewString(), oldBody)
 	if !errors.As(err, &failure) || failure.ConstraintName != "runtime_route_contract_identity" {
 		t.Fatal("older release writer erased explicit transformed contract", err)
 	}

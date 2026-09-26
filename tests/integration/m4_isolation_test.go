@@ -52,14 +52,14 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 	}
 	m4Eventually(t, "the first installation to account for its own traffic", 60*time.Second,
 		func() bool {
-			return first.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == requests
+			return first.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 		})
 
 	// The second installation saw none of it: no rows, and no delivery its
 	// consumer could have processed.
 	for _, table := range []string{"requests", "attempts", "attempt_usage_facts",
 		"request_metadata_event_receipts"} {
-		if total := second.count("SELECT count(*) FROM olp_go." + table); total != 0 {
+		if total := second.count("SELECT count(*) FROM olp." + table); total != 0 {
 			t.Fatalf("installation B holds %d rows in %s that installation A produced", total, table)
 		}
 	}
@@ -141,7 +141,7 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 				key, exists)
 		}
 	}
-	if total := second.count("SELECT count(*) FROM olp_go.attempt_usage_facts"); total != 0 {
+	if total := second.count("SELECT count(*) FROM olp.attempt_usage_facts"); total != 0 {
 		t.Fatalf("installation B gained %d usage facts from A's shutdown", total)
 	}
 	if err := secondWorker.Stop(15 * time.Second); err != nil {
@@ -158,7 +158,7 @@ func m4AwaitWorkerPlane(t *testing.T, in *m4Install, since time.Time) {
 		usage.TaskCostReconciliation, usage.TaskEpochDetection}
 	m4Eventually(t, "the worker plane to check in", 40*time.Second, func() bool {
 		for _, task := range tasks {
-			if in.count(`SELECT count(*) FROM olp_go.worker_task_health
+			if in.count(`SELECT count(*) FROM olp.worker_task_health
                 WHERE task = $1 AND checked_at >= $2`, string(task), since) == 0 {
 				return false
 			}

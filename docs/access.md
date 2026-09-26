@@ -11,11 +11,11 @@ Vite proxying, private secret files, and the one-time owner bootstrap token.
 
 ## Deployment and database roles
 
-Use a fresh, separate database. Go owns schema `olp_go` and its checksum
+Use a fresh, separate database. Go owns schema `olp` and its checksum
 history; it rejects Rust schemas and preexisting public tables before writing.
 The installation UUID survives repeated and concurrent migrations. Valkey uses
 the [installation namespace](operations.md#shared-state-in-valkey)
-`olp:go:v1:<installation UUID>:`. Never share a Rust installation's storage.
+`olp:<installation UUID>:`. Never share a Rust installation's storage.
 
 Provision a migration owner and a separate, existing runtime login with neither
 superuser nor ownership privileges. Using the migration connection, run:

@@ -98,7 +98,7 @@ func scanRecord(row pgx.Row) (*record, error) {
 
 // load reads one provider, locking the row inside a transaction when asked.
 func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record, error) {
-	query := "SELECT " + recordColumns + " FROM olp_go.providers p WHERE p.id=$1"
+	query := "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
 	if lock {
 		query += " FOR UPDATE"
 	}
@@ -119,7 +119,7 @@ func checkProvider(ctx context.Context, q access.Queryer, p access.Principal, id
 // touch records a draft change and returns the new etag.
 func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	etag := access.NewID()
-	_, err := tx.Exec(ctx, "UPDATE olp_go.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
 	return etag, err
 }
 
@@ -164,16 +164,16 @@ type detail struct {
 }
 
 const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
-	"(SELECT count(*) FROM olp_go.provider_models m WHERE m.provider_id=p.id)," +
-	"(SELECT count(*) FROM olp_go.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
-	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp_go.provider_models m WHERE m.provider_id=p.id)," +
-	"(SELECT count(*) FROM olp_go.provider_models m,jsonb_array_elements(m.capabilities) c WHERE m.provider_id=p.id AND c->>'source'='certified')," +
-	"d.credential_id::text,dc.version,EXISTS(SELECT 1 FROM olp_go.provider_slots available JOIN olp_go.provider_credentials secret ON secret.id=available.credential_id WHERE available.provider_id=p.id AND available.enabled AND secret.revoked_at IS NULL),rc.id::text,rc.version" +
-	" FROM olp_go.providers p JOIN olp_go.users u ON u.id=p.created_by LEFT JOIN olp_go.projects pr ON pr.id=p.project_id" +
-	" LEFT JOIN olp_go.provider_slots d ON d.provider_id=p.id AND d.is_default" +
-	" LEFT JOIN olp_go.provider_credentials dc ON dc.id=d.credential_id" +
-	" LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id" +
-	" LEFT JOIN olp_go.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
+	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
+	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
+	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
+	"(SELECT count(*) FROM olp.provider_models m,jsonb_array_elements(m.capabilities) c WHERE m.provider_id=p.id AND c->>'source'='certified')," +
+	"d.credential_id::text,dc.version,EXISTS(SELECT 1 FROM olp.provider_slots available JOIN olp.provider_credentials secret ON secret.id=available.credential_id WHERE available.provider_id=p.id AND available.enabled AND secret.revoked_at IS NULL),rc.id::text,rc.version" +
+	" FROM olp.providers p JOIN olp.users u ON u.id=p.created_by LEFT JOIN olp.projects pr ON pr.id=p.project_id" +
+	" LEFT JOIN olp.provider_slots d ON d.provider_id=p.id AND d.is_default" +
+	" LEFT JOIN olp.provider_credentials dc ON dc.id=d.credential_id" +
+	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
+	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
 func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var p record

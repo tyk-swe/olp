@@ -270,13 +270,13 @@ deployment termination budget.
 ## Shared state in Valkey
 
 Every key is prefixed with the installation namespace
-`olp:go:v1:<installation>:`, so installations sharing one Valkey service never
+`olp:<installation>:`, so installations sharing one Valkey service never
 read, acknowledge, or reconcile one another's state.
 
 | Key | Contents |
 | --- | --- |
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
-| `<prefix>limits:{<lookup>}:concurrency:v2` | Concurrency leases for one lookup. |
+| `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
 | `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key or budget-group UUID. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
 | `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
@@ -346,9 +346,10 @@ For a production recovery point:
    `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
 
 The script requires a zero, at-most-30-second-old durable checkpoint and an
-explicit quiescence assertion. It exports one PostgreSQL snapshot and creates an
-`olp-go-v1` manifest containing the checksum, installation identity, migration
-count, and runtime generation. Only the `olp_go` schema is backed up.
+explicit quiescence assertion. It exports one PostgreSQL snapshot and creates a
+manifest with format and schema markers `olp`, the checksum, installation
+identity, migration count, and runtime generation. Only the `olp` schema is
+backed up.
 
 The dump contains password hashes, session and API-key digests, and encrypted
 provider/OIDC credentials. Keep master-key rings and authentication HMAC files

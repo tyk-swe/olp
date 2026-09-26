@@ -342,7 +342,7 @@ func (s *Server) ownedJob(ctx context.Context, authority access.Authority, video
 	// Retired routes can still own live jobs, so read the durable project
 	// rather than requiring the route to remain in the active snapshot.
 	var projectID *string
-	if err := s.Media.Jobs.Pool.QueryRow(ctx, "SELECT project_id::text FROM olp_go.routes WHERE slug=$1", record.RouteSlug).Scan(&projectID); err != nil {
+	if err := s.Media.Jobs.Pool.QueryRow(ctx, "SELECT project_id::text FROM olp.routes WHERE slug=$1", record.RouteSlug).Scan(&projectID); err != nil {
 		return nil, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
 	}
 	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {

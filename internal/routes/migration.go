@@ -60,7 +60,7 @@ func (s *Server) migrationDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var published bool
-	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.routes WHERE slug=$1)", input.Slug).Scan(&published); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1)", input.Slug).Scan(&published); err != nil {
 		return access.Reply{}, err
 	}
 	if published {
@@ -74,12 +74,12 @@ func (s *Server) migrationDraft(r *http.Request) (access.Reply, error) {
 		targets[i].ID = access.NewID()
 	}
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, input.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), current.ProjectID, fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, input.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), current.ProjectID, fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if v.Policy != nil {
 		policy, _ := json.Marshal(v.Policy)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.UserID()); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.UserID()); err != nil {
 			return access.Reply{}, err
 		}
 	}

@@ -436,7 +436,7 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 		data, err := secrets.ReadFile(c.BootstrapTokenFile)
 		if errors.Is(err, os.ErrNotExist) {
 			var complete bool
-			if err := pool.QueryRow(ctx, "SELECT setup_complete FROM olp_go.installation WHERE singleton").Scan(&complete); err != nil {
+			if err := pool.QueryRow(ctx, "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete); err != nil {
 				return nil, nil, "", errors.New("cannot inspect installation setup state")
 			}
 			if !complete {

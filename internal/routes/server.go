@@ -66,7 +66,7 @@ type draft struct {
 }
 
 const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity"
-const draftFrom = " FROM olp_go.route_drafts d JOIN olp_go.users u ON u.id=d.created_by LEFT JOIN olp_go.projects pr ON pr.id=d.project_id"
+const draftFrom = " FROM olp.route_drafts d JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects pr ON pr.id=d.project_id"
 
 func scanDraft(row pgx.Row) (*draft, error) {
 	var d draft
@@ -118,9 +118,9 @@ func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedT
 	rows, err := q.Query(ctx, `SELECT m.id::text,p.id::text,p.name,m.upstream_model,p.state,
 		coalesce(r.models,'[]'::jsonb),coalesce(r.configuration->>'auth_mode','none'),
 		coalesce(r.slots,'[]'::jsonb),
-		ARRAY(SELECT c.id::text FROM olp_go.provider_credentials c WHERE c.provider_id=p.id AND c.revoked_at IS NULL)
-		FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id
-		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
+		ARRAY(SELECT c.id::text FROM olp.provider_credentials c WHERE c.provider_id=p.id AND c.revoked_at IS NULL)
+		FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id
+		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id=ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, err
@@ -284,12 +284,12 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 			if modelID, err = access.ParseUUID(*t.ProviderModelID); err != nil {
 				return nil, access.Invalid("targets.provider_model_id", "Use a provider model identifier.")
 			}
-			err = q.QueryRow(ctx, "SELECT p.id::text,p.name,m.upstream_model,p.project_id::text FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE m.id=$1", modelID).Scan(&providerID, &providerName, &providerModel, &providerProject)
+			err = q.QueryRow(ctx, "SELECT p.id::text,p.name,m.upstream_model,p.project_id::text FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id WHERE m.id=$1", modelID).Scan(&providerID, &providerName, &providerModel, &providerProject)
 		case t.ProviderID != nil && t.ProviderModel != nil:
 			if providerID, err = access.ParseUUID(*t.ProviderID); err != nil {
 				return nil, access.Invalid("targets.provider_id", "Use a provider identifier.")
 			}
-			err = q.QueryRow(ctx, "SELECT m.id::text,p.name,m.upstream_model,p.project_id::text FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE p.id=$1 AND m.upstream_model=$2", providerID, *t.ProviderModel).Scan(&modelID, &providerName, &providerModel, &providerProject)
+			err = q.QueryRow(ctx, "SELECT m.id::text,p.name,m.upstream_model,p.project_id::text FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id WHERE p.id=$1 AND m.upstream_model=$2", providerID, *t.ProviderModel).Scan(&modelID, &providerName, &providerModel, &providerProject)
 		default:
 			return nil, access.Invalid("targets", "Name each target by provider_model_id or by provider_id and provider_model.")
 		}
@@ -411,7 +411,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	id, etag := access.NewID(), access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.create", "route_draft", id, "success"); err != nil {
@@ -466,7 +466,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	etag := access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.update", "route_draft", id, "success"); err != nil {
@@ -508,7 +508,7 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.route_drafts WHERE id=$1", id); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_drafts WHERE id=$1", id); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.delete", "route_draft", id, "success"); err != nil {

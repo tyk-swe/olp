@@ -16,7 +16,7 @@ import (
 // that begin by creating another draft for an existing slug.
 func PublishedFidelity(ctx context.Context, q access.Queryer, slug string, project *string) (json.RawMessage, error) {
 	var raw []byte
-	err := q.QueryRow(ctx, `SELECT v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id
+	err := q.QueryRow(ctx, `SELECT v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
         WHERE r.slug=$1 AND r.project_id IS NOT DISTINCT FROM $2::uuid`, slug, project).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -32,7 +32,7 @@ func ValidateFidelityMigration(ctx context.Context, q access.Queryer, slug strin
 		return access.Invalid("fidelity", err.Error())
 	}
 	var strict bool
-	err = q.QueryRow(ctx, "SELECT strict_contract FROM olp_go.routes WHERE slug=$1", slug).Scan(&strict)
+	err = q.QueryRow(ctx, "SELECT strict_contract FROM olp.routes WHERE slug=$1", slug).Scan(&strict)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}

@@ -201,11 +201,11 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatalf("owner-scoped video inventory lost job: %d %s", status, raw)
 	}
 	var ownerID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT api_key_id::text FROM olp_go.media_jobs WHERE id=$1 AND strict_contract AND native_source_id=$1", localID).Scan(&ownerID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT api_key_id::text FROM olp.media_jobs WHERE id=$1 AND strict_contract AND native_source_id=$1", localID).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
 	var ciphertext []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&ciphertext); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&ciphertext); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(ciphertext, []byte("one frame")) || bytes.Contains(ciphertext, []byte("9007199254740993")) {
@@ -226,20 +226,20 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatal("unreserved video source activated")
 	}
 	var orphanSecrets int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", orphanID).Scan(&orphanSecrets); err != nil || orphanSecrets != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", orphanID).Scan(&orphanSecrets); err != nil || orphanSecrets != 0 {
 		t.Fatalf("failed attachment committed a source secret: %d %v", orphanSecrets, err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, uuid.NewString()); err == nil {
 		t.Fatal("wrong owner read native source")
 	}
 	past := time.Now().Add(-time.Second)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.media_jobs SET expires_at=$2 WHERE id=$1", localID, past); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, past); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
 		t.Fatal("expired job read native source")
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
 		t.Fatal(err)
 	}
 	oldRevoked := recovered.Revoked
@@ -248,13 +248,13 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatal("revoked provider read native source")
 	}
 	recovered.Revoked = oldRevoked
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
 		t.Fatal("tampered video source authenticated")
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, ciphertext); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, ciphertext); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,7 +284,7 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 		t.Fatalf("native delete=%d %s", status, raw)
 	}
 	var secrets int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&secrets); err != nil || secrets != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&secrets); err != nil || secrets != 0 {
 		t.Fatalf("deleted secret retained: %d %v", secrets, err)
 	}
 	status, raw, _ = h.gatewayRaw("DELETE", "/v1/videos/"+localID, key, nil, nil)

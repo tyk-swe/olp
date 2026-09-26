@@ -83,7 +83,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	var secret []byte
 	if slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*slot.CredentialID)

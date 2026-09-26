@@ -31,8 +31,8 @@ import (
 const (
 	routeSlug     = "sdk-smoke-route"
 	upstreamModel = "fixture-model"
-	apiKey        = "olp_go_fixture_key"
-	conflictKey   = "olp_go_fixture_conflict_key"
+	apiKey        = "olp_fixture_key"
+	conflictKey   = "olp_fixture_conflict_key"
 	credential    = "fixture-upstream-credential"
 )
 

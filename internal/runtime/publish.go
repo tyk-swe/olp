@@ -82,7 +82,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		return Published{}, err
 	}
 	var sequence int64
-	if err = tx.QueryRow(ctx, "UPDATE olp_go.installation SET release_sequence=release_sequence+1 WHERE singleton RETURNING release_sequence").Scan(&sequence); err != nil {
+	if err = tx.QueryRow(ctx, "UPDATE olp.installation SET release_sequence=release_sequence+1 WHERE singleton RETURNING release_sequence").Scan(&sequence); err != nil {
 		return Published{}, err
 	}
 	now := time.Now().UTC()
@@ -104,7 +104,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		return Published{}, err
 	}
 	p := Published{ID: snapshot.Generation.ID, Sequence: sequence}
-	_, err = tx.Exec(ctx, "INSERT INTO olp_go.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at) VALUES($1,$2,$3,$4,$5,$6,$6)", p.ID, sequence, digest, encoded, actor, now)
+	_, err = tx.Exec(ctx, "INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by,created_at,published_at) VALUES($1,$2,$3,$4,$5,$6,$6)", p.ID, sequence, digest, encoded, actor, now)
 	return p, err
 }
 
@@ -113,7 +113,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 // their latest published revision.
 func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	snapshot := &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
-	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text FROM olp_go.providers p JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
+	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT scope,scope_id::text,policy FROM olp_go.routing_policies WHERE scope IN ('installation','api-key')")
+	rows, err = tx.Query(ctx, "SELECT scope,scope_id::text,policy FROM olp.routing_policies WHERE scope IN ('installation','api-key')")
 	if err != nil {
 		return nil, err
 	}

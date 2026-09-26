@@ -121,7 +121,7 @@ func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
 		return nil, ErrMetadataTooLarge
 	}
 	r.UUID = uuid.Must(uuid.NewV7())
-	out, err := scan(s.pool.QueryRow(ctx, `INSERT INTO olp_go.provider_resources
+	out, err := scan(s.pool.QueryRow(ctx, `INSERT INTO olp.provider_resources
 		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		RETURNING `+columns,
@@ -138,7 +138,7 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 	if err != nil || LocalID(kind, id) != localID {
 		return nil, ErrNotFound
 	}
-	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=$1 AND id=$2 AND api_key_id=$3 AND state<>$4 AND (expires_at IS NULL OR expires_at>now())`,
 		kind, id, apiKeyID, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -151,7 +151,7 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 }
 
 func (s *Store) GetByUpstream(ctx context.Context, kind, apiKeyID, providerID, upstreamID string) (*Resource, error) {
-	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND upstream_id=$4 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())`,
 		kind, apiKeyID, providerID, upstreamID, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -183,9 +183,9 @@ func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, 
 		}
 		after = parsed
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp_go.provider_resources
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
 		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
-		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp_go.provider_resources
+		AND ($4::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM olp.provider_resources
 		WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND state<>$3 AND (expires_at IS NULL OR expires_at>now())))
 		ORDER BY created_at DESC, id DESC LIMIT $5`,
 		kinds, apiKeyID, StateDeleted, nilUUID(after), limit)
@@ -212,7 +212,7 @@ func (s *Store) Update(ctx context.Context, localID, state string, metadata json
 	if err != nil {
 		return ErrNotFound
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources
+	tag, err := s.pool.Exec(ctx, `UPDATE olp.provider_resources
 		SET state=COALESCE($2,state), metadata=metadata||COALESCE($3,'{}'::jsonb),
 			expires_at=COALESCE($4,expires_at), updated_at=now()
 		WHERE id=$1 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())
@@ -237,14 +237,14 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE olp_go.provider_resources SET state=$2,updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource tombstone: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp_go.secrets WHERE id=$1 AND purpose='provider_continuation'`, id); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose='provider_continuation'`, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -256,10 +256,10 @@ func (s *Store) CleanupExpired(ctx context.Context, now time.Time) (int64, error
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `DELETE FROM olp_go.secrets s USING olp_go.provider_resources r WHERE s.id=r.id AND s.purpose='provider_continuation' AND r.expires_at<=$1`, now); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets s USING olp.provider_resources r WHERE s.id=r.id AND s.purpose='provider_continuation' AND r.expires_at<=$1`, now); err != nil {
 		return 0, err
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM olp_go.provider_resources WHERE expires_at IS NOT NULL AND expires_at<=$1`, now)
+	tag, err := tx.Exec(ctx, `DELETE FROM olp.provider_resources WHERE expires_at IS NOT NULL AND expires_at<=$1`, now)
 	if err != nil {
 		return 0, fmt.Errorf("provider resource cleanup: %w", err)
 	}

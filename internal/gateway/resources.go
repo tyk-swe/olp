@@ -288,7 +288,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if x.mode == "streaming" && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyResponses) {
 		req.Header.Set("Accept", "text/event-stream")
@@ -962,7 +962,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		return nil, finish(classConnect, nil)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
 		pipeR.CloseWithError(err)

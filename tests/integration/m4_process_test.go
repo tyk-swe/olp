@@ -521,7 +521,7 @@ func m4Counters(t *testing.T, pool *pgxpool.Pool) (processed, duplicates, reclai
 	t.Helper()
 	err := pool.QueryRow(t.Context(), `SELECT request_metadata_processed_total,
             request_metadata_duplicates_total, request_metadata_reclaimed_total
-        FROM olp_go.async_worker_counters WHERE singleton`).Scan(&processed, &duplicates, &reclaimed)
+        FROM olp.async_worker_counters WHERE singleton`).Scan(&processed, &duplicates, &reclaimed)
 	if err != nil {
 		t.Fatalf("read worker counters: %v", err)
 	}
@@ -658,15 +658,15 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 	in.worker("m4-ledger-worker")
 	priced := "0.000004200000"
 	m4Eventually(t, "every served request to become an accounted fact", 60*time.Second, func() bool {
-		return in.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == requests
+		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 	})
-	if rows := in.count("SELECT count(*) FROM olp_go.requests"); rows != requests {
+	if rows := in.count("SELECT count(*) FROM olp.requests"); rows != requests {
 		t.Fatalf("requests = %d, want %d", rows, requests)
 	}
-	if rows := in.count("SELECT count(*) FROM olp_go.attempts"); rows != requests {
+	if rows := in.count("SELECT count(*) FROM olp.attempts"); rows != requests {
 		t.Fatalf("attempts = %d, want %d", rows, requests)
 	}
-	if rows := in.count(`SELECT count(*) FROM olp_go.attempt_usage_facts
+	if rows := in.count(`SELECT count(*) FROM olp.attempt_usage_facts
         WHERE input_tokens = 4 AND output_tokens = 6 AND usage_complete
           AND charge_status = 'billable' AND NOT unpriced AND currency = 'USD'
           AND estimated_cost::text = $1`, priced); rows != requests {
@@ -692,10 +692,10 @@ func TestM4AccountingIsDurableAcrossReplicas(t *testing.T) {
 		_, repeated, _ := m4Counters(t, in.h.Pool)
 		return repeated > duplicates
 	})
-	if rows := in.count("SELECT count(*) FROM olp_go.attempt_usage_facts"); rows != requests {
+	if rows := in.count("SELECT count(*) FROM olp.attempt_usage_facts"); rows != requests {
 		t.Fatalf("a repeated delivery created %d facts, want %d", rows, requests)
 	}
-	if rows := in.count("SELECT count(*) FROM olp_go.requests"); rows != requests {
+	if rows := in.count("SELECT count(*) FROM olp.requests"); rows != requests {
 		t.Fatalf("a repeated delivery created %d requests, want %d", rows, requests)
 	}
 	if again := in.summary(effective); again["estimated_cost"] != total ||

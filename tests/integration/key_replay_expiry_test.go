@@ -35,7 +35,7 @@ func TestExpiredKeyCreationStillReplaysItsOriginalResult(t *testing.T) {
 	input["name"] = "different request"
 	h.want(owner, "POST", "/api/v1/api-keys", input, headers, 409)
 	var count int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit WHERE action='api_key.create'").Scan(&count); err != nil || count != 1 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='api_key.create'").Scan(&count); err != nil || count != 1 {
 		t.Fatal("replay or rejected requests duplicated the creation audit")
 	}
 }

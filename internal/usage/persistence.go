@@ -42,73 +42,73 @@ const (
 	chargeBillingUncertain = "billing_uncertain"
 )
 
-const admitReceiptSQL = `INSERT INTO olp_go.request_metadata_event_receipts
+const admitReceiptSQL = `INSERT INTO olp.request_metadata_event_receipts
         (event_id, request_id, event_sha256, status, observed_at)
     SELECT $1::uuid, $2::uuid, $3, 'pending', $4
     WHERE $4 >= now() - make_interval(days => $5)
       AND $4 <= now() + make_interval(mins => $6)
-      AND NOT EXISTS (SELECT 1 FROM olp_go.attempt_usage_facts
+      AND NOT EXISTS (SELECT 1 FROM olp.attempt_usage_facts
                       WHERE event_id = $1::uuid OR request_id = $2::uuid)
     ON CONFLICT DO NOTHING RETURNING event_id::text`
 
 const existingReceiptSQL = `SELECT
-        EXISTS (SELECT 1 FROM olp_go.request_metadata_event_receipts
+        EXISTS (SELECT 1 FROM olp.request_metadata_event_receipts
                 WHERE event_id = $1::uuid AND request_id = $2::uuid) AS receipt_exists,
-        (SELECT event_sha256 FROM olp_go.request_metadata_event_receipts
+        (SELECT event_sha256 FROM olp.request_metadata_event_receipts
          WHERE event_id = $1::uuid AND request_id = $2::uuid) AS event_sha256,
-        EXISTS (SELECT 1 FROM olp_go.attempt_usage_facts
+        EXISTS (SELECT 1 FROM olp.attempt_usage_facts
                 WHERE event_id = $1::uuid AND request_id = $2::uuid) AS attempt_fact_exists,
         ($3 < now() - make_interval(days => $4)
          OR $3 > now() + make_interval(mins => $5)) AS outside_window`
 
-const rejectReceiptSQL = `INSERT INTO olp_go.request_metadata_event_receipts
+const rejectReceiptSQL = `INSERT INTO olp.request_metadata_event_receipts
         (event_id, request_id, event_sha256, status, observed_at)
     SELECT $1::uuid, $2::uuid, $3, 'rejected', $4
-    WHERE NOT EXISTS (SELECT 1 FROM olp_go.attempt_usage_facts
+    WHERE NOT EXISTS (SELECT 1 FROM olp.attempt_usage_facts
                       WHERE event_id = $1::uuid OR request_id = $2::uuid)
     ON CONFLICT DO NOTHING RETURNING event_id::text`
 
-const rejectedGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
+const rejectedGapSQL = `INSERT INTO olp.request_metadata_ingestion_gaps
         (id, gateway_instance, event_count, reason, certainty, first_observed_at, last_observed_at)
     VALUES ($1, 'request-metadata-consumer', 0,
             'request_metadata_event_outside_replay_window', 'lower_bound',
             LEAST($2::timestamptz, now()), LEAST($2::timestamptz, now()))`
 
 const raceReceiptSQL = `SELECT EXISTS (
-        SELECT 1 FROM olp_go.request_metadata_event_receipts
+        SELECT 1 FROM olp.request_metadata_event_receipts
         WHERE event_id = $1::uuid AND request_id = $2::uuid
           AND event_sha256 = $3
         UNION ALL
-        SELECT 1 FROM olp_go.attempt_usage_facts
+        SELECT 1 FROM olp.attempt_usage_facts
         WHERE event_id = $1::uuid AND request_id = $2::uuid
-          AND NOT EXISTS (SELECT 1 FROM olp_go.request_metadata_event_receipts
+          AND NOT EXISTS (SELECT 1 FROM olp.request_metadata_event_receipts
                           WHERE event_id = $1::uuid OR request_id = $2::uuid))`
 
-const markReceiptPersistedSQL = `UPDATE olp_go.request_metadata_event_receipts
+const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
        SET status = 'fact_persisted'
      WHERE event_id = $1::uuid AND request_id = $2::uuid AND status = 'pending'`
 
-const insertRequestSQL = `INSERT INTO olp_go.requests
+const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
          attempt_count, created_at, attribution, policy_decisions)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8, $15::jsonb, $16::jsonb)
     ON CONFLICT (id, started_at) DO NOTHING`
 
-const insertAttemptSQL = `INSERT INTO olp_go.attempts
+const insertAttemptSQL = `INSERT INTO olp.attempts
         (id, request_id, request_started_at, ordinal, provider_id, upstream_model,
          started_at, completed_at, status_code, error_class, committed, latency_ms,
          first_byte_ms, routing)
     VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (request_id, ordinal) DO NOTHING`
 
-const insertAnchorSQL = `INSERT INTO olp_go.usage_request_anchors (request_id, request_started_at)
+const insertAnchorSQL = `INSERT INTO olp.usage_request_anchors (request_id, request_started_at)
     VALUES ($1::uuid, $2) ON CONFLICT DO NOTHING`
 
 // The counted markers are written false and recomputed once every fact of the
 // request is in place, so a partially delivered request never counts itself
 // twice under one scope.
-const insertFactSQL = `INSERT INTO olp_go.attempt_usage_facts
+const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
         (attempt_id, event_id, request_id, request_started_at, attempt_ordinal,
          api_key_id, budget_group_id, provider_id, route_slug, upstream_model, operation, surface,
          observed_at, charge_status, usage_observed, usage_complete, input_tokens,
@@ -130,7 +130,7 @@ const insertFactSQL = `INSERT INTO olp_go.attempt_usage_facts
 // numeric keeps the sum exact.
 const factTotalsSQL = `SELECT count(*), COALESCE(sum(estimated_cost), 0)::text,
         count(*) FILTER (WHERE charge_status <> 'not_billable' AND unpriced)
-    FROM olp_go.attempt_usage_facts WHERE event_id = $1::uuid`
+    FROM olp.attempt_usage_facts WHERE event_id = $1::uuid`
 
 // recomputeMarkersSQL decides, for each count scope, which attempt of a request
 // carries the request. Reports count the first attempt of a scope once, and
@@ -162,8 +162,8 @@ const recomputeMarkersSQL = `WITH marked AS (
                    OVER (PARTITION BY request_id, upstream_model) AS model_incomplete,
                bool_or(charge_status <> 'not_billable' AND NOT usage_complete)
                    OVER (PARTITION BY request_id, provider_id, upstream_model) AS target_incomplete
-          FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid)
-    UPDATE olp_go.attempt_usage_facts fact SET
+          FROM olp.attempt_usage_facts WHERE request_id = $1::uuid)
+    UPDATE olp.attempt_usage_facts fact SET
         request_counted = marked.request_marker,
         provider_request_counted = marked.provider_marker,
         model_request_counted = marked.model_marker,

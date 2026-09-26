@@ -210,7 +210,7 @@ func TestOIDCVerifierFlowBindingLinkingAndEnrollment(t *testing.T) {
 	expired := &browser{}
 	expiredAuthorization := begin(expired, "/api/v1/oidc/login", map[string]any{})
 	expiredURL, _ := url.Parse(expiredAuthorization)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.oidc_flows SET expires_at=now()-interval '1 second' WHERE state_digest=$1", h.Server.Auth.Digest("oidc_state", expiredURL.Query().Get("state"))); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.oidc_flows SET expires_at=now()-interval '1 second' WHERE state_digest=$1", h.Server.Auth.Digest("oidc_state", expiredURL.Query().Get("state"))); err != nil {
 		t.Fatal(err)
 	}
 	h.want(expired, "GET", issuer.callback(t, expiredAuthorization, nil), nil, nil, 403)
@@ -251,7 +251,7 @@ func TestOIDCVerifierFlowBindingLinkingAndEnrollment(t *testing.T) {
 	otherOwnerSession := &browser{}
 	h.want(otherOwnerSession, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.recent_auth SET expires_at=now()-interval '1 second'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.recent_auth SET expires_at=now()-interval '1 second'"); err != nil {
 		t.Fatal(err)
 	}
 	h.want(owner, "POST", "/api/v1/oidc/link", nil, nil, 428)

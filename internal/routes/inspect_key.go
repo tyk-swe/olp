@@ -28,7 +28,7 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	}
 	var authority access.Authority
 	var raw []byte
-	if err := q.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp_go.api_keys WHERE id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID); err != nil {
+	if err := q.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp.api_keys WHERE id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID); err != nil {
 		return key, err
 	}
 	if !principal.CanProject(authority.ProjectID, false) {

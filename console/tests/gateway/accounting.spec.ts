@@ -324,7 +324,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   ).toBeVisible();
   await expect(page.getByText('Revision 1', { exact: true })).toBeVisible();
   await page.screenshot({
-    path: info.outputPath('go-pricing-revision.png'),
+    path: info.outputPath('pricing-revision.png'),
     fullPage: true
   });
 
@@ -408,7 +408,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   await expectFact(charge, 'Usage observed', 'Yes');
   await expectFact(charge, 'Usage completeness', 'Complete');
   await page.screenshot({
-    path: info.outputPath('go-request-accounting.png'),
+    path: info.outputPath('request-accounting.png'),
     fullPage: true
   });
 
@@ -458,7 +458,7 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   await expect(budget).toContainText('Window ends');
   await expect(budget).toContainText('Unpriced attempts this UTC month');
   await page.screenshot({
-    path: info.outputPath('go-usage-budget.png'),
+    path: info.outputPath('usage-budget.png'),
     fullPage: true
   });
 
@@ -486,7 +486,7 @@ test('retained media records expose metadata, filters, and accessible details', 
   database.pathname =
     '/' +
     (process.env.OLP_CONSOLE_E2E_DATABASE_PREFIX ?? '') +
-    (info.project.name === 'go-packaged' ? 'olp_go_packaged' : 'olp_go_vite');
+    (info.project.name === 'packaged' ? 'olp_packaged' : 'olp_vite');
   const succeeded = randomUUID();
   const failed = randomUUID();
   const seed = await promisify(execFile)('psql', [
@@ -498,11 +498,11 @@ test('retained media records expose metadata, filters, and accessible details', 
     `
     WITH refs AS (
       SELECT p.id AS provider_id, p.active_revision_id AS revision_id,
-        (SELECT id FROM olp_go.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
-        (SELECT id FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id
-      FROM olp_go.providers p WHERE p.name='Accounting upstream'
+        (SELECT id FROM olp.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
+        (SELECT id FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id
+      FROM olp.providers p WHERE p.name='Accounting upstream'
     )
-    INSERT INTO olp_go.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
+    INSERT INTO olp.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
       route_slug,operation,state,lifecycle_state,progress_percent,completed_at,deleted_at,
       etag,runtime_generation_id,provider_revision_id)
     SELECT v.id::uuid,'terminal-fixture-'||v.id,key_id,provider_id,'archived-video-model',
@@ -558,7 +558,7 @@ test('retained media records expose metadata, filters, and accessible details', 
     ).toBeLessThanOrEqual(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await page.screenshot({
-      path: info.outputPath(`go-retained-media-${width}.png`),
+      path: info.outputPath(`retained-media-${width}.png`),
       fullPage: true
     });
   }

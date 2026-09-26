@@ -31,7 +31,7 @@ func TestConfigurationPreservesConnectionAndEnforcesSessionSettings(t *testing.T
 				t.Fatalf("pool size/connection timeout = %d/%s; want %d/%s", cfg.MaxConns, connection.ConnectTimeout, tc.connections, tc.timeout)
 			}
 			for key, want := range map[string]string{
-				"application_name":                    "olp-go",
+				"application_name":                    "olp",
 				"TimeZone":                            "UTC",
 				"statement_timeout":                   "10000",
 				"lock_timeout":                        "10000",

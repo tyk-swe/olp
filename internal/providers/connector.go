@@ -96,7 +96,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
-	req.Header.Set("User-Agent", "olp-go/probe")
+	req.Header.Set("User-Agent", "olp/probe")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

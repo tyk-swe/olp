@@ -65,11 +65,11 @@ jobs:
       - name: Build native candidate without Rust
         run: |
           mkdir -p .local/evidence
-          docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp-go:candidate . 2>&1 | tee .local/evidence/build.log
+          docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp:candidate . 2>&1 | tee .local/evidence/build.log
       - name: Qualify native candidate
-        run: ./scripts/smoke-image-services.sh olp-go:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
+        run: ./scripts/smoke-image-services.sh olp:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
-          name: go-native-${{ matrix.arch }}
+          name: native-${{ matrix.arch }}
           path: .local/evidence

@@ -526,17 +526,17 @@ func TestBatchLifecycle(t *testing.T) {
 		t.Fatal("a metadata-only list must not contact the provider")
 	}
 	var originalFileMetadata []byte
-	if err := h.Pool.QueryRow(t.Context(), `SELECT metadata FROM olp_go.provider_resources WHERE kind='file' AND route_slug=$1`, slug).Scan(&originalFileMetadata); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT metadata FROM olp.provider_resources WHERE kind='file' AND route_slug=$1`, slug).Scan(&originalFileMetadata); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata='[]'::jsonb WHERE kind='file' AND route_slug=$1`, slug); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET metadata='[]'::jsonb WHERE kind='file' AND route_slug=$1`, slug); err != nil {
 		t.Fatal(err)
 	}
 	status, raw, _ := h.gatewayRaw("GET", "/v1/files", secret, nil, nil)
 	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != before {
 		t.Fatalf("corrupt file was silently omitted from local list: status=%d body=%s", status, raw)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET metadata=$2::jsonb WHERE kind='file' AND route_slug=$1`, slug, string(originalFileMetadata)); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET metadata=$2::jsonb WHERE kind='file' AND route_slug=$1`, slug, string(originalFileMetadata)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -603,10 +603,10 @@ func TestBatchLifecycle(t *testing.T) {
 	fixture.batches["batch-up-1"]["error_file_id"] = "file-up-err"
 	fixture.mu.Unlock()
 
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.provider_resources
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources
 		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata)
 		SELECT gen_random_uuid(),'file',$1,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,'file-up-out','processed','{}'
-		FROM olp_go.provider_resources WHERE kind='batch' AND upstream_id='batch-up-1'`, other["id"]); err != nil {
+		FROM olp.provider_resources WHERE kind='batch' AND upstream_id='batch-up-1'`, other["id"]); err != nil {
 		t.Fatal(err)
 	}
 	status, raw, _ = h.gatewayRaw("GET", "/v1/batches/"+batchID, secret, nil, nil)
@@ -618,7 +618,7 @@ func TestBatchLifecycle(t *testing.T) {
 	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != beforeList {
 		t.Fatalf("unprojectable batch was silently omitted from local list: status=%d body=%s", status, raw)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp_go.provider_resources WHERE kind='file' AND upstream_id='file-up-out'`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp.provider_resources WHERE kind='file' AND upstream_id='file-up-out'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -642,7 +642,7 @@ func TestBatchLifecycle(t *testing.T) {
 	}
 
 	var metadata string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT coalesce(string_agg(metadata::text,''),'') FROM olp_go.provider_resources").Scan(&metadata); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT coalesce(string_agg(metadata::text,''),'') FROM olp.provider_resources").Scan(&metadata); err != nil {
 		t.Fatal(err)
 	}
 	for _, marker := range []string{"upload-content-marker-7", "batch-download-marker-9"} {
@@ -718,10 +718,10 @@ func TestResponseLifecycle(t *testing.T) {
 
 	block := func(upstreamID string) {
 		t.Helper()
-		if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.provider_resources
+		if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources
 			(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata)
 			SELECT gen_random_uuid(),'response',$1,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,$2,'completed','{}'
-			FROM olp_go.provider_resources WHERE kind='response' AND upstream_id='resp-up-1'`, otherKeyID, upstreamID); err != nil {
+			FROM olp.provider_resources WHERE kind='response' AND upstream_id='resp-up-1'`, otherKeyID, upstreamID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -768,7 +768,7 @@ func TestResponseLifecycle(t *testing.T) {
 	}
 
 	var metadata string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT coalesce(string_agg(metadata::text,''),'') FROM olp_go.provider_resources").Scan(&metadata); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT coalesce(string_agg(metadata::text,''),'') FROM olp.provider_resources").Scan(&metadata); err != nil {
 		t.Fatal(err)
 	}
 	for _, marker := range []string{"prompt-marker-1", "response-output-marker-3"} {
@@ -1309,7 +1309,7 @@ func TestResponseRetrievalAccounting(t *testing.T) {
 			if background {
 				var count, input, output int64
 				var costCorrect bool
-				if err := h.Pool.QueryRow(t.Context(), "SELECT count(*), coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0), sum(estimated_cost)=0.000024 FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output, &costCorrect); err != nil {
+				if err := h.Pool.QueryRow(t.Context(), "SELECT count(*), coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0), sum(estimated_cost)=0.000024 FROM olp.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output, &costCorrect); err != nil {
 					t.Fatal(err)
 				}
 				if count != 1 || input != 4 || output != 6 || !costCorrect {
@@ -1427,7 +1427,7 @@ func TestBackgroundResponseStreamAccounting(t *testing.T) {
 	}
 	original := sink.last()
 	var count, input, output int64
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 || input != 4 || output != 6 {
@@ -1442,7 +1442,7 @@ func TestBackgroundResponseStreamAccounting(t *testing.T) {
 			t.Fatalf("poll: %d %v", status, out)
 		}
 	}
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count); err != nil || count != 1 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("duplicate stream billing: count=%d err=%v", count, err)
 	}
 }

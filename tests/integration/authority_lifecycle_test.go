@@ -15,7 +15,7 @@ func TestOutstandingInvitationsLoseIssuerAuthority(t *testing.T) {
 		h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": pending["token"], "display_name": "Pending", "password": accessPassword}, nil, 410)
 		h.want(issuer, "GET", "/api/v1/sessions/current", nil, nil, 401)
 		var revoked bool
-		if err := h.Pool.QueryRow(t.Context(), "SELECT revoked_at IS NOT NULL FROM olp_go.invitations WHERE id=$1", pending["invitation"].(map[string]any)["id"]).Scan(&revoked); err != nil || !revoked {
+		if err := h.Pool.QueryRow(t.Context(), "SELECT revoked_at IS NOT NULL FROM olp.invitations WHERE id=$1", pending["invitation"].(map[string]any)["id"]).Scan(&revoked); err != nil || !revoked {
 			t.Fatal("outstanding grant was not retired")
 		}
 	}

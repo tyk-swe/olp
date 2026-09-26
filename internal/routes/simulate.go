@@ -105,7 +105,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	routingID := d.ID
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp_go.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
 		return access.Reply{}, err
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())
@@ -392,7 +392,7 @@ func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.S
 	}
 	revoked := map[string]bool{}
 	if len(ids) > 0 {
-		rows, err := q.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp_go.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
+		rows, err := q.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
 		if err != nil {
 			return nil, err
 		}

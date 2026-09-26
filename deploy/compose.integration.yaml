@@ -1,7 +1,7 @@
 services:
   postgres:
     volumes:
-      - ${OLP_GO_TEST_TLS_DIR:?}/:/tls:ro
+      - ${OLP_TEST_TLS_DIR:?}/:/tls:ro
     entrypoint:
       - bash
       - -ec
@@ -11,8 +11,8 @@ services:
         chown postgres:postgres /tmp/server.key
         exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/tmp/server.key
   valkey:
-    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-go-local', '--tls-port', '6380', '--tls-cert-file', '/tls/server.crt', '--tls-key-file', '/tls/server.key', '--tls-ca-cert-file', '/tls/ca.crt', '--tls-auth-clients', 'no']
+    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-local', '--tls-port', '6380', '--tls-cert-file', '/tls/server.crt', '--tls-key-file', '/tls/server.key', '--tls-ca-cert-file', '/tls/ca.crt', '--tls-auth-clients', 'no']
     ports:
       - '127.0.0.1::6380'
     volumes:
-      - ${OLP_GO_TEST_TLS_DIR:?}/:/tls:ro
+      - ${OLP_TEST_TLS_DIR:?}/:/tls:ro

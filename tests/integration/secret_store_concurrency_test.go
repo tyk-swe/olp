@@ -112,7 +112,7 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 	}
 	for _, id := range ids {
 		var version int
-		if err := h.Pool.QueryRow(t.Context(), `SELECT key_version FROM olp_go.secrets WHERE id=$1`, id).Scan(&version); err != nil || version != 2 {
+		if err := h.Pool.QueryRow(t.Context(), `SELECT key_version FROM olp.secrets WHERE id=$1`, id).Scan(&version); err != nil || version != 2 {
 			t.Fatalf("overlapping store retained an old key version: id=%s version=%d err=%v", id, version, err)
 		}
 		tx, err := h.Pool.Begin(t.Context())

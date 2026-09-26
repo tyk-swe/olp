@@ -23,7 +23,7 @@ func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 		t.Fatal("expected migration failure")
 	}
 	var exists bool
-	if err = pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp_go')").Scan(&exists); err != nil {
+	if err = pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp')").Scan(&exists); err != nil {
 		t.Fatal(err)
 	}
 	if exists {
@@ -42,14 +42,14 @@ func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 
 func TestMigrationRejectsNonSequentialHistory(t *testing.T) {
 	h := newAccessHarness(t)
-	if _, err := h.Pool.Exec(t.Context(), "DELETE FROM olp_go.migrations WHERE version='0003_oidc_role_claims.sql'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "DELETE FROM olp.migrations WHERE version='0003_oidc_role_claims.sql'"); err != nil {
 		t.Fatal(err)
 	}
 	if database.Migrate(t.Context(), h.Pool) == nil {
 		t.Fatal("accepted a hole in migration history")
 	}
 	var missing bool
-	if err := h.Pool.QueryRow(t.Context(), "SELECT NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0003_oidc_role_claims.sql')").Scan(&missing); err != nil || !missing {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT NOT EXISTS(SELECT 1 FROM olp.migrations WHERE version='0003_oidc_role_claims.sql')").Scan(&missing); err != nil || !missing {
 		t.Fatal("failed migration changed history", err)
 	}
 }

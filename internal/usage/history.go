@@ -112,7 +112,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
         u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions
-    FROM olp_go.requests r LEFT JOIN LATERAL (
+    FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
              SUM(f.cached_input_tokens)::bigint AS cached_input_tokens,
@@ -122,7 +122,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
              SUM(f.estimated_cost)::text AS estimated_cost,
              btrim(MAX(f.currency)) AS currency, BOOL_OR(f.unpriced) AS unpriced,
              BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) AS usage_complete
-        FROM olp_go.attempt_usage_facts f
+        FROM olp.attempt_usage_facts f
        WHERE f.request_id = r.id AND f.request_started_at = r.started_at
       HAVING count(*) > 0
     ) u ON true`
@@ -192,13 +192,13 @@ func ListRequests(ctx context.Context, q access.Queryer, f RequestFilters, curso
 // properties, so they are matched against retained attempts, not expiring usage facts.
 func (f RequestFilters) push(q *filterQuery) {
 	if !f.AllProjects {
-		q.push(" AND r.api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
+		q.push(" AND r.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
 	}
 	if f.Route != nil {
 		q.pushBind(" AND r.route_slug = ", *f.Route)
 	}
 	if f.ProviderID != nil || f.Model != nil {
-		q.push(" AND EXISTS (SELECT 1 FROM olp_go.attempts filter_attempt" +
+		q.push(" AND EXISTS (SELECT 1 FROM olp.attempts filter_attempt" +
 			" WHERE filter_attempt.request_id = r.id AND filter_attempt.request_started_at = r.started_at")
 		if f.ProviderID != nil {
 			q.pushBind(" AND filter_attempt.provider_id = ", *f.ProviderID)
@@ -235,8 +235,8 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         f.cache_write_input_tokens, f.cache_write_5m_input_tokens, f.cache_write_1h_input_tokens,
         f.media_units::text, f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text
-    FROM olp_go.attempts a JOIN olp_go.providers p ON p.id = a.provider_id
-    LEFT JOIN olp_go.attempt_usage_facts f ON f.request_id = a.request_id
+    FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
+    LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
         AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
     WHERE a.request_id = $1 AND a.request_started_at = $2 ORDER BY a.ordinal`
 

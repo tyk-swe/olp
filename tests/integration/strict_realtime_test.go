@@ -154,7 +154,7 @@ func TestStrictRealtimeCurrentNetworkCredentialRevocation(t *testing.T) {
 	owner := &browser{}
 	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
 	var providerID, networkID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,n.id::text FROM olp_go.providers p JOIN olp_go.provider_network_credentials n ON n.provider_id=p.id`).Scan(&providerID, &networkID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,n.id::text FROM olp.providers p JOIN olp.provider_network_credentials n ON n.provider_id=p.id`).Scan(&providerID, &networkID); err != nil {
 		t.Fatal(err)
 	}
 	endpoint := strings.Replace(h.HTTP.URL, "http://", "ws://", 1) + "/v1/realtime?model=" + slug
@@ -299,7 +299,7 @@ func TestStrictRealtimeCurrentProviderCredentialRevocation(t *testing.T) {
 	owner := &browser{}
 	h.want(owner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
 	var providerID, credentialID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp_go.providers p JOIN olp_go.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT p.id::text,s.credential_id::text FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id AND s.is_default`).Scan(&providerID, &credentialID); err != nil {
 		t.Fatal(err)
 	}
 	endpoint := strings.Replace(h.HTTP.URL, "http://", "ws://", 1) + "/v1/realtime?model=" + slug

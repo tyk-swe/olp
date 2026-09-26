@@ -50,7 +50,7 @@ func TestOIDCUnlinkPreservesAnIdentityAuthorizedByCurrentMappings(t *testing.T) 
 				t.Fatal("unlink was not rejected for removing the last usable identity")
 			}
 			var count, unlinks int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp_go.oidc_identities),(SELECT count(*) FROM olp_go.audit WHERE action='oidc.unlink')").Scan(&count, &unlinks); err != nil || count != 2 || unlinks != 0 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM olp.oidc_identities),(SELECT count(*) FROM olp.audit WHERE action='oidc.unlink')").Scan(&count, &unlinks); err != nil || count != 2 || unlinks != 0 {
 				t.Fatalf("identities=%d, unlink audits=%d, error=%v", count, unlinks, err)
 			}
 			h.want(member, "GET", "/api/v1/sessions/current", nil, nil, 200)

@@ -42,7 +42,7 @@ func TestConcurrentOIDCConsumptionAndIdentityLinking(t *testing.T) {
 		t.Fatalf("identity link race: %d, %d", a, b)
 	}
 	var count int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.oidc_identities WHERE subject='contested-identity'").Scan(&count); err != nil || count != 1 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.oidc_identities WHERE subject='contested-identity'").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("linked identity count=%d", count)
 	}
 }
@@ -71,7 +71,7 @@ func TestOIDCRoleSyncRetiresSessionsAndOutstandingGrants(t *testing.T) {
 	h.want(old, "GET", "/api/v1/sessions/current", nil, nil, 401)
 	h.want(nil, "POST", "/api/v1/invitations/accept", map[string]any{"token": pending["token"], "display_name": "Pending", "password": accessPassword}, nil, 410)
 	var unattributed bool
-	if err := h.Pool.QueryRow(t.Context(), "SELECT actor_user_id IS NULL FROM olp_go.audit WHERE action='user.role_sync_oidc'").Scan(&unattributed); err != nil || !unattributed {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT actor_user_id IS NULL FROM olp.audit WHERE action='user.role_sync_oidc'").Scan(&unattributed); err != nil || !unattributed {
 		t.Fatal("automatic role sync must not invent a human actor")
 	}
 	configuration["default_role"] = nil
@@ -96,7 +96,7 @@ func TestOIDCManagedPasswordCannotEscapeVerifiedDeauthorization(t *testing.T) {
 	authorize(member, "/api/v1/oidc/reauthenticate", map[string]any{"purpose": "password_enrollment"}, claims, 303)
 	h.want(member, "POST", "/api/v1/profile/password/enroll", map[string]any{"new_password": accessPassword}, etagHeader(profile), 200)
 	var management string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE id=$1", profile["id"]).Scan(&management); err != nil || management != "oidc" {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp.users WHERE id=$1", profile["id"]).Scan(&management); err != nil || management != "oidc" {
 		t.Fatalf("ownership after enrollment=%s, err=%v", management, err)
 	}
 	identity := h.want(member, "GET", "/api/v1/oidc/identities", nil, nil, 200)["items"].([]any)[0].(map[string]any)
@@ -114,7 +114,7 @@ func TestOIDCManagedPasswordCannotEscapeVerifiedDeauthorization(t *testing.T) {
 	invitation := h.want(member, "POST", "/api/v1/invitations", map[string]any{"email": "pending-denied@example.com", "role": "owner"}, map[string]string{"Idempotency-Key": "denied-invitation"}, 201)
 	h.want(member, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
 	var sequence int64
-	if err := h.Pool.QueryRow(t.Context(), "SELECT authority_sequence FROM olp_go.installation").Scan(&sequence); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT authority_sequence FROM olp.installation").Scan(&sequence); err != nil {
 		t.Fatal(err)
 	}
 	// An unverified token must not revoke anything.
@@ -142,7 +142,7 @@ func TestOIDCManagedPasswordCannotEscapeVerifiedDeauthorization(t *testing.T) {
 	var authorized bool
 	var grants int
 	var after int64
-	if err := h.Pool.QueryRow(t.Context(), "SELECT oidc_authorized,(SELECT count(*) FROM olp_go.recent_auth),(SELECT authority_sequence FROM olp_go.installation) FROM olp_go.users WHERE id=$1", profile["id"]).Scan(&authorized, &grants, &after); err != nil || authorized || grants != 0 || after != sequence+1 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT oidc_authorized,(SELECT count(*) FROM olp.recent_auth),(SELECT authority_sequence FROM olp.installation) FROM olp.users WHERE id=$1", profile["id"]).Scan(&authorized, &grants, &after); err != nil || authorized || grants != 0 || after != sequence+1 {
 		t.Fatalf("revocation: authorized=%v grants=%d sequence=%d->%d err=%v", authorized, grants, sequence, after, err)
 	}
 	// Recovery synchronizes the lower mapping, without resurrecting old sessions

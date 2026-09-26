@@ -130,6 +130,85 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 	}
 }
 
+// A fresh installation keeps its PostgreSQL state in schema olp and its Valkey
+// state under olp:<installation UUID>:, exactly as the released binary writes them.
+func TestFreshInstallationUsesOlpStorageNames(t *testing.T) {
+	binary := required(t, "OLP_TEST_BINARY")
+	pool, url := accessDatabase(t)
+	migrate := exec.CommandContext(t.Context(), binary, "migrate")
+	migrate.Env = testutil.Environment(map[string]string{"OLP_DATABASE_URL": url})
+	if output, err := migrate.CombinedOutput(); err != nil {
+		t.Fatalf("migrate: %v: %s", err, output)
+	}
+	rows, err := pool.Query(t.Context(), "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'olp%' ORDER BY nspname")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || !slices.Equal(schemas, []string{"olp"}) {
+		t.Fatalf("installation schemas = %v, want [olp]: %v", schemas, err)
+	}
+	var installation string
+	var applied int
+	if err := pool.QueryRow(t.Context(), "SELECT (SELECT id::text FROM olp.installation WHERE singleton), (SELECT count(*) FROM olp.migrations)").Scan(&installation, &applied); err != nil {
+		t.Fatalf("read installation row and migration ledger: %v", err)
+	}
+	embedded, err := os.ReadDir("../../internal/database/migrations")
+	if err != nil || applied == 0 || applied != len(embedded) {
+		t.Fatalf("migration ledger holds %d of %d migrations: %v", applied, len(embedded), err)
+	}
+
+	valkey := client(t, required(t, "OLP_TEST_VALKEY_URL"), 5*time.Second)
+	prefix := "olp:" + installation + ":"
+	owned := func() []string {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		reply, err := valkey.Do(ctx, "KEYS", "*"+installation+"*")
+		if err != nil {
+			t.Fatalf("list installation keys: %v", err)
+		}
+		items, _ := reply.([]any)
+		keys := make([]string, 0, len(items))
+		for _, item := range items {
+			key, ok := item.(string)
+			if !ok {
+				t.Fatalf("KEYS returned %#v", item)
+			}
+			keys = append(keys, key)
+		}
+		return keys
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, key := range owned() {
+			if _, err := valkey.Do(ctx, "DEL", key); err != nil {
+				t.Errorf("remove %s: %v", key, err)
+			}
+		}
+	})
+	worker := testutil.StartProcess(t, binary, "worker", map[string]string{"OLP_DATABASE_URL": url,
+		"OLP_AUTH_HMAC_KEY_FILE": required(t, "OLP_AUTH_HMAC_KEY_FILE"), "OLP_MASTER_KEY_FILE": required(t, "OLP_MASTER_KEY_FILE"),
+		"OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_LISTEN_ADDR": "127.0.0.1:0",
+		"OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_SHUTDOWN_TIMEOUT": "1s"})
+	deadline := time.Now().Add(20 * time.Second)
+	for keys := owned(); !slices.Contains(keys, prefix+"request-metadata"); keys = owned() {
+		if time.Now().After(deadline) {
+			t.Fatalf("worker keys for installation %s = %v, want %srequest-metadata\n%s", installation, keys, prefix, worker.Log())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := worker.Stop(3 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range owned() {
+		if !strings.HasPrefix(key, prefix) {
+			t.Fatalf("installation key %q is outside namespace %q", key, prefix)
+		}
+	}
+}
+
 func TestInvalidConfigurationFailsBeforeBinding(t *testing.T) {
 	binary := required(t, "OLP_TEST_BINARY")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -164,7 +243,7 @@ func awaitWorkerPlane(t *testing.T, since time.Time) {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		rows, err := pool.Query(t.Context(),
-			"SELECT task FROM olp_go.worker_task_health WHERE checked_at>=$1 ORDER BY task", since)
+			"SELECT task FROM olp.worker_task_health WHERE checked_at>=$1 ORDER BY task", since)
 		if err != nil {
 			t.Fatal(err)
 		}

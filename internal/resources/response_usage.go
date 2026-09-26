@@ -23,7 +23,7 @@ func (s *Store) ReconcileResponseUsage(ctx context.Context, localID string, evid
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT metadata->'pending_usage' FROM olp_go.provider_resources
+	err = tx.QueryRow(ctx, `SELECT metadata->'pending_usage' FROM olp.provider_resources
  WHERE id=$1 AND kind IN ('response','strict_response') FOR UPDATE`, id).Scan(&raw)
 	if err != nil {
 		return usage.Persisted{}, err
@@ -54,7 +54,7 @@ func (s *Store) ReconcileResponseUsage(ctx context.Context, localID string, evid
 	if err != nil {
 		return usage.Persisted{}, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE olp_go.provider_resources SET metadata=metadata-'pending_usage', updated_at=now() WHERE id=$1`, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET metadata=metadata-'pending_usage', updated_at=now() WHERE id=$1`, id); err != nil {
 		return usage.Persisted{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {

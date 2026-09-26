@@ -75,7 +75,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 	defer tx.Rollback(ctx)
 	var fingerprint []byte
 	var active *int
-	if err = tx.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE").Scan(&fingerprint, &active); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton FOR UPDATE").Scan(&fingerprint, &active); err != nil {
 		return nil, err
 	}
 	expected := auth.Digest("installation", "identity")
@@ -87,7 +87,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 	}
 	// Authenticate every record, including expired replays and old key versions,
 	// before admitting writes. A version number alone does not identify a key.
-	rows, err := tx.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp_go.secrets")
+	rows, err := tx.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets")
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 		return nil, err
 	}
 	rows.Close()
-	if _, err = tx.Exec(ctx, "UPDATE olp_go.installation SET auth_fingerprint=$1,active_key_version=$2 WHERE singleton", expected, keys.Active); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.installation SET auth_fingerprint=$1,active_key_version=$2 WHERE singleton", expected, keys.Active); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -431,7 +431,7 @@ func (s *Server) Principal(r *http.Request, q Queryer, operation string) (Princi
 	var p Principal
 	p.Kind = "user"
 	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -454,7 +454,7 @@ func (s *Server) Principal(r *http.Request, q Queryer, operation string) (Princi
 	return p, nil
 }
 func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
-	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp_go.project_members WHERE user_id=$1", p.ID)
+	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp.project_members WHERE user_id=$1", p.ID)
 	if err != nil {
 		return err
 	}
@@ -512,7 +512,7 @@ func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, pro
 		return Forbidden()
 	}
 	var exists bool
-	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
+	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -540,7 +540,7 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret, operation 
 	}
 	var digest, data, projectData []byte
 	var live bool
-	err := q.QueryRow(r.Context(), "SELECT id::text,name,scopes,digest,created_by::text,expires_at>now() AND revoked_at IS NULL,all_projects,project_ids FROM olp_go.management_tokens WHERE lookup_id=$1", parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &p.AllProjects, &projectData)
+	err := q.QueryRow(r.Context(), "SELECT id::text,name,scopes,digest,created_by::text,expires_at>now() AND revoked_at IS NULL,all_projects,project_ids FROM olp.management_tokens WHERE lookup_id=$1", parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &p.AllProjects, &projectData)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest("management_token", secret))) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -584,7 +584,7 @@ func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(r.Context(), "SELECT id FROM olp_go.installation WHERE singleton FOR UPDATE"); err != nil {
+	if _, err = tx.Exec(r.Context(), "SELECT id FROM olp.installation WHERE singleton FOR UPDATE"); err != nil {
 		tx.Rollback(r.Context())
 		return nil, err
 	}
@@ -603,7 +603,7 @@ func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resou
 	var userID, tokenID any
 	if actor != "" {
 		var kind string
-		err := tx.QueryRow(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM olp_go.users WHERE id=$1) THEN 'user' WHEN EXISTS(SELECT 1 FROM olp_go.management_tokens WHERE id=$1) THEN 'management_token' ELSE '' END`, actor).Scan(&kind)
+		err := tx.QueryRow(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM olp.users WHERE id=$1) THEN 'user' WHEN EXISTS(SELECT 1 FROM olp.management_tokens WHERE id=$1) THEN 'management_token' ELSE '' END`, actor).Scan(&kind)
 		if err != nil {
 			return err
 		}
@@ -616,7 +616,7 @@ func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resou
 			return errors.New("audit actor is not a known principal")
 		}
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO olp_go.Audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", NewID(), userID, tokenID, action, resource, id, outcome, source, family)
+	_, err := tx.Exec(ctx, "INSERT INTO olp.Audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", NewID(), userID, tokenID, action, resource, id, outcome, source, family)
 	return err
 }
 func Commit(r *http.Request, tx pgx.Tx, result Reply) (Reply, error) {

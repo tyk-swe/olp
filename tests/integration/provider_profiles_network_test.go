@@ -247,7 +247,7 @@ func TestProviderProfileTLSDefaultsAndNetworkCredentialLifecycle(t *testing.T) {
 					}
 				}
 				var ciphertext []byte
-				if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp_go.secrets WHERE id=$1", networkID).Scan(&ciphertext); err != nil {
+				if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp.secrets WHERE id=$1", networkID).Scan(&ciphertext); err != nil {
 					t.Fatal(err)
 				}
 				if len(ciphertext) == 0 || bytes.Contains(ciphertext, []byte("PRIVATE KEY")) || bytes.Contains(ciphertext, []byte(f.credential)) {

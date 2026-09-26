@@ -80,7 +80,7 @@ func TestPublicContinuationBarrierPrecedesActionableToolBytes(t *testing.T) {
 			return
 		}
 		defer tx.Rollback(context.Background())
-		if _, err = tx.Exec(r.Context(), `SELECT active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE`); err != nil {
+		if _, err = tx.Exec(r.Context(), `SELECT active_key_version FROM olp.installation WHERE singleton FOR UPDATE`); err != nil {
 			t.Error(err)
 			return
 		}
@@ -128,7 +128,7 @@ func TestPublicContinuationBarrierPrecedesActionableToolBytes(t *testing.T) {
 			}
 			if bytes.Contains(line, []byte(`"tool_calls"`)) {
 				var ready bool
-				err = h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.provider_resources r JOIN olp_go.secrets s ON s.id=r.id WHERE r.submission_id=$1 AND r.state='ready' AND s.purpose='provider_continuation')`, headers["X-OLP-Submission-ID"]).Scan(&ready)
+				err = h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.submission_id=$1 AND r.state='ready' AND s.purpose='provider_continuation')`, headers["X-OLP-Submission-ID"]).Scan(&ready)
 				select {
 				case action <- ready && err == nil:
 				default:
@@ -153,7 +153,7 @@ func TestPublicContinuationBarrierPrecedesActionableToolBytes(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	var state string
-	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&state); err != nil || state != resources.StateDispatching {
+	if err = h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&state); err != nil || state != resources.StateDispatching {
 		t.Fatalf("uncommitted barrier state=%s err=%v", state, err)
 	}
 	unlock()
@@ -249,7 +249,7 @@ func TestPublicContinuationClaimFailureNeverDispatchesProvider(t *testing.T) {
 		t.Fatalf("failed encrypted claim dispatched: status=%d calls=%d %s", status, calls.Load(), body)
 	}
 	var claimed int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claimed); err != nil || claimed != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claimed); err != nil || claimed != 0 {
 		t.Fatalf("failed encrypted claim left a dispatch journal: count=%d err=%v", claimed, err)
 	}
 }

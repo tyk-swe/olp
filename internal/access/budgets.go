@@ -40,7 +40,7 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 }
 
 const budgetGroupFields = `'id',g.id,'name',g.name,'project_id',g.project_id,'project_name',pr.name,'daily_cost_limit',g.daily_cost_limit::text,'monthly_cost_limit',g.monthly_cost_limit::text,'created_by',g.created_by,'created_by_email',u.email,'etag',g.etag,'created_at',g.created_at,'updated_at',g.updated_at`
-const budgetGroupFrom = " FROM olp_go.budget_groups g JOIN olp_go.users u ON u.id=g.created_by LEFT JOIN olp_go.projects pr ON pr.id=g.project_id"
+const budgetGroupFrom = " FROM olp.budget_groups g JOIN olp.users u ON u.id=g.created_by LEFT JOIN olp.projects pr ON pr.id=g.project_id"
 
 func (s *Server) budgetGroupJSON() string {
 	enforcement := "false"
@@ -117,7 +117,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	id, etag := NewID(), NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
@@ -163,7 +163,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	var etag string
 	var projectID *string
 	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text) FROM olp_go.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text) FROM olp.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
 		return Reply{}, err
 	}
 	if err := ProjectAccess(p, projectID, true); err != nil {
@@ -189,7 +189,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	etag = NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now() WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now() WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r, tx); err != nil {
@@ -206,7 +206,7 @@ func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string
 		return nil
 	}
 	var groupProject *string
-	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp_go.budget_groups WHERE id=$1", *groupID).Scan(&groupProject); err != nil {
+	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.budget_groups WHERE id=$1", *groupID).Scan(&groupProject); err != nil {
 		return err
 	}
 	if (groupProject == nil) != (projectID == nil) || (groupProject != nil && *groupProject != *projectID) {

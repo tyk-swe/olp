@@ -228,7 +228,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	if stream {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
-	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("User-Agent", "olp/gateway")
 	var secret []byte
 	if p.slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*p.slot.CredentialID)

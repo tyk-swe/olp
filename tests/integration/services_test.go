@@ -113,7 +113,7 @@ func TestPostgresTransactionsCancellationAuthenticationAndTLS(t *testing.T) {
 
 func TestValkeyScriptsStreamsRecoveryAndIsolation(t *testing.T) {
 	c := client(t, required(t, "OLP_TEST_VALKEY_URL"), time.Second)
-	prefix := "olp-go-test:" + rand.Text()
+	prefix := "olp-test:" + rand.Text()
 	key, stream := prefix+":counter", prefix+":events"
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -163,14 +163,14 @@ func TestValkeyTLSAuthenticationAndPubSubHints(t *testing.T) {
 	if err := c.Ping(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bad, _ := coordination.Configuration(strings.Replace(raw, "olp-go-local", "wrong-password", 1), "", 100*time.Millisecond)
+	bad, _ := coordination.Configuration(strings.Replace(raw, "olp-local", "wrong-password", 1), "", 100*time.Millisecond)
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	if c, err := coordination.Open(ctx, bad); err == nil {
 		c.Close()
 		t.Fatal("accepted invalid Valkey credentials")
 	}
-	channel := "olp-go-test:" + rand.Text() + ":hints"
+	channel := "olp-test:" + rand.Text() + ":hints"
 	ch := make(chan string, 1)
 	scfg, err := coordination.Configuration(raw, "", time.Second)
 	if err != nil {
@@ -215,7 +215,7 @@ func TestValkeyCancellationDisconnectReconnectAndClose(t *testing.T) {
 	}
 	// Pausing command processing forces a transport deadline while the queued
 	// increment still executes afterward. Retrying would duplicate the write.
-	key := "olp-go-test:" + rand.Text() + ":ambiguous"
+	key := "olp-test:" + rand.Text() + ":ambiguous"
 	t.Cleanup(func() { c.Do(context.Background(), "DEL", key) })
 	do(t, c, "CLIENT", "PAUSE", "300", "ALL")
 	_, err = c.Do(t.Context(), "INCR", key)
@@ -232,7 +232,7 @@ func TestValkeyCancellationDisconnectReconnectAndClose(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 20 {
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Millisecond)
-		_, err := c.Do(ctx, "BLPOP", "olp-go-test:"+rand.Text(), "0.03")
+		_, err := c.Do(ctx, "BLPOP", "olp-test:"+rand.Text(), "0.03")
 		cancel()
 		if !errors.As(err, &outcome) || !outcome.Ambiguous {
 			t.Fatalf("in-flight cancellation: %v", err)
@@ -250,7 +250,7 @@ func TestValkeyCancellationDisconnectReconnectAndClose(t *testing.T) {
 	for range 10 {
 		closing := client(t, raw, 100*time.Millisecond)
 		done := make(chan error, 1)
-		go func() { _, err := closing.Do(t.Context(), "BLPOP", "olp-go-test:"+rand.Text(), "1"); done <- err }()
+		go func() { _, err := closing.Do(t.Context(), "BLPOP", "olp-test:"+rand.Text(), "1"); done <- err }()
 		time.Sleep(5 * time.Millisecond)
 		closing.Close()
 		select {
@@ -265,7 +265,7 @@ func TestValkeyCancellationDisconnectReconnectAndClose(t *testing.T) {
 	for range 10 {
 		closing := client(t, raw, 100*time.Millisecond)
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Millisecond)
-		_, err := closing.Do(ctx, "BLPOP", "olp-go-test:"+rand.Text(), "0.03")
+		_, err := closing.Do(ctx, "BLPOP", "olp-test:"+rand.Text(), "0.03")
 		cancel()
 		if !errors.As(err, &outcome) || !outcome.Ambiguous {
 			t.Fatalf("cancel before close: %v", err)

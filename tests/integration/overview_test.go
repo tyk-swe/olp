@@ -74,7 +74,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 		"name": "Overview key", "scopes": []string{"inference"}, "allowed_routes": []string{"overview-chat"},
 	}, map[string]string{"Idempotency-Key": "key"}, 201)
 	want(overview(), 1, 1, 1, true)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET expires_at=$2 WHERE id=$1", key["id"], time.Now().Add(-time.Hour)); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1", key["id"], time.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	want(overview(), 1, 1, 1, true)

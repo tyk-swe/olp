@@ -394,11 +394,11 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 		t.Fatalf("deleted Interaction remained available: %d", response.StatusCode)
 	}
 	var residualSecret bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.secrets s JOIN olp_go.provider_resources r ON r.id=s.id WHERE r.kind='interaction' AND r.state='deleted')`).Scan(&residualSecret); err != nil || residualSecret {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.secrets s JOIN olp.provider_resources r ON r.id=s.id WHERE r.kind='interaction' AND r.state='deleted')`).Scan(&residualSecret); err != nil || residualSecret {
 		t.Fatalf("deleted Interaction retained encrypted provider ID: %v %v", residualSecret, err)
 	}
 	var storedNativeID bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.provider_resources WHERE kind='interaction' AND (upstream_id LIKE 'v1_%' OR metadata::text LIKE '%v1_fixture_%'))`).Scan(&storedNativeID); err != nil || storedNativeID {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources WHERE kind='interaction' AND (upstream_id LIKE 'v1_%' OR metadata::text LIKE '%v1_fixture_%'))`).Scan(&storedNativeID); err != nil || storedNativeID {
 		t.Fatalf("native ID escaped encryption: %v %v", storedNativeID, err)
 	}
 }
@@ -658,7 +658,7 @@ func TestGeminiLifecycleRefusesUnauthorizedStateAndInvalidSetupBeforeProviderWor
 		t.Fatal("unowned Live resumption handle dispatched to provider")
 	}
 	var credentialID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default`, providerID).Scan(&credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp.provider_slots WHERE provider_id=$1 AND is_default`, providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
 	}
 	detail := h.want(owner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
@@ -690,7 +690,7 @@ func TestGeminiInteractionEncryptedMappingFailsClosedOnTamperAndExpiry(t *testin
 	tampered := create("tamper")
 	expired := create("expiry")
 	before := len(provider.captured())
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.secrets SET ciphertext=decode('00','hex') WHERE id=(SELECT id FROM olp_go.provider_resources WHERE kind='interaction' AND replace(id::text,'-','')=$1)`, strings.TrimPrefix(tampered, "interaction_")); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.secrets SET ciphertext=decode('00','hex') WHERE id=(SELECT id FROM olp.provider_resources WHERE kind='interaction' AND replace(id::text,'-','')=$1)`, strings.TrimPrefix(tampered, "interaction_")); err != nil {
 		t.Fatal(err)
 	}
 	response, raw := geminiPublic(t, h, http.MethodGet, path+"/"+tampered, key, nil)
@@ -701,7 +701,7 @@ func TestGeminiInteractionEncryptedMappingFailsClosedOnTamperAndExpiry(t *testin
 	if response.StatusCode != 409 || !bytes.Contains(raw, []byte("provider_resource_unavailable")) {
 		t.Fatalf("tampered previous ID reached provider: %d %s", response.StatusCode, raw)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='interaction' AND replace(id::text,'-','')=$1`, strings.TrimPrefix(expired, "interaction_")); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='interaction' AND replace(id::text,'-','')=$1`, strings.TrimPrefix(expired, "interaction_")); err != nil {
 		t.Fatal(err)
 	}
 	response, raw = geminiPublic(t, h, http.MethodGet, path+"/"+expired, key, nil)

@@ -1,4 +1,4 @@
-name: openllmproxy-go-v1
+name: openllmproxy
 
 x-database-environment: &database-environment
   OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp:${POSTGRES_PASSWORD_URL_ENCODED:-olp}@postgres:5432/olp}

@@ -31,7 +31,7 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 		t.Fatalf("missing strict local identifier: %s", first)
 	}
 	var encrypted bool
-	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.provider_resources r JOIN olp_go.secrets s ON s.id=r.id WHERE r.kind='strict_response' AND r.contract_version='native-responses-v1' AND s.purpose='provider_continuation')`).Scan(&encrypted); err != nil || !encrypted {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.kind='strict_response' AND r.contract_version='native-responses-v1' AND s.purpose='provider_continuation')`).Scan(&encrypted); err != nil || !encrypted {
 		t.Fatalf("contract not committed: %t %v", encrypted, err)
 	}
 	oldCalls := len(historical.captured())

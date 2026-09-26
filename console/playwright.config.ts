@@ -15,7 +15,7 @@ export default defineConfig({
   testDir: './tests',
   testMatch: '**/{access,foundation,gateway}/**/*.spec.ts',
   timeout: 90_000,
-  outputDir: 'test-results/go-access',
+  outputDir: 'test-results/access',
   workers: 1,
   retries: 0,
   forbidOnly: true,
@@ -27,8 +27,8 @@ export default defineConfig({
     screenshot: 'only-on-failure'
   },
   projects: [
-    { name: 'go-packaged', use: { baseURL: 'http://127.0.0.1:4182' } },
-    { name: 'go-vite', use: { baseURL: 'http://127.0.0.1:4183' } }
+    { name: 'packaged', use: { baseURL: 'http://127.0.0.1:4182' } },
+    { name: 'vite', use: { baseURL: 'http://127.0.0.1:4183' } }
   ],
   webServer: [
     {
@@ -36,8 +36,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:9182/health/live',
       reuseExistingServer: false,
       env: {
-        OLP_CONSOLE_E2E_BACKEND: 'go',
-        OLP_DATABASE_URL: database('olp_go_packaged'),
+        OLP_DATABASE_URL: database('olp_packaged'),
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4182',
         OLP_LISTEN_ADDR: '127.0.0.1:4182',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9182',
@@ -51,8 +50,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:9184/health/live',
       reuseExistingServer: false,
       env: {
-        OLP_CONSOLE_E2E_BACKEND: 'go',
-        OLP_DATABASE_URL: database('olp_go_vite'),
+        OLP_DATABASE_URL: database('olp_vite'),
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4183',
         OLP_LISTEN_ADDR: '127.0.0.1:4184',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9184',

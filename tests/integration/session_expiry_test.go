@@ -7,7 +7,7 @@ import "testing"
 func TestExpiredSessionCannotReadOrMutate(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.sessions SET expires_at=now()-interval '1 second'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET expires_at=now()-interval '1 second'"); err != nil {
 		t.Fatal(err)
 	}
 	h.want(owner, "GET", "/api/v1/sessions/current", nil, nil, 401)

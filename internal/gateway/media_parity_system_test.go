@@ -235,7 +235,7 @@ func TestVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget(t *testing.T) {
 		t.Fatalf("durable create dispatched %d upstream times", got)
 	}
 	var state string
-	if err := f.pool.QueryRow(t.Context(), "SELECT lifecycle_state FROM olp_go.media_jobs").Scan(&state); err != nil {
+	if err := f.pool.QueryRow(t.Context(), "SELECT lifecycle_state FROM olp.media_jobs").Scan(&state); err != nil {
 		t.Fatal(err)
 	}
 	if state != string(media.LifecycleCreateAmbiguous) {

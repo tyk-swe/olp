@@ -204,12 +204,12 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 			t.Fatalf("%s: %v", query, err)
 		}
 	}
-	exec("INSERT INTO olp_go.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
+	exec("INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
 		f.ownerID, "owner@example.test", uuid.NewString())
 	f.apiKeyID = uuid.NewString()
 	lookup := "mediaLookup" + uuid.NewString()[:8]
 	f.bearer = "olp_" + lookup + "_" + secrets.Token()
-	exec(`INSERT INTO olp_go.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
+	exec(`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
 		VALUES($1,$2,$3,'media test',$4,'{"scopes":["inference"],"allowed_routes":[]}', $5)`,
 		f.apiKeyID, lookup, f.auth.Digest("api_key", f.bearer), f.ownerID, uuid.NewString())
 
@@ -252,14 +252,14 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 		version := 1
 		credentialVersion = &version
 	}
-	exec(`INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,active_revision_id)
+	exec(`INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,active_revision_id)
 		VALUES($1,'media-provider','openai','active',$2,$3,$4,$5,$6)`,
 		f.providerID, configJSON, uuid.NewString(), uuid.NewString(), f.ownerID, f.revisionID)
-	exec(`INSERT INTO olp_go.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
+	exec(`INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
 		VALUES($1,$2,1,'media-provider',$3,$4,$5,$6,$7,$8)`,
 		f.revisionID, f.providerID, configJSON, modelsJSON, slotsJSON, credentialVersion, uuid.NewString(), f.ownerID)
 	if withCredential {
-		exec("INSERT INTO olp_go.provider_credentials(id,provider_id,version) VALUES($1,$2,1)",
+		exec("INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,1)",
 			*f.credentialID, f.providerID)
 	}
 
@@ -267,7 +267,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	// remain decryptable for job reconciliation even after the API key and the
 	// credential row itself move on.
 	if withCredential {
-		exec("UPDATE olp_go.installation SET active_key_version = $1 WHERE singleton", f.keys.Active)
+		exec("UPDATE olp.installation SET active_key_version = $1 WHERE singleton", f.keys.Active)
 		tx, err := f.pool.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -314,7 +314,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	// Job authorization reads the durable route even after it is retired
 	// from the active snapshot.
 	route := f.snapshot.Routes["video-default"]
-	exec(`INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag)
+	exec(`INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag)
 		VALUES($1,$2,$3,$4,$5,$6)`,
 		route.ID, route.Slug, f.ownerID, route.Revision, route.RevisionID, uuid.NewString())
 	digest, err := f.snapshot.Digest()
@@ -325,7 +325,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	if err != nil {
 		t.Fatal(err)
 	}
-	exec("INSERT INTO olp_go.runtime_releases(id,sequence,sha256,snapshot,created_by) VALUES($1,1,$2,$3,$4)",
+	exec("INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by) VALUES($1,1,$2,$3,$4)",
 		f.generationID, digest, encoded, f.ownerID)
 
 	creds := map[string][]byte{}
@@ -429,7 +429,7 @@ func (f *mediaFixture) lifecycle(t *testing.T, upstreamID string) string {
 	t.Helper()
 	var state string
 	if err := f.pool.QueryRow(t.Context(),
-		"SELECT lifecycle_state FROM olp_go.media_jobs WHERE upstream_job_id = $1", upstreamID).Scan(&state); err != nil {
+		"SELECT lifecycle_state FROM olp.media_jobs WHERE upstream_job_id = $1", upstreamID).Scan(&state); err != nil {
 		t.Fatal(err)
 	}
 	return state
@@ -523,7 +523,7 @@ func TestVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("upstream delete calls %d", got)
 	}
 	var lifecycle string
-	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
 		t.Fatal(err)
 	}
 	if lifecycle != "deleted" {
@@ -562,7 +562,7 @@ func TestVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("revoked key list: status %d", resp.StatusCode)
 	}
 	var count int
-	if err := f.pool.QueryRow(ctx, "SELECT count(*) FROM olp_go.media_jobs WHERE id = $1", videoID).Scan(&count); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT count(*) FROM olp.media_jobs WHERE id = $1", videoID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -691,15 +691,15 @@ func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	exec(`CREATE FUNCTION olp_go.fail_test_media_finalize() RETURNS trigger LANGUAGE plpgsql AS $$
+	exec(`CREATE FUNCTION olp.fail_test_media_finalize() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN
 			IF NEW.lifecycle_state = 'deleted' THEN
 				RAISE EXCEPTION 'injected finalization failure';
 			END IF;
 			RETURN NEW;
 		END; $$`)
-	exec(`CREATE TRIGGER fail_test_media_finalize BEFORE UPDATE ON olp_go.media_jobs
-		FOR EACH ROW EXECUTE FUNCTION olp_go.fail_test_media_finalize()`)
+	exec(`CREATE TRIGGER fail_test_media_finalize BEFORE UPDATE ON olp.media_jobs
+		FOR EACH ROW EXECUTE FUNCTION olp.fail_test_media_finalize()`)
 
 	resp = f.call(t, http.MethodDelete, "/v1/videos/"+videoID, "", nil)
 	resp.Body.Close()
@@ -710,15 +710,15 @@ func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 		t.Fatalf("upstream delete calls %d", got)
 	}
 	var lifecycle string
-	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
 		t.Fatal(err)
 	}
 	if lifecycle != "delete_pending" {
 		t.Fatalf("the durable delete intent must survive a failed tombstone: %q", lifecycle)
 	}
 
-	exec("DROP TRIGGER fail_test_media_finalize ON olp_go.media_jobs")
-	exec("DROP FUNCTION olp_go.fail_test_media_finalize()")
+	exec("DROP TRIGGER fail_test_media_finalize ON olp.media_jobs")
+	exec("DROP FUNCTION olp.fail_test_media_finalize()")
 
 	// Upstream reports the object already gone; durable intent accepts it.
 	f.upstream.delete404.Store(true)
@@ -727,7 +727,7 @@ func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || deleted["deleted"] != true {
 		t.Fatalf("delete-missing-is-success: status %d body %v", resp.StatusCode, deleted)
 	}
-	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp.media_jobs WHERE id = $1", videoID).Scan(&lifecycle); err != nil {
 		t.Fatal(err)
 	}
 	if lifecycle != "deleted" {
@@ -748,15 +748,15 @@ func TestVideoCreateAttachFailureCompensates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	exec(`CREATE FUNCTION olp_go.fail_test_media_attach() RETURNS trigger LANGUAGE plpgsql AS $$
+	exec(`CREATE FUNCTION olp.fail_test_media_attach() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN
 			IF OLD.lifecycle_state = 'creating' AND NEW.lifecycle_state = 'active' THEN
 				RAISE EXCEPTION 'injected attach failure';
 			END IF;
 			RETURN NEW;
 		END; $$`)
-	exec(`CREATE TRIGGER fail_test_media_attach BEFORE UPDATE ON olp_go.media_jobs
-		FOR EACH ROW EXECUTE FUNCTION olp_go.fail_test_media_attach()`)
+	exec(`CREATE TRIGGER fail_test_media_attach BEFORE UPDATE ON olp.media_jobs
+		FOR EACH ROW EXECUTE FUNCTION olp.fail_test_media_attach()`)
 
 	resp := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
 	resp.Body.Close()
@@ -784,7 +784,7 @@ func TestVideoCreateAttachFailureCompensates(t *testing.T) {
 	}
 	var genID, revisionID *string
 	if err := f.pool.QueryRow(ctx,
-		"SELECT runtime_generation_id::text, provider_revision_id::text FROM olp_go.media_jobs WHERE upstream_job_id = 'upstream-video-created-2'",
+		"SELECT runtime_generation_id::text, provider_revision_id::text FROM olp.media_jobs WHERE upstream_job_id = 'upstream-video-created-2'",
 	).Scan(&genID, &revisionID); err != nil {
 		t.Fatal(err)
 	}
@@ -792,8 +792,8 @@ func TestVideoCreateAttachFailureCompensates(t *testing.T) {
 		t.Fatalf("pinned authority lost: %v %v", genID, revisionID)
 	}
 
-	exec("DROP TRIGGER fail_test_media_attach ON olp_go.media_jobs")
-	exec("DROP FUNCTION olp_go.fail_test_media_attach()")
+	exec("DROP TRIGGER fail_test_media_attach ON olp.media_jobs")
+	exec("DROP FUNCTION olp.fail_test_media_attach()")
 
 	// The autonomous pass finishes the cleanup without the creating key.
 	f.rt.mu.Lock()
@@ -835,9 +835,9 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	// past the staleness gate without firing the lifecycle guard.
 	reserved := reserve()
 	for _, query := range []string{
-		"ALTER TABLE olp_go.media_jobs DISABLE TRIGGER ALL",
-		"UPDATE olp_go.media_jobs SET updated_at = now() - interval '10 minutes' WHERE id = '" + reserved.ID + "'",
-		"ALTER TABLE olp_go.media_jobs ENABLE TRIGGER ALL",
+		"ALTER TABLE olp.media_jobs DISABLE TRIGGER ALL",
+		"UPDATE olp.media_jobs SET updated_at = now() - interval '10 minutes' WHERE id = '" + reserved.ID + "'",
+		"ALTER TABLE olp.media_jobs ENABLE TRIGGER ALL",
 	} {
 		if _, err := f.pool.Exec(ctx, query); err != nil {
 			t.Fatal(err)
@@ -851,7 +851,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 		t.Fatalf("reconciliation pass %+v", pass)
 	}
 	var lifecycle string
-	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id = $1", reserved.ID).Scan(&lifecycle); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp.media_jobs WHERE id = $1", reserved.ID).Scan(&lifecycle); err != nil {
 		t.Fatal(err)
 	}
 	if lifecycle != "create_ambiguous" {
@@ -873,7 +873,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 		t.Fatalf("second pass %+v", pass)
 	}
 	var state string
-	if err := f.pool.QueryRow(ctx, "SELECT state FROM olp_go.media_jobs WHERE id = $1", active.ID).Scan(&state); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT state FROM olp.media_jobs WHERE id = $1", active.ID).Scan(&state); err != nil {
 		t.Fatal(err)
 	}
 	if state != "succeeded" {
@@ -883,7 +883,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	// Worker restart: a fresh service instance adopts the durable delete
 	// intent and finishes it without any in-process state from the first.
 	if _, err := f.pool.Exec(ctx,
-		`UPDATE olp_go.media_jobs SET lifecycle_state = 'delete_pending',
+		`UPDATE olp.media_jobs SET lifecycle_state = 'delete_pending',
 			next_reconciliation_at = now(), reconciliation_claim_id = NULL,
 			reconciliation_claimed_until = NULL WHERE id = $1`, active.ID); err != nil {
 		t.Fatal(err)
@@ -901,7 +901,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	if pass.Claimed < 1 {
 		t.Fatalf("restarted worker pass %+v", pass)
 	}
-	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp_go.media_jobs WHERE id = $1", active.ID).Scan(&lifecycle); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT lifecycle_state FROM olp.media_jobs WHERE id = $1", active.ID).Scan(&lifecycle); err != nil {
 		t.Fatal(err)
 	}
 	if lifecycle != "deleted" {
@@ -946,7 +946,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 
 	// Explicit revocation is durable authority: it always wins over the
 	// retained historical reference.
-	if _, err := f.pool.Exec(ctx, "UPDATE olp_go.provider_credentials SET revoked_at = now() WHERE id = $1", *f.credentialID); err != nil {
+	if _, err := f.pool.Exec(ctx, "UPDATE olp.provider_credentials SET revoked_at = now() WHERE id = $1", *f.credentialID); err != nil {
 		t.Fatal(err)
 	}
 	f.rt.mu.Lock()
@@ -969,7 +969,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(ctx,
-		"UPDATE olp_go.media_jobs SET lifecycle_state = 'delete_pending' WHERE id = $1", revokedJob.ID); err != nil {
+		"UPDATE olp.media_jobs SET lifecycle_state = 'delete_pending' WHERE id = $1", revokedJob.ID); err != nil {
 		t.Fatal(err)
 	}
 	before := f.upstream.deleteCalls.Load()
@@ -978,7 +978,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reconErr *string
-	if err := f.pool.QueryRow(ctx, "SELECT reconciliation_error FROM olp_go.media_jobs WHERE id = $1", revokedJob.ID).Scan(&reconErr); err != nil {
+	if err := f.pool.QueryRow(ctx, "SELECT reconciliation_error FROM olp.media_jobs WHERE id = $1", revokedJob.ID).Scan(&reconErr); err != nil {
 		t.Fatal(err)
 	}
 	if reconErr == nil || *reconErr != "media_job_credential_revoked" {
@@ -1035,7 +1035,7 @@ func TestVideoConcurrentCreates(t *testing.T) {
 	}
 	var count int
 	if err := f.pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.media_jobs WHERE lifecycle_state = 'active'").Scan(&count); err != nil {
+		"SELECT count(*) FROM olp.media_jobs WHERE lifecycle_state = 'active'").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != workers {

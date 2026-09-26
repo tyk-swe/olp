@@ -12,8 +12,8 @@
 -- Reconstructed spend per budget window. The windows are derived (day number
 -- and year*12+month), so a reconciliation pass can rebuild Valkey counters
 -- after an outage without replaying facts.
-CREATE TABLE olp_go.api_key_cost_windows (
-    api_key_id uuid NOT NULL REFERENCES olp_go.api_keys ON DELETE CASCADE,
+CREATE TABLE olp.api_key_cost_windows (
+    api_key_id uuid NOT NULL REFERENCES olp.api_keys ON DELETE CASCADE,
     window_kind text NOT NULL CHECK (window_kind IN ('day','month')),
     window_id bigint NOT NULL CHECK (window_id >= 0),
     accrued numeric(28,12) NOT NULL CHECK (accrued >= 0),
@@ -26,10 +26,10 @@ CREATE TABLE olp_go.api_key_cost_windows (
 -- Request history is range partitioned so retention purges whole ranges as the
 -- installation grows. A DEFAULT partition keeps the schema complete without a
 -- partition maintenance worker.
-CREATE TABLE olp_go.requests (
+CREATE TABLE olp.requests (
     id uuid NOT NULL,
     runtime_generation_id uuid NOT NULL,
-    api_key_id uuid NOT NULL REFERENCES olp_go.api_keys,
+    api_key_id uuid NOT NULL REFERENCES olp.api_keys,
     route_slug text NOT NULL,
     operation text NOT NULL,
     surface text NOT NULL,
@@ -43,16 +43,16 @@ CREATE TABLE olp_go.requests (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (id, started_at)
 ) PARTITION BY RANGE (started_at);
-CREATE TABLE olp_go.requests_default PARTITION OF olp_go.requests DEFAULT;
-CREATE INDEX requests_route_idx ON olp_go.requests (route_slug, started_at DESC);
-CREATE INDEX requests_started_at_idx ON olp_go.requests (started_at DESC);
+CREATE TABLE olp.requests_default PARTITION OF olp.requests DEFAULT;
+CREATE INDEX requests_route_idx ON olp.requests (route_slug, started_at DESC);
+CREATE INDEX requests_started_at_idx ON olp.requests (started_at DESC);
 
-CREATE TABLE olp_go.attempts (
+CREATE TABLE olp.attempts (
     id uuid PRIMARY KEY,
     request_id uuid NOT NULL,
     request_started_at timestamptz NOT NULL,
     ordinal smallint NOT NULL CHECK (ordinal > 0),
-    provider_id uuid NOT NULL REFERENCES olp_go.providers,
+    provider_id uuid NOT NULL REFERENCES olp.providers,
     upstream_model text NOT NULL,
     started_at timestamptz NOT NULL,
     completed_at timestamptz,
@@ -66,31 +66,31 @@ CREATE TABLE olp_go.attempts (
     routing jsonb,
     UNIQUE (request_id, ordinal),
     FOREIGN KEY (request_id, request_started_at)
-        REFERENCES olp_go.requests (id, started_at) ON DELETE CASCADE
+        REFERENCES olp.requests (id, started_at) ON DELETE CASCADE
 );
-CREATE INDEX attempts_provider_started_idx ON olp_go.attempts (provider_id, started_at DESC);
-CREATE INDEX attempts_request_id_idx ON olp_go.attempts (request_id);
+CREATE INDEX attempts_provider_started_idx ON olp.attempts (provider_id, started_at DESC);
+CREATE INDEX attempts_request_id_idx ON olp.attempts (request_id);
 
 -- Usage facts outlive their request rows: retention purges history earlier than
 -- aggregates. The anchor carries the partition key so facts keep a foreign key
 -- without pinning the partitioned history table.
-CREATE TABLE olp_go.usage_request_anchors (
+CREATE TABLE olp.usage_request_anchors (
     request_id uuid NOT NULL,
     request_started_at timestamptz NOT NULL,
     PRIMARY KEY (request_id, request_started_at)
 );
-CREATE INDEX usage_request_anchors_started_at_idx ON olp_go.usage_request_anchors (request_started_at);
+CREATE INDEX usage_request_anchors_started_at_idx ON olp.usage_request_anchors (request_started_at);
 
-CREATE TABLE olp_go.pricing_revisions (
+CREATE TABLE olp.pricing_revisions (
     id uuid PRIMARY KEY,
     revision integer NOT NULL UNIQUE,
     effective_at timestamptz NOT NULL,
-    created_by uuid NOT NULL REFERENCES olp_go.users,
+    created_by uuid NOT NULL REFERENCES olp.users,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE olp_go.prices (
-    pricing_revision_id uuid NOT NULL REFERENCES olp_go.pricing_revisions ON DELETE CASCADE,
+CREATE TABLE olp.prices (
+    pricing_revision_id uuid NOT NULL REFERENCES olp.pricing_revisions ON DELETE CASCADE,
     provider_kind text NOT NULL CHECK (provider_kind IN (
         'openai','anthropic','gemini','vertex_ai','bedrock','azure_openai','openai_compatible')),
     model text NOT NULL,
@@ -104,19 +104,19 @@ CREATE TABLE olp_go.prices (
     unit_price numeric(24,12),
     currency char(3) NOT NULL DEFAULT 'USD'
         CHECK (currency = upper(currency) AND btrim(currency) ~ '^[A-Z]{3}$'),
-    provider_id uuid REFERENCES olp_go.providers ON DELETE CASCADE,
+    provider_id uuid REFERENCES olp.providers ON DELETE CASCADE,
     -- Vendor catalogue identity (an `openai_compatible` connector fronting a
     -- known vendor prices against that vendor, not the connector kind).
     vendor_id text,
     CONSTRAINT prices_revision_scope_key UNIQUE NULLS NOT DISTINCT
         (pricing_revision_id, provider_kind, provider_id, vendor_id, model, operation)
 );
-CREATE INDEX prices_provider_override_idx ON olp_go.prices (provider_id, model, operation)
+CREATE INDEX prices_provider_override_idx ON olp.prices (provider_id, model, operation)
     WHERE provider_id IS NOT NULL;
 
 -- One installation reports one currency; mixing them would make every total a
 -- lie. The first revision sets it and later revisions are checked against it.
-CREATE TABLE olp_go.pricing_currency (
+CREATE TABLE olp.pricing_currency (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     currency char(3) NOT NULL CHECK (currency = upper(currency) AND btrim(currency) ~ '^[A-Z]{3}$')
 );
@@ -124,14 +124,14 @@ CREATE TABLE olp_go.pricing_currency (
 -- One row per provider attempt that produced billable evidence. The CHECK
 -- constraints encode the charge state machine so no code path can persist a
 -- priced row without complete usage, or a cost on a not-billable attempt.
-CREATE TABLE olp_go.attempt_usage_facts (
+CREATE TABLE olp.attempt_usage_facts (
     attempt_id uuid PRIMARY KEY,
     event_id uuid NOT NULL,
     request_id uuid NOT NULL,
     request_started_at timestamptz NOT NULL,
     attempt_ordinal smallint NOT NULL CHECK (attempt_ordinal > 0),
-    api_key_id uuid NOT NULL REFERENCES olp_go.api_keys,
-    provider_id uuid NOT NULL REFERENCES olp_go.providers,
+    api_key_id uuid NOT NULL REFERENCES olp.api_keys,
+    provider_id uuid NOT NULL REFERENCES olp.providers,
     route_slug text NOT NULL,
     upstream_model text NOT NULL,
     operation text NOT NULL,
@@ -146,7 +146,7 @@ CREATE TABLE olp_go.attempt_usage_facts (
     media_units numeric(24,6) CHECK (media_units IS NULL OR media_units >= 0),
     estimated_cost numeric(24,12) CHECK (estimated_cost IS NULL OR estimated_cost >= 0),
     unpriced boolean NOT NULL,
-    pricing_revision_id uuid REFERENCES olp_go.pricing_revisions,
+    pricing_revision_id uuid REFERENCES olp.pricing_revisions,
     currency char(3) CHECK (currency IS NULL
         OR (currency = upper(currency) AND btrim(currency) ~ '^[A-Z]{3}$')),
     request_counted boolean NOT NULL,
@@ -163,7 +163,7 @@ CREATE TABLE olp_go.attempt_usage_facts (
     target_incomplete_counted boolean NOT NULL,
     UNIQUE (request_id, attempt_ordinal),
     FOREIGN KEY (request_id, request_started_at)
-        REFERENCES olp_go.usage_request_anchors (request_id, request_started_at) ON DELETE CASCADE,
+        REFERENCES olp.usage_request_anchors (request_id, request_started_at) ON DELETE CASCADE,
     CONSTRAINT attempt_usage_facts_not_billable_check CHECK (
         charge_status <> 'not_billable'
         OR (NOT usage_observed AND usage_complete AND NOT unpriced
@@ -175,26 +175,26 @@ CREATE TABLE olp_go.attempt_usage_facts (
         OR (charge_status = 'billable' AND usage_complete AND NOT unpriced))
 );
 CREATE INDEX attempt_usage_facts_api_key_observed_at_idx
-    ON olp_go.attempt_usage_facts (api_key_id, observed_at DESC);
-CREATE INDEX attempt_usage_facts_event_id_idx ON olp_go.attempt_usage_facts (event_id);
+    ON olp.attempt_usage_facts (api_key_id, observed_at DESC);
+CREATE INDEX attempt_usage_facts_event_id_idx ON olp.attempt_usage_facts (event_id);
 CREATE INDEX attempt_usage_facts_model_idx
-    ON olp_go.attempt_usage_facts (upstream_model, observed_at DESC);
-CREATE INDEX attempt_usage_facts_observed_at_idx ON olp_go.attempt_usage_facts (observed_at DESC);
+    ON olp.attempt_usage_facts (upstream_model, observed_at DESC);
+CREATE INDEX attempt_usage_facts_observed_at_idx ON olp.attempt_usage_facts (observed_at DESC);
 CREATE INDEX attempt_usage_facts_provider_idx
-    ON olp_go.attempt_usage_facts (provider_id, observed_at DESC);
+    ON olp.attempt_usage_facts (provider_id, observed_at DESC);
 CREATE INDEX attempt_usage_facts_request_idx
-    ON olp_go.attempt_usage_facts (request_id, request_started_at, attempt_ordinal);
+    ON olp.attempt_usage_facts (request_id, request_started_at, attempt_ordinal);
 
 -- Rolled up usage. Reports read facts and hourly rows as one set, so every
 -- count scope of the fact table survives the rollup as a separate column.
-CREATE TABLE olp_go.attempt_usage_hourly (
+CREATE TABLE olp.attempt_usage_hourly (
     bucket timestamptz NOT NULL,
     route_slug text NOT NULL,
-    provider_id uuid NOT NULL REFERENCES olp_go.providers,
+    provider_id uuid NOT NULL REFERENCES olp.providers,
     upstream_model text NOT NULL,
     operation text NOT NULL,
     surface text NOT NULL CHECK (surface IN ('openai','anthropic','gemini','unknown')),
-    api_key_id uuid REFERENCES olp_go.api_keys,
+    api_key_id uuid REFERENCES olp.api_keys,
     request_count bigint NOT NULL CHECK (request_count >= 0),
     provider_request_count bigint NOT NULL CHECK (provider_request_count >= 0),
     model_request_count bigint NOT NULL CHECK (model_request_count >= 0),
@@ -221,11 +221,11 @@ CREATE TABLE olp_go.attempt_usage_hourly (
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id)
 );
 CREATE INDEX attempt_usage_hourly_api_key_bucket_idx
-    ON olp_go.attempt_usage_hourly (api_key_id, bucket DESC) WHERE api_key_id IS NOT NULL;
+    ON olp.attempt_usage_hourly (api_key_id, bucket DESC) WHERE api_key_id IS NOT NULL;
 
 -- Gaps are the honest record of metadata that was lost or could not be
 -- attributed. Reports treat any overlapping gap as evidence of incompleteness.
-CREATE TABLE olp_go.request_metadata_ingestion_gaps (
+CREATE TABLE olp.request_metadata_ingestion_gaps (
     id uuid PRIMARY KEY,
     gateway_instance text NOT NULL,
     event_count bigint NOT NULL CHECK (event_count >= 0),
@@ -242,9 +242,9 @@ CREATE TABLE olp_go.request_metadata_ingestion_gaps (
         CHECK (certainty = 'lower_bound' OR event_count > 0)
 );
 CREATE UNIQUE INDEX request_metadata_ingestion_gaps_deduplication_key_idx
-    ON olp_go.request_metadata_ingestion_gaps (deduplication_key) WHERE deduplication_key IS NOT NULL;
+    ON olp.request_metadata_ingestion_gaps (deduplication_key) WHERE deduplication_key IS NOT NULL;
 
-CREATE TABLE olp_go.request_metadata_gap_hourly (
+CREATE TABLE olp.request_metadata_gap_hourly (
     bucket timestamptz NOT NULL,
     gateway_instance text NOT NULL,
     reason text NOT NULL,
@@ -261,11 +261,11 @@ CREATE TABLE olp_go.request_metadata_gap_hourly (
     PRIMARY KEY (bucket, gateway_instance, reason)
 );
 CREATE INDEX request_metadata_gap_hourly_overlap_idx
-    ON olp_go.request_metadata_gap_hourly (last_observed_at, first_observed_at);
+    ON olp.request_metadata_gap_hourly (last_observed_at, first_observed_at);
 
 -- One row per gateway process lifetime. An open epoch that stops checkpointing
 -- is detected, marked unclean, and carries the gap that bounds its loss.
-CREATE TABLE olp_go.request_metadata_gateway_epochs (
+CREATE TABLE olp.request_metadata_gateway_epochs (
     gateway_instance text NOT NULL,
     process_epoch uuid NOT NULL,
     started_at timestamptz NOT NULL,
@@ -280,8 +280,8 @@ CREATE TABLE olp_go.request_metadata_gateway_epochs (
     stale_candidate_at timestamptz,
     stale_detected_at timestamptz,
     acknowledged_at timestamptz,
-    acknowledged_by uuid REFERENCES olp_go.users ON DELETE SET NULL,
-    uncertainty_gap_id uuid REFERENCES olp_go.request_metadata_ingestion_gaps ON DELETE SET NULL,
+    acknowledged_by uuid REFERENCES olp.users ON DELETE SET NULL,
+    uncertainty_gap_id uuid REFERENCES olp.request_metadata_ingestion_gaps ON DELETE SET NULL,
     CONSTRAINT request_metadata_gateway_epochs_updated_check CHECK (updated_at >= started_at),
     CONSTRAINT request_metadata_gateway_epochs_closed_check
         CHECK (gracefully_closed_at IS NULL OR gracefully_closed_at >= started_at),
@@ -297,21 +297,21 @@ CREATE TABLE olp_go.request_metadata_gateway_epochs (
     PRIMARY KEY (gateway_instance, process_epoch)
 );
 CREATE UNIQUE INDEX request_metadata_gateway_epochs_process_epoch_idx
-    ON olp_go.request_metadata_gateway_epochs (process_epoch);
+    ON olp.request_metadata_gateway_epochs (process_epoch);
 CREATE UNIQUE INDEX request_metadata_gateway_epochs_one_open_idx
-    ON olp_go.request_metadata_gateway_epochs (gateway_instance)
+    ON olp.request_metadata_gateway_epochs (gateway_instance)
     WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL;
 CREATE INDEX request_metadata_gateway_epochs_stale_scan_idx
-    ON olp_go.request_metadata_gateway_epochs (updated_at)
+    ON olp.request_metadata_gateway_epochs (updated_at)
     WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL;
 CREATE INDEX request_metadata_gateway_epochs_unresolved_idx
-    ON olp_go.request_metadata_gateway_epochs (stale_detected_at)
+    ON olp.request_metadata_gateway_epochs (stale_detected_at)
     WHERE stale_detected_at IS NOT NULL AND acknowledged_at IS NULL;
 
 -- Bounded idempotency for stream delivery. A receipt admits one event once
 -- within the supported replay window; older deliveries are rejected explicitly
 -- rather than silently added to an aggregate they can no longer belong to.
-CREATE TABLE olp_go.request_metadata_event_receipts (
+CREATE TABLE olp.request_metadata_event_receipts (
     event_id uuid NOT NULL,
     request_id uuid NOT NULL,
     event_sha256 bytea NOT NULL CHECK (octet_length(event_sha256) = 32),
@@ -321,9 +321,9 @@ CREATE TABLE olp_go.request_metadata_event_receipts (
     PRIMARY KEY (event_id, request_id)
 );
 CREATE INDEX request_metadata_event_receipts_recorded_at_idx
-    ON olp_go.request_metadata_event_receipts USING brin (recorded_at);
+    ON olp.request_metadata_event_receipts USING brin (recorded_at);
 
-CREATE TABLE olp_go.request_metadata_consumer_health (
+CREATE TABLE olp.request_metadata_consumer_health (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     pending_events bigint NOT NULL CHECK (pending_events >= 0),
     lag_events bigint NOT NULL CHECK (lag_events >= 0),
@@ -333,7 +333,7 @@ CREATE TABLE olp_go.request_metadata_consumer_health (
 
 -- Fixed worker responsibilities checkpoint here; readiness reads staleness from
 -- `checked_at` and progress from `last_progress_at`.
-CREATE TABLE olp_go.worker_task_health (
+CREATE TABLE olp.worker_task_health (
     task text PRIMARY KEY CHECK (task IN (
         'request_metadata_consumer','maintenance','cost_reconciliation',
         'request_metadata_gateway_epoch_detection')),
@@ -345,7 +345,7 @@ CREATE TABLE olp_go.worker_task_health (
     skipped_total bigint NOT NULL DEFAULT 0 CHECK (skipped_total >= 0)
 );
 
-CREATE TABLE olp_go.async_worker_counters (
+CREATE TABLE olp.async_worker_counters (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     request_metadata_reclaimed_total bigint NOT NULL DEFAULT 0
         CHECK (request_metadata_reclaimed_total >= 0),
@@ -356,4 +356,4 @@ CREATE TABLE olp_go.async_worker_counters (
     request_metadata_processed_total bigint NOT NULL DEFAULT 0
         CHECK (request_metadata_processed_total >= 0)
 );
-INSERT INTO olp_go.async_worker_counters (singleton) VALUES (true);
+INSERT INTO olp.async_worker_counters (singleton) VALUES (true);

@@ -83,10 +83,10 @@ func TestOIDCConfigurationPreservesTheLastMappedOwner(t *testing.T) {
 				t.Fatal("a rejected update changed the configuration or removed its secret")
 			}
 			var updates int
-			if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 1 {
+			if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 1 {
 				t.Fatal("a rejected mapping wrote a success audit")
 			}
-			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.sessions SET expires_at=now()-interval '1 second'"); err != nil {
+			if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET expires_at=now()-interval '1 second'"); err != nil {
 				t.Fatal(err)
 			}
 			owner = login()
@@ -98,9 +98,9 @@ func TestOIDCConfigurationPreservesTheLastMappedOwner(t *testing.T) {
 			// Old identities must verify both the client and role inputs
 			// before they can prove a usable owner sign-in path.
 			for _, query := range []string{
-				"UPDATE olp_go.oidc_identities SET role_claims=role_claims-'client_id'",
-				"UPDATE olp_go.oidc_identities SET role_claims=role_claims-'scopes'",
-				"UPDATE olp_go.oidc_identities SET role_claims=NULL",
+				"UPDATE olp.oidc_identities SET role_claims=role_claims-'client_id'",
+				"UPDATE olp.oidc_identities SET role_claims=role_claims-'scopes'",
+				"UPDATE olp.oidc_identities SET role_claims=NULL",
 			} {
 				if _, err := h.Pool.Exec(t.Context(), query); err != nil {
 					t.Fatal(err)
@@ -150,10 +150,10 @@ func TestOIDCSecretRemovalRequiresAnIndependentOwnerSignIn(t *testing.T) {
 		t.Fatal("rejected secret removal changed the configuration or credential")
 	}
 	var updates int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 2 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='oidc.configuration.update'").Scan(&updates); err != nil || updates != 2 {
 		t.Fatalf("configuration update audits=%d, error=%v", updates, err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.sessions SET expires_at=now()-interval '1 second'"); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET expires_at=now()-interval '1 second'"); err != nil {
 		t.Fatal(err)
 	}
 	h.want(pending, "GET", issuer.callback(t, authorization, claims), nil, nil, 303)

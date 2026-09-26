@@ -67,8 +67,8 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 			WHERE published->>'id'=m.id::text AND c->>'source'='certified' AND ($4='' OR c->>'surface'=$4)
 		),
 		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::json)
-		FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id
-		LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id
+		FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id
+		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
 		AND ($3::boolean IS NULL OR m.enabled=$3) AND ($4='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(m.capabilities) c WHERE c->>'surface'=$4))
 		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1)
@@ -110,7 +110,7 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp_go.runtime_releases g JOIN olp_go.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp.runtime_releases g JOIN olp.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -42,7 +42,7 @@ type Gap struct {
 	LastObservedAt  time.Time
 }
 
-const insertGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
+const insertGapSQL = `INSERT INTO olp.request_metadata_ingestion_gaps
         (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at,
          deduplication_key)
     VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -101,12 +101,12 @@ func (c *LossCounters) Totals() (events, dropped, abandoned int64) {
 	return c.events.Load(), c.dropped.Load(), c.abandoned.Load()
 }
 
-const uncleanGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
+const uncleanGapSQL = `INSERT INTO olp.request_metadata_ingestion_gaps
         (id, gateway_instance, event_count, reason, certainty, first_observed_at,
          last_observed_at, reported_at)
     VALUES ($1, $2, $3, 'gateway_epoch_unclean_shutdown', 'lower_bound', $4, $5, $5)`
 
-const markUncleanSQL = `UPDATE olp_go.request_metadata_gateway_epochs
+const markUncleanSQL = `UPDATE olp.request_metadata_gateway_epochs
        SET stale_detected_at = $1, uncertainty_gap_id = $2
      WHERE gateway_instance = $3 AND process_epoch = $4
        AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL`
@@ -168,11 +168,11 @@ func validateCheckpoint(gatewayInstance string, s Snapshot, graceful bool) (stri
 
 const baselineSQL = `SELECT accepted, persisted, dropped, abandoned, writer_closed, updated_at,
         gracefully_closed_at, stale_detected_at
-    FROM olp_go.request_metadata_gateway_epochs
+    FROM olp.request_metadata_gateway_epochs
     WHERE gateway_instance = $1 AND process_epoch = $2 FOR UPDATE`
 
 const supersededSQL = `SELECT process_epoch::text, accepted, persisted, abandoned, updated_at
-    FROM olp_go.request_metadata_gateway_epochs
+    FROM olp.request_metadata_gateway_epochs
     WHERE gateway_instance = $1 AND process_epoch <> $2
       AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL FOR UPDATE`
 
@@ -260,11 +260,11 @@ func supersededEpochs(ctx context.Context, tx pgx.Tx, instance, processEpoch str
 	return superseded, nil
 }
 
-const bufferLossGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
+const bufferLossGapSQL = `INSERT INTO olp.request_metadata_ingestion_gaps
         (id, gateway_instance, event_count, reason, first_observed_at, last_observed_at, reported_at)
     VALUES ($1, $2, $3, 'gateway_local_buffer_loss', $4, $5, $6)`
 
-const upsertEpochSQL = `INSERT INTO olp_go.request_metadata_gateway_epochs
+const upsertEpochSQL = `INSERT INTO olp.request_metadata_gateway_epochs
         (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, abandoned,
          retrying, writer_closed, updated_at, gracefully_closed_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
@@ -446,12 +446,12 @@ type Detection struct {
 
 const staleEpochsSQL = `SELECT gateway_instance, process_epoch::text, accepted, persisted, abandoned,
         updated_at, stale_candidate_at
-    FROM olp_go.request_metadata_gateway_epochs
+    FROM olp.request_metadata_gateway_epochs
     WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL AND updated_at < $1
     ORDER BY updated_at, gateway_instance, process_epoch
     LIMIT 100 FOR UPDATE SKIP LOCKED`
 
-const markCandidateSQL = `UPDATE olp_go.request_metadata_gateway_epochs SET stale_candidate_at = $1
+const markCandidateSQL = `UPDATE olp.request_metadata_gateway_epochs SET stale_candidate_at = $1
      WHERE gateway_instance = $2 AND process_epoch = $3
        AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL`
 

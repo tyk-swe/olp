@@ -37,10 +37,10 @@ func TestConcurrentOwnerChangesKeepUsableAuthority(t *testing.T) {
 		t.Fatalf("owner race: %d, %d", first, second)
 	}
 	var owners, events int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.users WHERE active AND role='owner'").Scan(&owners); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.users WHERE active AND role='owner'").Scan(&owners); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit WHERE action='user.update'").Scan(&events); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='user.update'").Scan(&events); err != nil {
 		t.Fatal(err)
 	}
 	if owners != 1 || events != 1 {
@@ -67,10 +67,10 @@ func TestInterruptedRotationResumesAndRejectsStaleWriters(t *testing.T) {
 		t.Fatal(err)
 	}
 	var original []byte
-	if err = h.Pool.QueryRow(t.Context(), "UPDATE olp_go.secrets SET ciphertext=ciphertext WHERE id=$1 RETURNING ciphertext", damaged).Scan(&original); err != nil {
+	if err = h.Pool.QueryRow(t.Context(), "UPDATE olp.secrets SET ciphertext=ciphertext WHERE id=$1 RETURNING ciphertext", damaged).Scan(&original); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext='\\x00' WHERE id=$1", damaged); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext='\\x00' WHERE id=$1", damaged); err != nil {
 		t.Fatal(err)
 	}
 	ring, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"},{"version":2,"key":"` + strings.Repeat("ef", 32) + `"}]}`))
@@ -82,7 +82,7 @@ func TestInterruptedRotationResumesAndRejectsStaleWriters(t *testing.T) {
 		t.Fatalf("expected interrupted rotation after one committed batch: count=%d", count)
 	}
 	h.want(b, "POST", "/api/v1/api-keys", map[string]any{"name": "stale writer"}, map[string]string{"Idempotency-Key": uuid.NewString()}, 503)
-	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp_go.secrets SET ciphertext=$1 WHERE id=$2", original, damaged); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$1 WHERE id=$2", original, damaged); err != nil {
 		t.Fatal(err)
 	}
 	replacement, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"},{"version":2,"key":"` + strings.Repeat("01", 32) + `"}]}`))
@@ -119,7 +119,7 @@ func TestFailedMigrationLeavesNoPartialInstallationAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	var present bool
-	if err = pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp_go')").Scan(&present); err != nil || present {
+	if err = pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='olp')").Scan(&present); err != nil || present {
 		t.Fatal("failed migration wrote schema")
 	}
 	if err = database.Migrate(t.Context(), pool); err != nil {

@@ -53,7 +53,7 @@ func TestContinuationConnectionLossDoesNotInventAcceptedWork(t *testing.T) {
 		t.Fatal("canceled request unexpectedly sent")
 	}
 	var reserved int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, beforeSend["X-OLP-Submission-ID"]).Scan(&reserved); err != nil || reserved != 0 || calls.Load() != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, beforeSend["X-OLP-Submission-ID"]).Scan(&reserved); err != nil || reserved != 0 || calls.Load() != 0 {
 		t.Fatalf("pre-send loss reserved work: rows=%d calls=%d err=%v", reserved, calls.Load(), err)
 	}
 	partial := continuationHeaders()
@@ -71,7 +71,7 @@ func TestContinuationConnectionLossDoesNotInventAcceptedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE submission_id=$1`, partial["X-OLP-Submission-ID"]).Scan(&reserved); err != nil || reserved != 0 || calls.Load() != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, partial["X-OLP-Submission-ID"]).Scan(&reserved); err != nil || reserved != 0 || calls.Load() != 0 {
 		t.Fatalf("incomplete ingress upload reserved work: rows=%d calls=%d err=%v", reserved, calls.Load(), err)
 	}
 	// Once the provider accepts work, cancellation cannot turn a retry into a

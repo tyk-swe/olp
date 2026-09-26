@@ -108,7 +108,7 @@ func attributionSeed(t *testing.T, f *repFixture, keyID string, observed time.Ti
 	t.Helper()
 	requestID := access.NewID()
 	f.anchor(requestID, observed)
-	f.exec(`INSERT INTO olp_go.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
+	f.exec(`INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
 	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
 	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
 	        unpriced, request_counted, provider_request_counted, model_request_counted,
@@ -188,7 +188,7 @@ func TestAttributionReporting(t *testing.T) {
 	requestID := access.NewID()
 	f.request(repRequest{ID: requestID, StartedAt: now, Route: "alpha",
 		Operation: "generation", Surface: "openai", AttemptCount: 1})
-	f.exec("UPDATE olp_go.requests SET attribution=$2::jsonb WHERE id=$1",
+	f.exec("UPDATE olp.requests SET attribution=$2::jsonb WHERE id=$1",
 		requestID, `{"team":"core"}`)
 	list := h.want(owner, "GET", "/api/v1/requests", nil, nil, 200)
 	var row map[string]any

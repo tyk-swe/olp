@@ -219,8 +219,8 @@ const jobSelect = `SELECT j.id::text, j.upstream_job_id, j.api_key_id::text, j.p
 		j.reconciliation_attempts, j.next_reconciliation_at,
 		j.last_reconciliation_at, j.etag::text,
 		j.created_at, j.updated_at, j.strict_contract, j.native_source_id::text
-	FROM olp_go.media_jobs j
-	JOIN olp_go.providers p ON p.id = j.provider_id`
+	FROM olp.media_jobs j
+	JOIN olp.providers p ON p.id = j.provider_id`
 
 func scanJob(row pgx.Row) (JobRecord, error) {
 	var j JobRecord
@@ -282,7 +282,7 @@ func Jobs(ctx context.Context, q Querier, filters Filters, cursor *Cursor, limit
 		query += fmt.Sprintf(clause, len(args))
 	}
 	if !filters.AllProjects {
-		push(" AND j.api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.AllowedProjects)
+		push(" AND j.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.AllowedProjects)
 	}
 	if filters.APIKeyID != nil {
 		push(" AND j.api_key_id = $%d", *filters.APIKeyID)
@@ -355,7 +355,7 @@ func JobsAfterID(ctx context.Context, q Querier, filters Filters, after *string,
 		if routes == nil {
 			routes = []string{}
 		}
-		err := q.QueryRow(ctx, `SELECT created_at, id::text FROM olp_go.media_jobs
+		err := q.QueryRow(ctx, `SELECT created_at, id::text FROM olp.media_jobs
 			WHERE id = $1
 			  AND ($2::uuid IS NULL OR api_key_id = $2)
 			  AND (cardinality($3::text[]) = 0 OR route_slug = ANY($3::text[]))
@@ -477,7 +477,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	}
 	defer tx.Rollback(ctx)
 	// Acquire admission authority before taking the INSERT's fresh snapshot.
-	if _, err = tx.Exec(ctx, "SELECT id FROM olp_go.providers WHERE id = $1 FOR SHARE", input.ProviderID); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT id FROM olp.providers WHERE id = $1 FOR SHARE", input.ProviderID); err != nil {
 		return JobRecord{}, dbError(err)
 	}
 	// Compare the exact feature-owned configuration before inserting, under
@@ -494,7 +494,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	tag, err := tx.Exec(ctx, `WITH authority AS (
 			SELECT r.id AS runtime_generation_id, r.snapshot->'providers'->>$3::text AS provider_key,
 			       r.snapshot#>'{providers}' -> $3::text AS provider_entry
-			FROM olp_go.runtime_releases r
+			FROM olp.runtime_releases r
 			WHERE r.id = $8::uuid
 		), pinned AS (
 			SELECT authority.runtime_generation_id,
@@ -505,9 +505,9 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 		), compatible AS (
 			SELECT pinned.runtime_generation_id, pinned.provider_revision_id
 			FROM pinned
-			JOIN olp_go.providers provider ON provider.id = $3::uuid
-			JOIN olp_go.provider_revisions current ON current.id = provider.active_revision_id
-			JOIN olp_go.provider_revisions pinned_revision ON pinned_revision.id = pinned.provider_revision_id
+			JOIN olp.providers provider ON provider.id = $3::uuid
+			JOIN olp.provider_revisions current ON current.id = provider.active_revision_id
+			JOIN olp.provider_revisions pinned_revision ON pinned_revision.id = pinned.provider_revision_id
 			WHERE provider.state <> 'disabled'
 			  AND pinned_revision.provider_id = $3::uuid
 			  AND pinned_revision.configuration->>'kind'
@@ -531,7 +531,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 			  AND ($9::uuid IS NULL OR EXISTS (
 			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
 			       WHERE slot->>'credential_id' = $9::text))
-			  AND (SELECT cred.version FROM olp_go.provider_credentials cred
+			  AND (SELECT cred.version FROM olp.provider_credentials cred
 			       WHERE cred.id = (pinned.provider_entry->>'active_credential')::uuid)
 			      IS NOT DISTINCT FROM current.credential_version
 			  AND EXISTS (
@@ -547,7 +547,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 			               AND c->>'surface' = $7
 			               AND c->>'mode' = 'unary'
 			               AND c->>'source' = 'certified'))))
-		INSERT INTO olp_go.media_jobs (
+		INSERT INTO olp.media_jobs (
 			id, upstream_job_id, api_key_id, provider_id, provider_model,
 			route_slug, operation, surface, state, lifecycle_state,
 			runtime_generation_id, provider_revision_id, credential_version_id, etag, slot_id,
@@ -595,7 +595,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 		source = &nativeSourceID[0]
 	}
 	row, err := scanJob(q.QueryRow(ctx, `WITH attached AS (
-			UPDATE olp_go.media_jobs SET
+			UPDATE olp.media_jobs SET
 				upstream_job_id = $2,
 				state = $3,
 				lifecycle_state = 'active',
@@ -621,7 +621,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 			j.reconciliation_attempts, j.next_reconciliation_at,
 			j.last_reconciliation_at, j.etag::text, j.created_at, j.updated_at,
 			j.strict_contract, j.native_source_id::text
-		FROM attached j JOIN olp_go.providers p ON p.id = j.provider_id`,
+		FROM attached j JOIN olp.providers p ON p.id = j.provider_id`,
 		id, upstreamJobID, string(update.State), update.ProgressPercent,
 		update.ContentAvailable, update.ExpiresAt, update.ErrorClass,
 		update.LastPolledAt, uuid.Must(uuid.NewV7()), source))
@@ -666,7 +666,7 @@ func updateLifecycle(ctx context.Context, q Querier, id string, lifecycle Lifecy
 	for _, value := range allowed {
 		allowedStrings = append(allowedStrings, string(value))
 	}
-	query := `UPDATE olp_go.media_jobs SET lifecycle_state = $2,
+	query := `UPDATE olp.media_jobs SET lifecycle_state = $2,
 			upstream_job_id = COALESCE($3, upstream_job_id),
 			reconciliation_error = $4, next_reconciliation_at = now(), etag = $5
 		WHERE id = $1 AND lifecycle_state = ANY($6::text[])`
@@ -694,7 +694,7 @@ func updateLifecycle(ctx context.Context, q Querier, id string, lifecycle Lifecy
 // lifecycle drifted past the transition — and the worker hands off.
 func claimRefusal(ctx context.Context, q Querier, id string) error {
 	var exists bool
-	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.media_jobs WHERE id=$1)", id).Scan(&exists); err != nil {
+	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.media_jobs WHERE id=$1)", id).Scan(&exists); err != nil {
 		return &JobError{Kind: JobErrorDatabase, Err: err}
 	}
 	if !exists {
@@ -705,7 +705,7 @@ func claimRefusal(ctx context.Context, q Querier, id string) error {
 
 func missingOrChanged(ctx context.Context, q Querier, id string) *JobError {
 	var exists bool
-	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.media_jobs WHERE id=$1)", id).Scan(&exists); err != nil {
+	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.media_jobs WHERE id=$1)", id).Scan(&exists); err != nil {
 		return &JobError{Kind: JobErrorDatabase, Err: err}
 	}
 	if exists {
@@ -750,7 +750,7 @@ func markCreateCleanupPendingClaimed(ctx context.Context, q Querier, id, claimID
 // BeginDeletion persists delete intent before contacting the pinned upstream
 // target. Repeated calls return the same pending/deleted tombstone.
 func BeginDeletion(ctx context.Context, q Querier, id string) (JobRecord, error) {
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET lifecycle_state = 'delete_pending',
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs SET lifecycle_state = 'delete_pending',
 			reconciliation_error = NULL, next_reconciliation_at = now(), etag = $2
 		WHERE id = $1 AND lifecycle_state = 'active'`, id, uuid.Must(uuid.NewV7()))
 	if err != nil {
@@ -772,7 +772,7 @@ func BeginDeletion(ctx context.Context, q Querier, id string) (JobRecord, error)
 // delete_pending or deleted; that record is returned so the worker finishes
 // the upstream confirmation. Any other refusal hands the job off.
 func beginDeletionClaimed(ctx context.Context, q Querier, id, claimID string) (JobRecord, error) {
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET lifecycle_state = 'delete_pending',
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs SET lifecycle_state = 'delete_pending',
 			reconciliation_error = NULL, next_reconciliation_at = now(), etag = $3
 		WHERE id = $1 AND reconciliation_claim_id = $2 AND lifecycle_state = 'active'`,
 		id, claimID, uuid.Must(uuid.NewV7()))
@@ -881,7 +881,7 @@ func refreshJob(ctx context.Context, pool *pgxpool.Pool, id string, claimID *str
 		}
 		return current, nil
 	}
-	if _, err = tx.Exec(ctx, `UPDATE olp_go.media_jobs SET
+	if _, err = tx.Exec(ctx, `UPDATE olp.media_jobs SET
 			state = $2,
 			progress_percent = CASE
 				WHEN $3::real IS NULL THEN progress_percent
@@ -912,7 +912,7 @@ func refreshJob(ctx context.Context, pool *pgxpool.Pool, id string, claimID *str
 // delete is accepted. Polls may rotate the ETag while the upstream delete is
 // in flight, so optimistic locking is unsafe at this point.
 func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
 			reconciliation_error = NULL, content_available = false,
 			native_source_id = NULL, etag = $2
@@ -930,7 +930,7 @@ func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
 // delete cannot be finalized by a worker that lost the lease. An existing
 // tombstone under the same claim is a successful no-op.
 func finalizeDeletionClaimed(ctx context.Context, q Querier, id, claimID string) error {
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
 			reconciliation_error = NULL, content_available = false,
 			native_source_id = NULL, etag = $3
@@ -947,7 +947,7 @@ func finalizeDeletionClaimed(ctx context.Context, q Querier, id, claimID string)
 	var lifecycle string
 	var currentClaim *string
 	err = q.QueryRow(ctx, `SELECT lifecycle_state, reconciliation_claim_id::text
-		FROM olp_go.media_jobs WHERE id = $1`, id).Scan(&lifecycle, &currentClaim)
+		FROM olp.media_jobs WHERE id = $1`, id).Scan(&lifecycle, &currentClaim)
 	if err != nil {
 		return dbError(err)
 	}
@@ -969,7 +969,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 	}
 	claimID := uuid.Must(uuid.NewV7())
 	rows, err := q.Query(ctx, `WITH candidates AS (
-			SELECT id FROM olp_go.media_jobs
+			SELECT id FROM olp.media_jobs
 			WHERE lifecycle_state <> 'deleted'
 			  AND next_reconciliation_at <= $1
 			  AND (reconciliation_claimed_until IS NULL
@@ -991,7 +991,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 			FOR UPDATE SKIP LOCKED
 			LIMIT $2
 		), claimed AS (
-			UPDATE olp_go.media_jobs j SET
+			UPDATE olp.media_jobs j SET
 				reconciliation_claim_id = $3,
 				reconciliation_claimed_until = $1 + interval '2 minutes',
 				last_reconciliation_at = $1,
@@ -1012,7 +1012,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 			c.reconciliation_attempts, c.next_reconciliation_at,
 			c.last_reconciliation_at, c.etag::text, c.created_at, c.updated_at,
 			c.strict_contract, c.native_source_id::text
-		FROM claimed c JOIN olp_go.providers p ON p.id = c.provider_id
+		FROM claimed c JOIN olp.providers p ON p.id = c.provider_id
 		ORDER BY c.created_at, c.id`,
 		now, limit, claimID, PollGateSeconds, uuid.Must(uuid.NewV7()))
 	if err != nil {
@@ -1026,7 +1026,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 // ExtendClaim revalidates ownership of a claimed job and extends its lease so
 // it covers the upstream call that is about to start.
 func ExtendClaim(ctx context.Context, q Querier, id, claimID string, until time.Time) (bool, error) {
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs SET
 			reconciliation_claimed_until = GREATEST(reconciliation_claimed_until, $3),
 			next_reconciliation_at = GREATEST(next_reconciliation_at, $3),
 			etag = $4
@@ -1044,7 +1044,7 @@ func FinishReconciliation(ctx context.Context, q Querier, id, claimID string, ne
 	if errorClass != nil && (*errorClass == "" || len(*errorClass) > 120) {
 		return &JobError{Kind: JobErrorInvalid, Message: "reconciliation error class must contain 1-120 bytes"}
 	}
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs SET
 			reconciliation_claim_id = NULL,
 			reconciliation_claimed_until = NULL,
 			next_reconciliation_at = $3,
@@ -1064,7 +1064,7 @@ func FinishReconciliation(ctx context.Context, q Querier, id, claimID string, ne
 
 func ClaimJob(ctx context.Context, q Querier, id string, now time.Time) (JobRecord, bool, error) {
 	claimID := uuid.Must(uuid.NewV7())
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET
+	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs SET
 			reconciliation_claim_id = $2,
 			reconciliation_claimed_until = $3 + interval '2 minutes',
 			last_reconciliation_at = $3,
@@ -1105,7 +1105,7 @@ func ReconciliationSummary(ctx context.Context, q Querier, now time.Time) (Summa
 			COUNT(*) FILTER (
 				WHERE lifecycle_state <> 'deleted' AND reconciliation_error IS NOT NULL)::bigint,
 			MIN(created_at) FILTER (WHERE lifecycle_state NOT IN ('active','deleted'))
-		FROM olp_go.media_jobs WHERE lifecycle_state <> 'deleted'`,
+		FROM olp.media_jobs WHERE lifecycle_state <> 'deleted'`,
 		now, PollGateSeconds).
 		Scan(&s.Pending, &s.Stale, &s.Failed, &s.OldestPendingAt)
 	return s, dbError(err)

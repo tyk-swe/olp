@@ -75,7 +75,7 @@ func newVideoUpstream(t *testing.T) *videoUpstream {
 func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 	t.Helper()
 	var cfgRaw []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp_go.providers WHERE id=$1", providerID).Scan(&cfgRaw); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp.providers WHERE id=$1", providerID).Scan(&cfgRaw); err != nil {
 		t.Fatal(err)
 	}
 	var cfg providers.Configuration
@@ -86,7 +86,7 @@ func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 	transportSum := sha256.Sum256(transportInput)
 	transportFP := hex.EncodeToString(transportSum[:])[:32]
 	var credentialID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT credential_id::text FROM olp.provider_slots WHERE provider_id=$1 AND is_default", providerID).Scan(&credentialID); err != nil {
 		t.Fatal(err)
 	}
 	credentialFP := transportFP + ":" + credentialID
@@ -119,10 +119,10 @@ func certifyVideoSeeded(t *testing.T, h *accessHarness, providerID string) {
 		})
 	}
 	capsJSON, _ := json.Marshal(caps)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capsJSON, providerID, vendorModel); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_models SET capabilities=$1 WHERE provider_id=$2 AND upstream_model=$3", capsJSON, providerID, vendorModel); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_slots SET validated_at=$1, validated_fingerprint=$2 WHERE provider_id=$3 AND is_default", now, validatedFP, providerID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -304,7 +304,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 
 	if _, err := h.Pool.Exec(t.Context(),
-		"UPDATE olp_go.media_jobs SET reconciliation_claim_id=$1, reconciliation_claimed_until=now()+interval '5 minutes' WHERE id=$2",
+		"UPDATE olp.media_jobs SET reconciliation_claim_id=$1, reconciliation_claimed_until=now()+interval '5 minutes' WHERE id=$2",
 		uuid.NewString(), job2ID); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatal("a busy refresh must not reach the provider")
 	}
 	if _, err := h.Pool.Exec(t.Context(),
-		"UPDATE olp_go.media_jobs SET reconciliation_claim_id=NULL, reconciliation_claimed_until=NULL WHERE id=$1", job2ID); err != nil {
+		"UPDATE olp.media_jobs SET reconciliation_claim_id=NULL, reconciliation_claimed_until=NULL WHERE id=$1", job2ID); err != nil {
 		t.Fatal(err)
 	}
 	h.want(op, "POST", job2Path+"/refresh", nil, idem("refresh-clear"), 200)
@@ -366,7 +366,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 
 	rows, err := h.Pool.Query(t.Context(),
-		"SELECT action FROM olp_go.Audit WHERE resource_type='media_job' AND resource_id=$1", jobID)
+		"SELECT action FROM olp.Audit WHERE resource_type='media_job' AND resource_id=$1", jobID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestMediaManagement(t *testing.T) {
 		}
 	}
 	rows, err = h.Pool.Query(t.Context(),
-		"SELECT action FROM olp_go.Audit WHERE resource_type='media_job' AND resource_id=$1", job2ID)
+		"SELECT action FROM olp.Audit WHERE resource_type='media_job' AND resource_id=$1", job2ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestMediaManagement(t *testing.T) {
 	}
 	var leak int
 	if err := h.Pool.QueryRow(t.Context(),
-		"SELECT count(*) FROM olp_go.Audit WHERE resource_id LIKE '%'||$1||'%'", up.contentBytes).Scan(&leak); err != nil {
+		"SELECT count(*) FROM olp.Audit WHERE resource_id LIKE '%'||$1||'%'", up.contentBytes).Scan(&leak); err != nil {
 		t.Fatal(err)
 	}
 	if leak != 0 {

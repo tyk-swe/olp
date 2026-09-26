@@ -190,11 +190,11 @@ func TestConfigurationPromotion(t *testing.T) {
 	}
 
 	var secretLeak int
-	destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.replays WHERE fingerprint LIKE '%'||$1||'%'", vendorSecret).Scan(&secretLeak)
+	destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.replays WHERE fingerprint LIKE '%'||$1||'%'", vendorSecret).Scan(&secretLeak)
 	if secretLeak != 0 {
 		t.Fatal("replay fingerprints must never contain secrets")
 	}
-	destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.audit_events WHERE detail::text LIKE '%'||$1||'%' OR resource_id LIKE '%'||$1||'%'", vendorSecret).Scan(&secretLeak)
+	destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit_events WHERE detail::text LIKE '%'||$1||'%' OR resource_id LIKE '%'||$1||'%'", vendorSecret).Scan(&secretLeak)
 	if secretLeak != 0 {
 		t.Fatal("audit must never contain secrets")
 	}
@@ -217,7 +217,7 @@ func TestConfigurationPromotion(t *testing.T) {
 	providerBefore := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
 	draftBefore := destination.want(destinationOwner, "GET", "/api/v1/route-drafts/"+stagedDraft["id"].(string), nil, nil, 200)
 	var slotsETagBefore string
-	destination.Pool.QueryRow(t.Context(), "SELECT slots_etag::text FROM olp_go.providers WHERE id=$1", providerID).Scan(&slotsETagBefore)
+	destination.Pool.QueryRow(t.Context(), "SELECT slots_etag::text FROM olp.providers WHERE id=$1", providerID).Scan(&slotsETagBefore)
 	again := destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", applyBody, idem("apply-again"), 200)
 	if len(again["conflicts"].([]any)) != 0 || len(again["blockers"].([]any)) != 0 {
 		t.Fatal("a repeated apply must be an idempotent noop", again)
@@ -235,7 +235,7 @@ func TestConfigurationPromotion(t *testing.T) {
 	providerAfter := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
 	draftAfter := destination.want(destinationOwner, "GET", "/api/v1/route-drafts/"+stagedDraft["id"].(string), nil, nil, 200)
 	var slotsETagAfter string
-	destination.Pool.QueryRow(t.Context(), "SELECT slots_etag::text FROM olp_go.providers WHERE id=$1", providerID).Scan(&slotsETagAfter)
+	destination.Pool.QueryRow(t.Context(), "SELECT slots_etag::text FROM olp.providers WHERE id=$1", providerID).Scan(&slotsETagAfter)
 	if providerAfter["etag"] != providerBefore["etag"] || draftAfter["etag"] != draftBefore["etag"] || slotsETagAfter != slotsETagBefore {
 		t.Fatal("a repeated apply must not rotate provider or draft etags")
 	}
@@ -327,8 +327,8 @@ func TestConfigurationPromotion(t *testing.T) {
 
 	slotName := strings.TrimPrefix(bindingKey, "Promoted vendor/")
 	var slotID, modelID string
-	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND name=$2", providerID, slotName).Scan(&slotID)
-	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.provider_models WHERE provider_id=$1 AND upstream_model=$2", providerID, vendorModel).Scan(&modelID)
+	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_slots WHERE provider_id=$1 AND name=$2", providerID, slotName).Scan(&slotID)
+	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_models WHERE provider_id=$1 AND upstream_model=$2", providerID, vendorModel).Scan(&modelID)
 	if slotID == "" || modelID == "" {
 		t.Fatal("staged slot and model must exist", slotID, modelID)
 	}
@@ -343,8 +343,8 @@ func TestConfigurationPromotion(t *testing.T) {
 	}
 	destination.want(destinationOwner, "GET", "/api/v1/routes/"+stagedRouteID, nil, nil, 200)
 	var preservedSlot, preservedModel string
-	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.provider_slots WHERE provider_id=$1 AND name=$2", providerID, slotName).Scan(&preservedSlot)
-	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.provider_models WHERE provider_id=$1 AND upstream_model=$2", providerID, vendorModel).Scan(&preservedModel)
+	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_slots WHERE provider_id=$1 AND name=$2", providerID, slotName).Scan(&preservedSlot)
+	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_models WHERE provider_id=$1 AND upstream_model=$2", providerID, vendorModel).Scan(&preservedModel)
 	if preservedSlot != slotID {
 		t.Fatal("apply must preserve a same-named slot UUID", slotID, preservedSlot)
 	}
@@ -383,7 +383,7 @@ func TestConfigurationPricingRequiresSettings(t *testing.T) {
 		"prices": []any{repPrice("openai_compatible", vendorModel, "generation")}}
 	h.machineWant(configure, "POST", "/api/v1/configuration/apply", body, idem("denied-pricing"), 403)
 	var count int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.projects WHERE name='must-rollback'").Scan(&count); err != nil || count != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.projects WHERE name='must-rollback'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rejected import mutated projects: count=%d err=%v", count, err)
 	}
 	h.machineWant(settings, "POST", "/api/v1/configuration/apply", body, idem("authorized-pricing"), 200)

@@ -29,12 +29,12 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (Rep
 		return c, nil, err
 	}
 	c.Fingerprint = s.Auth.Digest("mutation", string(data))
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE id IN (SELECT id FROM olp_go.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN (SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return c, nil, err
 	}
 	var stored []byte
 	var id string
-	err = tx.QueryRow(r.Context(), "SELECT fingerprint,secret_id::text FROM olp_go.replays WHERE actor=$1 AND key=$2 AND expires_at>now()", p.ID, c.Key).Scan(&stored, &id)
+	err = tx.QueryRow(r.Context(), "SELECT fingerprint,secret_id::text FROM olp.replays WHERE actor=$1 AND key=$2 AND expires_at>now()", p.ID, c.Key).Scan(&stored, &id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, nil, nil
 	}
@@ -79,6 +79,6 @@ func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, resul
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "mutation_replay", data, &expires); err != nil {
 		return err
 	}
-	_, err = tx.Exec(r.Context(), "INSERT INTO olp_go.replays(actor,key,fingerprint,secret_id,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor,key) DO UPDATE SET fingerprint=excluded.fingerprint,secret_id=excluded.secret_id,expires_at=excluded.expires_at", c.Actor, c.Key, c.Fingerprint, id, expires)
+	_, err = tx.Exec(r.Context(), "INSERT INTO olp.replays(actor,key,fingerprint,secret_id,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor,key) DO UPDATE SET fingerprint=excluded.fingerprint,secret_id=excluded.secret_id,expires_at=excluded.expires_at", c.Actor, c.Key, c.Fingerprint, id, expires)
 	return err
 }

@@ -163,11 +163,11 @@ func kbExec(t *testing.T, h *accessHarness, query string, args ...any) {
 func kbProvider(t *testing.T, h *accessHarness) string {
 	t.Helper()
 	var owner string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp_go.users ORDER BY created_at LIMIT 1").Scan(&owner); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.users ORDER BY created_at LIMIT 1").Scan(&owner); err != nil {
 		t.Fatalf("read owner: %v", err)
 	}
 	id := access.NewID()
-	kbExec(t, h, `INSERT INTO olp_go.providers (id, name, kind, state, configuration, etag, slots_etag, created_by)
+	kbExec(t, h, `INSERT INTO olp.providers (id, name, kind, state, configuration, etag, slots_etag, created_by)
 	    VALUES ($1, 'Budget vendor', 'openai', 'active', '{}'::jsonb, $2, $3, $4)`,
 		id, access.NewID(), access.NewID(), owner)
 	return id
@@ -179,7 +179,7 @@ func kbProvider(t *testing.T, h *accessHarness) string {
 func kbFact(t *testing.T, h *accessHarness, key, provider string, observed time.Time, charge string, cost *string, unpriced bool) {
 	t.Helper()
 	request := access.NewID()
-	kbExec(t, h, `INSERT INTO olp_go.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2)`, request, observed)
+	kbExec(t, h, `INSERT INTO olp.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2)`, request, observed)
 	billable := charge != "not_billable"
 	var tokens *int64
 	var currency *string
@@ -189,7 +189,7 @@ func kbFact(t *testing.T, h *accessHarness, key, provider string, observed time.
 	if cost != nil {
 		currency = kbText("USD")
 	}
-	kbExec(t, h, `INSERT INTO olp_go.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
+	kbExec(t, h, `INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
 	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
 	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
 	        cached_input_tokens, media_units, estimated_cost, unpriced, pricing_revision_id, currency,
@@ -207,7 +207,7 @@ func kbFact(t *testing.T, h *accessHarness, key, provider string, observed time.
 // kbHourly records one retained rollup bucket for the key.
 func kbHourly(t *testing.T, h *accessHarness, key, provider string, bucket time.Time, cost string, unpricedAttempts int64) {
 	t.Helper()
-	kbExec(t, h, `INSERT INTO olp_go.attempt_usage_hourly (bucket, route_slug, provider_id, upstream_model,
+	kbExec(t, h, `INSERT INTO olp.attempt_usage_hourly (bucket, route_slug, provider_id, upstream_model,
 	        operation, surface, api_key_id, request_count, provider_request_count, model_request_count,
 	        target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
 	        estimated_cost, request_unpriced_count, provider_unpriced_count, model_unpriced_count,

@@ -196,14 +196,14 @@ func TestNativeConfigurationPublicRevisionReplayPromotionAndReload(t *testing.T)
 	// refuse the release, never normalize the source or repair its hash.
 	var releaseID, recordedDigest string
 	var snapshot []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text,sha256,snapshot FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&releaseID, &recordedDigest, &snapshot); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT id::text,sha256,snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&releaseID, &recordedDigest, &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	corrupted := bytes.ReplaceAll(snapshot, []byte(`"negative_zero":-0`), []byte(`"negative_zero":0`))
 	if bytes.Equal(snapshot, corrupted) {
 		t.Fatal("snapshot fixture lacks its exact native negative zero")
 	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.runtime_releases SET snapshot=$2 WHERE id=$1", releaseID, corrupted); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.runtime_releases SET snapshot=$2 WHERE id=$1", releaseID, corrupted); err != nil {
 		t.Fatal(err)
 	}
 	reader := newAccessHarnessOn(t, h.Pool, h.DBURL)
@@ -211,7 +211,7 @@ func TestNativeConfigurationPublicRevisionReplayPromotionAndReload(t *testing.T)
 		t.Fatalf("corrupted native source did not fail digest verification: %v", err)
 	}
 	var retainedDigest string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT sha256 FROM olp_go.runtime_releases WHERE id=$1", releaseID).Scan(&retainedDigest); err != nil || retainedDigest != recordedDigest {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT sha256 FROM olp.runtime_releases WHERE id=$1", releaseID).Scan(&retainedDigest); err != nil || retainedDigest != recordedDigest {
 		t.Fatal("runtime reader rewrote a historical digest after corruption")
 	}
 }

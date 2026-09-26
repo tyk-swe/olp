@@ -148,7 +148,7 @@ func TestPublicContinuationBranchesStayOwnedAndExpire(t *testing.T) {
 	if status != 409 || !bytes.Contains(denied, []byte("continuation_mismatch")) || calls.Load() != 3 {
 		t.Fatalf("cross-route handle dispatched: %d calls=%d %s", status, calls.Load(), denied)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]); err != nil {
 		t.Fatal(err)
 	}
 	status, denied, _ = h.gatewayRaw("GET", recoveryPath, key, nil, map[string]string{"X-OLP-Continuation": continuationClientVersion})

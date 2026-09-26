@@ -14,7 +14,7 @@ import (
 // from, so the sample is refused and the caller retries with a fresh reading.
 var ErrInvalidCheckpoint = errors.New("invalid request metadata checkpoint")
 
-const reportConsumerHealthSQL = `INSERT INTO olp_go.request_metadata_consumer_health
+const reportConsumerHealthSQL = `INSERT INTO olp.request_metadata_consumer_health
         (singleton, pending_events, lag_events, oldest_pending_at, checked_at)
     VALUES (true, $1, $2, $3, $4)
     ON CONFLICT (singleton) DO UPDATE SET

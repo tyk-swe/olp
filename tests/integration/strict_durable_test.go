@@ -76,11 +76,11 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		t.Fatalf("other key read strict file: %d", status)
 	}
 	var count int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE kind='strict_file' AND api_key_id=(SELECT api_key_id FROM olp_go.provider_resources WHERE upstream_id='file-up-1' AND kind='strict_file')`).Scan(&count); err != nil || count != 1 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='strict_file' AND api_key_id=(SELECT api_key_id FROM olp.provider_resources WHERE upstream_id='file-up-1' AND kind='strict_file')`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("strict file owner mapping: count=%d err=%v", count, err)
 	}
 	var metadata, ciphertext string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT r.metadata::text,encode(s.ciphertext,'hex') FROM olp_go.provider_resources r JOIN olp_go.secrets s ON s.id=r.id WHERE r.kind='strict_file' AND r.upstream_id='file-up-1'`).Scan(&metadata, &ciphertext); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT r.metadata::text,encode(s.ciphertext,'hex') FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.kind='strict_file' AND r.upstream_id='file-up-1'`).Scan(&metadata, &ciphertext); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(metadata, "first") || strings.Contains(metadata, "9007199254740993") || strings.Contains(ciphertext, hex.EncodeToString([]byte("first"))) {
@@ -112,7 +112,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		t.Fatalf("source/overlay changed native JSON:\n got %s\nwant %s", got, wantBound)
 	}
 	var ownerID, batchUUID string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp_go.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &batchUUID); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &batchUUID); err != nil {
 		t.Fatal(err)
 	}
 	_, encrypted, err := h.Gateway.Resources.ReadDurableContract(t.Context(), resources.KindStrictBatch, ownerID, batchID)
@@ -215,7 +215,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status != http.StatusConflict || !bytes.Contains(raw, []byte(`"code":"provider_resource_credential_unavailable"`)) || fixture.dials.Load() != before {
 		t.Fatalf("revoked credential reached accepted strict batch: %d %s", status, raw)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp_go.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_batch' AND upstream_id='batch-up-1'`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET expires_at=now()-interval '1 second' WHERE kind='strict_batch' AND upstream_id='batch-up-1'`); err != nil {
 		t.Fatal(err)
 	}
 	if status, _, _ := h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil); status != http.StatusNotFound {
@@ -225,7 +225,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var retained int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.secrets WHERE id=$1::uuid`, batchUUID).Scan(&retained); err != nil || retained != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1::uuid`, batchUUID).Scan(&retained); err != nil || retained != 0 {
 		t.Fatalf("expired strict batch ciphertext remains: count=%d err=%v", retained, err)
 	}
 }
@@ -271,7 +271,7 @@ func TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork(t *testing.T) {
 	}
 	var attempts, inputTokens, outputTokens int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)
- FROM olp_go.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &inputTokens, &outputTokens); err != nil {
+ FROM olp.attempt_usage_facts WHERE upstream_model=$1 AND operation='generation'`, vendorModel).Scan(&attempts, &inputTokens, &outputTokens); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 1 || inputTokens != 4 || outputTokens != 6 {
@@ -356,13 +356,13 @@ func TestAcceptedStrictBatchMappingSurvivesClientDisconnect(t *testing.T) {
 	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_lock($1)", lockKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp_go.wait_strict_batch_mapping() RETURNS trigger LANGUAGE plpgsql AS $$
+	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp.wait_strict_batch_mapping() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.kind='strict_batch' THEN PERFORM pg_advisory_xact_lock(21416016); END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER wait_strict_batch_mapping BEFORE INSERT ON olp_go.provider_resources
-FOR EACH ROW EXECUTE FUNCTION olp_go.wait_strict_batch_mapping()`); err != nil {
+CREATE TRIGGER wait_strict_batch_mapping BEFORE INSERT ON olp.provider_resources
+FOR EACH ROW EXECUTE FUNCTION olp.wait_strict_batch_mapping()`); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -412,7 +412,7 @@ AND wait_event_type='Lock' AND wait_event='advisory')`).Scan(&waiting); err != n
 	deadline = time.Now().Add(3 * time.Second)
 	var ownerID, localID string
 	for {
-		err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp_go.provider_resources
+		err := h.Pool.QueryRow(t.Context(), `SELECT api_key_id::text,id::text FROM olp.provider_resources
 WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&ownerID, &localID)
 		if err == nil {
 			break
@@ -476,7 +476,7 @@ func TestStrictFileEarlyProviderAcceptanceNeverLooksComplete(t *testing.T) {
 		t.Fatalf("early provider reply exposed a completed file: status=%d result=%v calls=%d", status, result, fixture.dials.Load()-before)
 	}
 	var mapped int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp_go.provider_resources WHERE kind='strict_file'`).Scan(&mapped); err != nil || mapped != 0 {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='strict_file'`).Scan(&mapped); err != nil || mapped != 0 {
 		t.Fatalf("partial upload published file mapping: count=%d err=%v", mapped, err)
 	}
 	fact := sink.last().Attempts[0]
@@ -523,13 +523,13 @@ func TestAcceptedStrictBatchCancellationSurvivesClientDisconnect(t *testing.T) {
 	if _, err := locker.Exec(t.Context(), "SELECT pg_advisory_lock($1)", lockKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp_go.wait_strict_batch_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
+	if _, err := h.Pool.Exec(t.Context(), `CREATE FUNCTION olp.wait_strict_batch_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.kind='strict_batch' AND NEW.state='cancelling' THEN PERFORM pg_advisory_xact_lock(21416017); END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER wait_strict_batch_cancel BEFORE UPDATE ON olp_go.provider_resources
-FOR EACH ROW EXECUTE FUNCTION olp_go.wait_strict_batch_cancel()`); err != nil {
+CREATE TRIGGER wait_strict_batch_cancel BEFORE UPDATE ON olp.provider_resources
+FOR EACH ROW EXECUTE FUNCTION olp.wait_strict_batch_cancel()`); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -577,7 +577,7 @@ AND wait_event_type='Lock' AND wait_event='advisory')`).Scan(&waiting); err != n
 	deadline = time.Now().Add(3 * time.Second)
 	for {
 		var state string
-		err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp_go.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&state)
+		err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.provider_resources WHERE kind='strict_batch' AND upstream_id='batch-up-1'`).Scan(&state)
 		if err == nil && state == "cancelling" {
 			break
 		}

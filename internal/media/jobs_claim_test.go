@@ -143,10 +143,10 @@ func seedClaimFixture(t *testing.T) *claimFixture {
 		}
 	}
 	ownerID := uuid.NewString()
-	exec("INSERT INTO olp_go.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
+	exec("INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
 		ownerID, "owner-"+uuid.NewString()[:8]+"@example.test", uuid.NewString())
 	f.apiKeyID = uuid.NewString()
-	exec(`INSERT INTO olp_go.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
+	exec(`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
 		VALUES($1,$2,$3,'media claim test',$4,'{"scopes":["inference"],"allowed_routes":[]}'::jsonb,$5)`,
 		f.apiKeyID, "claimLookup"+uuid.NewString()[:8], []byte{1, 2, 3}, ownerID, uuid.NewString())
 
@@ -176,10 +176,10 @@ func seedClaimFixture(t *testing.T) *claimFixture {
 	configJSON, _ := json.Marshal(configuration)
 	modelsJSON, _ := json.Marshal(models)
 	slotsJSON, _ := json.Marshal([]map[string]any{slot})
-	exec(`INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,active_revision_id)
+	exec(`INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,active_revision_id)
 		VALUES($1,'media-claim-provider','openai','active',$2,$3,$4,$5,$6)`,
 		f.providerID, configJSON, uuid.NewString(), uuid.NewString(), ownerID, f.revisionID)
-	exec(`INSERT INTO olp_go.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
+	exec(`INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by)
 		VALUES($1,$2,1,'media-claim-provider',$3,$4,$5,$6,$7,$8)`,
 		f.revisionID, f.providerID, configJSON, modelsJSON, slotsJSON, nil, uuid.NewString(), ownerID)
 
@@ -212,7 +212,7 @@ func seedClaimFixture(t *testing.T) *claimFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exec("INSERT INTO olp_go.runtime_releases(id,sequence,sha256,snapshot,created_by) VALUES($1,1,$2,$3,$4)",
+	exec("INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by) VALUES($1,1,$2,$3,$4)",
 		f.generationID, digest, encoded, ownerID)
 
 	policy := &egress.Policy{
@@ -266,7 +266,7 @@ func (f *claimFixture) insertJob(t *testing.T, seed claimJobSeed) JobRecord {
 		completedAt = &at
 	}
 	id := uuid.NewString()
-	_, err := f.pool.Exec(t.Context(), `INSERT INTO olp_go.media_jobs (
+	_, err := f.pool.Exec(t.Context(), `INSERT INTO olp.media_jobs (
 			id, upstream_job_id, api_key_id, provider_id, provider_model, route_slug,
 			operation, surface, state, lifecycle_state, progress_percent, content_available,
 			expires_at, error_class, completed_at, last_polled_at, deleted_at,
@@ -302,10 +302,10 @@ func (f *claimFixture) forceClaimable(t *testing.T, id string) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "ALTER TABLE olp_go.media_jobs DISABLE TRIGGER ALL"); err != nil {
+	if _, err := tx.Exec(ctx, "ALTER TABLE olp.media_jobs DISABLE TRIGGER ALL"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE olp_go.media_jobs SET
+	if _, err := tx.Exec(ctx, `UPDATE olp.media_jobs SET
 			next_reconciliation_at = now() - interval '1 second',
 			reconciliation_claimed_until = CASE WHEN reconciliation_claim_id IS NULL
 				THEN NULL ELSE now() - interval '1 second' END,
@@ -313,7 +313,7 @@ func (f *claimFixture) forceClaimable(t *testing.T, id string) {
 		WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, "ALTER TABLE olp_go.media_jobs ENABLE TRIGGER ALL"); err != nil {
+	if _, err := tx.Exec(ctx, "ALTER TABLE olp.media_jobs ENABLE TRIGGER ALL"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -345,7 +345,7 @@ func (f *claimFixture) leaseOf(t *testing.T, id string) (*string, *time.Time) {
 	var claimID *string
 	var until *time.Time
 	if err := f.pool.QueryRow(t.Context(), `SELECT reconciliation_claim_id::text,
-		reconciliation_claimed_until FROM olp_go.media_jobs WHERE id = $1`, id).
+		reconciliation_claimed_until FROM olp.media_jobs WHERE id = $1`, id).
 		Scan(&claimID, &until); err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func TestCompletionClassifiesClaimLossAsHandoff(t *testing.T) {
 		UpstreamID: strPtr("upstream-video-finish-missing"), State: StateQueued,
 		Lifecycle: LifecycleDeletePending})
 	recordG := f.claim(t, gone.ID)
-	if _, err := f.pool.Exec(ctx, "DELETE FROM olp_go.media_jobs WHERE id = $1", gone.ID); err != nil {
+	if _, err := f.pool.Exec(ctx, "DELETE FROM olp.media_jobs WHERE id = $1", gone.ID); err != nil {
 		t.Fatal(err)
 	}
 	recordG.Lifecycle = LifecycleDeleted

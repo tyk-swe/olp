@@ -133,9 +133,9 @@ func TestM4CrashBeforeAcknowledgementReplaysAsDuplicate(t *testing.T) {
 
 	worker := in.worker("m4-replay-worker")
 	m4Eventually(t, "the worker to account for every request", 60*time.Second, func() bool {
-		return in.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == requests
+		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 	})
-	receipts := in.count("SELECT count(*) FROM olp_go.request_metadata_event_receipts")
+	receipts := in.count("SELECT count(*) FROM olp.request_metadata_event_receipts")
 	if receipts != requests {
 		t.Fatalf("receipts = %d, want %d", receipts, requests)
 	}
@@ -156,18 +156,18 @@ func TestM4CrashBeforeAcknowledgementReplaysAsDuplicate(t *testing.T) {
 	m4Eventually(t, "the replayed delivery to be acknowledged and removed", 30*time.Second,
 		func() bool { return len(m4Payloads(t, in.valkey, in.stream)) == 0 })
 
-	if total := in.count("SELECT count(*) FROM olp_go.attempt_usage_facts"); total != requests {
+	if total := in.count("SELECT count(*) FROM olp.attempt_usage_facts"); total != requests {
 		t.Fatalf("usage facts = %d after a replay, want %d", total, requests)
 	}
-	if total := in.count("SELECT count(*) FROM olp_go.requests"); total != requests {
+	if total := in.count("SELECT count(*) FROM olp.requests"); total != requests {
 		t.Fatalf("requests = %d after a replay, want %d", total, requests)
 	}
 	if total := in.count(
-		"SELECT count(*) FROM olp_go.request_metadata_event_receipts"); total != receipts {
+		"SELECT count(*) FROM olp.request_metadata_event_receipts"); total != receipts {
 		t.Fatalf("receipts = %d after a replay, want the original %d", total, receipts)
 	}
 	if total := in.count(
-		`SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
+		`SELECT count(*) FROM olp.request_metadata_ingestion_gaps
             WHERE reason = 'invalid_request_metadata_event'`); total != 0 {
 		t.Fatalf("a replayed delivery was recorded as %d metadata gaps", total)
 	}
@@ -194,7 +194,7 @@ func TestM4PendingDeliveriesAreReclaimedAfterAWorkerIsLost(t *testing.T) {
 	lost := in.worker("m4-reclaim-lost")
 	m4Eventually(t, "the first worker to account for the first requests", 60*time.Second,
 		func() bool {
-			return in.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == served
+			return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == served
 		})
 	consumers := m4Consumers(t, in.valkey, in.stream)
 	if len(consumers) != 1 {
@@ -229,7 +229,7 @@ func TestM4PendingDeliveriesAreReclaimedAfterAWorkerIsLost(t *testing.T) {
 	survivor := in.worker("m4-reclaim-survivor")
 	m4Eventually(t, "the survivor to reclaim and account for the stranded deliveries",
 		usage.ReclaimIdle+90*time.Second, func() bool {
-			return in.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == served+stranded
+			return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == served+stranded
 		})
 	if pending := m4ConsumerPending(t, in.valkey, in.stream, owner); pending != 0 {
 		t.Fatalf("the lost worker still owns %d deliveries after they were reclaimed", pending)
@@ -238,11 +238,11 @@ func TestM4PendingDeliveriesAreReclaimedAfterAWorkerIsLost(t *testing.T) {
 		t.Fatalf("reclaimed deliveries = %d, want at least %d", reclaimed, stranded)
 	}
 	// Reclaiming must account for each delivery once, not once per claim.
-	if total := in.count("SELECT count(*) FROM olp_go.requests"); total != served+stranded {
+	if total := in.count("SELECT count(*) FROM olp.requests"); total != served+stranded {
 		t.Fatalf("requests = %d, want %d", total, served+stranded)
 	}
 	if total := in.count(
-		"SELECT count(*) FROM olp_go.request_metadata_event_receipts"); total != served+stranded {
+		"SELECT count(*) FROM olp.request_metadata_event_receipts"); total != served+stranded {
 		t.Fatalf("receipts = %d, want %d", total, served+stranded)
 	}
 	if err := survivor.Stop(15 * time.Second); err != nil {
@@ -322,7 +322,7 @@ func TestM4CostReconciliationSurvivesLeaderLoss(t *testing.T) {
 	// standby is in when the leader is lost.
 	standby := in.worker("m4-leader-standby")
 	m4Eventually(t, "the standby to record a pass it skipped", 40*time.Second, func() bool {
-		return in.count(`SELECT coalesce(max(skipped_total), 0) FROM olp_go.worker_task_health
+		return in.count(`SELECT coalesce(max(skipped_total), 0) FROM olp.worker_task_health
             WHERE task = $1`, string(usage.TaskCostReconciliation)) > 0
 	})
 	if pid, held := m4Leader(t, in.h.Pool); !held || pid != elected {
@@ -341,7 +341,7 @@ func TestM4CostReconciliationSurvivesLeaderLoss(t *testing.T) {
 		if !held || pid == elected {
 			return false
 		}
-		return in.count(`SELECT count(*) FROM olp_go.worker_task_health
+		return in.count(`SELECT count(*) FROM olp.worker_task_health
             WHERE task = $1 AND last_success_at >= $2`,
 			string(usage.TaskCostReconciliation), lostAt) == 1
 	})
@@ -463,13 +463,13 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	// Waiting for the accounting proves the replica's events were delivered,
 	// so what the epoch below reports is a shutdown and not a backlog.
 	m4Eventually(t, "the worker to account for the requests", 60*time.Second, func() bool {
-		return in.count("SELECT count(*) FROM olp_go.attempt_usage_facts") == requests
+		return in.count("SELECT count(*) FROM olp.attempt_usage_facts") == requests
 	})
 	// The epoch is checkpointed while the replica runs, so waiting for it to
 	// report the events it accepted is what makes the record below a statement
 	// about a shutdown rather than about a checkpoint that never happened.
 	m4Eventually(t, "the replica to report the events it accepted", 30*time.Second, func() bool {
-		return in.count(`SELECT count(*) FROM olp_go.request_metadata_gateway_epochs
+		return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
             WHERE gateway_instance = $1 AND accepted = $2`, lostInstance, requests) == 1
 	})
 	if err := lost.Kill(); err != nil {
@@ -480,10 +480,10 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	// confirms on a later pass, so this takes over a minute by design.
 	m4Eventually(t, "the detector to confirm the lost replica's epoch",
 		usage.EpochStaleAfter+usage.EpochConfirmAfter+90*time.Second, func() bool {
-			return in.count(`SELECT count(*) FROM olp_go.request_metadata_gateway_epochs
+			return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
                 WHERE gateway_instance = $1 AND stale_detected_at IS NOT NULL`, lostInstance) == 1
 		})
-	if total := in.count(`SELECT count(*) FROM olp_go.request_metadata_ingestion_gaps
+	if total := in.count(`SELECT count(*) FROM olp.request_metadata_ingestion_gaps
         WHERE gateway_instance = $1 AND reason = 'gateway_epoch_unclean_shutdown'`,
 		lostInstance); total != 1 {
 		t.Fatalf("unclean shutdown gaps for the lost replica = %d, want 1", total)
@@ -518,7 +518,7 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	if resolved := m4Epoch(t, in, "acknowledged", lostInstance); resolved["process_epoch"] != epoch {
 		t.Fatalf("acknowledged epoch: %v", resolved)
 	}
-	if total := in.count(`SELECT count(*) FROM olp_go.audit
+	if total := in.count(`SELECT count(*) FROM olp.audit
         WHERE action = 'request_metadata.gateway_epoch_acknowledge'`); total != 2 {
 		t.Fatalf("acknowledgement audit rows = %d, want one per statement", total)
 	}
@@ -534,7 +534,7 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 		t.Fatalf("stop the replica: %v", err)
 	}
 	m4Eventually(t, "the stopped replica to close its epoch", 30*time.Second, func() bool {
-		return in.count(`SELECT count(*) FROM olp_go.request_metadata_gateway_epochs
+		return in.count(`SELECT count(*) FROM olp.request_metadata_gateway_epochs
             WHERE gateway_instance = $1 AND gracefully_closed_at IS NOT NULL`, keptInstance) == 1
 	})
 	closed := m4Epoch(t, in, "gracefully_closed", keptInstance)

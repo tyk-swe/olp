@@ -191,14 +191,14 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	newGroup := func(limit string) string {
 		t.Helper()
 		id := acctID(t)
-		acctExec(t, fixture.Pool, `INSERT INTO olp_go.budget_groups
+		acctExec(t, fixture.Pool, `INSERT INTO olp.budget_groups
             (id, name, project_id, daily_cost_limit, etag, created_by)
             VALUES ($1::uuid, $2, NULL, $3::text::numeric, $4::uuid, $5::uuid)`,
 			id, "group-"+id, limit, acctID(t), fixture.User)
 		return id
 	}
 	groupA, groupB := newGroup("5.00"), newGroup("9.00")
-	acctExec(t, fixture.Pool, `UPDATE olp_go.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
+	acctExec(t, fixture.Pool, `UPDATE olp.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
 		groupA, fixture.Key)
 
 	observed := time.Now().UTC().Add(-time.Minute)
@@ -235,7 +235,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 
 	var storedGroup *string
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("fact group: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {
@@ -243,7 +243,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 	var requestGroup *string
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.requests WHERE id = $1::uuid`, event.RequestID).Scan(&requestGroup); err != nil {
+        FROM olp.requests WHERE id = $1::uuid`, event.RequestID).Scan(&requestGroup); err != nil {
 		t.Fatalf("request group: %v", err)
 	}
 	if requestGroup == nil || *requestGroup != groupA {
@@ -251,7 +251,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 
 	bucket := time.Now().UTC().Truncate(time.Hour)
-	acctExec(t, fixture.Pool, `INSERT INTO olp_go.attempt_usage_hourly
+	acctExec(t, fixture.Pool, `INSERT INTO olp.attempt_usage_hourly
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
          budget_group_id, request_count, provider_request_count, model_request_count,
          target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
@@ -262,16 +262,16 @@ func TestSharedBudgetAccounting(t *testing.T) {
          1, 1, 1, 1, 10, 10, 0, 0, '1.25'::numeric, 0, 0, 0, 0, 0, 0, 0, 0, 'USD', 0)`,
 		bucket, fixture.Provider, fixture.Key, groupA)
 
-	acctExec(t, fixture.Pool, `UPDATE olp_go.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
+	acctExec(t, fixture.Pool, `UPDATE olp.api_keys SET budget_group_id = $1::uuid WHERE id = $2::uuid`,
 		groupB, fixture.Key)
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, event.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("fact group after move: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {
 		t.Fatalf("reattributed persisted fact: %v", storedGroup)
 	}
-	if count := acctCount(t, fixture, `SELECT count(*) FROM olp_go.attempt_usage_hourly
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_hourly
         WHERE budget_group_id = $1::uuid`, groupA); count != 1 {
 		t.Fatalf("reattributed rollup: %d group rows", count)
 	}
@@ -305,7 +305,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 		t.Fatalf("second event snapshots = %d, want 2", len(result.CostSnapshots))
 	}
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
-        FROM olp_go.attempt_usage_facts WHERE request_id = $1::uuid`, second.RequestID).Scan(&storedGroup); err != nil {
+        FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, second.RequestID).Scan(&storedGroup); err != nil {
 		t.Fatalf("second fact group: %v", err)
 	}
 	if storedGroup == nil || *storedGroup != groupA {

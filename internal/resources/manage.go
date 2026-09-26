@@ -162,9 +162,9 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		r.provider_id::text, p.name, r.upstream_id,
 		COALESCE(r.metadata->>'upstream_model', ''), r.state,
 		r.expires_at, r.created_at, r.updated_at
-		FROM olp_go.provider_resources r
-		JOIN olp_go.providers p ON p.id = r.provider_id
-		JOIN olp_go.api_keys k ON k.id = r.api_key_id
+		FROM olp.provider_resources r
+		JOIN olp.providers p ON p.id = r.provider_id
+		JOIN olp.api_keys k ON k.id = r.api_key_id
 		WHERE TRUE`
 	var args []any
 	push := func(clause string, value any) {
@@ -172,7 +172,7 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		query += fmt.Sprintf(clause, len(args))
 	}
 	if !filters.allProjects {
-		push(" AND r.api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.projects)
+		push(" AND r.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.projects)
 	}
 	if filters.kind != nil {
 		push(" AND r.kind = $%d", *filters.kind)

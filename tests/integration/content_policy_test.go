@@ -155,12 +155,12 @@ func TestContentPolicy(t *testing.T) {
 
 	requestID := access.NewID()
 	now := time.Now().UTC()
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`, requestID, now); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.usage_request_anchors (request_id, request_started_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`, requestID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.requests (id, runtime_generation_id, api_key_id, route_slug, operation,
 	        surface, started_at, completed_at, status_code, attempt_count, policy_decisions)
-	    VALUES ($1, $2, (SELECT id FROM olp_go.api_keys ORDER BY created_at LIMIT 1), $3, 'generation',
+	    VALUES ($1, $2, (SELECT id FROM olp.api_keys ORDER BY created_at LIMIT 1), $3, 'generation',
 	        'openai', $4, $4, 200, 1, $5::jsonb)`,
 		requestID, access.NewID(), slug, now,
 		`[{"rule_id":"mask-in","phase":"input","action":"redact","outcome":"redacted"}]`); err != nil {
@@ -178,8 +178,8 @@ func TestContentPolicy(t *testing.T) {
 	}
 
 	for _, query := range []string{
-		`SELECT coalesce(string_agg(policy_decisions::text,''),'') FROM olp_go.requests`,
-		`SELECT coalesce(string_agg(routing::text,''),'') FROM olp_go.attempts`,
+		`SELECT coalesce(string_agg(policy_decisions::text,''),'') FROM olp.requests`,
+		`SELECT coalesce(string_agg(routing::text,''),'') FROM olp.attempts`,
 	} {
 		var text string
 		if err := h.Pool.QueryRow(t.Context(), query).Scan(&text); err != nil {
