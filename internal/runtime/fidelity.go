@@ -22,8 +22,9 @@ type RouteFidelity struct {
 }
 
 // Strict reports whether the route preserves the selected target's native
-// invocation. Every other valid route is transformed.
-func (f RouteFidelity) Strict() bool { return f.Mode == FidelityStrict }
+// invocation. Only an explicit transformed mode relaxes that promise, so a
+// route whose fidelity was never set fails closed as strict.
+func (f RouteFidelity) Strict() bool { return f.Mode != FidelityTransformed }
 
 var errFidelityMode = errors.New("fidelity.mode must be strict or transformed")
 

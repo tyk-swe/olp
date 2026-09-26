@@ -97,3 +97,14 @@ func TestOmittedFidelityIsStrictAndLegacyIsRejected(t *testing.T) {
 		t.Fatal("legacy fidelity validated")
 	}
 }
+
+func TestUnsetOrUnknownFidelityFailsClosedAsStrict(t *testing.T) {
+	for _, f := range []RouteFidelity{{}, {Mode: "legacy"}, {Mode: "STRICT"}} {
+		if !f.Strict() {
+			t.Fatalf("fidelity %+v relaxed the strict promise", f)
+		}
+	}
+	if (RouteFidelity{Mode: FidelityTransformed}).Strict() {
+		t.Fatal("an explicit transformed route kept the strict promise")
+	}
+}

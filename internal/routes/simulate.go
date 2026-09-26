@@ -117,11 +117,11 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	route := simulationRoute(routingID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.Fidelity, err = runtime.DecodeFidelity(d.Fidelity)
+	fidelity, err := runtime.DecodeFidelity(d.Fidelity)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
 	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
@@ -360,8 +360,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))
 }
 
-func simulationRoute(id, slug string, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
-	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
+func simulationRoute(id, slug string, fidelity runtime.RouteFidelity, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
+	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Fidelity: fidelity, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
 	for _, t := range targets {
 		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
 	}

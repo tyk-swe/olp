@@ -53,8 +53,7 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 	if err != nil {
 		return err
 	}
-	route := simulationRoute(d.ID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.Fidelity = fidelity
+	route := simulationRoute(d.ID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	if len(d.ContentPolicy) > 0 {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
 		if err != nil {
