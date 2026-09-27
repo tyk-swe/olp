@@ -210,3 +210,34 @@ func TestControlledUpstreamFragmentationAndCancellation(t *testing.T) {
 		t.Fatal("canceled upstream did not stop")
 	}
 }
+
+// A decoded stream, encoded again event by event, decodes to the same events.
+func TestEncodedEventsDecodeAsTheyWereRead(t *testing.T) {
+	data, err := fixtures.Files.ReadFile("streams/generic-fragmented.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read, encoded []sse.Frame
+	var wire []byte
+	events := sse.NewDecoder(testutil.Fragmented(data, 2), 4096)
+	for {
+		frame, err := events.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		read = append(read, frame)
+		wire = append(wire, frame.Encode()...)
+	}
+	if _, err = events.Next(); err != io.EOF {
+		t.Fatalf("a finished stream answered %v", err)
+	}
+	if err = sse.Decode(strings.NewReader(string(wire)), 4096, func(f sse.Frame) error { encoded = append(encoded, f); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(read) == 0 || !reflect.DeepEqual(encoded, read) {
+		t.Fatalf("encoded %s decodes to %#v; want %#v", wire, encoded, read)
+	}
+}

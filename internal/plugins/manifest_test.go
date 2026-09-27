@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -66,6 +67,12 @@ func TestManifestValidation(t *testing.T) {
 		"uncanonical origin":   {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://api.acme.example:443/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
 		"reserved header":      {func(m *abi.Manifest) { m.Profiles[0].Hosting.Headers["Host"] = "{credential}" }, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.Host"},
 		"credential not given": {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query = nil }, CodeManifestInvalid, "manifest.profiles[1].hosting"},
+		"envelope member": {func(m *abi.Manifest) {
+			m.Profiles[0].Hosting.Envelope = &abi.Envelope{Request: "request", Response: "{response}"}
+		}, CodeManifestInvalid, "manifest.profiles[0].hosting.envelope.response"},
+		"bound rewrite": {func(m *abi.Manifest) {
+			m.Profiles[1].Hosting.Rewrites = []abi.Rewrite{{Op: "set", Path: "/metadata/user_id", Value: json.RawMessage(`"olp"`)}, {Op: "delete", Path: "/stream"}}
+		}, CodeManifestInvalid, "manifest.profiles[1].hosting.rewrites[1].path"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
@@ -76,15 +83,20 @@ func TestManifestValidation(t *testing.T) {
 }
 
 func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
-	data, err := json.Marshal(validManifest())
+	declared := validManifest()
+	declared.Profiles[0].Hosting.Envelope = &abi.Envelope{Request: "request", Fields: map[string]string{"model": "{model}"}, Response: "response"}
+	declared.Profiles[0].Hosting.Rewrites = []abi.Rewrite{{Op: "set", Path: "/store", Value: json.RawMessage(`null`)}}
+	data, err := json.Marshal(declared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = decodeManifest(data); err != nil {
-		t.Fatal(err)
+	if decoded, err := decodeManifest(data); err != nil || !reflect.DeepEqual(decoded, declared) {
+		t.Fatalf("decoded %+v: %v", decoded, err)
 	}
 	extended := strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1)
 	_, err = decodeManifest([]byte(extended))
+	wantError(t, err, CodeManifestInvalid, "manifest")
+	_, err = decodeManifest([]byte(strings.Replace(string(data), `"response":"response"`, `"response":"response","events":"response"`, 1)))
 	wantError(t, err, CodeManifestInvalid, "manifest")
 	_, err = decodeManifest([]byte(`{"name":"` + strings.Repeat("a", maxManifestBytes) + `"}`))
 	wantError(t, err, CodeManifestInvalid, "manifest")

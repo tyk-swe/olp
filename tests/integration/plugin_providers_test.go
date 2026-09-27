@@ -157,7 +157,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
 	var catalogued map[string]any
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
-		if profile.(map[string]any)["kind"] == "plugin" {
+		if profile.(map[string]any)["kind"] == "plugin" && profile.(map[string]any)["id"] == "reference-chat" {
 			catalogued = profile.(map[string]any)
 		}
 	}

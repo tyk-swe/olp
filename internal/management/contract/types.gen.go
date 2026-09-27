@@ -618,6 +618,27 @@ func (e PlaygroundResponseFormat2Type) Valid() bool {
 	}
 }
 
+// Defines values for PluginRewriteOp.
+const (
+	Default PluginRewriteOp = "default"
+	Delete  PluginRewriteOp = "delete"
+	Set     PluginRewriteOp = "set"
+)
+
+// Valid indicates whether the value is a known member of the PluginRewriteOp enum.
+func (e PluginRewriteOp) Valid() bool {
+	switch e {
+	case Default:
+		return true
+	case Delete:
+		return true
+	case Set:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -2620,16 +2641,34 @@ type PluginApprovalRequest struct {
 	Origins []string `json:"origins"`
 }
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+// PluginEnvelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
+type PluginEnvelope struct {
+	// Fields The request object's other members by name, with value templates in which {model} stands for the upstream model. They become JSON strings.
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Request The member of the upstream's request object that carries the dialect's request body.
+	Request *string `json:"request,omitempty"`
+
+	// Response The member of the upstream's responses and stream events that carries the dialect's response or event.
+	Response *string `json:"response,omitempty"`
+}
+
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
 type PluginHosting struct {
 	// Address Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.
 	Address string `json:"address"`
+
+	// Envelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
+	Envelope *PluginEnvelope `json:"envelope,omitempty"`
 
 	// Headers Declared request headers by name, with value templates.
 	Headers *map[string]string `json:"headers,omitempty"`
 
 	// Query Declared query parameters by name, with value templates.
 	Query *map[string]string `json:"query,omitempty"`
+
+	// Rewrites Declared changes to the dialect's request body, applied in order before the envelope wraps it.
+	Rewrites *[]PluginRewrite `json:"rewrites,omitempty"`
 }
 
 // PluginListResponse defines model for PluginListResponse.
@@ -2657,11 +2696,26 @@ type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
 }
+
+// PluginRewrite A declared change to one member of the dialect's request body.
+type PluginRewrite struct {
+	// Op set replaces the member, default sets it unless the request has it, and delete removes it.
+	Op PluginRewriteOp `json:"op"`
+
+	// Path JSON pointer to an object member, such as /generationConfig/seed. Setting it creates the objects above it.
+	Path string `json:"path"`
+
+	// Value The JSON value to set or default to, which may be null; absent for delete.
+	Value json.RawMessage `json:"value,omitempty"`
+}
+
+// PluginRewriteOp set replaces the member, default sets it unless the request has it, and delete removes it.
+type PluginRewriteOp string
 
 // PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
 type PolicyDecision struct {

@@ -1,4 +1,5 @@
-// Package sse decodes bounded server-sent events independently of provider codecs.
+// Package sse decodes and encodes bounded server-sent events independently of
+// provider codecs.
 package sse
 
 import (
@@ -30,29 +31,60 @@ var ErrEventTooLarge = &DecodeError{Detail: "SSE event exceeds byte limit"}
 // Decode handles CR/LF/CRLF, comments, a leading BOM and UTF-8 fragmented at
 // arbitrary byte boundaries. EOF does not dispatch an unterminated event.
 func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
+	events := NewDecoder(r, maxEventBytes)
+	for {
+		frame, err := events.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err = emit(frame); err != nil {
+			return err
+		}
+	}
+}
+
+// A Decoder reads the events of a stream one at a time, as Decode does.
+type Decoder struct {
+	scanner *bufio.Scanner
+	id      *string
+	err     error
+}
+
+// NewDecoder reads events from r, each within maxEventBytes of the wire.
+func NewDecoder(r io.Reader, maxEventBytes int) *Decoder {
 	if maxEventBytes < 1 {
-		return errors.New("SSE event limit must be positive")
+		return &Decoder{err: errors.New("SSE event limit must be positive")}
 	}
 	scanner := bufio.NewScanner(r)
 	// Allow a leading BOM and one byte of lookahead at the event limit.
 	scanner.Buffer(make([]byte, min(4096, maxEventBytes+4)), maxEventBytes+4)
 	scanner.Split(lines(maxEventBytes))
-	var id *string
+	return &Decoder{scanner: scanner}
+}
+
+// Next returns the next event, or io.EOF once the stream ends. An event's ID
+// is the last one the stream set, as SSE clients track it.
+func (d *Decoder) Next() (Frame, error) {
+	if d.err != nil {
+		return Frame{}, d.err
+	}
 	var event *string
 	var retry *uint64
 	var data []string
-	for scanner.Scan() {
-		line := scanner.Text()
+	for d.scanner.Scan() {
+		line := d.scanner.Text()
 		if !utf8.ValidString(line) {
-			return &DecodeError{Detail: "invalid UTF-8 in SSE stream"}
+			d.err = &DecodeError{Detail: "invalid UTF-8 in SSE stream"}
+			return Frame{}, d.err
 		}
 		if line == "" {
 			if len(data) > 0 {
-				if err := emit(Frame{Event: event, Data: strings.Join(data, "\n"), ID: id, RetryMS: retry}); err != nil {
-					return err
-				}
+				return Frame{Event: event, Data: strings.Join(data, "\n"), ID: d.id, RetryMS: retry}, nil
 			}
-			event, retry, data = nil, nil, nil
+			event, retry = nil, nil
 			continue
 		}
 		if strings.HasPrefix(line, ":") {
@@ -71,7 +103,7 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 			}
 		case "id":
 			if !strings.ContainsRune(value, '\x00') {
-				id = &value
+				d.id = &value
 			}
 		case "retry":
 			if value != "" && strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
@@ -81,7 +113,42 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 			}
 		}
 	}
-	return scanner.Err()
+	d.err = d.scanner.Err()
+	if d.err == nil {
+		d.err = io.EOF
+	}
+	return Frame{}, d.err
+}
+
+// Encode writes the event in its shortest wire form, with a data line for
+// each line of its data, so it never takes more bytes than the fields it
+// carries did on the wire.
+func (f Frame) Encode() []byte {
+	var b bytes.Buffer
+	field := func(name, value string) {
+		b.WriteString(name)
+		b.WriteByte(':')
+		if strings.HasPrefix(value, " ") {
+			// Decoding removes one leading space.
+			b.WriteByte(' ')
+		}
+		b.WriteString(value)
+		b.WriteByte('\n')
+	}
+	if f.Event != nil {
+		field("event", *f.Event)
+	}
+	if f.ID != nil {
+		field("id", *f.ID)
+	}
+	if f.RetryMS != nil {
+		field("retry", strconv.FormatUint(*f.RetryMS, 10))
+	}
+	for line := range strings.SplitSeq(f.Data, "\n") {
+		field("data", line)
+	}
+	b.WriteByte('\n')
+	return b.Bytes()
 }
 
 // The splitter owns wire-byte accounting, including blank lines and CRLF.

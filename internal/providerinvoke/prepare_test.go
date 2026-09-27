@@ -2,10 +2,12 @@ package providerinvoke
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func TestConfiguredPreparationKeepsCallerPresenceAndActualDefaultOrigins(t *testing.T) {
@@ -79,5 +81,57 @@ func TestEmbeddingDefaultsReachEachActualNativeRequest(t *testing.T) {
 	}
 	if _, err := Prepare(request, cfg, "embedding-model", nil); err == nil {
 		t.Fatal("translated explicit null was overwritten by a default")
+	}
+}
+
+// A plugin profile's rewrites change the prepared dialect request, which OIF
+// records; its envelope wraps only what OLP sends.
+func TestPluginProfileRewritesThePreparedRequestOutsideItsEnvelope(t *testing.T) {
+	digest := strings.Repeat("ab", 32)
+	plugin, err := connectors.NewPluginProfile(digest, abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{{
+		ID: "acme-gemini", Label: "Acme Gemini", Dialect: "gemini-generate-content",
+		Hosting: abi.Hosting{
+			Address:  "https://api.acme.example/v1beta",
+			Headers:  map[string]string{"Authorization": "Bearer {credential}"},
+			Envelope: &abi.Envelope{Request: "request", Fields: map[string]string{"model": "{model}"}, Response: "response"},
+			Rewrites: []abi.Rewrite{
+				{Op: abi.RewriteSet, Path: "/generationConfig/candidateCount", Value: json.RawMessage(`1`)},
+				{Op: abi.RewriteDelete, Path: "/generationConfig/seed"},
+			},
+		},
+	}}}, "acme-gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-gemini", ProfileRevision: digest, Endpoint: plugin.Address()}
+	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"seed":7,"n":2,"max_tokens":16}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Prepare(request, cfg, "acme-large", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Contents         []json.RawMessage          `json:"contents"`
+		GenerationConfig map[string]json.RawMessage `json:"generationConfig"`
+		Request          json.RawMessage            `json:"request"`
+	}
+	prepared := result.Prepared.Document().Bytes()
+	if json.Unmarshal(prepared, &body) != nil || result.Wire != openai.FamilyGemini || len(body.Contents) != 1 || body.Request != nil {
+		t.Fatalf("prepared %s for %s", prepared, result.Wire)
+	}
+	if string(body.GenerationConfig["candidateCount"]) != "1" || string(body.GenerationConfig["maxOutputTokens"]) != "16" || body.GenerationConfig["seed"] != nil {
+		t.Fatalf("rewrote the generation config to %s", prepared)
+	}
+	rewritten := map[string]bool{}
+	for _, entry := range result.Prepared.Provenance() {
+		rewritten[entry.Pointer] = rewritten[entry.Pointer] || entry.Origin == "hosting_rewrite"
+	}
+	if !rewritten["/generationConfig/candidateCount"] || !rewritten["/generationConfig/seed"] {
+		t.Fatalf("provenance %+v", result.Prepared.Provenance())
+	}
+	if sent := cfg.WrapRequest(prepared, "acme-large"); string(sent) != `{"model":"acme-large","request":`+string(prepared)+`}` {
+		t.Fatalf("sent %s", sent)
 	}
 }

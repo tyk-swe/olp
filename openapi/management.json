@@ -4299,11 +4299,14 @@
       },
       "PluginHosting": {
         "additionalProperties": false,
-        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.",
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.",
         "properties": {
           "address": {
             "description": "Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.",
             "type": "string"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/PluginEnvelope"
           },
           "headers": {
             "additionalProperties": {
@@ -4322,10 +4325,71 @@
             "description": "Declared query parameters by name, with value templates.",
             "maxProperties": 16,
             "type": "object"
+          },
+          "rewrites": {
+            "description": "Declared changes to the dialect's request body, applied in order before the envelope wraps it.",
+            "items": {
+              "$ref": "#/components/schemas/PluginRewrite"
+            },
+            "maxItems": 16,
+            "type": "array"
           }
         },
         "required": [
           "address"
+        ],
+        "type": "object"
+      },
+      "PluginEnvelope": {
+        "additionalProperties": false,
+        "description": "The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "The request object's other members by name, with value templates in which {model} stands for the upstream model. They become JSON strings.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "request": {
+            "description": "The member of the upstream's request object that carries the dialect's request body.",
+            "type": "string"
+          },
+          "response": {
+            "description": "The member of the upstream's responses and stream events that carries the dialect's response or event.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PluginRewrite": {
+        "additionalProperties": false,
+        "description": "A declared change to one member of the dialect's request body.",
+        "properties": {
+          "op": {
+            "description": "set replaces the member, default sets it unless the request has it, and delete removes it.",
+            "enum": [
+              "set",
+              "default",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON pointer to an object member, such as /generationConfig/seed. Setting it creates the objects above it.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The JSON value to set or default to, which may be null; absent for delete.",
+            "x-go-type": "json.RawMessage",
+            "x-go-type-skip-optional-pointer": true
+          }
+        },
+        "required": [
+          "op",
+          "path"
         ],
         "type": "object"
       },

@@ -33,6 +33,19 @@ type Profile = abi.Profile
 // Hosting is a profile's hosting adaptation, which OLP runs.
 type Hosting = abi.Hosting
 
+// Envelope is the upstream's own JSON object around a dialect's bodies.
+type Envelope = abi.Envelope
+
+// Rewrite changes one member of a dialect's request body.
+type Rewrite = abi.Rewrite
+
+// Rewrite operations.
+const (
+	RewriteSet     = abi.RewriteSet
+	RewriteDefault = abi.RewriteDefault
+	RewriteDelete  = abi.RewriteDelete
+)
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 

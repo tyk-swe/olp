@@ -88,6 +88,8 @@ static credential, which the adaptation places.
 | `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query, fragment or placeholders. It becomes the endpoint of every provider using the profile. |
 | `Headers` | At most 16 request headers by name. Hop-by-hop, framing, content negotiation, tracing and `X-OLP-` headers are OLP's, and the dialect's semantic headers, such as `Anthropic-Version` or `OpenAI-Beta`, are the provider's. |
 | `Query` | At most 16 query parameters of the address by name: 1–128 letters, digits, `.`, `_`, `~` and `-`, other than the dialect's semantic query settings and addressing, such as Gemini's `alt`. |
+| `Envelope` | Optional. The upstream's own JSON object around the dialect's bodies; see [Envelopes and rewrites](#envelopes-and-rewrites). |
+| `Rewrites` | Optional. At most 16 declared changes to the dialect's request body; see [Envelopes and rewrites](#envelopes-and-rewrites). |
 
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
@@ -95,6 +97,62 @@ such as `Token {credential}`, and braces appear nowhere else. At least one value
 must place the credential. OLP refuses a credential it can't place in a header,
 such as one containing a line break, before sending anything, and redacts every
 value that carries the credential wherever it records upstream text.
+
+A profile whose adaptation changes only authorization, address and declared
+headers serves strict routes. An envelope or any rewrite changes the dialect's
+bodies, so the profile serves only
+[transformed routes](provider-routing.md#route-fidelity), and strict activation
+of a target using it tells the route author to declare the route transformed.
+
+### Envelopes and rewrites
+
+Some upstreams speak a built-in dialect inside a JSON object of their own, or
+need a few request members set or removed. The reference plugin's
+`reference-gemini` profile declares both:
+
+```go
+Hosting: plugin.Hosting{
+	Address: "https://api.example.com/enveloped/v1beta",
+	Headers: map[string]string{"Authorization": "Token {credential}"},
+	Envelope: &plugin.Envelope{
+		Request:  "request",
+		Fields:   map[string]string{"model": "{model}"},
+		Response: "response",
+	},
+	Rewrites: []plugin.Rewrite{
+		{Op: plugin.RewriteSet, Path: "/generationConfig/candidateCount", Value: json.RawMessage(`1`)},
+		{Op: plugin.RewriteDefault, Path: "/systemInstruction", Value: json.RawMessage(`{"parts":[{"text":"You are the reference assistant."}]}`)},
+		{Op: plugin.RewriteDelete, Path: "/generationConfig/seed"},
+	},
+},
+```
+
+OLP runs both around its built-in codecs, so codecs, content policy and usage
+accounting see plain dialect bodies:
+
+1. OLP prepares the dialect's request, then applies the rewrites in order. The
+   route inspector's effective request shows the result.
+2. The envelope wraps what OLP sends: a Gemini request travels as
+   `{"model": "…", "request": {"contents": […], …}}`.
+3. OLP unwraps each successful response and each server-sent event: from
+   `{"response": {…}, "traceId": "…"}` it reads the `response` member. A
+   response or event without the member, such as an upstream error or
+   `[DONE]`, reaches the dialect as it is; error responses are read as they
+   are.
+
+| Field | Rule |
+| --- | --- |
+| `Envelope.Request` | The member of the upstream's request object that carries the dialect's request body. Without it, OLP sends the body as it is. |
+| `Envelope.Fields` | Only with `Request`: at most 16 other members of the request object, by name, other than `Request`. Values are templates, as for headers, that become JSON strings; `{model}` stands for the upstream model the request is for, and the credential never goes in a body. |
+| `Envelope.Response` | The member of each successful response and stream event that carries the dialect's response or event. Without it, OLP reads responses as they are. |
+| `Rewrites[].Op` | `set` replaces the member, `default` sets it unless the request has it, even as `null`, and `delete` removes it if present. |
+| `Rewrites[].Path` | A JSON pointer to an object member, 1–8 names deep, such as `/generationConfig/seed`. Each member is rewritten at most once, and nothing inside a member another rewrite changes. The model and delivery members OLP binds, `/model`, `/stream` and Chat Completions' `/stream_options`, can't be rewritten. |
+| `Rewrites[].Value` | The JSON value to set or default to, which may be `null`. `delete` takes none. |
+
+Member names in envelopes and paths are 1–128 letters, digits, `_`, `-` and
+`.`. Setting or defaulting a member creates the objects above it; if one of
+them is present but not an object, OLP refuses the request with an
+`unsupported_parameter` error on `provider_profile` instead of sending it.
 
 ## What a plugin can reach
 
