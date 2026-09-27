@@ -20,6 +20,7 @@ const unchanged: ProviderRevisionDiff = {
   capabilities_removed: [],
   profile_changed: false,
   plugin_changed: false,
+  plugin_options_changed: false,
   semantic_configuration_changed: false,
   serving_binding_changed: false,
   network_configuration_changed: false
@@ -50,4 +51,14 @@ it('shows a move to another plugin build', () => {
   expect(
     flags({ ...unchanged, profile_changed: true, plugin_changed: true })
   ).toEqual(['Provider profile changed', 'Plugin digest changed']);
+});
+
+it('shows a change of plugin options', () => {
+  expect(
+    flags({
+      ...unchanged,
+      endpoint_changed: true,
+      plugin_options_changed: true
+    })
+  ).toEqual(['Endpoint changed', 'Plugin options changed']);
 });

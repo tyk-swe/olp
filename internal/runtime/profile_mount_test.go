@@ -57,7 +57,7 @@ func TestMountedPluginProviderMountsItsStaticCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, slotID, credentialID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	provider := Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Plugin: plugin, ProfileID: "acme-chat", ProfileRevision: digest, Endpoint: plugin.Address(), DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
+	provider := Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, Plugin: plugin, ProfileID: "acme-chat", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
 	cfg := Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
 	snapshot := Snapshot{Providers: map[string]Provider{id: provider}}
 	secrets, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: cfg, Credential: []byte("static-secret")}})
@@ -67,8 +67,14 @@ func TestMountedPluginProviderMountsItsStaticCredential(t *testing.T) {
 	if string(secrets[credentialID]) != "static-secret" || snapshot.Providers[id].Plugin != plugin {
 		t.Fatal("the static credential was not mounted for the published plugin profile")
 	}
-	cfg.ProfileRevision = strings.Repeat("cd", 32)
-	if _, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: cfg, Credential: []byte("static-secret")}}); err == nil {
+	moved := cfg
+	moved.ProfileRevision = strings.Repeat("cd", 32)
+	if _, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: moved, Credential: []byte("static-secret")}}); err == nil {
 		t.Fatal("a mounted file moved the provider to another plugin")
+	}
+	optioned := cfg
+	optioned.Options.PluginOptions = map[string]string{"account": "other"}
+	if _, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: optioned, Credential: []byte("static-secret")}}); err == nil {
+		t.Fatal("a mounted file set plugin options the revision does not publish")
 	}
 }

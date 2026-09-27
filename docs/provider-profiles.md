@@ -28,7 +28,8 @@ the plugin module that supplies it, so a provider pins that build. It serves one
 built-in dialect's generation operation at the address its plugin declares,
 shares that dialect's revision and semantic headers and query settings, and
 authenticates with a static credential its declared headers and query
-parameters place.
+parameters place. Its `options_schema` describes the options a provider using
+it sets, which the hosting adaptation places too.
 
 | Profile | Native generation address / contract |
 | --- | --- |

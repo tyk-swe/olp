@@ -78,7 +78,8 @@ export class ConfigurationDraft {
       'operation_defaults',
       'bindings',
       'models',
-      'parameter_defaults'
+      'parameter_defaults',
+      'plugin_options'
     ]) {
       const value = this.at(['options', name]);
       if (value !== undefined && !nativeObject(value))

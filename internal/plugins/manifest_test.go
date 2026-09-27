@@ -15,7 +15,9 @@ func validManifest() abi.Manifest {
 		Version: "1.2.0+build.7",
 		Origins: []string{"https://api.acme.example", "http://127.0.0.1:8080", "https://[::1]:8443"},
 		Profiles: []abi.Profile{
-			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}}},
+			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Options: []abi.Option{{Name: "account", Label: "Account"}}, Hosting: abi.Hosting{
+				Address: "https://api.acme.example/accounts/{options.account}/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
+			}},
 			{ID: "acme-messages", Label: "Acme Messages", Dialect: "anthropic-messages", Hosting: abi.Hosting{Address: "http://127.0.0.1:8080", Query: map[string]string{"key": "{credential}"}}},
 		},
 	}
@@ -66,6 +68,9 @@ func TestManifestValidation(t *testing.T) {
 		"uncanonical origin":   {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://api.acme.example:443/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
 		"reserved header":      {func(m *abi.Manifest) { m.Profiles[0].Hosting.Headers["Host"] = "{credential}" }, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.Host"},
 		"credential not given": {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query = nil }, CodeManifestInvalid, "manifest.profiles[1].hosting"},
+		"option name":          {func(m *abi.Manifest) { m.Profiles[0].Options[0].Name = "Account" }, CodeManifestInvalid, "manifest.profiles[0].options[0].name"},
+		"undeclared option":    {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query["account"] = "{options.account}" }, CodeManifestInvalid, "manifest.profiles[1].hosting.query.account"},
+		"option origin":        {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://{options.account}.acme.example/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()

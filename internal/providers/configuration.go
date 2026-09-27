@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/textproto"
 	"regexp"
 	"strings"
@@ -39,6 +40,9 @@ type Options struct {
 	Models            map[string]json.RawMessage       `json:"models"`
 	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 	VendorID          *string                          `json:"vendor_id"`
+	// PluginOptions holds a plugin provider's values for the options its
+	// plugin profile declares, by option name.
+	PluginOptions map[string]string `json:"plugin_options,omitempty"`
 }
 
 // Configuration is the stored connection configuration; it is the contract's
@@ -83,6 +87,8 @@ func (c *Configuration) Normalize() {
 	if c.Options.ParameterDefaults == nil {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
+	// An option left empty is unset.
+	maps.DeleteFunc(c.Options.PluginOptions, func(_, value string) bool { return value == "" })
 	switch {
 	case c.Kind == KindPlugin:
 		// No vendor list price applies to a plugin provider.
@@ -94,9 +100,10 @@ func (c *Configuration) Normalize() {
 	}
 }
 
-// pin resolves the plugin profile a plugin provider's draft pins, which must
-// belong to a usable plugin, and gives the provider its address as endpoint.
-func (c *Configuration) pin(ctx context.Context, q access.Queryer) error {
+// Pin resolves the plugin profile a plugin provider's configuration pins,
+// which must belong to a usable plugin, and gives the provider its address,
+// with its options in place, as endpoint.
+func (c *Configuration) Pin(ctx context.Context, q access.Queryer) error {
 	if c.Kind != KindPlugin {
 		return nil
 	}
@@ -114,7 +121,7 @@ func (c *Configuration) pin(ctx context.Context, q access.Queryer) error {
 	if err != nil {
 		return err
 	}
-	c.plugin, c.Endpoint = plugin, new(plugin.Address())
+	c.plugin, c.Endpoint = plugin, new(plugin.Address(c.Options.PluginOptions))
 	return nil
 }
 
@@ -167,6 +174,17 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	}
 	if c.Kind == KindPlugin && c.plugin == nil {
 		return access.Invalid("configuration.profile_revision", "Choose a profile of an installed, approved plugin, with the plugin's digest as the profile revision.")
+	}
+	if c.plugin == nil && len(c.Options.PluginOptions) != 0 {
+		return access.Invalid("configuration.options.plugin_options", "Only plugin providers have plugin options.")
+	}
+	if c.plugin != nil {
+		if err := c.plugin.ValidateOptions(c.Options.PluginOptions); err != nil {
+			if refusal, ok := errors.AsType[*connectors.OptionError](err); ok {
+				return access.Invalid("configuration.options.plugin_options."+refusal.Option, refusal.Message)
+			}
+			return err
+		}
 	}
 	modeAllowed := false
 	for _, m := range kind.AuthModes {
@@ -263,6 +281,9 @@ func (c *Configuration) transportFingerprint() string {
 	if c.ProfileID != "" {
 		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
 	}
+	if c.Kind == KindPlugin {
+		parts = append(parts, c.Options.PluginOptions)
+	}
 	if c.Options.Network != nil {
 		parts = append(parts, c.Options.Network)
 	}
@@ -278,5 +299,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }

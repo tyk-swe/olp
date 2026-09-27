@@ -176,6 +176,9 @@ func hasSignature(f api.FunctionDefinition, params, results []api.ValueType) boo
 type Call struct {
 	Method string
 	Params any
+	// Provider is the provider a call on behalf of one serves: the profile it
+	// uses and its option values, which the plugin receives with the call.
+	Provider *abi.Provider
 	// Secrets are values the call hands the plugin. OLP redacts them from
 	// everything the plugin logs and from failures it reports.
 	Secrets []string
@@ -186,11 +189,7 @@ type Call struct {
 // *Error and leaves nothing behind; a failure the plugin reports is an
 // *abi.Error.
 func (m *Module) Call(ctx context.Context, call Call, result any) error {
-	params, err := json.Marshal(call.Params)
-	if err != nil {
-		return err
-	}
-	request, err := json.Marshal(abi.Request{Method: call.Method, Params: params})
+	request, err := call.request()
 	if err != nil {
 		return err
 	}
@@ -225,6 +224,15 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 		}
 		return nil
 	})
+}
+
+// request encodes the call as the request the plugin serves.
+func (c Call) request() ([]byte, error) {
+	params, err := json.Marshal(c.Params)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(abi.Request{Method: c.Method, Params: params, Provider: c.Provider})
 }
 
 // run instantiates the module for one call and runs use within the

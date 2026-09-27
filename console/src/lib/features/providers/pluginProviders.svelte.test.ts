@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectKeys } from '$lib/features/access/projects/projectKeys';
+import { ApiProblem } from '$lib/api/http';
 import { providerKeys } from './providerKeys';
 import {
   createProvider,
@@ -74,6 +75,33 @@ const referenceChat: ProviderProfile = {
   strict: true,
   plugin: { digest, name: 'reference', version: '0.1.0' }
 };
+const workspaceChat: ProviderProfile = {
+  ...referenceChat,
+  id: 'reference-workspace-chat',
+  label: 'Reference workspace Chat Completions',
+  options_schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['workspace'],
+    properties: {
+      workspace: {
+        type: 'string',
+        title: 'Workspace',
+        description: 'The upstream workspace that serves this provider.',
+        minLength: 1,
+        maxLength: 256,
+        pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+      },
+      region: {
+        type: 'string',
+        title: 'Region',
+        minLength: 1,
+        maxLength: 256,
+        enum: ['us', 'eu']
+      }
+    }
+  }
+};
 const openAiChat: ProviderProfile = {
   ...referenceChat,
   id: 'openai-chat',
@@ -142,7 +170,10 @@ beforeEach(() => {
   client.setQueryData(['provider-vendors'], []);
   client.setQueryData(['provider-configuration-schemas'], {});
   client.setQueryData(projectKeys.memberships, []);
-  client.setQueryData(['provider-profiles'], [openAiChat, referenceChat]);
+  client.setQueryData(
+    ['provider-profiles'],
+    [openAiChat, referenceChat, workspaceChat]
+  );
 });
 
 afterEach(async () => {
@@ -189,6 +220,12 @@ function choosePluginKind() {
   );
 }
 
+function submit() {
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
 describe('provider wizard with a plugin profile', () => {
   it('offers approved plugin profiles with their build, then the static credential', async () => {
     const saved: Provider = { ...pluginProvider, id: 'provider-new' };
@@ -215,7 +252,8 @@ describe('provider wizard with a plugin profile', () => {
     )!;
     const offered = [...select.querySelectorAll('optgroup option')];
     expect(offered.map((option) => option.textContent?.trim())).toEqual([
-      'Reference Chat Completions · reference 0.1.0 · digest dddddddddddd'
+      'Reference Chat Completions · reference 0.1.0 · digest dddddddddddd',
+      'Reference workspace Chat Completions · reference 0.1.0 · digest dddddddddddd'
     ]);
     expect(select.querySelector('optgroup')?.label).toBe(
       'reference 0.1.0 · digest dddddddddddd'
@@ -275,6 +313,130 @@ describe('provider wizard with a plugin profile', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
       'plugin profile'
     );
+  });
+});
+
+describe('provider wizard with plugin profile options', () => {
+  function chooseWorkspaceProfile() {
+    choosePluginKind();
+    choose(
+      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
+      `reference-workspace-chat@${digest}`
+    );
+  }
+
+  function fillConnection() {
+    type('#provider-name', 'Workspace upstream');
+    type('#initial-model', 'reference-model');
+    type('#provider-secret', 'reference-secret');
+  }
+
+  it("renders the profile's options in the Connection stage and sends them", async () => {
+    vi.mocked(createProvider).mockRejectedValue(new Error('stop here'));
+    render();
+    await settle();
+    choosePluginKind();
+    expect(host.querySelector('[id^="provider-option-"]')).toBeNull();
+
+    chooseWorkspaceProfile();
+    const options = host.querySelector('fieldset.plugin-options')!;
+    expect(options.querySelector('legend')?.textContent).toBe(
+      'Profile options'
+    );
+    const workspace = host.querySelector<HTMLInputElement>(
+      '#provider-option-workspace'
+    )!;
+    expect(
+      host.querySelector('label[for="provider-option-workspace"]')?.textContent
+    ).toBe('Workspace');
+    expect(workspace.required).toBe(true);
+    expect(workspace.closest('.native-field')?.textContent).toContain(
+      'The upstream workspace that serves this provider.'
+    );
+    const region = host.querySelector<HTMLSelectElement>(
+      '#provider-option-region'
+    )!;
+    expect(region.required).toBe(false);
+    expect([...region.options].map((option) => option.value)).toEqual([
+      '',
+      'us',
+      'eu'
+    ]);
+
+    type('#provider-option-workspace', 'acme');
+    choose(region, 'eu');
+    fillConnection();
+    submit();
+    await vi.waitFor(() => expect(createProvider).toHaveBeenCalledOnce());
+    const [input] = vi.mocked(createProvider).mock.calls[0]!;
+    expect(input.configuration).toMatchObject({
+      kind: 'plugin',
+      profile_id: 'reference-workspace-chat',
+      profile_revision: digest,
+      options: { plugin_options: { workspace: 'acme', region: 'eu' } }
+    });
+  });
+
+  it("shows the server's validation of an option at that option", async () => {
+    vi.mocked(createProvider).mockRejectedValue(
+      new ApiProblem({
+        type: 'https://openllmproxy.dev/problems/validation_failed',
+        title: 'Unprocessable Entity',
+        status: 422,
+        detail: 'The request is invalid.',
+        errors: {
+          'configuration.options.plugin_options.workspace': [
+            {
+              code: 'validation_failed',
+              message: 'Use a value matching ^[a-z0-9][a-z0-9-]{0,39}$.'
+            }
+          ]
+        }
+      })
+    );
+    render();
+    await settle();
+    chooseWorkspaceProfile();
+    type('#provider-option-workspace', 'Acme Corp');
+    fillConnection();
+    submit();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(
+        host
+          .querySelector('#provider-option-workspace')
+          ?.getAttribute('aria-invalid')
+      ).toBe('true');
+    });
+    expect(
+      host.querySelector('#provider-option-workspace-help')?.textContent
+    ).toContain('Use a value matching ^[a-z0-9][a-z0-9-]{0,39}$.');
+    expect(host.querySelector('.field-issues')?.textContent).toContain(
+      'Use a value matching'
+    );
+    expect(
+      host
+        .querySelector('#provider-option-region')
+        ?.getAttribute('aria-invalid')
+    ).toBe('false');
+  });
+
+  it('keeps only the options the newly chosen profile declares', async () => {
+    vi.mocked(createProvider).mockRejectedValue(new Error('stop here'));
+    render();
+    await settle();
+    chooseWorkspaceProfile();
+    type('#provider-option-workspace', 'acme');
+    choose(
+      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
+      `reference-chat@${digest}`
+    );
+    expect(host.querySelector('fieldset.plugin-options')).toBeNull();
+    fillConnection();
+    submit();
+    await vi.waitFor(() => expect(createProvider).toHaveBeenCalledOnce());
+    const [input] = vi.mocked(createProvider).mock.calls[0]!;
+    expect(input.configuration.options?.plugin_options).toBeUndefined();
   });
 });
 

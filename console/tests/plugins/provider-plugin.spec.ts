@@ -74,7 +74,7 @@ test('an operator connects a provider through an approved plugin profile', async
   );
   const plugin = page.getByRole('article', { name: `reference ${version}` });
   await expect(
-    plugin.getByRole('cell', { name: upstream.address })
+    plugin.getByRole('cell', { name: upstream.address, exact: true })
   ).toBeVisible();
   await plugin.getByRole('button', { name: 'Review and approve' }).click();
   await plugin
@@ -94,7 +94,7 @@ test('an operator connects a provider through an approved plugin profile', async
   await page.getByRole('radio', { name: /Provider plugin/ }).check();
   const profile = page.getByLabel('Plugin profile');
   await expect(
-    profile.locator('option', { hasText: digest.slice(0, 12) })
+    profile.locator(`option[value="reference-chat@${digest}"]`)
   ).toHaveText(
     `Reference Chat Completions · reference ${version} · digest ${digest.slice(0, 12)}`
   );

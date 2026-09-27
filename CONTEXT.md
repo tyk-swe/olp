@@ -68,6 +68,12 @@ _Avoid_: Trusted plugin (every plugin is operator-chosen; confinement differs).
 A provider plugin's declared placement of a built-in dialect at an upstream:
 its address, headers, envelope and declared rewrites of the dialect body.
 
+**Plugin option**:
+A non-secret provider setting a plugin profile declares, such as an account,
+region or project, which the operator sets per provider and which its hosting
+adaptation and plugin code receive.
+_Avoid_: Connection option (names any provider's connector settings).
+
 **Grant enrollment**:
 The operator's authorization of an upstream account through a provider plugin,
 by loopback paste-back, out-of-band code or device authorization.

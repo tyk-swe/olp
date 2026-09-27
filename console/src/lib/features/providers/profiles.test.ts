@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dialectSurface,
+  pluginOptionFields,
   pluginProfileGroups,
   type ProviderProfile
 } from './profiles';
@@ -68,5 +69,35 @@ describe('plugin profile catalogue', () => {
     expect(dialectSurface('gemini-generate-content')).toBe('gemini');
     expect(dialectSurface('openai-responses')).toBe('openai');
     expect(dialectSurface(undefined)).toBe('openai');
+  });
+});
+
+describe('plugin profile options', () => {
+  it('lists the declared options in order, marking those a provider must set', () => {
+    const workspace = {
+      options_schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['workspace'],
+        properties: {
+          workspace: { type: 'string', title: 'Workspace' },
+          region: { type: 'string', title: 'Region', enum: ['us', 'eu'] }
+        }
+      }
+    };
+    expect(pluginOptionFields(workspace)).toEqual([
+      {
+        name: 'workspace',
+        schema: { type: 'string', title: 'Workspace' },
+        required: true
+      },
+      {
+        name: 'region',
+        schema: { type: 'string', title: 'Region', enum: ['us', 'eu'] },
+        required: false
+      }
+    ]);
+    expect(pluginOptionFields(profile({}))).toEqual([]);
+    expect(pluginOptionFields(undefined)).toEqual([]);
   });
 });

@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -33,15 +34,17 @@ import (
 
 const pluginCredential = "reference-static-secret"
 
-// pluginUpstream is the fictional upstream the reference plugin's profile
-// places requests at: an OpenAI Chat Completions server that takes its key as
-// a token in the Authorization header and wants clients to identify
-// themselves. It records the headers of every request.
+// pluginUpstream is the fictional upstream the reference plugin's profiles
+// place requests at: an OpenAI Chat Completions server, with an API per
+// workspace too, that takes its key as a token in the Authorization header
+// and wants clients to identify themselves. It records the headers and path
+// of every request.
 type pluginUpstream struct {
 	*httptest.Server
 	mu          sync.Mutex
 	credentials []string
 	requests    []http.Header
+	paths       []string
 }
 
 func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
@@ -50,6 +53,7 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		u.requests = append(u.requests, r.Header.Clone())
+		u.paths = append(u.paths, r.URL.Path)
 		u.mu.Unlock()
 		token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Token ")
 		if !found || !slices.Contains(u.credentials, token) || r.Header.Get("X-Reference-Client") != "olp" {
@@ -57,7 +61,7 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 			writeJSON(w, map[string]any{"error": map[string]any{"message": "Unknown token " + r.Header.Get("Authorization"), "type": "invalid_request_error", "code": "invalid_api_key"}})
 			return
 		}
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+		if r.Method != http.MethodPost || !pluginUpstreamPath.MatchString(r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -87,10 +91,19 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	return u
 }
 
+var pluginUpstreamPath = regexp.MustCompile(`^/v1(/workspaces/[a-z0-9-]+)?/chat/completions$`)
+
 func (u *pluginUpstream) received() []http.Header {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return slices.Clone(u.requests)
+}
+
+// receivedPaths returns the path of every request, in order.
+func (u *pluginUpstream) receivedPaths() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return slices.Clone(u.paths)
 }
 
 // installReferencePlugin builds the reference plugin against the upstream,
@@ -157,7 +170,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
 	var catalogued map[string]any
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
-		if profile.(map[string]any)["kind"] == "plugin" {
+		if profile.(map[string]any)["id"] == "reference-chat" {
 			catalogued = profile.(map[string]any)
 		}
 	}

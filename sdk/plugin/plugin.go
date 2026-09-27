@@ -18,6 +18,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -33,6 +34,14 @@ type Profile = abi.Profile
 // Hosting is a profile's hosting adaptation, which OLP runs.
 type Hosting = abi.Hosting
 
+// Option is a non-secret setting a profile declares, which each provider
+// using the profile sets.
+type Option = abi.Option
+
+// Provider is the provider a call serves: the profile it uses and its option
+// values.
+type Provider = abi.Provider
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 
@@ -44,6 +53,22 @@ type Plugin interface {
 }
 
 var registered Plugin
+
+// methods serve the methods OLP calls, each given the call's context and
+// parameters.
+var methods = map[string]func(ctx context.Context, params json.RawMessage) any{
+	abi.MethodManifest: func(context.Context, json.RawMessage) any { return registered.Manifest() },
+}
+
+type providerKey struct{}
+
+// ProviderOf returns the provider the call ctx serves, for a method OLP calls
+// on behalf of a provider: the profile the provider uses and the values its
+// operator set for the profile's options. ok is false for any other call.
+func ProviderOf(ctx context.Context) (provider Provider, ok bool) {
+	provider, ok = ctx.Value(providerKey{}).(Provider)
+	return provider, ok
+}
 
 // Register makes p the plugin this module serves. Call it once, from init.
 func Register(p Plugin) {
@@ -69,11 +94,15 @@ func serve(message []byte) (response []byte) {
 	if registered == nil {
 		return respond(nil, &abi.Error{Code: abi.CodeInternal, Message: "The module registered no plugin."})
 	}
-	switch request.Method {
-	case abi.MethodManifest:
-		return respond(registered.Manifest(), nil)
+	method, ok := methods[request.Method]
+	if !ok {
+		return respond(nil, &abi.Error{Code: abi.CodeUnknownMethod, Message: "The plugin does not implement " + request.Method + "."})
 	}
-	return respond(nil, &abi.Error{Code: abi.CodeUnknownMethod, Message: "The plugin does not implement " + request.Method + "."})
+	ctx := context.Background()
+	if request.Provider != nil {
+		ctx = context.WithValue(ctx, providerKey{}, *request.Provider)
+	}
+	return respond(method(ctx, request.Params), nil)
 }
 
 func respond(result any, failure *abi.Error) []byte {

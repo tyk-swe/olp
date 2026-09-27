@@ -6,6 +6,7 @@
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import ProviderActivationControls from '$lib/features/providers/ProviderActivationControls.svelte';
   import type { RunProviderAction } from './providerEditor';
+  import type { FieldIssue } from '$lib/api/http';
   import {
     providerStatus,
     providerStatusTone,
@@ -21,6 +22,7 @@
     run,
     onTouch,
     dirty = false,
+    issues = [],
     onSave,
     onProviderChanged,
     onRefetchProvider,
@@ -34,6 +36,8 @@
     run: RunProviderAction;
     onTouch: () => void;
     dirty?: boolean;
+    /** Field issues the server reported for the last change. */
+    issues?: FieldIssue[];
     onSave: () => void;
     onProviderChanged: (mutation?: {
       previousEtag: string;
@@ -73,6 +77,7 @@
         values={editValues}
         idPrefix="detail"
         disabled={!canManage || Boolean(busy) || current.state === 'disabled'}
+        {issues}
         onChange={onTouch}
       />{/if}
   </div>

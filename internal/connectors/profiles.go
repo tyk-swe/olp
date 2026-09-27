@@ -44,6 +44,9 @@ type Profile struct {
 	// Plugin is the provider plugin that supplies the profile, or nil for a
 	// built-in profile.
 	Plugin *Plugin `json:"plugin,omitempty"`
+	// OptionsSchema is the JSON Schema of a plugin provider's option values,
+	// which the plugin profile declares; nil for a built-in profile.
+	OptionsSchema json.RawMessage `json:"options_schema,omitempty"`
 	// Strict reports whether the profile may serve strict routes: its hosting
 	// changes only authorization, address and headers, or is a qualified
 	// built-in binding.
@@ -168,6 +171,7 @@ func cloneProfile(p Profile) Profile {
 		schemas[name] = bytes.Clone(schema)
 	}
 	p.DefaultSchemas = schemas
+	p.OptionsSchema = bytes.Clone(p.OptionsSchema)
 	p.Authentication = slices.Clone(p.Authentication)
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
@@ -229,6 +233,9 @@ func (c Config) Hosting() string {
 }
 
 func (c Config) ValidateProfile() error {
+	if c.Plugin == nil && len(c.PluginOptions) > 0 {
+		return errors.New("only plugin profiles declare options")
+	}
 	if c.ProfileID == "" {
 		if c.ProfileRevision != "" || len(c.SemanticHeaders) > 0 || len(c.QuerySettings) > 0 || len(c.OperationDefaults) > 0 || len(c.Bindings) > 0 {
 			return errors.New("semantic configuration and serving bindings require an explicit versioned profile")
@@ -238,6 +245,11 @@ func (c Config) ValidateProfile() error {
 	p, err := c.profile()
 	if err != nil {
 		return err
+	}
+	if c.Plugin != nil {
+		if err = c.Plugin.ValidateOptions(c.PluginOptions); err != nil {
+			return err
+		}
 	}
 	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
 		return errors.New("profile, connector kind and authentication are not a supported composition")
@@ -389,8 +401,9 @@ func (c Config) Supports(operation, surface, mode string) bool {
 // host is the hosting stage of Apply. It places a request the caller addressed
 // from the connector: a profile's semantic headers and query settings, a
 // plugin profile's declared headers and query parameters filled from the
-// credential, or the API revision an automatic Anthropic provider sends. It
-// returns the placed values that carry the credential.
+// credential and the provider's options, or the API revision an automatic
+// Anthropic provider sends. It returns the placed values that carry the
+// credential.
 func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 	if err := c.ApplySemantic(req); err != nil {
 		return nil, err
@@ -399,7 +412,7 @@ func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
 	}
 	if c.Plugin != nil {
-		return c.Plugin.place(req, credential)
+		return c.Plugin.place(req, credential, c.PluginOptions)
 	}
 	return nil, nil
 }
@@ -468,8 +481,8 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 	}
 	switch c.Hosting() {
 	case pluginHosting:
-		if c.Endpoint != c.Plugin.Address() {
-			return errors.New("a plugin provider's endpoint is its profile's address")
+		if c.Endpoint != c.Plugin.Address(c.PluginOptions) {
+			return errors.New("a plugin provider's endpoint is its profile's address, with its options in place")
 		}
 		return nil
 	case "direct-gemini-interactions", "direct-gemini-live":

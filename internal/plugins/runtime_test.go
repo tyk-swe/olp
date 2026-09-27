@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -72,7 +73,12 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		Profiles: []abi.Profile{{ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
 			Address: "https://api.example.com/v1",
 			Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
-		}}},
+		}}, {ID: "reference-workspace-chat", Label: "Reference workspace Chat Completions", Dialect: "openai-chat",
+			Options: []abi.Option{{Name: "workspace", Label: "Workspace", Description: "The upstream workspace that serves this provider.", Pattern: "^[a-z0-9][a-z0-9-]{0,39}$"}},
+			Hosting: abi.Hosting{
+				Address: "https://api.example.com/v1/workspaces/{options.workspace}",
+				Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
+			}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {
 		t.Fatalf("manifest %+v, want %+v", manifest, want)
@@ -174,6 +180,25 @@ func TestPluginOutputReachesTheLogRedacted(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("plugin log lacks %s:\n%s", want, output)
+		}
+	}
+}
+
+// A call OLP makes on behalf of a provider hands the plugin the provider's
+// profile and option values; a call about the plugin itself carries none.
+func TestCallsCarryTheProviderTheyServe(t *testing.T) {
+	provider := &abi.Provider{Profile: "acme-chat", Options: map[string]string{"account": "acme"}}
+	for _, call := range []Call{
+		{Method: "provider_method", Params: map[string]string{"step": "1"}, Provider: provider},
+		{Method: abi.MethodManifest},
+	} {
+		data, err := call.request()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var request abi.Request
+		if err = json.Unmarshal(data, &request); err != nil || request.Method != call.Method || !reflect.DeepEqual(request.Provider, call.Provider) {
+			t.Fatalf("call %+v became request %s", call, data)
 		}
 	}
 }

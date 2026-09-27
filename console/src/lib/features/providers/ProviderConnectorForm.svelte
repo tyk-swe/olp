@@ -6,6 +6,7 @@
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
+  import type { FieldIssue } from '$lib/api/http';
   import { listProviderVendors } from '$lib/features/providers/api';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
@@ -23,6 +24,7 @@
     selectedSpec,
     busy,
     lockKind = false,
+    issues = [],
     onSubmit
   }: {
     draft: ProviderDraft;
@@ -31,6 +33,8 @@
     busy: string;
     /** Set once the draft provider exists; its connector kind is immutable. */
     lockKind?: boolean;
+    /** Field issues the server reported for the last submission. */
+    issues?: FieldIssue[];
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
@@ -159,6 +163,7 @@
         values={draft}
         idPrefix="provider"
         disabled={Boolean(busy)}
+        {issues}
       />{/if}
     {#if draft.kind === 'openai_compatible'}<div class="form-field full">
         <label for="compatible-provider">Compatible provider</label><select

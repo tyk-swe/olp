@@ -42,13 +42,16 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     'Installed reference 0.1.0.'
   );
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
+  for (const name of [
+    'reference-chat',
+    'https://api.example.com/v1',
+    'reference-workspace-chat',
+    'https://api.example.com/v1/workspaces/{options.workspace}'
+  ])
+    await expect(plugin.getByRole('cell', { name, exact: true })).toBeVisible();
   await expect(
-    plugin.getByRole('cell', { name: 'reference-chat' })
-  ).toBeVisible();
-  await expect(plugin.getByRole('cell', { name: 'openai-chat' })).toBeVisible();
-  await expect(
-    plugin.getByRole('cell', { name: 'https://api.example.com/v1' })
-  ).toBeVisible();
+    plugin.getByRole('cell', { name: 'openai-chat', exact: true })
+  ).toHaveCount(2);
   await expect(
     plugin
       .getByRole('region', { name: 'Declared origins' })

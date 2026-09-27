@@ -67,7 +67,7 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves and its `Hosting` adaptation. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set and its `Hosting` adaptation. |
 
 A profile serves one of OLP's built-in dialects whose requests and events are
 plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
@@ -75,6 +75,35 @@ plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
 dialect. OLP refuses a manifest that is invalid, names another dialect, or
 carries fields it does not know, with the offending field in the problem it
 returns.
+
+### Options
+
+A profile's `Options` declare up to 16 non-secret settings that each provider
+using the profile sets, such as an account ID, a region or a project. The
+console's provider wizard shows them in declared order, and OLP validates every
+provider's values against them. Hosting templates place them, and every call
+OLP makes to the plugin on behalf of a provider carries them (see
+[Calls for a provider](#calls-for-a-provider)).
+
+```go
+Options: []plugin.Option{
+	{Name: "account", Label: "Account", Description: "The Acme account that serves requests.", Pattern: "^[a-z0-9-]{1,40}$"},
+	{Name: "region", Label: "Region", Enum: []string{"us", "eu"}},
+},
+```
+
+| Field | Rule |
+| --- | --- |
+| `Name` | 1–64 lowercase letters, digits and underscores, starting with a letter; unique in the profile. Templates reference it as `{options.<name>}`. |
+| `Label` | 1–100 characters, as the wizard labels the field. |
+| `Description` | Optional; at most 500 characters. |
+| `Optional` | A provider may leave an optional option unset, so templates can't reference it; plugin code sees it only when set. Every other option is required. |
+| `Enum` | Optional; at most 64 distinct values, the only ones the option takes. |
+| `Pattern` | Optional; a regular expression in RE2 syntax, at most 512 characters, that values match. As in JSON Schema it matches anywhere in the value, so anchor it with `^` and `$`. An option declares an enum or a pattern, not both. |
+
+Every value is text of 1–256 characters without control characters. Options
+are not secret: they appear in provider configuration, revision diffs and
+configuration exports, and OLP does not redact them.
 
 ### Hosting adaptation
 
@@ -85,16 +114,18 @@ static credential, which the adaptation places.
 
 | Field | Rule |
 | --- | --- |
-| `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query, fragment or placeholders. It becomes the endpoint of every provider using the profile. |
+| `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query or fragment. Required options may appear in its path, such as `https://api.acme.example/accounts/{options.account}/v1`, never in its origin, and each value fills its part of one path segment. It becomes the endpoint of every provider using the profile, with the provider's options in place. |
 | `Headers` | At most 16 request headers by name. Hop-by-hop, framing, content negotiation, tracing and `X-OLP-` headers are OLP's, and the dialect's semantic headers, such as `Anthropic-Version` or `OpenAI-Beta`, are the provider's. |
 | `Query` | At most 16 query parameters of the address by name: 1–128 letters, digits, `.`, `_`, `~` and `-`, other than the dialect's semantic query settings and addressing, such as Gemini's `alt`. |
 
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
-such as `Token {credential}`, and braces appear nowhere else. At least one value
-must place the credential. OLP refuses a credential it can't place in a header,
-such as one containing a line break, before sending anything, and redacts every
-value that carries the credential wherever it records upstream text.
+such as `Token {credential}`, `{options.<name>}` for the provider's value of a
+required option, such as `{options.region}`, and braces appear nowhere else. At
+least one value must place the credential, and the address never does. OLP
+refuses a credential it can't place in a header, such as one containing a line
+break, before sending anything, and redacts every value that carries the
+credential wherever it records upstream text.
 
 ## What a plugin can reach
 
@@ -166,6 +197,14 @@ and carries its parameters:
 {"method": "manifest", "params": null}
 ```
 
+A request OLP makes on behalf of a provider also carries that provider: the
+ID of the profile it uses and its option values, without the unset optional
+ones. Requests about the plugin itself, such as `manifest`, carry none.
+
+```json
+{"method": "…", "params": {}, "provider": {"profile": "acme-chat", "options": {"account": "acme-prod", "region": "eu"}}}
+```
+
 A response carries either a result or an error:
 
 ```json
@@ -175,6 +214,18 @@ A response carries either a result or an error:
 
 Error codes `invalid_request`, `unknown_method` and `internal` are shared; a
 plugin may report codes of its own.
+
+### Calls for a provider
+
+The SDK hands every method the context of its call. For a call OLP makes on
+behalf of a provider, `plugin.ProviderOf(ctx)` returns the profile the provider
+uses and its option values:
+
+```go
+if provider, ok := plugin.ProviderOf(ctx); ok {
+	plugin.Log.Info("serving an account", "profile", provider.Profile, "account", provider.Options["account"])
+}
+```
 
 ### Methods
 

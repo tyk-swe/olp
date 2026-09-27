@@ -93,6 +93,7 @@
           selectedSpec={wizard.selectedSpec}
           busy={wizard.busy}
           lockKind={Boolean(wizard.wizardProvider)}
+          issues={wizard.validationIssues}
           onSubmit={async (event) => {
             const root = (event.currentTarget as HTMLFormElement).closest(
               'main'
