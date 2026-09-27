@@ -397,6 +397,15 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 				_, serverContent := doc.Root().Lookup("serverContent")
 				_, toolCall := doc.Root().Lookup("toolCall")
 				_, providerError = doc.Root().Lookup("error")
+				if providerError {
+					// An in-band provider error can echo an applied credential;
+					// scrub it before the frame reaches the client.
+					scrubbed, err := redactNativeFailureDocument(doc, x.sensitive)
+					if err != nil {
+						return end(fmt.Errorf("%w: provider error could not be redacted", errGeminiLiveProtocol))
+					}
+					payload = scrubbed.Bytes()
+				}
 				if x.strict() && (serverContent || toolCall) {
 					mu.Lock()
 					inFlight = !turnComplete

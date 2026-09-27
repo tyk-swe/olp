@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -46,6 +47,31 @@ func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 		decodedValid := decodeStrictRealtimeFrame(data, &decoded)
 		if decodedValid != referenceValid || decodedValid && !reflect.DeepEqual(decoded, reference) {
 			t.Fatalf("native observation differs for %s: reference=%+v valid=%t decoded=%+v valid=%t", frame, reference, referenceValid, decoded, decodedValid)
+		}
+	}
+}
+
+func TestRealtimeProviderErrorFramesAreRedacted(t *testing.T) {
+	var credentials egress.Sensitive
+	credentials.Add("provider-secret", "session-token")
+	tests := []struct {
+		frame string
+		want  string
+	}{
+		{`{"type":"error","event_id":"e1","error":{"type":"invalid_request","message":"key provider-secret rejected","code":"provider-secret"}}`,
+			`{"type":"error","event_id":"e1","error":{"type":"invalid_request","message":"key [REDACTED] rejected","code":"[REDACTED]"}}`},
+		{`{"error":{"message":"denied by session-token","nested":["provider-secret",7]}}`,
+			`{"error":{"message":"denied by [REDACTED]","nested":["[REDACTED]",7]}}`},
+		{`{"type":"response.audio.delta","delta":"provider-secret"}`,
+			`{"type":"response.audio.delta","delta":"provider-secret"}`},
+		{`{"type":"session.updated","event_id":"error is only text"}`,
+			`{"type":"session.updated","event_id":"error is only text"}`},
+		{`not json`, `not json`},
+	}
+	for _, tc := range tests {
+		got, err := redactRealtimeError([]byte(tc.frame), credentials)
+		if err != nil || string(got) != tc.want {
+			t.Fatalf("frame %s: got %q err=%v", tc.frame, got, err)
 		}
 	}
 }

@@ -29,7 +29,7 @@ func TestPerimeterHeadersCoverEveryPublicResponse(t *testing.T) {
 		{"/v1/chat/completions", map[string]string{"Cache-Control": "no-store"}, []string{"Cross-Origin-Resource-Policy", "X-Frame-Options"}},
 		{"/bedrock/model/m/converse", map[string]string{"Cache-Control": "no-store"}, []string{"Cross-Origin-Resource-Policy"}},
 	} {
-		for origin, hsts := range map[string]bool{"https://olp.example.com": true, "http://127.0.0.1:8080": false} {
+		for origin, hsts := range map[string]bool{"https://olp.example.com": true, "HTTPS://olp.example.com": true, "http://127.0.0.1:8080": false} {
 			w := httptest.NewRecorder()
 			Perimeter(origin, refuse).ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
 			h := w.Result().Header

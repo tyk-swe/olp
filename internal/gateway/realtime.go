@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -810,6 +811,31 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 	return openai.ParseErrorBody(body)
 }
 
+// redactRealtimeError scrubs applied credential values from a provider error
+// frame before it reaches the client. Any other frame returns unchanged, so
+// the relay stays byte-for-byte for everything it does not recognize.
+func redactRealtimeError(data []byte, credentials egress.Sensitive) ([]byte, error) {
+	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: len(data) + 2048})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return data, nil
+	}
+	isError := false
+	if _, ok := doc.Root().Lookup("error"); ok {
+		isError = true
+	} else if kind, ok := doc.Root().Lookup("type"); ok {
+		text, _ := kind.Text()
+		isError = text == "error"
+	}
+	if !isError {
+		return data, nil
+	}
+	redacted, err := redactNativeFailureDocument(doc, credentials)
+	if err != nil {
+		return nil, err
+	}
+	return redacted.Bytes(), nil
+}
+
 // realtimeBoundedWriter keeps one watchdog per direction. Every frame gets a
 // fresh full write window without a new context timer for each frame. The
 // WebSocket's own cancellation hook still closes a stalled connection and
@@ -905,6 +931,15 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				usageMu.Lock()
 				responses.clientFrame(typ, data)
 				usageMu.Unlock()
+			}
+			if inspect && typ == websocket.MessageText && bytes.Contains(data, []byte(`"error"`)) {
+				// An in-band provider error can echo an applied credential;
+				// scrub it before the frame reaches the client.
+				scrubbed, err := redactRealtimeError(data, x.sensitive)
+				if err != nil {
+					return relayEnd{err: err}
+				}
+				data = scrubbed
 			}
 			err = writer.write(typ, data)
 			if err != nil {

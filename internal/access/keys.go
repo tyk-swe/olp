@@ -184,6 +184,11 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
+	// A stored replay returns the plaintext secret, so the caller must still
+	// reach the target project before it is accepted.
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+		return Reply{}, err
+	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
@@ -193,9 +198,6 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	}
 	// A replay returns the original result even if its key has since expired.
 	if err := validateKey(input, true); err != nil {
-		return Reply{}, err
-	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if input.BudgetGroupID != nil {
@@ -363,13 +365,6 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	claim, replayed, err := s.Replay(r, tx, p, input)
-	if err != nil {
-		return Reply{}, err
-	}
-	if replayed != nil {
-		return Commit(r, tx, *replayed)
-	}
 	var etag, name string
 	var data []byte
 	var revoked *time.Time
@@ -378,8 +373,17 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
+	// A stored replay returns the rotated secret, so the caller must still
+	// reach this key's project before it is accepted.
 	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
+	}
+	claim, replayed, err := s.Replay(r, tx, p, input)
+	if err != nil {
+		return Reply{}, err
+	}
+	if replayed != nil {
+		return Commit(r, tx, *replayed)
 	}
 	if err = Match(r, etag); err != nil {
 		return Reply{}, err

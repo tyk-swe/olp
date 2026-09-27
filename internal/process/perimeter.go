@@ -2,6 +2,7 @@ package process
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/surface"
@@ -20,7 +21,10 @@ import (
 // uses. Inference responses stay cross-origin readable for browser SDKs
 // through CORS, so they carry no resource policy.
 func Perimeter(publicOrigin string, next http.Handler) http.Handler {
-	hsts := strings.HasPrefix(publicOrigin, "https://")
+	// Configuration validation parses the origin with url.Parse, which
+	// lowercases the scheme, so a mixed-case HTTPS origin is valid here.
+	origin, err := url.Parse(publicOrigin)
+	hsts := err == nil && origin.Scheme == "https"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
