@@ -135,7 +135,15 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
-	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}, log)
+	// The race detector slows wazero's compiler tenfold, so the harness
+	// interprets plugins, for installing and for signing alike.
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
+	pluginHost := plugins.NewHost(pluginRuntime, pool)
+	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost}, log)
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +164,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool)
-	catalogue := providers.New(server, &policy)
+	catalogue := providers.New(server, &policy, pluginHost)
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)
@@ -174,11 +182,6 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		},
 	}).Register(mux)
 	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.DefaultLimits, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	(&plugins.Management{Access: server, Runtime: pluginRuntime}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)

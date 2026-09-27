@@ -23,7 +23,7 @@ func (probeSocket) Close() error                { return nil }
 
 func nativeMediaProbeServer(t *testing.T) *Server {
 	t.Helper()
-	s := New(nil, &egress.Policy{})
+	s := New(nil, &egress.Policy{}, nil)
 	s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer test-credential" {
 			t.Errorf("unexpected certification request: %s %s", r.Method, r.URL)
@@ -87,7 +87,7 @@ func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
 	} {
 		t.Run(cfg.Kind+"/"+cfg.AuthMode+"/"+value(cfg.Endpoint), func(t *testing.T) {
 			cfg.Normalize()
-			s := New(nil, &egress.Policy{})
+			s := New(nil, &egress.Policy{}, nil)
 			s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
 				t.Errorf("unsupported media certification sent %s", r.URL)
 				return nil, io.ErrUnexpectedEOF

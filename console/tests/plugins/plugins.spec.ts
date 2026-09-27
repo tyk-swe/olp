@@ -42,13 +42,16 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     'Installed reference 0.1.0.'
   );
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
-  await expect(
-    plugin.getByRole('cell', { name: 'reference-chat' })
-  ).toBeVisible();
-  await expect(plugin.getByRole('cell', { name: 'openai-chat' })).toBeVisible();
-  await expect(
-    plugin.getByRole('cell', { name: 'https://api.example.com/v1' })
-  ).toBeVisible();
+  // One profile places the credential, and one signs requests with it.
+  for (const id of ['reference-chat', 'reference-signed-chat']) {
+    const profile = plugin.getByRole('row', { name: id });
+    await expect(
+      profile.getByRole('cell', { name: 'openai-chat' })
+    ).toBeVisible();
+    await expect(
+      profile.getByRole('cell', { name: 'https://api.example.com/v1' })
+    ).toBeVisible();
+  }
   await expect(
     plugin
       .getByRole('region', { name: 'Declared origins' })

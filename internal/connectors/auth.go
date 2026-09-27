@@ -50,6 +50,9 @@ const authTimeout = 10 * time.Second
 const authBodyLimit = 1 << 20
 
 type Auth struct {
+	// Signer runs the signing hooks of plugin profiles. Without one, a
+	// request of a profile that declares signing fails authentication.
+	Signer       Signer
 	mu           sync.Mutex
 	tokens       map[[32]byte]*cloudauth.Token
 	aws          map[[32]byte]aws.CredentialsProvider
@@ -202,7 +205,8 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 //     carry the credential.
 //  2. Authentication authorizes it, using the authenticator registered for
 //     the connector's auth mode.
-//  3. Signing runs last, over the finished request and its body.
+//  3. Signing runs last, over the finished request and its body: the auth
+//     mode's signature, such as SigV4, then a plugin profile's signing hook.
 //
 // It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) ([]string, error) {
@@ -219,14 +223,21 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 		return nil, err
 	}
 	sensitive := append(append([]string{string(secret)}, placed...), authorized.sensitive...)
-	if authorized.sign == nil {
-		return sensitive, nil
+	if authorized.sign != nil {
+		signed, err := authorized.sign(ctx, req, body)
+		if err != nil {
+			return nil, err
+		}
+		sensitive = append(sensitive, signed...)
 	}
-	signed, err := authorized.sign(ctx, req, body)
-	if err != nil {
-		return nil, err
+	if c.Plugin != nil {
+		signed, err := c.Plugin.sign(ctx, a.Signer, req, secret, body, sensitive)
+		if err != nil {
+			return nil, err
+		}
+		sensitive = append(sensitive, signed...)
 	}
-	return append(sensitive, signed...), nil
+	return sensitive, nil
 }
 
 // An authenticator authorizes upstream requests for one auth mode.

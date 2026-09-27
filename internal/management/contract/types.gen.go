@@ -2661,6 +2661,9 @@ type PluginProfile struct {
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
+
+	// Signing Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.
+	Signing *bool `json:"signing,omitempty"`
 }
 
 // PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.

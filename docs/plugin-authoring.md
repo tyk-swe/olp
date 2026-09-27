@@ -67,7 +67,7 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves and its `Hosting` adaptation. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, its `Hosting` adaptation and, optionally, `Signing`. |
 
 A profile serves one of OLP's built-in dialects whose requests and events are
 plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
@@ -79,9 +79,10 @@ returns.
 ### Hosting adaptation
 
 A profile's `Hosting` declares where and how the dialect's requests reach the
-upstream. OLP runs it for every request of a provider using the profile; no
-plugin code runs per request. Providers using the profile authenticate with a
-static credential, which the adaptation places.
+upstream. OLP runs it for every request of a provider using the profile; the
+only plugin code that runs per request is a [signing hook](#signing-hook).
+Providers using the profile authenticate with a static credential, which the
+adaptation places or the signing hook signs with.
 
 | Field | Rule |
 | --- | --- |
@@ -92,14 +93,53 @@ static credential, which the adaptation places.
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
 such as `Token {credential}`, and braces appear nowhere else. At least one value
-must place the credential. OLP refuses a credential it can't place in a header,
-such as one containing a line break, before sending anything, and redacts every
-value that carries the credential wherever it records upstream text.
+must place the credential, unless the profile signs requests. OLP refuses a
+credential it can't place in a header, such as one containing a line break,
+before sending anything, and redacts every value that carries the credential
+wherever it records upstream text.
+
+### Signing hook
+
+An upstream that authenticates each request by a signature or a timestamped
+token, rather than by the key itself, needs code per request. Such a profile
+sets `Signing: true`, and the plugin implements `plugin.Signer`, as the
+reference plugin's `reference-signed-chat` profile does:
+
+```go
+func (acme) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(r.Credential))
+	mac.Write([]byte(timestamp + "\n"))
+	mac.Write(r.Body)
+	return plugin.SignResult{Headers: map[string]string{
+		"X-Acme-Timestamp": timestamp,
+		"X-Acme-Signature": hex.EncodeToString(mac.Sum(nil)),
+	}}, nil
+}
+```
+
+OLP calls `Sign` once per upstream request of a signing profile, never per
+stream event, once the hosting adaptation has placed the request and its body
+is final. That holds for gateway traffic and for the probes and certification
+control sends. The `SignRequest` carries the profile's ID, the method, the
+absolute URL with its query, the headers, the body and the static credential.
+
+`Sign` returns the headers to add: at most 16, each one a profile could declare
+and the request doesn't already carry. OLP redacts their values wherever it
+records upstream text, as it does the credential. If `Sign` fails, exceeds the
+plugin limits or returns a header OLP refuses, the request is not sent: the
+attempt fails as a credential failure before reaching the upstream, and the
+route fails over. A plugin that declares a signing profile without
+implementing `Signer` reports no manifest, so OLP refuses to install it.
+
+Signing adds plugin code to every request. It runs in about a millisecond for a
+small body, and its cost grows with the body, which crosses the ABI as JSON, so
+keep `Sign` to the signature itself.
 
 ## What a plugin can reach
 
-OLP runs a plugin confined, on a fresh instance per call, within 64 MiB of
-memory and 10 seconds per call. It grants only:
+OLP runs a plugin confined, within 64 MiB of memory and 10 seconds per call. It
+grants only:
 
 - a clock: `time.Now` reads the host's wall and monotonic clocks;
 - randomness: `crypto/rand` reads the host's cryptographic source;
@@ -107,6 +147,11 @@ memory and 10 seconds per call. It grants only:
 
 There is no filesystem, network, environment or argument list. Sleeping spends
 the call's time limit, so avoid it.
+
+OLP keeps up to four instances of a module and serves each call on an idle one,
+so package-level state may survive from one call to the next. Never rely on it:
+OLP discards an instance whenever a call on it fails, and starts new ones as it
+needs them.
 
 ## Logging
 
@@ -159,8 +204,10 @@ carry the buffer's pointer in the high 32 bits and its length in the low 32.
 
 ### Messages
 
-Every message is one JSON document of at most 1 MiB. A request names a method
-and carries its parameters:
+Every message is one JSON document. What a plugin returns or sends OLP is at
+most 1 MiB; OLP's requests are as large as they must be, such as a `sign`
+request carrying the body it signs. A request names a method and carries its
+parameters:
 
 ```json
 {"method": "manifest", "params": null}
@@ -183,6 +230,9 @@ OLP calls, through `olp_call`:
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `manifest` | none | The manifest, as described above. |
+| `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
+
+OLP calls `sign` only for profiles that declare `"signing": true`.
 
 ### Capabilities
 

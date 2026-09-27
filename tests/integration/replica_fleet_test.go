@@ -79,7 +79,7 @@ func fleetConsole(t *testing.T) *accessHarness {
 	mux := http.NewServeMux()
 	management.Register(mux)
 	h.Server.Register(mux)
-	catalogue := providers.New(h.Server, &policy)
+	catalogue := providers.New(h.Server, &policy, nil)
 	catalogue.Register(mux)
 	(&management.Overview{Access: h.Server}).Register(mux)
 	(&observability.Management{Access: h.Server, Cache: observability.NewCache(), Pool: h.Pool}).Register(mux)

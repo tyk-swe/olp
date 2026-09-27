@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"maps"
 	"slices"
@@ -113,9 +112,14 @@ func level(name string) slog.Level {
 	return slog.LevelInfo
 }
 
-// stream returns a writer for one of the module's output streams. Each line
+// stream returns the writer of one of the module's output streams. Each line
 // it receives becomes a record.
-func (o *output) stream(name string) io.Writer {
+func (o *output) stream(name string) *stream {
+	for _, s := range o.streams {
+		if s.name == name {
+			return s
+		}
+	}
 	s := &stream{output: o, name: name}
 	o.streams = append(o.streams, s)
 	return s

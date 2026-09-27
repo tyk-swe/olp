@@ -187,7 +187,16 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 		}
+		var pluginHost *plugins.Host
 		if c.Mode.Management() || c.Mode.Inference() {
+			// Gateways and control's probes run signing hooks per upstream
+			// request, so the host compiles the modules it keeps.
+			serving, err := plugins.NewRuntime(startup, plugins.Compiled, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer serving.Close(context.Background())
+			pluginHost = plugins.NewHost(serving, pool)
 			gw = gateway.New(rt, &policy, gateway.Config{
 				MaxInFlight:        c.MaxInFlightInference,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
@@ -198,6 +207,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				MaxEventBytes:      c.ProviderMaxEventBytes,
 				TrustedProxies:     c.TrustedProxyCIDRs,
 				AdmissionPool:      inferencePool,
+				Signer:             pluginHost,
 			}, log)
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
@@ -264,12 +274,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
 			control.NotificationsActive = limiter != nil
-			pluginRuntime, err := plugins.NewRuntime(startup, plugins.DefaultLimits, log)
+			// Installing reads a module's manifest once, which the
+			// interpreter is ready to do several times sooner.
+			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
 			if err != nil {
 				return err
 			}
 			defer pluginRuntime.Close(context.Background())
-			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, pluginRuntime, log)
+			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, pluginRuntime, pluginHost, log)
 		}
 	}
 	if err := startup.Err(); err != nil {

@@ -24,7 +24,7 @@ func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	r, err := NewRuntime(t.Context(), limits, log)
+	r, err := NewRuntime(t.Context(), Interpreted, limits, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,10 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		Profiles: []abi.Profile{{ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
 			Address: "https://api.example.com/v1",
 			Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
-		}}},
+		}}, {ID: "reference-signed-chat", Label: "Reference Signed Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
+			Address: "https://api.example.com/v1",
+			Headers: map[string]string{"X-Reference-Client": "olp"},
+		}, Signing: true}},
 	}
 	if !reflect.DeepEqual(manifest, want) {
 		t.Fatalf("manifest %+v, want %+v", manifest, want)
@@ -110,10 +113,10 @@ func TestCallPastItsLimitsFailsCleanly(t *testing.T) {
 		behaviour, code string
 		limits          Limits
 	}{
-		"time": {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: time.Second}},
-		// Generous time, so the memory limit is what stops the call even
-		// under the race detector.
-		"memory": {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute}},
+		// Time enough to instantiate the module under the race detector;
+		// generous time elsewhere, so the memory limit is what stops the call.
+		"time":   {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Instances: 1}},
+		"memory": {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
