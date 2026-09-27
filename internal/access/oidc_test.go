@@ -36,6 +36,13 @@ func TestOIDCDiscoveryValidatesAdvertisedAddresses(t *testing.T) {
 			{"https://[fd00::1]/endpoint", false},
 			{"https://[fe80::1]/endpoint", false},
 			{"https://[::ffff:10.0.0.1]/endpoint", false},
+			// Identity egress applies the whole provider egress denylist:
+			// relay anycast, NAT64, 6to4, and space outside global unicast.
+			{"https://192.88.99.1/endpoint", false},
+			{"https://[64:ff9b::808:808]/endpoint", false},
+			{"https://[2002::1]/endpoint", false},
+			{"https://[2001::1]/endpoint", false},
+			{"https://[4000::1]/endpoint", false},
 			{"https://127.0.0.1/endpoint", oidcTestBuild},
 			{"https://[::1]/endpoint", oidcTestBuild},
 			{"https://localhost/endpoint", oidcTestBuild},

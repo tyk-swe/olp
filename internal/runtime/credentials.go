@@ -104,7 +104,7 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 	if m.keys == nil {
 		return nil, fmt.Errorf("credential %s is not installed: %w", credentialID, ErrCredentialUnavailable)
 	}
-	secret, err := m.keys.Read(ctx, m.pool, m.installation, credentialID, "provider_credential")
+	secret, err := m.keys.Read(ctx, m.pool, m.installation, credentialID, secrets.ProviderCredential)
 	if err != nil {
 		return nil, fmt.Errorf("credential %s: %w: %w", credentialID, ErrCredentialUnavailable, err)
 	}
@@ -155,7 +155,7 @@ func ReadNetworkSecret(ctx context.Context, q access.Queryer, keys *secrets.KeyR
 	if eligibility := ineligible[credentialID]; eligibility != Eligible {
 		return nil, unavailable(errors.New(string(eligibility)))
 	}
-	secret, err := keys.Read(ctx, q, installation, credentialID, "provider_credential")
+	secret, err := keys.Read(ctx, q, installation, credentialID, secrets.ProviderCredential)
 	if err != nil {
 		return nil, unavailable(err)
 	}

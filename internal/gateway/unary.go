@@ -126,11 +126,8 @@ func (s *Server) prepareUnary(x *execution) *Error {
 		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
 	}
 	if x.surfaceName() == "gemini" {
-		if values, ok := x.semanticQuery["key"]; ok {
-			if len(values) != 1 || values[0] == "" {
-				return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", nil)
-			}
-			delete(x.semanticQuery, "key")
+		if e := x.dropQueryKey(); e != nil {
+			return e
 		}
 	}
 	var incompatible error

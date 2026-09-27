@@ -109,103 +109,6 @@ func resourceURL(cfg connectors.Config, model, path string, query url.Values) (s
 	return cfg.ResourceURL(model, path, query)
 }
 
-func pinUnavailable() *Error {
-	return serverError(http.StatusConflict, "provider_resource_credential_unavailable",
-		"The provider revision, slot, or credential that owns this object is no longer available.")
-}
-
-// retainedUse is what a request does with a retained resource.
-type retainedUse int
-
-const (
-	// retainedHousekeeping lists, deletes or cancels a retained resource.
-	retainedHousekeeping retainedUse = iota
-	// retainedRetrieval reads a retained resource or its content.
-	retainedRetrieval
-	// retainedNewWork starts provider work from a retained resource.
-	retainedNewWork
-)
-
-// retainedContract serves a retained resource only under the contract it was
-// created with. A strict resource is refused once its route is transformed,
-// and a transformed one cannot start new work once its route is strict. The
-// owner can always list, delete or cancel, so provider-held data can be
-// removed and running upstream work stopped whatever the route promises now.
-func retainedContract(strict bool, current runtime.RouteFidelity, use retainedUse) *Error {
-	switch {
-	case use == retainedHousekeeping:
-		return nil
-	case strict && !current.Strict():
-		return serverError(http.StatusConflict, "provider_resource_unavailable",
-			"This strict resource is unavailable because its route is now transformed.")
-	case !strict && current.Strict() && use == retainedNewWork:
-		return serverError(http.StatusConflict, "provider_resource_unavailable",
-			"This resource was created under a transformed route and cannot start work now that the route is strict.")
-	}
-	return nil
-}
-
-// strictResourceKind reports whether a resource kind holds a strict contract.
-// Gemini Interactions keep one kind under either fidelity, so their kind says
-// nothing about the contract (known is false).
-func strictResourceKind(kind string) (strict, known bool) {
-	switch kind {
-	case resources.KindStrictResponse, resources.KindStrictFile, resources.KindStrictBatch, resources.KindContinuation:
-		return true, true
-	case resources.KindResponse, resources.KindFile, resources.KindBatch:
-		return false, true
-	}
-	return false, false
-}
-
-// resolveResource rebuilds the provider pin that owns a retained resource and
-// refuses a use its route no longer promises.
-func (s *Server) resolveResource(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *runtime.Route, *Error) {
-	if s.Resolver == nil || s.Resources == nil {
-		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
-	}
-	provider, route, slot, err := s.Resolver.ResolveCurrent(ctx, res, operation)
-	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
-		return nil, nil, pinUnavailable()
-	}
-	if err != nil {
-		return nil, nil, serverError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
-	}
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
-	}
-	if current, published := x.request.release.Snapshot.Routes[res.RouteSlug]; published {
-		if strict, known := strictResourceKind(res.Kind); known {
-			if e := retainedContract(strict, current.Fidelity, use); e != nil {
-				return nil, nil, e
-			}
-		}
-	}
-	var target *runtime.Target
-	for i := range route.Targets {
-		if route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {
-			continue
-		}
-		if target != nil {
-			return nil, nil, pinUnavailable()
-		}
-		target = &route.Targets[i]
-	}
-	if target == nil {
-		return nil, nil, pinUnavailable()
-	}
-	attempt := runtime.Attempt{
-		TargetID:           target.ID,
-		ProviderID:         provider.ID,
-		ProviderRevisionID: provider.RevisionID,
-		ProviderKind:       provider.Kind,
-		UpstreamModel:      target.ProviderModel,
-		Timeout:            time.Duration(target.Timeout) * time.Millisecond,
-		VendorID:           provider.VendorID,
-	}
-	return &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}, route, nil
-}
-
 func resourceModel(res *resources.Resource) string {
 	var meta struct {
 		UpstreamModel string `json:"upstream_model"`
@@ -326,8 +229,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	credentialValues, err := s.applySlotCredential(ctx, req, cfg, x.request.release, p.slot, body)
-	if err != nil {
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -367,10 +269,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
-	if f.upstream != nil {
-		f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
-	}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
@@ -977,7 +876,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if _, err := s.applySlotCredential(ctx, req, p.provider.Connector(), x.request.release, p.slot, nil); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}
@@ -1016,7 +915,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
@@ -1247,11 +1146,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
 		return
 	}
-	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch", use); e != nil {
-		s.stateFail(x, w, e, x.family)
-		return
-	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
+	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
@@ -1534,11 +1429,7 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."), x.family)
 		return
 	}
-	if e := s.authorizeDurable(r.Context(), x, authority, res, contract, "batch", use); e != nil {
-		s.stateFail(x, w, e, x.family)
-		return
-	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
+	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return

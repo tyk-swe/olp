@@ -1,4 +1,4 @@
--- Grants beneath immutable credential versions (ADR 0006).
+-- Grants beneath immutable credential versions (ADR 0008).
 --
 -- Grant enrollment creates an ordinary credential version that records the
 -- plugin, the observed principal and the grant facts. Its secret, under the

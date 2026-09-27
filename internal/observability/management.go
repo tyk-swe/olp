@@ -24,14 +24,11 @@ type Management struct {
 
 // Register mounts the health routes on the management surface.
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/health/ready", m.Access.Handle(m.ready))
-	mux.HandleFunc("GET /api/v1/provider-health", m.Access.Handle(m.providerHealth))
+	m.Access.Route(mux, "GET /api/v1/health/ready", m.ready)
+	m.Access.Route(mux, "GET /api/v1/provider-health", m.providerHealth)
 }
 
-func (m *Management) ready(r *http.Request) (access.Reply, error) {
-	if _, err := m.Access.Principal(r, m.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) ready(r *http.Request, _ access.Principal) (access.Reply, error) {
 	snapshot := m.Cache.Readiness()
 	if !readinessIsCurrent(snapshot, time.Now()) {
 		return access.Reply{}, access.Fail(503, "observability_snapshot_stale", "The readiness snapshot is stale.")
@@ -42,11 +39,7 @@ func (m *Management) ready(r *http.Request) (access.Reply, error) {
 	return access.OK(healthResponse(snapshot.Result)), nil
 }
 
-func (m *Management) providerHealth(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) providerHealth(r *http.Request, p access.Principal) (access.Reply, error) {
 	query := r.URL.Query()
 	window := 15
 	if raw := query.Get("window_minutes"); raw != "" {

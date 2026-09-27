@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -45,7 +45,7 @@ func retirements(t *testing.T, h *accessHarness, owner *browser) []any {
 	return h.want(owner, "GET", "/api/v1/audit?action=provider.grant.retire", nil, nil, 200)["items"].([]any)
 }
 
-// A grant serves only the plugin build that enrolled it (ADR 0005): a
+// A grant serves only the plugin build that enrolled it (ADR 0007): a
 // provider moved to another build refuses the grant its slot holds until the
 // slot is enrolled again, as a configuration plan pinning that build does.
 // Until the provider is activated with the new build, its active revision
@@ -150,7 +150,7 @@ func TestUninstallingAPluginRetiresTheGrantsItEnrolled(t *testing.T) {
 		t.Fatalf("the uninstalled build's grant is %+v", grant)
 	}
 	var tokens int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", secrets.ProviderGrantRefresh).Scan(&tokens); err != nil || tokens != 0 {
 		t.Fatalf("%d refresh tokens survived the uninstall: %v", tokens, err)
 	}
 	if events := retirements(t, h, owner); len(events) != 1 || events[0].(map[string]any)["resource_id"] != enrolled || events[0].(map[string]any)["actor_type"] != "user" {

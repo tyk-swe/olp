@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -35,7 +36,7 @@ func permanent(failure error) bool {
 }
 
 // lapse records, in tx, that a grant lapsed for reason: it can no longer be
-// refreshed (ADR 0006). The grant's refresh token is discarded and nothing
+// refreshed (ADR 0008). The grant's refresh token is discarded and nothing
 // refreshes it again, the lapse is audited with the worker as the actor, each
 // notification rule subscribed to grant lapses is sent one delivery of it, and
 // key authority advances, so gateways stop serving the grant's credential
@@ -94,7 +95,7 @@ func serialize(ctx context.Context, tx pgx.Tx) error {
 // actor, and key authority advances, so gateways stop serving the grant's
 // credential version within one authority poll.
 func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", g.refreshTokenID, RefreshPurpose); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", g.refreshTokenID, secrets.ProviderGrantRefresh); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family)
@@ -119,6 +120,6 @@ func Revoke(ctx context.Context, tx pgx.Tx, credentialID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *refreshTokenID, RefreshPurpose)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *refreshTokenID, secrets.ProviderGrantRefresh)
 	return err
 }

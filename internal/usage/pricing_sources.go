@@ -114,14 +114,8 @@ type sourceInput struct {
 	Enabled *bool  `json:"enabled"`
 }
 
-func (s *Server) listPricingSources(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
-	}
+func (s *Server) listPricingSources(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -146,14 +140,8 @@ func (s *Server) listPricingSources(r *http.Request) (access.Reply, error) {
 	return access.ListReplyBy(items, page, func(source Source) string { return source.ID }), nil
 }
 
-func (s *Server) getPricingSource(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
-	}
+func (s *Server) getPricingSource(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -165,7 +153,7 @@ func (s *Server) getPricingSource(r *http.Request) (access.Reply, error) {
 	return access.Detail(source, source.ETag), nil
 }
 
-func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
+func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input sourceInput
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
@@ -175,7 +163,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -204,7 +192,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 	}
 	result := access.Reply{Status: 201, ETag: source.ETag,
 		Location: "/api/v1/pricing/sources/" + source.ID, Body: source}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.create",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.create",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -231,7 +219,7 @@ func (s *Server) validateSourceURL(raw string) error {
 	return nil
 }
 
-func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
+func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := access.Decode(r, &patch); err != nil {
 		return access.Reply{}, err
@@ -253,7 +241,7 @@ func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -297,7 +285,7 @@ func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.update",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.update",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -384,11 +372,7 @@ func readBounded(body io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "settings")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) refreshPricingSource(r *http.Request, principal access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -412,6 +396,12 @@ func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	// The fetch ran without the installation lock, so authority is decided
+	// again under it before the snapshot and audit record are written.
+	principal, err = s.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	snapshot, err := scanSnapshot(tx.QueryRow(r.Context(),
 		`INSERT INTO olp.pricing_source_snapshots (id, source_id, sha256, document)
 		 VALUES ($1, $2, $3, $4::jsonb)
@@ -421,7 +411,7 @@ func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.refresh",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.refresh",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -500,14 +490,8 @@ func samePrice(a, b Price) bool {
 	return a.Currency == b.Currency
 }
 
-func (s *Server) listPricingSourceSnapshots(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
-	}
+func (s *Server) listPricingSourceSnapshots(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -545,7 +529,7 @@ type publishInput struct {
 	Overrides   []Price    `json:"overrides"`
 }
 
-func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, error) {
+func (s *Server) publishPricingSourceSnapshot(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input publishInput
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
@@ -559,7 +543,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, er
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -609,7 +593,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, er
 	}
 	revision.SourceSnapshotID = &snapshot.ID
 	result := access.Reply{Status: 201, Body: revision}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.publish",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.publish",
 		"pricing_source_snapshot", snapshot.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}

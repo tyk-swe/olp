@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,5 +152,28 @@ func TestPluginHostingPlacesAndRedactsTheStaticCredential(t *testing.T) {
 	message := result["error"].(map[string]any)["message"].(string)
 	if resp.StatusCode != http.StatusBadRequest || strings.Contains(message, secretA) || strings.Contains(message, "Token") || !strings.Contains(message, "[REDACTED]") {
 		t.Fatalf("placed credential was not redacted: %d %s", resp.StatusCode, message)
+	}
+}
+
+// Every provider credential the gateway applies must be recorded for
+// redaction, so applyCredentials is the only caller of Auth.Apply.
+func TestGatewayAppliesCredentialsOnlyThroughTheRedactionSeam(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls += strings.Count(string(source), ".auth.Apply(")
+	}
+	if calls != 1 {
+		t.Fatalf("found %d Auth.Apply calls; apply provider credentials through applyCredentials", calls)
 	}
 }

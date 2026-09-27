@@ -18,7 +18,8 @@ const session = {
     email: 'operator@example.com',
     display_name: 'Operator',
     role: 'operator' as const,
-    access_scope: 'global' as const
+    access_scope: 'global' as const,
+    operations: []
   },
   csrf_token: 'csrf-notification-token'
 };

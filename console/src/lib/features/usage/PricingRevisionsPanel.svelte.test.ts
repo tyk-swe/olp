@@ -65,6 +65,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(useRole).mockReturnValue({
     can: () => true,
+    allows: () => true,
     role: 'owner',
     globalScope: true,
     user: null
@@ -250,6 +251,7 @@ it('reports a submission failure, preserves the form, and releases the save lock
 it('allows read-only roles to list revisions while refusing creation', async () => {
   vi.mocked(useRole).mockReturnValue({
     can: () => false,
+    allows: () => false,
     role: 'viewer',
     globalScope: true,
     user: null

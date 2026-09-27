@@ -1,4 +1,4 @@
--- Provider plugins (ADR 0005). A plugin is stored by the SHA-256 digest of its
+-- Provider plugins (ADR 0007). A plugin is stored by the SHA-256 digest of its
 -- module, with the manifest the module declared at install. It can't be used
 -- until an owner approves the origins that manifest declares; approval covers
 -- exactly those origins, which never change for a digest.

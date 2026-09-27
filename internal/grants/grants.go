@@ -1,5 +1,5 @@
 // Package grants holds grants beneath immutable credential versions (ADR
-// 0006) and runs grant enrollment through provider plugins.
+// 0008) and runs grant enrollment through provider plugins.
 //
 // A grant is rotating upstream authorization a provider plugin obtains for an
 // operator's upstream account. Grant enrollment creates an ordinary credential
@@ -7,7 +7,7 @@
 // and holds the grant beneath it. The version's secret, under the
 // provider_credential purpose, is a connectors.GrantCredential: the current
 // access token and the facts, which is all the credential source serves
-// gateways. The refresh token is kept apart under RefreshPurpose, which gateway
+// gateways. The refresh token is kept apart under secrets.ProviderGrantRefresh, which gateway
 // code never reads.
 package grants
 
@@ -25,12 +25,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
-
-// RefreshPurpose is the secret purpose of grants' refresh tokens. Control
-// and worker code read it; gateway code never does.
-const RefreshPurpose = "provider_grant_refresh"
 
 // Bounds on what a plugin may hand OLP to hold.
 const (
@@ -59,13 +56,13 @@ func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest 
 	if err != nil {
 		return "", 0, err
 	}
-	if err = a.Keys.Store(ctx, tx, a.Installation, id, "provider_credential", served, nil); err != nil {
+	if err = a.Keys.Store(ctx, tx, a.Installation, id, secrets.ProviderCredential, served, nil); err != nil {
 		return "", 0, err
 	}
 	var refresh *string
 	if grant.RefreshToken != "" {
 		refresh = new(access.NewID())
-		if err = a.Keys.Store(ctx, tx, a.Installation, *refresh, RefreshPurpose, []byte(grant.RefreshToken), nil); err != nil {
+		if err = a.Keys.Store(ctx, tx, a.Installation, *refresh, secrets.ProviderGrantRefresh, []byte(grant.RefreshToken), nil); err != nil {
 			return "", 0, err
 		}
 	}

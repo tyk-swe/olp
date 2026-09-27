@@ -20,6 +20,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -47,22 +48,19 @@ type Management struct {
 
 // Register mounts the plugin operations on the management surface.
 func (s *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/plugins", s.Access.Handle(s.list))
+	s.Access.Route(mux, "GET /api/v1/plugins", s.list)
 	// Instantiating a module to read its manifest can take seconds.
-	mux.HandleFunc("POST /api/v1/plugins", s.Access.HandleTimeout(maxModuleBytes, time.Minute, s.install))
-	mux.HandleFunc("GET /api/v1/plugins/{plugin_digest}", s.Access.Handle(s.get))
-	mux.HandleFunc("POST /api/v1/plugins/{plugin_digest}/approve", s.Access.Handle(s.approve))
-	mux.HandleFunc("DELETE /api/v1/plugins/{plugin_digest}", s.Access.Handle(s.uninstall))
-	mux.HandleFunc("GET /api/v1/unconfined-plugins", s.Access.Handle(s.executables))
+	s.Access.Route(mux, "POST /api/v1/plugins", s.install, access.MaxBody(maxModuleBytes), access.Deadline(time.Minute))
+	s.Access.Route(mux, "GET /api/v1/plugins/{plugin_digest}", s.get)
+	s.Access.Route(mux, "POST /api/v1/plugins/{plugin_digest}/approve", s.approve)
+	s.Access.Route(mux, "DELETE /api/v1/plugins/{plugin_digest}", s.uninstall)
+	s.Access.Route(mux, "GET /api/v1/unconfined-plugins", s.executables)
 	// Running an executable to read its manifest can take seconds.
-	mux.HandleFunc("GET /api/v1/unconfined-plugins/{executable}", s.Access.HandleTimeout(64<<10, time.Minute, s.review))
-	mux.HandleFunc("POST /api/v1/unconfined-plugins/{executable}/permit", s.Access.HandleTimeout(64<<10, time.Minute, s.permit))
+	s.Access.Route(mux, "GET /api/v1/unconfined-plugins/{executable}", s.review, access.MaxBody(64<<10), access.Deadline(time.Minute))
+	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/permit", s.permit, access.MaxBody(64<<10), access.Deadline(time.Minute))
 }
 
-func (s *Management) list(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Management) list(r *http.Request, _ access.Principal) (access.Reply, error) {
 	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" WHERE $1 OR p.executable IS NULL ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest", s.Unconfined != nil)
 	if err != nil {
 		return access.Reply{}, err
@@ -79,10 +77,7 @@ func (s *Management) list(r *http.Request) (access.Reply, error) {
 	return access.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
 }
 
-func (s *Management) get(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Management) get(r *http.Request, _ access.Principal) (access.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -101,11 +96,8 @@ func (s *Management) load(ctx context.Context, q access.Queryer, digest string) 
 	return plugin, err
 }
 
-func (s *Management) install(r *http.Request) (access.Reply, error) {
-	// Authorize before reading an upload of up to 32 MiB.
-	if _, err := s.Access.OwnerPrincipal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Management) install(r *http.Request, _ access.Principal) (access.Reply, error) {
+	// The route authorizes before reading an upload of up to 32 MiB.
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/wasm" {
 		return access.Reply{}, access.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
 	}
@@ -134,7 +126,7 @@ func (s *Management) install(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.OwnerPrincipal(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -153,7 +145,7 @@ func (s *Management) install(r *http.Request) (access.Reply, error) {
 	status := http.StatusOK
 	if tag.RowsAffected() == 1 {
 		status = http.StatusCreated
-		if err = access.Audit(r.Context(), tx, r, p.ID, "plugin.install", "plugin", digest, "success"); err != nil {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.install", "plugin", digest, "success"); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -164,7 +156,7 @@ func (s *Management) install(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, access.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest})
 }
 
-func (s *Management) approve(r *http.Request) (access.Reply, error) {
+func (s *Management) approve(r *http.Request, _ access.Principal) (access.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -178,7 +170,7 @@ func (s *Management) approve(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.OwnerPrincipal(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -199,7 +191,7 @@ func (s *Management) approve(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, access.NewID(), digest); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "plugin.approve", "plugin", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.approve", "plugin", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	if plugin, err = loadPlugin(r.Context(), tx, digest); err != nil {
@@ -212,7 +204,7 @@ func (s *Management) approve(r *http.Request) (access.Reply, error) {
 	return reply, err
 }
 
-func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
+func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Reply, error) {
 	digest, err := digestParam(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -222,7 +214,7 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.OwnerPrincipal(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -248,7 +240,7 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	for _, credentialID := range retired {
-		if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -260,7 +252,7 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "plugin.uninstall", "plugin", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.uninstall", "plugin", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
@@ -295,8 +287,7 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 	if err != nil || len(refreshTokens) == 0 {
 		return retired, err
 	}
-	// The purpose grants.RefreshPurpose names.
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose='provider_grant_refresh'", refreshTokens)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", refreshTokens, secrets.ProviderGrantRefresh)
 	return retired, err
 }
 

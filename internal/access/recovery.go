@@ -47,7 +47,7 @@ func RecoverPassword(ctx context.Context, pool *pgxpool.Pool, address, secret st
 	if _, err = tx.Exec(ctx, "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
 		return nil, err
 	}
-	if err = Audit(ctx, tx, &http.Request{}, "", "user.password_recover", "user", id, "success"); err != nil {
+	if err = Audit(ctx, tx, &http.Request{}, System, "user.password_recover", "user", id, "success"); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

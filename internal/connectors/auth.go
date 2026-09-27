@@ -209,35 +209,37 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 //     mode's signature, such as SigV4, then a plugin profile's signing hook.
 //
 // It returns the values to redact wherever upstream text is recorded.
-func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) ([]string, error) {
+func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
 	placed, err := c.host(req, secret)
 	if err != nil {
-		return nil, err
+		return egress.Sensitive{}, err
 	}
 	authenticator, ok := authenticators[c.AuthMode]
 	if !ok {
-		return nil, ErrCredentialRejected
+		return egress.Sensitive{}, ErrCredentialRejected
 	}
 	authorized, err := authenticator.authenticate(a, ctx, req, c, secret)
 	if err != nil {
-		return nil, err
+		return egress.Sensitive{}, err
 	}
 	sensitive := append(append([]string{string(secret)}, placed...), authorized.sensitive...)
 	if authorized.sign != nil {
 		signed, err := authorized.sign(ctx, req, body)
 		if err != nil {
-			return nil, err
+			return egress.Sensitive{}, err
 		}
 		sensitive = append(sensitive, signed...)
 	}
 	if c.Plugin != nil {
 		signed, err := c.Plugin.sign(ctx, a.Signer, c.PluginOptions, req, secret, body, sensitive)
 		if err != nil {
-			return nil, err
+			return egress.Sensitive{}, err
 		}
 		sensitive = append(sensitive, signed...)
 	}
-	return sensitive, nil
+	var applied egress.Sensitive
+	applied.Add(sensitive...)
+	return applied, nil
 }
 
 // An authenticator authorizes upstream requests for one auth mode.
@@ -357,7 +359,8 @@ func (a *Auth) authenticateAWS(ctx context.Context, _ *http.Request, c Config, s
 		if err := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); err != nil {
 			return nil, ErrAuthentication
 		}
-		return []string{req.Header.Get("Authorization")}, nil
+		header := req.Header.Get("Authorization")
+		return []string{header, sigV4Signature(header)}, nil
 	}
 	return authorization{sensitive: []string{creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken}, sign: sign}, nil
 }
@@ -384,6 +387,19 @@ func tokenFailure(err error) error {
 	return ErrAuthentication
 }
 
+// sigV4Signature extracts the signature value a SigV4 Authorization header
+// carries as its ", Signature=<hex>" parameter.
+func sigV4Signature(authorization string) string {
+	i := strings.Index(authorization, "Signature=")
+	if i < 0 {
+		return ""
+	}
+	rest := authorization[i+len("Signature="):]
+	if j := strings.IndexByte(rest, ','); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
 func cacheKey(c Config, secret []byte) [32]byte {
 	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.AzureScope()+"\x00"), secret...))
 }

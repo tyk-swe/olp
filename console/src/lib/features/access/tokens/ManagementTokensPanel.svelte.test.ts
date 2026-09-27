@@ -13,7 +13,11 @@ import ManagementTokensProbe from './test/ManagementTokensProbe.svelte';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
-  useRole: () => ({ role: role.current, can: () => role.current === 'owner' })
+  useRole: () => ({
+    role: role.current,
+    can: () => role.current === 'owner',
+    allows: () => role.current === 'owner'
+  })
 }));
 vi.mock('$lib/features/access/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/api')>()),

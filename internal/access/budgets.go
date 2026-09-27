@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -51,11 +50,7 @@ func (s *Server) budgetGroupJSON() string {
 		`||jsonb_build_object('enforcement_active',` + enforcement + `))`
 }
 
-func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) budgetGroups(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -68,11 +63,7 @@ func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) budgetGroup(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) budgetGroup(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "budget_group_id")
 	if err != nil {
 		return Reply{}, err
@@ -83,13 +74,13 @@ func (s *Server) budgetGroup(r *http.Request) (Reply, error) {
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.budgetGroupJSON()+",g.etag::text,g.project_id::text"+budgetGroupFrom+" WHERE g.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
+func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
 	var input budgetGroupInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -99,7 +90,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -108,12 +99,17 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created budget group, so the caller
+		// must still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if err := validateBudgetGroup(&input); err != nil {
 		return Reply{}, err
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	id, etag := NewID(), NewID()
@@ -121,7 +117,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.create", "budget_group", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.create", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -130,7 +126,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
+func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -156,7 +152,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -166,7 +162,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text) FROM olp.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
 		return Reply{}, err
 	}
-	if err := ProjectAccess(p, projectID, true); err != nil {
+	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {
@@ -195,7 +191,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.update", "budget_group", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.update", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(map[string]any{"etag": etag}, etag))

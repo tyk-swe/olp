@@ -50,7 +50,7 @@
   }
 
   const access = useRole();
-  const isOwner = $derived(access.role === 'owner');
+  const isOwner = $derived(access.allows('POST /api/v1/management-tokens'));
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');

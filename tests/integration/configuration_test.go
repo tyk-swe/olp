@@ -378,6 +378,13 @@ func TestConfigurationPricingRequiresSettings(t *testing.T) {
 	doc["projects"] = []any{map[string]any{"name": "imported"}}
 	body := map[string]any{"document": doc}
 	h.machineWant(configure, "POST", "/api/v1/configuration/apply", body, idem("no-pricing"), 200)
+	// An imported project starts with its creator as manager, as one created
+	// through the projects API does.
+	var managers int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.project_members m JOIN olp.projects p ON p.id=m.project_id
+		JOIN olp.users u ON u.id=m.user_id WHERE p.name='imported' AND m.role='manager' AND u.email='owner@example.com'`).Scan(&managers); err != nil || managers != 1 {
+		t.Fatalf("an imported project has %d creator managers: %v", managers, err)
+	}
 	doc["projects"] = []any{map[string]any{"name": "must-rollback"}}
 	doc["pricing"] = map[string]any{"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		"prices": []any{repPrice("openai_compatible", vendorModel, "generation")}}

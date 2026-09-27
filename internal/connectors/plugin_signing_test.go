@@ -69,7 +69,7 @@ func TestPluginSigningHookSignsTheFinishedRequest(t *testing.T) {
 		t.Fatalf("signed headers %v", req.Header)
 	}
 	for _, signed := range []string{"hmac-of-request", "1759000000"} {
-		if !slices.Contains(sensitive, signed) {
+		if !slices.Contains(sensitive.Values(), signed) {
 			t.Errorf("%q is not redacted: %q", signed, sensitive)
 		}
 	}

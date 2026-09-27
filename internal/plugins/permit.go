@@ -25,10 +25,7 @@ func (s *Management) unconfinedTier() (*Unconfined, error) {
 
 // executables lists the executables in the unconfined plugin directory, which
 // only an owner sees.
-func (s *Management) executables(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.OwnerPrincipal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Management) executables(r *http.Request, _ access.Principal) (access.Reply, error) {
 	tier, err := s.unconfinedTier()
 	if err != nil {
 		return access.Reply{}, err
@@ -49,10 +46,7 @@ func (s *Management) executables(r *http.Request) (access.Reply, error) {
 }
 
 // review runs an executable to read its manifest, for an owner to review.
-func (s *Management) review(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.OwnerPrincipal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Management) review(r *http.Request, _ access.Principal) (access.Reply, error) {
 	tier, err := s.unconfinedTier()
 	if err != nil {
 		return access.Reply{}, err
@@ -75,15 +69,12 @@ func (s *Management) review(r *http.Request) (access.Reply, error) {
 // permit makes an executable an unconfined plugin, pinnable by its digest.
 // It runs with native privileges, so the owner acknowledges that and has
 // reauthenticated for it.
-func (s *Management) permit(r *http.Request) (access.Reply, error) {
+func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input contract.UnconfinedPluginPermitRequest
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	// Authorize before running anything.
-	if _, err := s.Access.OwnerPrincipal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
-	}
+	// The route authorizes before running anything.
 	tier, err := s.unconfinedTier()
 	if err != nil {
 		return access.Reply{}, err
@@ -110,7 +101,7 @@ func (s *Management) permit(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.OwnerPrincipal(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -131,7 +122,7 @@ func (s *Management) permit(r *http.Request) (access.Reply, error) {
 		file.Digest, abi.Version, data, file.Name, file.Size, access.NewID(), p.ID); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "plugin.permit", "plugin", file.Digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.permit", "plugin", file.Digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	plugin, err := loadPlugin(r.Context(), tx, file.Digest)

@@ -62,10 +62,7 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 	return nil
 }
 
-func (s *Server) operationDialects(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
 	items := []map[string]any{}
 	for _, d := range operationregistry.Default.Dialects() {
 		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})

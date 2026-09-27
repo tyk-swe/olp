@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -504,7 +505,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(authenticationError("missing_authorization", "Provide an Authorization bearer API key."))
 		return
 	}
-	authority, e := s.authenticate(r, "inference")
+	authority, e := s.authorizeKey(token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -731,14 +732,6 @@ func realtimeUpgrade(r *http.Request) bool {
 	return err == nil && len(key) == 16
 }
 
-func bearerToken(r *http.Request) string {
-	header := r.Header.Get("Authorization")
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return ""
-	}
-	return strings.TrimSpace(header[7:])
-}
-
 func realtimeURL(p *pin) (string, *Error) {
 	endpoint, err := p.provider.Connector().RealtimeURL(p.model)
 	if err != nil {
@@ -761,7 +754,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	if err != nil {
 		return nil, finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
-	if _, err := s.applySlotCredential(ctx, probe, p.provider.Connector(), x.request.release, p.slot, nil); err != nil {
+	if err := s.applySlotCredential(ctx, x, probe, p.provider.Connector(), p.slot, nil); err != nil {
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	headers := http.Header{}
@@ -783,7 +776,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = string(outcome.Acceptance)
 		}
-		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: upstreamResponseError(resp)}))
+		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: x.redacted(upstreamResponseError(resp))}))
 	}
 	fact.Class = "success"
 	if fact.Interaction != nil {
@@ -806,6 +799,33 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 		return nil
 	}
 	return openai.ParseErrorBody(body)
+}
+
+// redactRealtimeError scrubs applied credential values from a provider error
+// frame before it reaches the client. Any other frame returns unchanged, so
+// the relay stays byte-for-byte for everything it does not recognize. A frame
+// that does not parse at all still gets a raw byte-level scrub: an error
+// document too malformed to decode must not carry a credential through.
+func redactRealtimeError(data []byte, credentials egress.Sensitive) ([]byte, error) {
+	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: len(data) + 2048})
+	if err != nil || doc.Root().Kind() != oif.Object {
+		return []byte(credentials.Redact(string(data))), nil
+	}
+	isError := false
+	if _, ok := doc.Root().Lookup("error"); ok {
+		isError = true
+	} else if kind, ok := doc.Root().Lookup("type"); ok {
+		text, _ := kind.Text()
+		isError = text == "error"
+	}
+	if !isError {
+		return data, nil
+	}
+	redacted, err := redactNativeFailureDocument(doc, credentials)
+	if err != nil {
+		return nil, err
+	}
+	return redacted.Bytes(), nil
 }
 
 // realtimeBoundedWriter keeps one watchdog per direction. Every frame gets a
@@ -903,6 +923,18 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				usageMu.Lock()
 				responses.clientFrame(typ, data)
 				usageMu.Unlock()
+			}
+			if inspect && typ == websocket.MessageText &&
+				(bytes.Contains(data, []byte(`"error"`)) || bytes.Contains(data, []byte(`\`))) {
+				// An in-band provider error can echo an applied credential;
+				// scrub it before the frame reaches the client. The gate also
+				// admits any frame carrying a JSON escape, since a member or
+				// value spelled like "err\u006fr" hides the marker.
+				scrubbed, err := redactRealtimeError(data, x.sensitive)
+				if err != nil {
+					return relayEnd{err: err}
+				}
+				data = scrubbed
 			}
 			err = writer.write(typ, data)
 			if err != nil {

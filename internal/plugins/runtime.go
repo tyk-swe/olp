@@ -1,4 +1,4 @@
-// Package plugins installs provider plugins and runs them confined (ADR 0005).
+// Package plugins installs provider plugins and runs them confined (ADR 0007).
 //
 // A plugin is a WebAssembly module that speaks the ABI in sdk/plugin/abi. OLP
 // stores it by the SHA-256 digest of the module, and it can't be used until an

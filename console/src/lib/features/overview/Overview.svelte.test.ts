@@ -1,3 +1,4 @@
+import { operationsFor } from '$lib/features/access/session/test/grants';
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -19,7 +20,8 @@ function establish(role: FixedRole) {
       email: 'test@example.com',
       display_name: 'Test',
       role,
-      access_scope: 'global'
+      access_scope: 'global',
+      operations: operationsFor(role)
     },
     csrf_token: 'overview-test'
   });

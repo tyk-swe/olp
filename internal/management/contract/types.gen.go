@@ -309,42 +309,6 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	}
 }
 
-// Defines values for CreateManagementTokenRequestScopes.
-const (
-	Access     CreateManagementTokenRequestScopes = "access"
-	AccessRead CreateManagementTokenRequestScopes = "access_read"
-	Configure  CreateManagementTokenRequestScopes = "configure"
-	Keys       CreateManagementTokenRequestScopes = "keys"
-	Playground CreateManagementTokenRequestScopes = "playground"
-	Read       CreateManagementTokenRequestScopes = "read"
-	Settings   CreateManagementTokenRequestScopes = "settings"
-	Usage      CreateManagementTokenRequestScopes = "usage"
-)
-
-// Valid indicates whether the value is a known member of the CreateManagementTokenRequestScopes enum.
-func (e CreateManagementTokenRequestScopes) Valid() bool {
-	switch e {
-	case Access:
-		return true
-	case AccessRead:
-		return true
-	case Configure:
-		return true
-	case Keys:
-		return true
-	case Playground:
-		return true
-	case Read:
-		return true
-	case Settings:
-		return true
-	case Usage:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CredentialRequirement.
 const (
 	CredentialRequirementForbidden CredentialRequirement = "forbidden"
@@ -600,6 +564,96 @@ func (e InteractionInspectionStatus) Valid() bool {
 	case InteractionInspectionStatusNotInspected:
 		return true
 	case InteractionInspectionStatusTransformed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagementOperation.
+const (
+	ManagementOperationAccess         ManagementOperation = "access"
+	ManagementOperationAccessRead     ManagementOperation = "access_read"
+	ManagementOperationConfigure      ManagementOperation = "configure"
+	ManagementOperationKeys           ManagementOperation = "keys"
+	ManagementOperationLocalLogin     ManagementOperation = "local_login"
+	ManagementOperationManagePlugins  ManagementOperation = "manage_plugins"
+	ManagementOperationManageProjects ManagementOperation = "manage_projects"
+	ManagementOperationManageSessions ManagementOperation = "manage_sessions"
+	ManagementOperationManageTokens   ManagementOperation = "manage_tokens"
+	ManagementOperationPlayground     ManagementOperation = "playground"
+	ManagementOperationRead           ManagementOperation = "read"
+	ManagementOperationSelf           ManagementOperation = "self"
+	ManagementOperationSettings       ManagementOperation = "settings"
+	ManagementOperationUsage          ManagementOperation = "usage"
+)
+
+// Valid indicates whether the value is a known member of the ManagementOperation enum.
+func (e ManagementOperation) Valid() bool {
+	switch e {
+	case ManagementOperationAccess:
+		return true
+	case ManagementOperationAccessRead:
+		return true
+	case ManagementOperationConfigure:
+		return true
+	case ManagementOperationKeys:
+		return true
+	case ManagementOperationLocalLogin:
+		return true
+	case ManagementOperationManagePlugins:
+		return true
+	case ManagementOperationManageProjects:
+		return true
+	case ManagementOperationManageSessions:
+		return true
+	case ManagementOperationManageTokens:
+		return true
+	case ManagementOperationPlayground:
+		return true
+	case ManagementOperationRead:
+		return true
+	case ManagementOperationSelf:
+		return true
+	case ManagementOperationSettings:
+		return true
+	case ManagementOperationUsage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagementTokenScope.
+const (
+	ManagementTokenScopeAccess     ManagementTokenScope = "access"
+	ManagementTokenScopeAccessRead ManagementTokenScope = "access_read"
+	ManagementTokenScopeConfigure  ManagementTokenScope = "configure"
+	ManagementTokenScopeKeys       ManagementTokenScope = "keys"
+	ManagementTokenScopePlayground ManagementTokenScope = "playground"
+	ManagementTokenScopeRead       ManagementTokenScope = "read"
+	ManagementTokenScopeSettings   ManagementTokenScope = "settings"
+	ManagementTokenScopeUsage      ManagementTokenScope = "usage"
+)
+
+// Valid indicates whether the value is a known member of the ManagementTokenScope enum.
+func (e ManagementTokenScope) Valid() bool {
+	switch e {
+	case ManagementTokenScopeAccess:
+		return true
+	case ManagementTokenScopeAccessRead:
+		return true
+	case ManagementTokenScopeConfigure:
+		return true
+	case ManagementTokenScopeKeys:
+		return true
+	case ManagementTokenScopePlayground:
+		return true
+	case ManagementTokenScopeRead:
+		return true
+	case ManagementTokenScopeSettings:
+		return true
+	case ManagementTokenScopeUsage:
 		return true
 	default:
 		return false
@@ -1959,12 +2013,9 @@ type CreateManagementTokenRequest struct {
 	Name      string    `json:"name"`
 
 	// ProjectIds Projects the token may administer. Omit for all projects.
-	ProjectIds *[]openapi_types.UUID                `json:"project_ids,omitempty"`
-	Scopes     []CreateManagementTokenRequestScopes `json:"scopes"`
+	ProjectIds *[]openapi_types.UUID  `json:"project_ids,omitempty"`
+	Scopes     []ManagementTokenScope `json:"scopes"`
 }
-
-// CreateManagementTokenRequestScopes defines model for CreateManagementTokenRequest.Scopes.
-type CreateManagementTokenRequestScopes string
 
 // CreateManagementTokenResponse defines model for CreateManagementTokenResponse.
 type CreateManagementTokenResponse struct {
@@ -2438,6 +2489,9 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// ManagementOperation A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.
+type ManagementOperation string
+
 // ManagementTokenListResponse defines model for ManagementTokenListResponse.
 type ManagementTokenListResponse struct {
 	Items      []ManagementTokenResponse `json:"items"`
@@ -2457,7 +2511,7 @@ type ManagementTokenResponse struct {
 	Name           string                       `json:"name"`
 	ProjectIds     []openapi_types.UUID         `json:"project_ids"`
 	RevokedAt      nullable.Nullable[time.Time] `json:"revoked_at"`
-	Scopes         []string                     `json:"scopes"`
+	Scopes         []ManagementTokenScope       `json:"scopes"`
 }
 
 // ManagementTokenRevokeResponse defines model for ManagementTokenRevokeResponse.
@@ -2465,6 +2519,9 @@ type ManagementTokenRevokeResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
 	Id   openapi_types.UUID `json:"id"`
 }
+
+// ManagementTokenScope A management operation that may be delegated to a management token.
+type ManagementTokenScope string
 
 // Measurement defines model for Measurement.
 type Measurement struct {
@@ -4401,9 +4458,12 @@ type SessionListResponse struct {
 
 // SessionResponse defines model for SessionResponse.
 type SessionResponse struct {
-	CsrfToken        string       `json:"csrf_token"`
-	InstallationName string       `json:"installation_name"`
-	User             UserResponse `json:"user"`
+	CsrfToken        string `json:"csrf_token"`
+	InstallationName string `json:"installation_name"`
+
+	// Operations The management operations the signed-in member may perform now; the console shows only what the server would admit.
+	Operations []ManagementOperation `json:"operations"`
+	User       UserResponse          `json:"user"`
 }
 
 // SetModelRequest defines model for SetModelRequest.

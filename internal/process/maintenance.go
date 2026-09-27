@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type MaintenanceOptions struct {
@@ -123,7 +124,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 	if err = pool.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton").Scan(&fingerprint, &active); err != nil {
 		return errors.New("cannot inspect installation key state")
 	}
-	if fingerprint != nil && !hmac.Equal(fingerprint, auth.Digest("installation", "identity")) {
+	if fingerprint != nil && !hmac.Equal(fingerprint, auth.Digest(secrets.InstallationDigest, "identity")) {
 		return errors.New("authentication key does not match the installation")
 	}
 	rotated := 0
@@ -136,26 +137,9 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 			return err
 		}
 	}
-	rows, err := pool.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets ORDER BY id")
+	versions, err := keys.VerifyAll(ctx, pool, installation)
 	if err != nil {
-		return errors.New("cannot inspect encrypted records")
-	}
-	defer rows.Close()
-	versions := map[int]int{}
-	for rows.Next() {
-		var id, purpose string
-		var version int
-		var data []byte
-		if err = rows.Scan(&id, &purpose, &version, &data); err != nil {
-			return errors.New("cannot read encrypted record")
-		}
-		if _, err = keys.Open(installation, purpose, id, version, data); err != nil {
-			return err
-		}
-		versions[version]++
-	}
-	if err = rows.Err(); err != nil {
-		return errors.New("cannot inspect encrypted records")
+		return err
 	}
 	if command == "verify-retirement" {
 		if options.RetirementVersion == keys.Active || active == nil || *active != keys.Active || versions[options.RetirementVersion] != 0 {

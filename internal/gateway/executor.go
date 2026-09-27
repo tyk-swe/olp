@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -111,6 +112,24 @@ type execution struct {
 	firstByte  *time.Duration // request start to the first payload byte the client received
 	lease      *limits.Lease  // the API key reservation, settled once the request ends
 	dispatched bool           // at least one attempt was handed to a provider
+	// sensitive holds every credential value applied to an upstream request
+	// during this execution; provider-derived text passes through it.
+	sensitive egress.Sensitive
+}
+
+// applyCredentials authenticates an upstream request and remembers every
+// credential value it sent. It is the only way the gateway applies provider
+// credentials, so x.redacted covers each value a provider could echo.
+func (s *Server) applyCredentials(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, secret, body []byte) error {
+	applied, err := s.auth.Apply(ctx, req, cfg, secret, body)
+	x.sensitive.Include(applied)
+	return err
+}
+
+// redacted removes this execution's applied credentials from every field of a
+// provider error before it can reach a client, a log, or accounting.
+func (x *execution) redacted(e *openai.UpstreamError) *openai.UpstreamError {
+	return e.Redact(x.sensitive.Redact)
 }
 
 // usage is the metering evidence the request ends with: the usage of the
@@ -573,8 +592,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
 	}
-	credentialValues, err := s.applySlotCredential(actx, req, cfg, x.request.release, slot, body)
-	if err != nil {
+	if err := s.applySlotCredential(actx, x, req, cfg, slot, body); err != nil {
 		switch {
 		case actx.Err() != nil:
 			return fail(st.classify(err, false), nil)
@@ -589,7 +607,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 
 	var client *http.Client
 	if cfg.CarriedByPlugin() {
-		client = cfg.CarrierClient(s.cfg.Carrier, credentialValues)
+		client = cfg.CarrierClient(s.cfg.Carrier, x.sensitive.Values())
 	} else if client, err = s.providerClient(actx, x.request.release, provider, slot); err != nil {
 		return fail(classCredential, nil)
 	}
@@ -614,10 +632,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw)}
-		if f.upstream != nil {
-			f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
-		}
+		f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := st.rejected(resp.StatusCode, f.upstream)
 		if class == classRateLimit {
 			f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
@@ -652,7 +667,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 			if wire == openai.FamilyResponses && (bytes.Contains(frame, []byte("event: response.failed\n")) || bytes.Contains(frame, []byte("event: error\n"))) {
 				var err error
-				frame, err = redactFailedResponseFrame(frame, credentialValues)
+				frame, err = redactFailedResponseFrame(frame, x.sensitive)
 				if err != nil {
 					return err
 				}
@@ -825,8 +840,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			f.aggregateTooLarge = true
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
-			f.upstream = ue
-			ue.Message = redactCredentials(ue.Message, credentialValues)
+			f.upstream = x.redacted(ue)
 			class := st.classify(err, committed)
 			f.status = inBandStatus(class)
 			return fail(class, f)

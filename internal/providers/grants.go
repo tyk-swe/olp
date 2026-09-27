@@ -36,7 +36,7 @@ type grantStart struct {
 // device authorization the operator approves upstream. The grant will back the
 // credential slot the request names, or the default slot; for a slot a grant
 // already backs, this re-enrolls its grant.
-func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
+func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -53,12 +53,11 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, access.Invalid("slot_id", "Use a credential slot identifier.")
 		}
 	}
-	p, err := a.Principal(r, a.Pool, "configure")
+	current, err := load(r.Context(), a.Pool, id, false)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := checkProvider(r.Context(), a.Pool, p, id, true)
-	if err != nil {
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -89,7 +88,7 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	// installation mutation lock; saving rechecks the draft.
 	enrollment, err := grants.Start(r.Context(), s.Plugins, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
 	if err != nil {
-		if audited := s.auditFailedGrantEnrollment(r, p.ID, id); audited != nil {
+		if audited := s.auditFailedGrantEnrollment(r, p.Actor(), id); audited != nil {
 			return access.Reply{}, audited
 		}
 		return access.Reply{}, err
@@ -99,11 +98,14 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if _, err = a.Principal(r, tx, "configure"); err != nil {
+	if p, err = a.Reauthorize(r, tx); err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
@@ -129,7 +131,7 @@ type grantContinuation struct {
 // loopback callback URL or the code the upstream displayed, for a grant. The
 // grant becomes a new credential version of the provider, staged on the
 // enrollment's credential slot like a rotation.
-func (s *Server) continueGrantEnrollment(r *http.Request) (access.Reply, error) {
+func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	providerID, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -153,7 +155,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -161,7 +163,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request) (access.Reply, error) 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	enrollment, err := grants.Claim(r.Context(), tx, a, providerID, enrollmentID, p.ID)
@@ -173,7 +175,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request) (access.Reply, error) 
 	}
 	reply, err := s.exchangeGrant(r, current, enrollment, input.Input)
 	if err != nil {
-		if audited := s.auditFailedGrantEnrollment(r, p.ID, providerID); audited != nil {
+		if audited := s.auditFailedGrantEnrollment(r, p.Actor(), providerID); audited != nil {
 			return access.Reply{}, audited
 		}
 	}
@@ -206,12 +208,15 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, current.ID, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile or credential slot changed during grant enrollment. Start another.")
@@ -239,7 +244,7 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", current.ID, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.enroll", "provider_credential", credentialID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.enroll", "provider_credential", credentialID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(current.ID, etag, grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal})})
@@ -269,7 +274,7 @@ type grantEnrollmentStatus struct {
 // last poll runs one poll step, and since the enrollment's session state is
 // persisted, any control replica serves the next. Once the operator approves
 // the device, the grant is staged like a pasted-back one.
-func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
+func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	providerID, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -287,7 +292,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -295,7 +300,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	enrollment, standing, err := grants.Watch(r.Context(), tx, a, providerID, enrollmentID, p.ID)
@@ -305,7 +310,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 	// A device authorization that expired before a poll ended it ends with
 	// the status request that finds it expired, which audits it once.
 	if standing.Ended {
-		if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -323,7 +328,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 	// A poll that ended the enrollment without a grant is audited, unless
 	// the enrollment was cancelled meanwhile.
 	if (err != nil || standing.Status != grants.Pending) && !errors.Is(err, pgx.ErrNoRows) {
-		if audited := s.auditFailedGrantEnrollment(r, p.ID, providerID); audited != nil {
+		if audited := s.auditFailedGrantEnrollment(r, p.Actor(), providerID); audited != nil {
 			return access.Reply{}, audited
 		}
 	}
@@ -362,7 +367,7 @@ func grantStatus(current *record, standing grants.Standing) grantEnrollmentStatu
 // or a device authorization's poll that ended it without a grant, in its own
 // transaction once the step's rolled back. Like every audit record, it names
 // the principal and the provider, never what was pasted back.
-func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor, providerID string) error {
+func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor access.Actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
 	tx, err := s.Access.Pool.Begin(ctx)
 	if err != nil {
@@ -377,7 +382,7 @@ func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor, providerID s
 
 // cancelGrantEnrollment ends a grant enrollment its principal started and has
 // not continued, deleting its session state.
-func (s *Server) cancelGrantEnrollment(r *http.Request) (access.Reply, error) {
+func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	providerID, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -392,7 +397,7 @@ func (s *Server) cancelGrantEnrollment(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -400,7 +405,7 @@ func (s *Server) cancelGrantEnrollment(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = grants.Cancel(r.Context(), tx, providerID, enrollmentID, p.ID); err != nil {

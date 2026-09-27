@@ -211,7 +211,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	f.bearer = "olp_" + lookup + "_" + secrets.Token()
 	exec(`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
 		VALUES($1,$2,$3,'media test',$4,'{"scopes":["inference"],"allowed_routes":[]}', $5)`,
-		f.apiKeyID, lookup, f.auth.Digest("api_key", f.bearer), f.ownerID, uuid.NewString())
+		f.apiKeyID, lookup, f.auth.Digest(secrets.APIKeyDigest, f.bearer), f.ownerID, uuid.NewString())
 
 	f.providerID = uuid.NewString()
 	f.revisionID = uuid.NewString()
@@ -272,7 +272,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.keys.Store(ctx, tx, f.installation, *f.credentialID, "provider_credential", []byte("upstream-secret-value"), nil); err != nil {
+		if err := f.keys.Store(ctx, tx, f.installation, *f.credentialID, secrets.ProviderCredential, []byte("upstream-secret-value"), nil); err != nil {
 			tx.Rollback(ctx)
 			t.Fatal(err)
 		}

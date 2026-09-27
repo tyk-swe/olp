@@ -14,8 +14,9 @@ import (
 
 // Server exposes the read side of accounting — usage reports, request history,
 // pricing revisions, and the gateway epochs that bound what was lost — over the
-// management API. Every route authenticates as a console session through the
-// access server; nothing here is reachable with an API key.
+// management API. Every route admits the console session or management token
+// its contract requirement names; nothing here is reachable with a gateway API
+// key.
 type Server struct {
 	Access *access.Server
 	// VendorKind resolves a vendor catalogue identifier to its connector kind.
@@ -29,28 +30,27 @@ type Server struct {
 // Register mounts the accounting routes. The patterns are more specific than
 // the management catch-all, so they take precedence over its 404.
 func (s *Server) Register(mux *http.ServeMux) {
-	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v1/usage/summary", h(s.usageSummary))
-	mux.HandleFunc("GET /api/v1/usage/breakdown", h(s.usageBreakdown))
-	mux.HandleFunc("GET /api/v1/usage/time-series", h(s.usageTimeSeries))
-	mux.HandleFunc("GET /api/v1/usage/completeness", h(s.usageCompleteness))
-	mux.HandleFunc("GET /api/v1/requests", h(s.listRequests))
-	mux.HandleFunc("GET /api/v1/requests/{request_id}", h(s.getRequest))
-	mux.HandleFunc("GET /api/v1/pricing/revisions", h(s.listPricingRevisions))
+	s.Access.Route(mux, "GET /api/v1/usage/summary", s.usageSummary)
+	s.Access.Route(mux, "GET /api/v1/usage/breakdown", s.usageBreakdown)
+	s.Access.Route(mux, "GET /api/v1/usage/time-series", s.usageTimeSeries)
+	s.Access.Route(mux, "GET /api/v1/usage/completeness", s.usageCompleteness)
+	s.Access.Route(mux, "GET /api/v1/requests", s.listRequests)
+	s.Access.Route(mux, "GET /api/v1/requests/{request_id}", s.getRequest)
+	s.Access.Route(mux, "GET /api/v1/pricing/revisions", s.listPricingRevisions)
 	// A revision may carry thousands of rates, well past the default body cap.
-	mux.HandleFunc("POST /api/v1/pricing/revisions", s.Access.HandleWith(1<<20, s.createPricingRevision))
-	mux.HandleFunc("GET /api/v1/pricing/sources", h(s.listPricingSources))
-	mux.HandleFunc("POST /api/v1/pricing/sources", h(s.createPricingSource))
-	mux.HandleFunc("GET /api/v1/pricing/sources/{pricing_source_id}", h(s.getPricingSource))
-	mux.HandleFunc("PATCH /api/v1/pricing/sources/{pricing_source_id}", h(s.updatePricingSource))
-	mux.HandleFunc("POST /api/v1/pricing/sources/{pricing_source_id}/refresh", h(s.refreshPricingSource))
-	mux.HandleFunc("GET /api/v1/pricing/sources/{pricing_source_id}/snapshots", h(s.listPricingSourceSnapshots))
+	s.Access.Route(mux, "POST /api/v1/pricing/revisions", s.createPricingRevision, access.MaxBody(1<<20))
+	s.Access.Route(mux, "GET /api/v1/pricing/sources", s.listPricingSources)
+	s.Access.Route(mux, "POST /api/v1/pricing/sources", s.createPricingSource)
+	s.Access.Route(mux, "GET /api/v1/pricing/sources/{pricing_source_id}", s.getPricingSource)
+	s.Access.Route(mux, "PATCH /api/v1/pricing/sources/{pricing_source_id}", s.updatePricingSource)
+	s.Access.Route(mux, "POST /api/v1/pricing/sources/{pricing_source_id}/refresh", s.refreshPricingSource)
+	s.Access.Route(mux, "GET /api/v1/pricing/sources/{pricing_source_id}/snapshots", s.listPricingSourceSnapshots)
 
-	mux.HandleFunc("POST /api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish",
-		s.Access.HandleWith(1<<20, s.publishPricingSourceSnapshot))
-	mux.HandleFunc("GET /api/v1/request-metadata/gateway-epochs", h(s.listGatewayEpochs))
-	mux.HandleFunc("POST /api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
-		h(s.acknowledgeGatewayEpoch))
+	s.Access.Route(mux, "POST /api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish",
+		s.publishPricingSourceSnapshot, access.MaxBody(1<<20))
+	s.Access.Route(mux, "GET /api/v1/request-metadata/gateway-epochs", s.listGatewayEpochs)
+	s.Access.Route(mux, "POST /api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
+		s.acknowledgeGatewayEpoch)
 }
 
 // list is the shape every paged accounting response shares.
@@ -59,17 +59,7 @@ type list struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
-// read authorises a console read. Operations reads are the lowest management
-// permission: every active role may see what the installation spent.
-func (s *Server) read(r *http.Request) (access.Principal, error) {
-	return s.Access.Principal(r, s.Access.Pool, "usage")
-}
-
-func (s *Server) usageSummary(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) usageSummary(r *http.Request, p access.Principal) (access.Reply, error) {
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -82,11 +72,7 @@ func (s *Server) usageSummary(r *http.Request) (access.Reply, error) {
 	return access.OK(summary), nil
 }
 
-func (s *Server) usageCompleteness(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) usageCompleteness(r *http.Request, p access.Principal) (access.Reply, error) {
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -99,11 +85,7 @@ func (s *Server) usageCompleteness(r *http.Request) (access.Reply, error) {
 	return access.OK(report), nil
 }
 
-func (s *Server) usageBreakdown(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) usageBreakdown(r *http.Request, p access.Principal) (access.Reply, error) {
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -121,11 +103,7 @@ func (s *Server) usageBreakdown(r *http.Request) (access.Reply, error) {
 	return access.OK(report), nil
 }
 
-func (s *Server) usageTimeSeries(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) usageTimeSeries(r *http.Request, p access.Principal) (access.Reply, error) {
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -142,11 +120,8 @@ func (s *Server) usageTimeSeries(r *http.Request) (access.Reply, error) {
 	return access.OK(series), nil
 }
 
-func (s *Server) listRequests(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) listRequests(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	query := r.URL.Query()
 	filters := RequestFilters{
 		Route:           textParam(query, "route"),
@@ -189,11 +164,7 @@ func (s *Server) listRequests(r *http.Request) (access.Reply, error) {
 	return access.OK(list{Items: items, NextCursor: next}), nil
 }
 
-func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) getRequest(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "request_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -206,20 +177,14 @@ func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
 	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(keyProject, false) {
+	if p.Project(keyProject, access.View) != nil {
 		return access.Reply{}, access.Fail(404, "not_found", "The request does not exist.")
 	}
 	return access.OK(detail), nil
 }
 
-func (s *Server) listPricingRevisions(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
-	}
+func (s *Server) listPricingRevisions(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	query := r.URL.Query()
 	limit, err := limitParam(query)
 	if err != nil {
@@ -248,7 +213,7 @@ type pricingRevisionInput struct {
 	Prices      []Price    `json:"prices"`
 }
 
-func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
+func (s *Server) createPricingRevision(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input pricingRevisionInput
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
@@ -262,7 +227,7 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -279,7 +244,7 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, Body: revision}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_revision.create",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_revision.create",
 		"pricing_revision", revision.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -289,14 +254,8 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) listGatewayEpochs(r *http.Request) (access.Reply, error) {
-	p, err := s.read(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
-	}
+func (s *Server) listGatewayEpochs(r *http.Request, p access.Principal) (access.Reply, error) {
+	var err error
 	query := r.URL.Query()
 	limit, err := limitParam(query)
 	if err != nil {
@@ -314,7 +273,7 @@ func (s *Server) listGatewayEpochs(r *http.Request) (access.Reply, error) {
 	return access.OK(list{Items: items, NextCursor: next}), nil
 }
 
-func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) {
+func (s *Server) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (access.Reply, error) {
 	epoch, err := access.IDParam(r, "process_epoch")
 	if err != nil {
 		return access.Reply{}, err
@@ -324,7 +283,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -338,7 +297,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) 
 	}
 	// Acknowledging is an operator statement about loss they have seen, so each
 	// acknowledgement is audited even when the epoch was already acknowledged.
-	if err = access.Audit(r.Context(), tx, r, principal.ID,
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(),
 		"request_metadata.gateway_epoch_acknowledge", "request_metadata_gateway_epoch",
 		epoch, "success"); err != nil {
 		return access.Reply{}, err

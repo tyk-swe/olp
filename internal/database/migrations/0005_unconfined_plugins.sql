@@ -1,4 +1,4 @@
--- Unconfined plugins (ADR 0005). An unconfined plugin is a native executable
+-- Unconfined plugins (ADR 0007). An unconfined plugin is a native executable
 -- in the deployment's image, which OLP never stores: it records the name the
 -- executable has in the unconfined plugin directory instead of a module, and
 -- its digest identifies the plugin as a module's does. An owner permits it in

@@ -200,7 +200,6 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h := w.Header()
 	h.Set("X-Request-Id", id)
 	h.Set("Cache-Control", "no-store")
-	h.Set("X-Content-Type-Options", "nosniff")
 	s.cors(w, r)
 	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
 }
@@ -281,46 +280,6 @@ func (s *Server) release(ctx context.Context) {
 		return
 	}
 	s.admission.Release()
-}
-
-// authenticate resolves the bearer key against the pinned authority and
-// checks the scope the endpoint needs.
-func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, *Error) {
-	header := r.Header.Get("Authorization")
-	if header == "" {
-		switch requestSurface(r) {
-		case "anthropic":
-			if key := r.Header.Get("X-Api-Key"); key != "" {
-				header = "Bearer " + key
-			}
-		case "gemini":
-			key := r.Header.Get("X-Goog-Api-Key")
-			if key == "" {
-				key = r.URL.Query().Get("key")
-			}
-			if key != "" {
-				header = "Bearer " + key
-			}
-		}
-	}
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return access.Authority{}, authenticationError("invalid_api_key", "Provide an API key as a bearer token in the Authorization header.")
-	}
-	token := strings.TrimSpace(header[7:])
-	authority, err := s.Runtime.Authenticate(token)
-	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
-		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
-	case err != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "Incorrect API key provided.")
-	case authority.RevokedAt != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has been revoked.")
-	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(s.now()):
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has expired.")
-	case !slices.Contains(authority.Policy.Scopes, scope):
-		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
-	}
-	return authority, nil
 }
 
 // readBody bounds both the encoded and decoded body before parsing.
@@ -560,8 +519,11 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		if e := s.prepare(r.Context(), x, func(slug string) bool {
-			return authority.Allows("inference", slug, x.request.release.Snapshot.Routes[slug].ProjectID, s.now())
+		if e := s.prepare(r.Context(), x, func(route *runtime.Route) *Error {
+			if !authority.Allows("inference", route.Slug, x.request.release.Snapshot.Routes[route.Slug].ProjectID, s.now()) {
+				return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+			}
+			return nil
 		}); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -659,9 +621,10 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 	}
 }
 
-// prepare resolves the route, checks the caller's route permission, and
-// ranks the eligible attempts against the pinned snapshot.
-func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug string) bool) *Error {
+// prepare resolves the route, lets authorize refuse the caller's use of it in
+// the caller's own terms, and ranks the eligible attempts against the pinned
+// snapshot.
+func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runtime.Route) *Error) *Error {
 	x.mode = "unary"
 	if x.parsed.Stream {
 		x.mode = "streaming"
@@ -672,8 +635,8 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		return modelNotFound(x.parsed.Route)
 	}
 	x.route = &route
-	if !permitted(route.Slug) {
-		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	if e := authorize(&route); e != nil {
+		return e
 	}
 	if x.pin != nil {
 		if e := s.pinAttempts(ctx, x); e != nil {
@@ -692,14 +655,8 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
 		if x.family.Surface() == "gemini" {
-			if keys, present := x.semanticQuery["key"]; present {
-				if len(keys) != 1 || keys[0] == "" {
-					param := "key"
-					return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
-				}
-				// Authentication already resolved the gateway key. It is neither
-				// native semantics nor an upstream query/default/receipt value.
-				delete(x.semanticQuery, "key")
+			if e := x.dropQueryKey(); e != nil {
+				return e
 			}
 		}
 	}
@@ -856,6 +813,14 @@ func mapsKeys[V any](m map[string]V) func(func(string) bool) {
 // only state available — writeSurfaceError applies the write deadline itself.
 func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
 	writeSurfaceError(w, overloaded, requestSurface(r))
+}
+
+// WriteNotFound renders the surface's 404 for a request nothing routed.
+// Process composition mounts it under reserved inference prefixes the gateway
+// only partially claims, so an unknown endpoint or a method mismatch still
+// answers in the envelope the surface's other errors use.
+func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
+	writeSurfaceError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
 }
 
 func writeJSON(w http.ResponseWriter, body any) {

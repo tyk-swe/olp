@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
+import { operationsFor } from '$lib/features/access/session/test/grants';
 import { clearCsrfToken } from '$lib/features/access/session/api';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import { ApiProblem } from '$lib/api/http';
@@ -18,7 +19,8 @@ const session = {
     email: 'owner@example.com',
     display_name: 'Owner',
     role: 'owner' as const,
-    access_scope: 'global' as const
+    access_scope: 'global' as const,
+    operations: operationsFor('owner')
   },
   csrf_token: 'csrf-plugin-token'
 };

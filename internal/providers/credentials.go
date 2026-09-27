@@ -14,15 +14,12 @@ import (
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const maxSlots = 64
 
-func (s *Server) credentials(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -31,7 +28,7 @@ func (s *Server) credentials(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
@@ -62,7 +59,7 @@ type rotateRequest struct {
 // rotate validates a new credential against the upstream, records it as the
 // next version, and selects it for the draft. Published revisions keep the
 // version they were activated with.
-func (s *Server) rotate(r *http.Request) (access.Reply, error) {
+func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -80,8 +77,17 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
+	current, err := load(r.Context(), tx, id, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	_, replayed, err := a.Replay(r, tx, p, input)
@@ -90,13 +96,6 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	current, err := load(r.Context(), tx, id, false)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
-		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -147,8 +146,17 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
+	locked, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
@@ -157,10 +165,6 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	locked, err := load(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
@@ -181,7 +185,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, ETag: etag, Body: map[string]any{"provider_id": id, "etag": etag, "credential_id": credentialID, "credential_version": version, "runtime_generation": nil}}
@@ -194,7 +198,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 // revoke marks a credential version unusable everywhere: drafts, published
 // revisions, and gateways that learn it through the authority refresh. It
 // ends the version's grant, if it has one.
-func (s *Server) revoke(r *http.Request) (access.Reply, error) {
+func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.credential.revoke", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
 		if err != nil {
@@ -364,16 +368,12 @@ func (s *Server) quotaUnavailable(err error) {
 	log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
-func (s *Server) slots(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := checkProvider(r.Context(), s.Access.Pool, p, id, false)
+	current, err := visibleProvider(r.Context(), s.Access.Pool, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -430,7 +430,7 @@ func validSlot(in *slotInput, slotID string) error {
 	return nil
 }
 
-func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
+func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -457,8 +457,17 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the provider's slots, so the caller must
+	// still reach its project before a replay is served.
+	current, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
@@ -467,13 +476,6 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	current, err := load(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
-		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.SlotsETag); err != nil {
 		return access.Reply{}, err
@@ -552,7 +554,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	updated, err := load(r.Context(), tx, id, false)
@@ -569,12 +571,8 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
+func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -592,7 +590,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	slots, err := loadSlots(r.Context(), tx, id)
@@ -626,7 +624,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		if err = slot.credentialFits(&current.Configuration); err != nil {
 			return access.Reply{}, err
 		}
-		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, "provider_credential"); err != nil {
+		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, secrets.ProviderCredential); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -644,11 +642,14 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if _, err = a.Principal(r, tx, "configure"); err != nil {
+	if p, err = a.Reauthorize(r, tx); err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
@@ -661,6 +662,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.slotList(r.Context(), tx, locked)

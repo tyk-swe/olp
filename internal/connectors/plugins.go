@@ -32,7 +32,7 @@ const AuthStaticCredential = "static_credential"
 
 // AuthGrant authenticates a plugin provider with a grant: rotating upstream
 // authorization that the plugin's grant enrollment obtains and OLP holds
-// beneath a credential version (ADR 0006). The hosting adaptation places the
+// beneath a credential version (ADR 0008). The hosting adaptation places the
 // grant's current access token and grant facts.
 const AuthGrant = "grant"
 

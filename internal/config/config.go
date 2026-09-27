@@ -166,6 +166,13 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if envErr != nil {
 		return c, envErr
 	}
+	// Keys and tokens come only from mounted files, never from the
+	// environment, which process listings and diagnostics can expose.
+	for _, name := range []string{"OLP_AUTH_HMAC_KEY", "OLP_MASTER_KEY", "OLP_BOOTSTRAP_TOKEN"} {
+		if getenv(name) != "" {
+			return c, fmt.Errorf("%s is not accepted inline; mount the value and set %s_FILE", name, name)
+		}
+	}
 	for origin := range strings.SplitSeq(corsOrigins, ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
 			c.GatewayCORSAllowedOrigins = append(c.GatewayCORSAllowedOrigins, origin)

@@ -19,7 +19,14 @@
   import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';
   import ReadinessPanels from '$lib/features/runtime/health/ReadinessPanels.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
 
+  // Runtime generations and unresolved gateway epochs are installation-wide
+  // reads, so they run only for principals the contract admits.
+  const access = useRole();
+  const epochsAllowed = $derived(
+    access.allows('GET /api/v1/request-metadata/gateway-epochs')
+  );
   const generationPagination = $state(emptyCursorHistory());
   const epochPagination = $state(emptyCursorHistory());
   const refetchInterval = 15_000;
@@ -52,6 +59,7 @@
     queryKey: healthKeys.generations(generationPagination.cursor),
     queryFn: () => listRuntimeGenerations(generationPagination.cursor),
     placeholderData: (previous) => previous,
+    enabled: access.globalScope,
     refetchInterval
   }));
   const epochs = createQuery(() => ({
@@ -59,10 +67,17 @@
     queryFn: () =>
       listRequestMetadataGatewayEpochs('unresolved', epochPagination.cursor),
     placeholderData: (previous) => previous,
+    enabled: epochsAllowed,
     refetchInterval
   }));
 
-  const panels = [readiness, providers, persistence, generations, epochs];
+  const panels = $derived([
+    readiness,
+    providers,
+    persistence,
+    ...(access.globalScope ? [generations] : []),
+    ...(epochsAllowed ? [epochs] : [])
+  ]);
   const fetching = $derived(panels.some((panel) => panel.isFetching));
   const checkedAt = $derived.by(() => {
     const stamps = panels
@@ -119,10 +134,14 @@
     {persistence}
   />
 
-  <GatewayEpochsPanel {epochs} pagination={epochPagination} {readiness} />
+  {#if epochsAllowed}
+    <GatewayEpochsPanel {epochs} pagination={epochPagination} {readiness} />
+  {/if}
 
   <ProviderHealthPanel {providers} bind:windowMinutes />
+{/if}
 
+{#if readiness.data && access.globalScope}
   <section class="section" aria-labelledby="runtime-title">
     <div class="section-heading">
       <div>

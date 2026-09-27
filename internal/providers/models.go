@@ -35,7 +35,9 @@ func ValidModelName(field, value string) error {
 
 // prepare reads what an upstream call needs without holding the installation
 // lock: the provider, its etag precondition, and the enabled probe credential.
-func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
+// The caller's project scope is decided first, so a provider outside it answers
+// 404 before its precondition or credential is consulted.
+func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, []byte, error) {
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, nil, err
@@ -43,6 +45,9 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return nil, nil, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -73,20 +78,13 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	return current, credential, nil
 }
 
-func (s *Server) probe(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
@@ -99,10 +97,40 @@ func (s *Server) probe(r *http.Request) (access.Reply, error) {
 	} else {
 		detail = classify(err).Detail
 	}
-	if _, err = s.Access.Pool.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
+	if err = s.recordProbe(r, "provider.probe", id, at, succeeded, detail); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Detail(map[string]any{"provider_id": id, "succeeded": succeeded, "checked_at": at, "probe_type": "models", "detail": detail, "discovered_models": discovered}, current.ETag), nil
+}
+
+// recordProbe stores a probe outcome on the provider and audits it in one
+// transaction. The upstream call ran without the installation lock, so the
+// caller's authority and project reach are decided again under it before
+// anything is written.
+func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
+	tx, err := s.Access.Begin(r)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := s.Access.Reauthorize(r, tx)
+	if err != nil {
+		return err
+	}
+	current, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
+		return err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded)); err != nil {
+		return err
+	}
+	return tx.Commit(r.Context())
 }
 
 // auditOutcome maps a probe result onto the audit outcome vocabulary.
@@ -127,12 +155,8 @@ type discoverRequest struct {
 	} `json:"models"`
 }
 
-func (s *Server) discover(r *http.Request) (access.Reply, error) {
+func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -165,11 +189,8 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 			models = append(models, declared{m.UpstreamModel, m.DisplayName, nil})
 		}
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	upstream := len(models) == 0
@@ -178,7 +199,9 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		listed, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
 		if err != nil {
 			pe := classify(err)
-			a.Pool.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status='failed',last_probe_detail=$3 WHERE id=$1", id, at, pe.Detail)
+			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
+				return access.Reply{}, err
+			}
 			return access.Reply{}, access.Fail(422, "discovery_failed", pe.Detail)
 		}
 		for _, name := range listed {
@@ -190,12 +213,15 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
@@ -229,7 +255,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	if _, err = touch(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.discover", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -239,11 +265,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) models(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -252,7 +274,7 @@ func (s *Server) models(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	d, err := s.detail(r.Context(), s.Access.Pool, id)
@@ -331,7 +353,7 @@ func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	return out, nil
 }
 
-func (s *Server) setModel(r *http.Request) (access.Reply, error) {
+func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -350,7 +372,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -358,7 +380,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -397,7 +419,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	if _, err = touch(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.model.update", "provider_model", modelID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -407,15 +429,11 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) certify(r *http.Request) (access.Reply, error) {
+func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	r = r.WithContext(ctx)
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -424,11 +442,8 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, id)
+	current, credential, err := s.prepare(r, p, id)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	m, err := loadModel(r.Context(), a.Pool, id, modelID, false)
@@ -479,12 +494,15 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
@@ -512,7 +530,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag)

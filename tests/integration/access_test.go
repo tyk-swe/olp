@@ -25,22 +25,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/process"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func accessDatabase(t *testing.T) (*pgxpool.Pool, string) {
@@ -185,29 +181,9 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool)
-	catalogue := providers.New(server, &policy, pluginHost)
-	catalogue.Unconfined = unconfined
-	catalogue.Plugins = pluginHost
+	// The management API is composed exactly as a process composes it.
 	mux := http.NewServeMux()
-	management.Register(mux)
-	server.Register(mux)
-	catalogue.Register(mux)
-	(&management.Overview{Access: server}).Register(mux)
-	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
-	(&resources.Management{Access: server, Pool: pool}).Register(mux)
-	(&routes.Server{Access: server, UnconfinedPlugins: unconfined != nil}).Register(mux)
-	(&configuration.Server{
-		Access: server, Egress: &policy, Unconfined: unconfined, VendorKind: providers.VendorKind,
-		StoreNetworkCredential: catalogue.StoreNetworkCredential,
-		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
-			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
-			return id, err
-		},
-	}).Register(mux)
-	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	(&plugins.Management{Access: server, Runtime: pluginRuntime, Host: pluginHost, Unconfined: unconfined}).Register(mux)
-	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
-	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
+	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined}.Register(mux)
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
@@ -410,7 +386,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if record["requests_per_minute"] != nil || record["allowed_routes"].([]any)[0] != "private" {
 		t.Fatal("patch did not preserve omitted values and clear explicit null")
 	}
-	authority, err := h.Server.LookupAuthority(t.Context(), first["secret"].(string))
+	authority, err := h.authority(first["secret"].(string))
 	if err != nil || !authority.Allows("models_read", "private", nil, time.Now()) || authority.Allows("inference", "private", nil, time.Now()) {
 		t.Fatal("invalid authority", err)
 	}
@@ -421,14 +397,14 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if rotated["secret"] != replayed["secret"] {
 		t.Fatal("rotation replay differs")
 	}
-	if _, err = h.Server.LookupAuthority(t.Context(), first["secret"].(string)); err == nil {
+	if _, err = h.authority(first["secret"].(string)); err == nil {
 		t.Fatal("old key survived rotation")
 	}
 	record = h.want(owner, "GET", path, nil, nil, 200)
 	revocation := etagHeader(record)
 	revocation["Idempotency-Key"] = "revoke-one"
 	h.want(owner, "POST", path+"/revoke", nil, revocation, 200)
-	authority, err = h.Server.LookupAuthority(t.Context(), rotated["secret"].(string))
+	authority, err = h.authority(rotated["secret"].(string))
 	if err != nil || authority.Allows("models_read", "private", nil, time.Now()) {
 		t.Fatal("revoked key admitted", err)
 	}
@@ -642,4 +618,24 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 		t.Fatal("runtime can mutate migration history")
 	}
 	_ = fmt.Sprintf("%s", database.ValkeyNamespace(first))
+}
+
+func TestSessionAdministrationRequiresInstallationOwner(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	ownerSessions := h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)["items"].([]any)
+	session := ownerSessions[0].(map[string]any)["id"].(string)
+	ownerID := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
+
+	assigned := h.invite(owner, "assigned-owner@example.com", "owner")
+	profile := h.want(assigned, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	h.want(assigned, "POST", "/api/v1/sessions", map[string]any{"email": "assigned-owner@example.com", "password": accessPassword}, nil, 201)
+	developer := h.invite(owner, "session-developer@example.com", "developer")
+
+	for _, caller := range []*browser{assigned, developer} {
+		h.want(caller, "GET", "/api/v1/sessions?user_id="+ownerID, nil, nil, 403)
+		h.want(caller, "DELETE", "/api/v1/sessions/"+session, nil, nil, 404)
+	}
+	h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)
 }

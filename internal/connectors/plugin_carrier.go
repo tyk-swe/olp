@@ -10,7 +10,7 @@ import (
 )
 
 // An unconfined plugin may carry its profiles' upstream traffic itself
-// (ADR 0005): OLP places, authenticates and signs each request as for any
+// (ADR 0007): OLP places, authenticates and signs each request as for any
 // plugin profile, then hands the finished request to the plugin instead of its
 // own transport, and reads the response and its stream back. The plugin sees
 // all caller content, so such a profile serves only transformed routes.

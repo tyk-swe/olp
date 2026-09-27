@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -120,7 +121,7 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 		return nil, Standing{}, err
 	}
 	e.interval = time.Duration(interval) * time.Second
-	session, err := a.Keys.Read(ctx, tx, a.Installation, id, sessionPurpose)
+	session, err := a.Keys.Read(ctx, tx, a.Installation, id, secrets.GrantEnrollment)
 	if err != nil {
 		return nil, Standing{}, err
 	}
@@ -138,7 +139,7 @@ func expire(ctx context.Context, tx pgx.Tx, providerID, id, principal string) (b
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, sessionPurpose)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
 	return true, err
 }
 
@@ -234,7 +235,7 @@ func (e Enrollment) settle(ctx context.Context, db *pgxpool.Pool, set string, en
 	case !ended:
 		return nil
 	}
-	_, err = db.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, sessionPurpose)
+	_, err = db.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
 	return err
 }
 

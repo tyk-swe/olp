@@ -19,15 +19,15 @@ func (s *Server) slotSecret(ctx context.Context, release *runtime.Release, slot 
 
 // applySlotCredential prepares an upstream request with a credential slot:
 // the credential source serves the slot's secret, then the connector hosts,
-// authenticates and signs the request. It returns the values to redact. The
+// authenticates and signs the request. It records the values to redact. The
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
-func (s *Server) applySlotCredential(ctx context.Context, req *http.Request, cfg connectors.Config, release *runtime.Release, slot runtime.Slot, body []byte) ([]string, error) {
-	secret, err := s.slotSecret(ctx, release, slot)
+func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, slot runtime.Slot, body []byte) error {
+	secret, err := s.slotSecret(ctx, x.request.release, slot)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return s.auth.Apply(ctx, req, cfg, secret, body)
+	return s.applyCredentials(ctx, x, req, cfg, secret, body)
 }
 
 // providerNetworkSecret asks the credential source for the provider's network

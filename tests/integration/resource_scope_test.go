@@ -214,7 +214,11 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 	h.want(op, "POST", "/api/v1/providers", map[string]any{
 		"name": "Foreign", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": "http://127.0.0.1:9/v1/"},
 		"credential": "x", "project_id": projectB,
-	}, idem("provider-foreign"), 403)
+	}, idem("provider-foreign"), 404)
+	h.want(op, "POST", "/api/v1/providers", map[string]any{
+		"name": "Missing", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": "http://127.0.0.1:9/v1/"},
+		"credential": "x", "project_id": uuid.NewString(),
+	}, idem("provider-missing"), 404)
 
 	listed := h.want(op, "GET", "/api/v1/providers", nil, nil, 200)
 	providers := listed["items"].([]any)
@@ -226,6 +230,23 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 		h.want(op, "GET", "/api/v1/providers/"+id+"/models", nil, nil, 404)
 	}
 	h.want(op, "GET", "/api/v1/providers/"+providerAID+"/models", nil, nil, 200)
+	inventory := h.want(op, "GET", "/api/v1/provider-models", nil, nil, 200)["items"].([]any)
+	if len(inventory) == 0 {
+		t.Fatal("the model inventory must include the caller's own project")
+	}
+	for _, item := range inventory {
+		if item.(map[string]any)["provider_id"] != providerAID {
+			t.Fatal("the model inventory must be narrowed to accessible projects", item)
+		}
+	}
+	if len(h.want(owner, "GET", "/api/v1/provider-models", nil, nil, 200)["items"].([]any)) <= len(inventory) {
+		t.Fatal("the global inventory must include every project")
+	}
+	h.want(op, "GET", "/api/v1/runtime-generations", nil, nil, 403)
+	h.want(owner, "GET", "/api/v1/runtime-generations", nil, nil, 200)
+	// Scope is decided before a provider's precondition or credential is read.
+	h.want(op, "POST", "/api/v1/providers/"+providerB["id"].(string)+"/probe", nil, map[string]string{"If-Match": `"stale"`}, 404)
+	h.want(op, "POST", "/api/v1/providers/"+providerB["id"].(string)+"/discovery", map[string]any{}, nil, 404)
 
 	op2Listed := h.want(op2, "GET", "/api/v1/providers", nil, nil, 200)
 	if len(op2Listed["items"].([]any)) != 1 {
@@ -284,7 +305,7 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 		"allowed_routes": []string{"alpha-route"},
 	}, idem("key-alpha"), 201)
 	keyAID := keyA["id"].(string)
-	h.want(op, "POST", "/api/v1/api-keys", map[string]any{"name": "foreign", "scopes": []string{"inference"}, "project_id": projectB}, idem("key-foreign"), 403)
+	h.want(op, "POST", "/api/v1/api-keys", map[string]any{"name": "foreign", "scopes": []string{"inference"}, "project_id": projectB}, idem("key-foreign"), 404)
 	if status, out, _ := h.request(op, "POST", "/api/v1/api-keys", map[string]any{
 		"name": "cross", "scopes": []string{"inference"}, "project_id": projectA, "allowed_routes": []string{"beta-route"},
 	}, idem("key-cross")); status != 422 {
@@ -327,8 +348,11 @@ func TestResourceScopeAssignedMembers(t *testing.T) {
 		t.Fatal("gateway epochs must remain installation-wide", status)
 	}
 
-	if status, _, _ := h.request(op, "POST", "/api/v1/playground", map[string]any{"model": "beta-route", "input": "hi"}, nil); status == 200 {
-		t.Fatal("the playground must not run an out-of-scope route")
+	// The playground answers an out-of-scope route exactly like a missing one.
+	for _, model := range []string{"beta-route", "missing-route"} {
+		if status, out, _ := h.request(op, "POST", "/api/v1/playground", map[string]any{"model": model, "input": "hi"}, nil); status != 404 || problemCode(t, out) != "route_not_found" {
+			t.Fatal("the playground must not reveal an out-of-scope route", model, status, out)
+		}
 	}
 }
 
@@ -392,8 +416,8 @@ func TestProjectScopedMachineTokens(t *testing.T) {
 	if status, _ := h.machine(projectSecret, "POST", "/api/v1/providers", map[string]any{
 		"name": "Foreign create", "configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": "http://127.0.0.1:9/v1/"},
 		"credential": "x", "project_id": projectB,
-	}, idem("machine-foreign-provider")); status != 403 {
-		t.Fatal("a project-scoped token must not create outside its project", status)
+	}, idem("machine-foreign-provider")); status != 404 {
+		t.Fatal("a project-scoped token must not see or create outside its project", status)
 	}
 	if status, _ := h.machine(projectSecret, "GET", "/api/v1/settings", nil, nil); status != 403 {
 		t.Fatal("a project-scoped token must be denied installation settings even when scoped for them", status)

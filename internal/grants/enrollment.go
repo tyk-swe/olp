@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -20,9 +21,6 @@ import (
 // pastes back what the upstream returned within it. A device authorization
 // lasts as long as its user code instead, within maxDeviceTTL.
 const SessionTTL = 10 * time.Minute
-
-// sessionPurpose is the secret purpose of an enrollment's session state.
-const sessionPurpose = "grant_enrollment"
 
 // maxSession bounds the state a plugin carries between enrollment steps.
 const maxSession = 16 << 10
@@ -89,7 +87,7 @@ func approved(manifest abi.Manifest, address string) bool {
 // enrollment expires. A device authorization's first poll is due after its
 // interval.
 func (e Enrollment) Save(ctx context.Context, tx pgx.Tx, a *access.Server) error {
-	if err := a.Keys.Store(ctx, tx, a.Installation, e.ID, sessionPurpose, []byte(e.session), &e.ExpiresAt); err != nil {
+	if err := a.Keys.Store(ctx, tx, a.Installation, e.ID, secrets.GrantEnrollment, []byte(e.session), &e.ExpiresAt); err != nil {
 		return err
 	}
 	var interval *int64
@@ -119,12 +117,12 @@ func Claim(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 	if err != nil {
 		return e, err
 	}
-	session, err := a.Keys.Read(ctx, tx, a.Installation, id, sessionPurpose)
+	session, err := a.Keys.Read(ctx, tx, a.Installation, id, secrets.GrantEnrollment)
 	if err != nil {
 		return e, err
 	}
 	e.session = string(session)
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, sessionPurpose)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
 	return e, err
 }
 
@@ -138,7 +136,7 @@ func Cancel(ctx context.Context, tx pgx.Tx, providerID, id, principal string) er
 	if tag.RowsAffected() == 0 {
 		return unavailable(ctx, tx, providerID, id, principal)
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, sessionPurpose)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
 	return err
 }
 
@@ -174,7 +172,7 @@ func (e Enrollment) Complete(ctx context.Context, tx pgx.Tx, credentialID string
 	if tag.RowsAffected() == 0 {
 		return pgx.ErrNoRows
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, sessionPurpose)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
 	return err
 }
 

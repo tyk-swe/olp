@@ -343,8 +343,10 @@ func (s *Server) ownedJob(ctx context.Context, authority access.Authority, video
 	if e != nil {
 		return nil, e
 	}
+	// A job whose route the key may no longer use answers like every other
+	// retained resource the key cannot reach.
 	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {
-		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+record.RouteSlug+"`.")
+		return nil, notFoundError("video_not_found", "The video job does not exist.")
 	}
 	use := retainedRetrieval
 	if op == media.OpVideoDelete {

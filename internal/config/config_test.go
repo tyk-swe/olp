@@ -90,3 +90,13 @@ func TestUnconfinedPluginDirEnablesTheTier(t *testing.T) {
 		t.Fatalf("flag: %q %v", c.UnconfinedPluginDir, err)
 	}
 }
+
+func TestInlineSecretsAreRefused(t *testing.T) {
+	for _, name := range []string{"OLP_AUTH_HMAC_KEY", "OLP_MASTER_KEY", "OLP_BOOTSTRAP_TOKEN"} {
+		env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/db", name: "inline-secret-value"}
+		_, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), name+"_FILE") || strings.Contains(err.Error(), "inline-secret-value") {
+			t.Fatalf("%s: inline secret was not refused safely: %v", name, err)
+		}
+	}
+}

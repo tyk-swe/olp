@@ -9,7 +9,10 @@ import {
 
 type Schemas = components['schemas'];
 
-export type SessionUser = Schemas['UserResponse'] & { role: FixedRole };
+export type SessionUser = Schemas['UserResponse'] & {
+  role: FixedRole;
+  operations: readonly Schemas['ManagementOperation'][];
+};
 export type CurrentSession = Omit<Schemas['SessionResponse'], 'user'> & {
   user: SessionUser;
 };
@@ -30,7 +33,9 @@ function sessionResult(
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
     !isFixedRole(user?.role) ||
-    (user?.access_scope !== 'global' && user?.access_scope !== 'assigned')
+    (user?.access_scope !== 'global' && user?.access_scope !== 'assigned') ||
+    !Array.isArray(value.operations) ||
+    !value.operations.every((operation) => typeof operation === 'string')
   ) {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
@@ -38,7 +43,12 @@ function sessionResult(
       status: 502
     });
   }
-  return value as CurrentSession;
+  // The console authorizes against the member's operations, which the
+  // session reports beside the member.
+  return {
+    ...value,
+    user: { ...(value.user as SessionUser), operations: value.operations }
+  };
 }
 
 export async function authenticationCapabilities(

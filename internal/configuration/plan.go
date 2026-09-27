@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -862,16 +863,10 @@ func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentia
 	if s.Access == nil || s.Access.Keys == nil {
 		return false, errors.New("credential comparison unavailable")
 	}
-	var version int
-	var encrypted []byte
-	err := q.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp.secrets WHERE id=$1 AND purpose='provider_credential' AND (expires_at IS NULL OR expires_at>now())", *credentialID).Scan(&version, &encrypted)
+	current, err := s.Access.Keys.Read(ctx, q, s.Access.Installation, *credentialID, secrets.ProviderCredential)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	current, err := s.Access.Keys.Open(s.Access.Installation, "provider_credential", *credentialID, version, encrypted)
 	if err != nil {
 		return false, err
 	}

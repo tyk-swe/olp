@@ -281,7 +281,7 @@ func (c *Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant
 // authenticate with a credential version recording pluginDigest: the plugin
 // build whose grant enrollment created it, or "" for a pasted credential. A
 // grant serves only a provider that pins the build that enrolled it, since a
-// plugin gets only its own grant (ADR 0005) and a build's name is only what
+// plugin gets only its own grant (ADR 0007) and a build's name is only what
 // its manifest claims; moving a provider to another build therefore takes a
 // new grant enrollment for each of its slots.
 func (c *Configuration) Authenticates(pluginDigest string) bool {

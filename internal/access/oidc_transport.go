@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 func oidcURL(raw string) error {
@@ -24,32 +26,24 @@ func oidcURL(raw string) error {
 	}
 	return nil
 }
-func oidcAddressAllowed(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	if oidcTestBuild && ip.IsLoopback() {
-		return true
-	}
-	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-		return false
-	}
-	for _, block := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32"} {
-		if netip.MustParsePrefix(block).Contains(ip) {
-			return false
-		}
-	}
-	return true
-}
+
+// identityEgress decides which addresses identity-provider calls may reach. It
+// is the provider egress denylist with no operator exceptions and is never
+// built from the provider policy, so provider egress settings cannot widen
+// it. Only an oidctest build admits loopback issuers.
+var identityEgress = egress.Policy{AllowedNetworks: oidcTestNetworks}
+
+// oidcAddresses resolves host to the addresses identity egress may dial; one
+// disallowed answer rejects the host.
 func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil || len(addresses) == 0 {
-		return nil, errors.New("OIDC host lookup failed")
+	addresses, err := identityEgress.Resolve(ctx, host)
+	if errors.Is(err, egress.ErrUnsafeDestination) {
+		return nil, errors.New("OIDC address is outside the allowed egress policy")
 	}
-	for _, ip := range addresses {
-		if !oidcAddressAllowed(ip) {
-			return nil, errors.New("OIDC address is outside the allowed egress policy")
-		}
+	if err != nil {
+		return nil, errors.New("OIDC host lookup failed")
 	}
 	return addresses, nil
 }

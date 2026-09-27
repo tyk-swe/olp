@@ -20,15 +20,16 @@ import (
 const playgroundTimeout = 2 * time.Minute
 
 // Playground serves the console's unary test surface through the same
-// executor as API traffic, authenticated by console session.
+// executor as API traffic, admitting a console session or management token
+// that holds the playground operation.
 type Playground struct {
 	Access  *access.Server
 	Gateway *Server
 }
 
 func (p *Playground) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/playground", p.Access.HandleTimeout(1<<20, playgroundTimeout, p.handle))
-	mux.HandleFunc("POST /api/v1/playground/stream", p.Access.HandleStream(1<<20, playgroundTimeout, p.stream))
+	p.Access.Route(mux, "POST /api/v1/playground", p.handle, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
+	p.Access.Stream(mux, "POST /api/v1/playground/stream", p.stream, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
 }
 
 type playgroundTool struct {
@@ -245,11 +246,18 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 	}
 }
 
-func (p *Playground) handle(r *http.Request) (access.Reply, error) {
-	principal, err := p.Access.Principal(r, p.Access.Pool, "playground")
-	if err != nil {
-		return access.Reply{}, err
+// authorize admits routes in the member's projects. A route outside them is
+// answered as missing, exactly like a route that does not exist.
+func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) *Error {
+	return func(route *runtime.Route) *Error {
+		if principal.Project(route.ProjectID, access.View) != nil {
+			return modelNotFound(route.Slug)
+		}
+		return nil
 	}
+}
+
+func (p *Playground) handle(r *http.Request, principal access.Principal) (access.Reply, error) {
 	var in playgroundRequest
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
@@ -263,7 +271,7 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 	}
 	s := p.Gateway
 	x := p.execution(r, principal, parsed, family, in.Routing)
-	if e := s.prepare(r.Context(), x, func(string) bool { return principal.CanProject(x.route.ProjectID, false) }); e != nil {
+	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
@@ -388,11 +396,7 @@ func attemptPriority(x *execution, targetID string) int {
 	return 0
 }
 
-func (p *Playground) stream(w http.ResponseWriter, r *http.Request) error {
-	principal, err := p.Access.Principal(r, p.Access.Pool, "playground")
-	if err != nil {
-		return err
-	}
+func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal access.Principal) error {
 	var in playgroundRequest
 	if err := access.Decode(r, &in); err != nil {
 		return err
@@ -406,7 +410,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request) error {
 	}
 	s := p.Gateway
 	x := p.execution(r, principal, parsed, family, in.Routing)
-	if e := s.prepare(r.Context(), x, func(string) bool { return principal.CanProject(x.route.ProjectID, false) }); e != nil {
+	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Fail(e.Status, e.Code, e.Message)

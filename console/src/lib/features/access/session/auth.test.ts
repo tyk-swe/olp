@@ -23,7 +23,8 @@ function sessionResponse(role: string, csrfToken = `csrf-${role}`) {
       role,
       access_scope: 'global'
     },
-    csrf_token: csrfToken
+    csrf_token: csrfToken,
+    operations: ['read', 'self']
   };
 }
 

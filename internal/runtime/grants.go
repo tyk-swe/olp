@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // servedGrant is what a gateway serves for the grant beneath a credential
@@ -81,7 +82,7 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 			served[credentialID] = previous
 			continue
 		}
-		secret, err := m.keys.Read(ctx, tx, m.installation, credentialID, "provider_credential")
+		secret, err := m.keys.Read(ctx, tx, m.installation, credentialID, secrets.ProviderCredential)
 		if err != nil {
 			return fmt.Errorf("grant of credential %s: %w", credentialID, err)
 		}

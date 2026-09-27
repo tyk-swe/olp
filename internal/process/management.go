@@ -23,7 +23,29 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, pluginHost *plugins.Host, unconfined *plugins.Unconfined, log *slog.Logger) {
+// Management is everything the management API is composed from. Processes
+// and integration tests mount it the same way, so neither can drift from the
+// routes the contract declares.
+type Management struct {
+	Access        *access.Server
+	Egress        *egress.Policy
+	Limiter       *limits.Limiter
+	Runtime       *runtime.Manager
+	Gateway       *gateway.Server
+	Media         *media.Service
+	Health        *observability.Cache
+	Log           *slog.Logger
+	PluginRuntime *plugins.Runtime
+	PluginHost    *plugins.Host
+	Unconfined    *plugins.Unconfined
+}
+
+// Register mounts the whole management API: the published contract, every
+// feature's routes, and the catch-all that answers 404 for the rest.
+func (m Management) Register(mux *http.ServeMux) {
+	control, policy, limiter, rt, gw, mediaJobs, cache, log := m.Access, m.Egress, m.Limiter, m.Runtime, m.Gateway, m.Media, m.Health, m.Log
+	pluginRuntime, pluginHost, unconfined := m.PluginRuntime, m.PluginHost, m.Unconfined
+	management.Register(mux)
 	control.Egress = policy
 	control.Register(mux)
 	catalogue := providers.New(control, policy, pluginHost)

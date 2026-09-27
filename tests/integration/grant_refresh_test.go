@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -90,7 +91,7 @@ func readGrant(t *testing.T, h *accessHarness, credentialID string) grantState {
 	t.Helper()
 	var g grantState
 	if err := h.Pool.QueryRow(t.Context(), `SELECT generation,refresh_token_id::text,expires_at,refresh_at,lapsed_at,refresh_failures,refresh_failure,
-		(SELECT count(*) FROM olp.secrets s WHERE s.id=g.refresh_token_id AND s.purpose=$2) FROM olp.provider_grants g WHERE credential_id=$1`, credentialID, grants.RefreshPurpose).
+		(SELECT count(*) FROM olp.secrets s WHERE s.id=g.refresh_token_id AND s.purpose=$2) FROM olp.provider_grants g WHERE credential_id=$1`, credentialID, secrets.ProviderGrantRefresh).
 		Scan(&g.generation, &g.refreshToken, &g.expires, &g.refresh, &g.lapsed, &g.failures, &g.failure, &g.refreshTokens); err != nil {
 		t.Fatal(err)
 	}
@@ -156,14 +157,14 @@ func TestWorkersRefreshGrantsAheadOfExpiryAndGatewaysServeTheNewAccessToken(t *t
 	if len(issued) != len(enrolled)+2 || grant.generation != 2 || grant.failures != 0 || grant.refresh == nil || time.Until(*grant.refresh) < 49*time.Minute {
 		t.Fatalf("refreshed grant %+v, issued %d tokens", grant, len(issued))
 	}
-	stored, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *grant.refreshToken, grants.RefreshPurpose)
+	stored, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *grant.refreshToken, secrets.ProviderGrantRefresh)
 	if err != nil || string(stored) != refresh {
 		t.Fatalf("the rotated refresh token was not kept: %v", err)
 	}
 
 	// Gateway code reads only access tokens: with the refresh token made
 	// unreadable, a poll serves the new access token.
-	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext='unreadable' WHERE purpose=$1", grants.RefreshPurpose); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext='unreadable' WHERE purpose=$1", secrets.ProviderGrantRefresh); err != nil {
 		t.Fatal(err)
 	}
 	h.refresh()
@@ -382,7 +383,7 @@ func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 		t.Fatalf("after a permanent failure the grant is %+v", grant)
 	}
 	var tokens int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", secrets.ProviderGrantRefresh).Scan(&tokens); err != nil || tokens != 0 {
 		t.Fatalf("%d refresh tokens survived: %v", tokens, err)
 	}
 	if err := runtime.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
@@ -409,7 +410,7 @@ func TestRevokingACredentialVersionEndsItsGrant(t *testing.T) {
 		t.Fatalf("the revoked version's grant is %+v", grant)
 	}
 	var tokens int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", secrets.ProviderGrantRefresh).Scan(&tokens); err != nil || tokens != 0 {
 		t.Fatalf("%d refresh tokens survived the revocation: %v", tokens, err)
 	}
 	issued := len(authority.Issued())
@@ -474,7 +475,7 @@ func TestARefreshIsKeptWhenItsPassIsInterrupted(t *testing.T) {
 	if grant.generation != 2 || grant.refreshToken == nil {
 		t.Fatalf("the interrupted refresh left the grant %+v", grant)
 	}
-	if stored, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *grant.refreshToken, grants.RefreshPurpose); err != nil || string(stored) != issued[len(issued)-1] {
+	if stored, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *grant.refreshToken, secrets.ProviderGrantRefresh); err != nil || string(stored) != issued[len(issued)-1] {
 		t.Fatalf("the rotated refresh token was not kept: %v", err)
 	}
 	dueNow(t, h, credentialID)

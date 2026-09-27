@@ -71,6 +71,7 @@ type openaiFixture struct {
 	lastBatchRaw    atomic.Value
 	batchCreates    atomic.Int64
 	earlyFileReply  atomic.Bool
+	fileEcho        atomic.Bool // reject uploads, echoing the applied credential
 	batchCreateRaw  atomic.Value
 	batchFetchRaw   atomic.Value
 	fileCreateRaw   atomic.Value
@@ -121,6 +122,13 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	})
 	mux.HandleFunc("POST /openai/files", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		if f.fileEcho.Load() {
+			key := r.Header.Get("Api-Key")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "Invalid key " + key, "code": key, "type": key}})
+			return
+		}
 		if f.earlyFileReply.Load() {
 			_ = http.NewResponseController(w).EnableFullDuplex()
 			_, _ = r.Body.Read(make([]byte, 1))
@@ -511,6 +519,13 @@ func TestBatchLifecycle(t *testing.T) {
 	otherSecret := other["secret"].(string)
 	h.refresh()
 
+	fixture.fileEcho.Store(true)
+	status, rejected := h.uploadTestFile(slug, secret, "upload-content-marker-7\n")
+	fixture.fileEcho.Store(false)
+	if encoded, _ := json.Marshal(rejected); status != 400 || bytes.Contains(encoded, []byte(vendorSecret)) {
+		t.Fatalf("a provider echo of the applied credential reached the client: %d %s", status, encoded)
+	}
+
 	status, uploaded := h.uploadTestFile(slug, secret, "upload-content-marker-7\n")
 	if status != 200 {
 		t.Fatalf("upload: %d %v", status, uploaded)
@@ -811,6 +826,7 @@ func TestResponseLifecycle(t *testing.T) {
 type realtimeFixture struct {
 	*httptest.Server
 	dials atomic.Int64
+	echo  atomic.Bool // reject the handshake, echoing the applied credential
 }
 
 func newRealtimeFixture(t *testing.T) *realtimeFixture {
@@ -827,6 +843,13 @@ func newRealtimeFixture(t *testing.T) *realtimeFixture {
 	})
 	mux.HandleFunc("GET /openai/realtime", func(w http.ResponseWriter, r *http.Request) {
 		f.dials.Add(1)
+		if f.echo.Load() {
+			key := r.Header.Get("Api-Key")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "Invalid key " + key, "code": key, "type": key}})
+			return
+		}
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			return
@@ -885,6 +908,23 @@ func TestRealtimeIngress(t *testing.T) {
 		t.Fatal("denied origin reached the provider dial")
 	}
 	admissionReleased("denied origin")
+
+	// A rejected upstream handshake that echoes the applied credential must
+	// not carry it into the recorded outcome, request history, or traces.
+	fixture.echo.Store(true)
+	echoed, _, err := websocket.Dial(t.Context(), wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + secret}}})
+	if err == nil {
+		_, _, err = echoed.Read(t.Context())
+	}
+	fixture.echo.Store(false)
+	if err == nil {
+		t.Fatal("a rejected upstream handshake opened a realtime session")
+	}
+	admissionReleased("rejected handshake")
+	recorded, _ := json.Marshal(sink.last())
+	if sink.last().Outcome != "failure" || bytes.Contains(recorded, []byte(vendorSecret)) {
+		t.Fatalf("a provider echo of the applied credential was recorded: %s", recorded)
+	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -954,6 +994,7 @@ type bedrockFixture struct {
 	lastAuth   atomic.Value
 	lastPath   atomic.Value
 	big        atomic.Bool
+	echo       atomic.Bool // reject Converse, echoing the applied credentials
 	streamBody func(w http.ResponseWriter)
 }
 
@@ -992,6 +1033,16 @@ func newBedrockFixture(t *testing.T) *bedrockFixture {
 		}
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/converse"):
+			if f.echo.Load() {
+				signature, token := r.Header.Get("Authorization"), r.Header.Get("X-Amz-Security-Token")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{
+					"message": "The signature " + signature + " with token " + token + " was rejected",
+					"__type":  "com.amazonaws#" + token,
+				})
+				return
+			}
 			if f.big.Load() {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprintf(w, `{"output":{"message":{"role":"assistant","content":[{"text":%q}]}},"stopReason":"end_turn","usage":{"inputTokens":4,"outputTokens":6,"totalTokens":10}}`, strings.Repeat("x", (1<<20)+64))
@@ -1159,6 +1210,18 @@ func testBedrockIngress(t *testing.T, strict bool) {
 	fixture.big.Store(false)
 	if status != 502 || bytes.Contains(raw, []byte("stopReason")) {
 		t.Fatalf("oversized unary reply relayed truncated bytes: %d %.200s", status, raw)
+	}
+
+	fixture.echo.Store(true)
+	status, raw, _ = h.gatewayRaw("POST", "/bedrock/model/"+slug+"/converse", "", strings.NewReader(`{"messages":[{"role":"user","content":[{"text":"hi"}]}]}`), map[string]string{
+		"X-OLP-API-Key": secret,
+		"Content-Type":  "application/json",
+	})
+	fixture.echo.Store(false)
+	for _, credential := range []string{"BEDROCKKEY1234567890", "bedrock-session-token", "bedrock-secret-123456789"} {
+		if status < 400 || bytes.Contains(raw, []byte(credential)) {
+			t.Fatalf("a provider echo of the applied credential reached the client: %d %s", status, raw)
+		}
 	}
 
 	unsupported := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Bedrock unsupported", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": fixture.URL, "cloud_region": "us-east-1"}, "model": "custom.unsupported-v1:0", "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)

@@ -1,4 +1,4 @@
--- A grant lapses when it can no longer be refreshed (ADR 0006): its plugin
+-- A grant lapses when it can no longer be refreshed (ADR 0008): its plugin
 -- reports that the upstream won't refresh it, or a refresh authorizes another
 -- account than the grant's. Lapse is terminal: the grant's refresh token is
 -- discarded, its credential version's slots are ineligible, and only a new

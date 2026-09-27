@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,21 +94,44 @@ func TestManagementTokenValidation(t *testing.T) {
 		})
 	}
 	all := valid
-	all.Scopes = managementScopeNames
+	all.Scopes = nil
+	for _, op := range TokenScopes() {
+		all.Scopes = append(all.Scopes, op.String())
+	}
 	if err := validManagementToken(all); err != nil {
 		t.Fatal("rejected the full scope set", err)
 	}
 }
 
+// tokenRow is one management_tokens row joined with its creator: the token
+// is live and created by a global owner with no project memberships unless a
+// case overrides a column.
+func tokenRow(digest []byte, scopes []string, overrides map[int]any) stubRow {
+	data, _ := json.Marshal(scopes)
+	values := []any{"token-uuid", "deploy", data, digest, "creator-uuid", true, true, []byte("[]"), "owner", "global", []byte("{}")}
+	for column, value := range overrides {
+		values[column] = value
+	}
+	return stubRow{values: values}
+}
+
+const (
+	tokenLive         = 5
+	tokenAllProjects  = 6
+	tokenProjectIDs   = 7
+	tokenCreatorRole  = 8
+	tokenCreatorScope = 9
+	tokenMemberships  = 10
+)
+
 func TestMachinePrincipalResolution(t *testing.T) {
 	s := machineServer(t)
 	secret := "olpm_lookup_random"
-	digest := s.Auth.Digest("management_token", secret)
-	scopes, _ := json.Marshal([]string{"read", "configure"})
-	live := stubQueryer{stubRow{values: []any{"token-uuid", "deploy", scopes, digest, "creator-uuid", true, true, []byte("[]")}}}
+	digest := s.Auth.Digest(secrets.ManagementTokenDigest, secret)
+	live := stubQueryer{tokenRow(digest, []string{"read", "configure"}, nil)}
 
 	r := machineRequest(secret, "GET")
-	p, err := s.Principal(r, live, "read")
+	p, err := authorize(s, r, live, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,38 +141,92 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	if p.UserID() != "creator-uuid" {
 		t.Fatal("machine ownership should attribute the token creator")
 	}
-	if _, err = s.Principal(r, live, "usage"); err == nil {
+	if _, err = authorize(s, r, live, Usage); err == nil {
 		t.Fatal("an unscoped operation must not authorize")
 	}
 	projectIDs, _ := json.Marshal([]string{"p1", "p2"})
-	settingsScopes, _ := json.Marshal([]string{"read", "settings"})
-	projectScoped := stubQueryer{stubRow{values: []any{"token-uuid", "deploy", settingsScopes, digest, "creator-uuid", true, false, projectIDs}}}
-	scoped, err := s.Principal(r, projectScoped, "read")
+	projectScoped := stubQueryer{tokenRow(digest, []string{"read", "settings"}, map[int]any{tokenAllProjects: false, tokenProjectIDs: projectIDs})}
+	scoped, err := authorize(s, r, projectScoped, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if scoped.AllProjects || scoped.Projects["p1"] != "manager" || scoped.Projects["p2"] != "manager" {
 		t.Fatal("a project-scoped token must resolve manager-equivalent projects", scoped)
 	}
-	if _, err = s.Principal(r, projectScoped, "settings"); err == nil {
+	if _, err = authorize(s, r, projectScoped, Settings); err == nil {
 		t.Fatal("a project-scoped token must not run installation operations")
 	}
 	for name, row := range map[string]pgx.Row{
 		"unknown":    stubRow{err: pgx.ErrNoRows},
-		"retired":    stubRow{values: []any{"token-uuid", "deploy", scopes, digest, "creator-uuid", false, true, []byte("[]")}},
-		"bad digest": stubRow{values: []any{"token-uuid", "deploy", scopes, s.Auth.Digest("management_token", "olpm_lookup_other"), "creator-uuid", true, true, []byte("[]")}},
-		"mangled":    stubRow{values: []any{"token-uuid", "deploy", scopes, digest, "creator-uuid", true, true, []byte("[]")}},
+		"retired":    tokenRow(digest, []string{"read"}, map[int]any{tokenLive: false}),
+		"bad digest": tokenRow(s.Auth.Digest(secrets.ManagementTokenDigest, "olpm_lookup_other"), []string{"read"}, nil),
+		"mangled":    tokenRow(digest, []string{"read"}, nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			attempt := secret
 			if name == "mangled" {
 				attempt = "olpm_onlytwo"
 			}
-			if _, err := s.Principal(machineRequest(attempt, "GET"), stubQueryer{row}, "read"); err == nil {
+			if _, err := authorize(s, machineRequest(attempt, "GET"), stubQueryer{row}, Read); err == nil {
 				t.Fatal("an invalid machine credential authorized")
 			}
 		})
 	}
+}
+
+func TestMachinePrincipalActsWithinCreatorAuthority(t *testing.T) {
+	s := machineServer(t)
+	secret := "olpm_lookup_random"
+	digest := s.Auth.Digest(secrets.ManagementTokenDigest, secret)
+	every := []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
+	resolve := func(row stubRow, operation Operation) (Principal, error) {
+		return authorize(s, machineRequest(secret, "GET"), stubQueryer{row}, operation)
+	}
+
+	// The stored liveness column folds in the creator's active and OIDC
+	// authorization state, so either loss is an authentication failure.
+	if _, err := resolve(tokenRow(digest, every, map[int]any{tokenLive: false}), Read); !isProblem(err, 401) {
+		t.Fatal("an inactive or deauthorized creator must retire the token", err)
+	}
+
+	demoted := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator"})
+	if _, err := resolve(demoted, Access); !isProblem(err, 403) {
+		t.Fatal("a demoted creator's token must lose owner-only operations", err)
+	}
+	if _, err := resolve(demoted, Configure); err != nil {
+		t.Fatal("a demoted creator's token must keep operations the creator still holds", err)
+	}
+	viewer := tokenRow(digest, every, map[int]any{tokenCreatorRole: "viewer"})
+	if _, err := resolve(viewer, Keys); !isProblem(err, 403) {
+		t.Fatal("a viewer creator's token must not manage keys", err)
+	}
+
+	memberships, _ := json.Marshal(map[string]string{"p1": "manager", "p2": "viewer"})
+	assigned := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
+	p, err := resolve(assigned, Read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AllProjects || len(p.Projects) != 2 || p.Projects["p1"] != "manager" || p.Projects["p2"] != "viewer" {
+		t.Fatal("an all-projects token must narrow to its assigned creator's projects and roles", p)
+	}
+	if _, err = resolve(assigned, Settings); !isProblem(err, 403) {
+		t.Fatal("an assigned creator's token must lose installation reach", err)
+	}
+
+	listed, _ := json.Marshal([]string{"p1", "p3"})
+	narrowed := tokenRow(digest, every, map[int]any{tokenAllProjects: false, tokenProjectIDs: listed, tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
+	if p, err = resolve(narrowed, Read); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Projects) != 1 || p.Projects["p1"] != "manager" {
+		t.Fatal("a project-scoped token must keep only projects its creator still reaches", p)
+	}
+}
+
+func isProblem(err error, status int) bool {
+	problem, ok := errors.AsType[*Problem](err)
+	return ok && problem.Status == status
 }
 
 func TestBearerMachineBoundary(t *testing.T) {
@@ -172,7 +250,7 @@ func machineRequestHeader(header string) *http.Request {
 
 func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
+	server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
 		return OK(map[string]bool{"reached": true}), nil
 	}))
 	defer server.Close()
@@ -217,17 +295,6 @@ func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	}
 }
 
-func TestUsageScopeMatrix(t *testing.T) {
-	for _, role := range []string{"owner", "operator", "developer", "viewer"} {
-		if !Permission(role, "usage") {
-			t.Fatal("usage reads must remain available to", role)
-		}
-	}
-	if Permission("unknown", "usage") {
-		t.Fatal("usage reads must reject unknown roles")
-	}
-}
-
 func TestProvisioningIdentifiers(t *testing.T) {
 	r := httptest.NewRequest("PUT", "/", nil)
 	r.SetPathValue("source", "scim-bridge")
@@ -248,4 +315,13 @@ func TestProvisioningIdentifiers(t *testing.T) {
 	if _, err := provisioningID(r, "external_id", "external_id", 255); err == nil {
 		t.Fatal("accepted an oversized external identifier")
 	}
+}
+
+// authorize authenticates r and authorizes op, as a route admitting op would.
+func authorize(s *Server, r *http.Request, q Queryer, op Operation) (Principal, error) {
+	p, err := s.Authenticate(r, q)
+	if err != nil {
+		return p, err
+	}
+	return p, p.Authorize(op)
 }

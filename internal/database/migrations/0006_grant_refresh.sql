@@ -1,4 +1,4 @@
--- Workers refresh grants ahead of their access tokens' expiry (ADR 0006).
+-- Workers refresh grants ahead of their access tokens' expiry (ADR 0008).
 --
 -- A refresh rewrites the grant's credential version's provider_credential
 -- secret with the new access token and advances the grant's generation, which

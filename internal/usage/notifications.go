@@ -406,7 +406,7 @@ func (w *notificationWorker) notificationSecret(ctx context.Context, secretID *s
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	return w.keys.Read(ctx, tx, w.installation, *secretID, "notification_secret")
+	return w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
 }
 
 func deliveryErrorCode(err error) string {

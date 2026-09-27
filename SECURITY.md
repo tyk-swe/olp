@@ -16,6 +16,12 @@ Report suspected vulnerabilities in any version; upgrading is not a
 prerequisite for reporting. A package version in a source checkout does not
 establish that the checkout is a published release.
 
+## Security architecture
+
+[docs/security.md](docs/security.md) describes the boundaries OpenLLMProxy
+defends, how every call is authorized, how secrets are held, and the known
+non-goals and residual risks.
+
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately to `support@mail.tyk.sh`; do not

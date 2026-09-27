@@ -17,7 +17,7 @@ func provisioningID(r *http.Request, name, field string, max int) (string, error
 	return value, nil
 }
 
-func (s *Server) provisionUser(r *http.Request) (Reply, error) {
+func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
@@ -53,7 +53,7 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -98,14 +98,14 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if !*input.Active {
-		if err = retireIssuedInvitations(r, tx, userID, p.ID, p.UserID()); err != nil {
+		if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
 			return Reply{}, err
 		}
 	}
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "user.provision", "user", userID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
@@ -115,7 +115,7 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(u, u.ETag))
 }
 
-func (s *Server) deprovisionUser(r *http.Request) (Reply, error) {
+func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
 	source, err := provisioningID(r, "source", "source", 100)
 	if err != nil {
 		return Reply{}, err
@@ -129,7 +129,7 @@ func (s *Server) deprovisionUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -146,13 +146,13 @@ func (s *Server) deprovisionUser(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return Reply{}, err
 	}
-	if err = retireIssuedInvitations(r, tx, userID, p.ID, p.UserID()); err != nil {
+	if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "user.deprovision", "user", userID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "user.deprovision", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Reply{Status: 204})

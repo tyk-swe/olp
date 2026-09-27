@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -124,14 +125,14 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 // spelling. Redact decoded strings while OIF keeps every unrelated member and
 // number byte-for-byte. A credential-bearing member name cannot be renamed
 // without changing the native grammar, so refuse it.
-func redactNativeFailureDocument(doc oif.Document, credentials []string) (oif.Document, error) {
+func redactNativeFailureDocument(doc oif.Document, credentials egress.Sensitive) (oif.Document, error) {
 	changes := []oif.Change{}
 	var inspect func(oif.Value, string) error
 	inspect = func(value oif.Value, pointer string) error {
 		switch value.Kind() {
 		case oif.Object:
 			for _, member := range value.Members() {
-				if redactCredentials(member.Name, credentials) != member.Name {
+				if credentials.Contains(member.Name) {
 					return errors.New("failed response event has a credential-bearing member name")
 				}
 				if err := inspect(member.Value, oif.Pointer(pointer, member.Name)); err != nil {
@@ -149,7 +150,7 @@ func redactNativeFailureDocument(doc oif.Document, credentials []string) (oif.Do
 			if !ok {
 				return errors.New("failed response event has invalid text")
 			}
-			if safe := redactCredentials(text, credentials); safe != text {
+			if safe := credentials.Redact(text); safe != text {
 				encoded, _ := json.Marshal(safe)
 				changes = append(changes, oif.Change{Pointer: pointer, Value: string(encoded), Origin: oif.ExplicitTransform, Reason: "provider error credential redaction"})
 			}
@@ -165,9 +166,9 @@ func redactNativeFailureDocument(doc oif.Document, credentials []string) (oif.Do
 	return oif.Apply(doc, changes)
 }
 
-func redactFailedResponseFrame(frame []byte, credentials []string) ([]byte, error) {
+func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
-	if i < 0 || redactCredentials(string(frame[:i]), credentials) != string(frame[:i]) {
+	if i < 0 || credentials.Contains(string(frame[:i])) {
 		return nil, errors.New("failed response event has unsafe framing")
 	}
 	payload := bytes.TrimSpace(frame[i+7:])
@@ -184,18 +185,6 @@ func redactFailedResponseFrame(frame []byte, credentials []string) ([]byte, erro
 	out = append(out, redacted.Bytes()...)
 	out = append(out, '\n', '\n')
 	return out, nil
-}
-
-func (s *Server) responseCredentialValues(ctx context.Context, x *execution, p *pin, response *http.Response) []string {
-	secret, _ := s.slotSecret(ctx, x.request.release, p.slot)
-	values := []string{string(secret)}
-	if response.Request != nil {
-		names := append([]string{"Authorization", "Api-Key", "X-Goog-Api-Key"}, p.provider.CredentialHeaders...)
-		for _, name := range names {
-			values = append(values, response.Request.Header.Values(name)...)
-		}
-	}
-	return values
 }
 
 func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *execution, res *resources.Resource, p *pin, query url.Values) *Error {
@@ -237,7 +226,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	nativeIncomplete := false
 	nativeTerminalFailure := false
 	fact := &x.facts[len(x.facts)-1]
-	credentialValues := s.responseCredentialValues(ctx, x, p, resp)
+	credentialValues := x.sensitive
 	emit := func(frame []byte) error {
 		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
 		if err != nil || len(projected) > limit {

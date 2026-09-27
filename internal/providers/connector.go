@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -114,7 +115,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	case transport.CarriedByPlugin() && s.Plugins == nil:
 		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
 	case transport.CarriedByPlugin():
-		client = transport.CarrierClient(s.Plugins, sensitive)
+		client = transport.CarrierClient(s.Plugins, sensitive.Values())
 	default:
 		if client, err = s.connectionClient(ctx, cfg, credential); err != nil {
 			return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
@@ -704,7 +705,7 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if err := slot.credentialFits(&p.Configuration); err != nil {
 		return nil, state, err
 	}
-	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, "provider_credential")
+	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, secrets.ProviderCredential)
 	if err != nil {
 		return nil, state, err
 	}

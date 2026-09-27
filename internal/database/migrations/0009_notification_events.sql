@@ -1,5 +1,5 @@
 -- Notification rules subscribe a destination to an event: a budget threshold,
--- or a provider event, such as a grant lapse (ADR 0006), which concerns the
+-- or a provider event, such as a grant lapse (ADR 0008), which concerns the
 -- whole installation. The worker that delivered budget alerts delivers every
 -- event, with the same signing, retries and backoff.
 ALTER TABLE olp.budget_alert_rules RENAME TO notification_rules;

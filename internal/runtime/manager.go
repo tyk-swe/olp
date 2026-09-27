@@ -328,7 +328,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			if err := tx.QueryRow(ctx, "SELECT provider_id::text FROM olp.provider_network_credentials WHERE id=$1", id).Scan(&owner); err != nil || owner != provider.ID {
 				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
 			}
-			secret, err := m.keys.Read(ctx, tx, m.installation, id, "provider_credential")
+			secret, err := m.keys.Read(ctx, tx, m.installation, id, secrets.ProviderCredential)
 			if err != nil {
 				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
 			}
@@ -341,7 +341,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			if _, done := release.credentials[*slot.CredentialID]; done {
 				continue
 			}
-			secret, err := m.keys.Read(ctx, tx, m.installation, *slot.CredentialID, "provider_credential")
+			secret, err := m.keys.Read(ctx, tx, m.installation, *slot.CredentialID, secrets.ProviderCredential)
 			if err != nil {
 				return nil, fmt.Errorf("credential %s for provider %s: %w", *slot.CredentialID, provider.ID, err)
 			}
@@ -371,7 +371,7 @@ func (m *Manager) Authenticate(secret string) (access.Authority, error) {
 		return access.Authority{}, ErrInvalidKey
 	}
 	record, ok := state.keys[parts[1]]
-	if !ok || !hmac.Equal(record.digest, m.auth.Digest("api_key", secret)) {
+	if !ok || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return access.Authority{}, ErrInvalidKey
 	}
 	return record.authority, nil

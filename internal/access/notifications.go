@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-)
 
-const notificationSecretPurpose = "notification_secret"
+	"github.com/tyk-swe/olp/internal/secrets"
+)
 
 // The events a notification rule subscribes its destination to. A budget
 // threshold concerns an API key's or budget group's spend; a provider event,
-// such as a grant lapse (ADR 0006), concerns the whole installation.
+// such as a grant lapse (ADR 0008), concerns the whole installation.
 const (
 	BudgetThresholdEvent = "budget.threshold"
 	GrantLapsedEvent     = "provider.grant.lapsed"
@@ -57,18 +57,17 @@ type ruleInput struct {
 	Enabled          *bool   `json:"enabled"`
 }
 
-func notificationPermission(projectID *string) string {
+// notificationOperation is what writing a notification destination or rule
+// requires: installation-wide ones are installation settings, and project
+// ones are managed with the project's keys.
+func notificationOperation(projectID *string) Operation {
 	if projectID == nil {
-		return "settings"
+		return Settings
 	}
-	return "keys"
+	return Keys
 }
 
-func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDestinations(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -84,11 +83,7 @@ func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) notificationDestination(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDestination(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "notification_destination_id")
 	if err != nil {
 		return Reply{}, err
@@ -101,8 +96,8 @@ func (s *Server) notificationDestination(r *http.Request) (Reply, error) {
 		id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
@@ -134,7 +129,7 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 		return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 	}
 	secretID := NewID()
-	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, notificationSecretPurpose, []byte(secret), nil); err != nil {
+	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, secrets.NotificationSecret, []byte(secret), nil); err != nil {
 		return err
 	}
 	_, err := tx.Exec(r.Context(),
@@ -149,7 +144,7 @@ func (s *Server) validateDestination(input destinationInput) error {
 	return s.validateDestinationURL(input.URL)
 }
 
-func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
+func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Reply, error) {
 	var input destinationInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -159,8 +154,11 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(input.ProjectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(input.ProjectID)); err != nil {
 		return Reply{}, err
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
@@ -168,6 +166,11 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created destination, so the caller
+		// must still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if err = s.validateDestination(input); err != nil {
@@ -180,7 +183,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		}
 		input.ProjectID = &parsed
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	enabled := true
@@ -204,7 +207,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/destinations/" + id,
 		Body: json.RawMessage(data)}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.create",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_destination.create",
 		"notification_destination", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -214,7 +217,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
+func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -231,21 +234,27 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	var projectID *string
-	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
-		return Reply{}, err
-	}
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(projectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, true); err != nil {
+	var projectID *string
+	if err = tx.QueryRow(r.Context(),
+		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Project(projectID, View); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(projectID)); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -302,18 +311,14 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.update",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_destination.update",
 		"notification_destination", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 
-func (s *Server) notificationRules(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationRules(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -329,11 +334,7 @@ func (s *Server) notificationRules(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) notificationRule(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationRule(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "notification_rule_id")
 	if err != nil {
 		return Reply{}, err
@@ -346,8 +347,8 @@ func (s *Server) notificationRule(r *http.Request) (Reply, error) {
 		id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
@@ -459,7 +460,7 @@ func validateProviderEventRule(input ruleInput) error {
 	return nil
 }
 
-func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
+func (s *Server) createNotificationRule(r *http.Request, _ Principal) (Reply, error) {
 	var input ruleInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -469,8 +470,11 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(input.ProjectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(input.ProjectID)); err != nil {
 		return Reply{}, err
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
@@ -478,6 +482,11 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created rule, so the caller must
+		// still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if input.ProjectID != nil {
@@ -487,7 +496,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		}
 		input.ProjectID = &parsed
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if err = s.validateRule(r, tx, &input); err != nil {
@@ -514,7 +523,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/rules/" + id,
 		Body: json.RawMessage(data)}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_rule.create",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_rule.create",
 		"notification_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -524,7 +533,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
+func (s *Server) updateNotificationRule(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -543,21 +552,27 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	var projectID *string
-	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.notification_rules WHERE id=$1", id).Scan(&projectID); err != nil {
-		return Reply{}, err
-	}
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(projectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, true); err != nil {
+	var projectID *string
+	if err = tx.QueryRow(r.Context(),
+		"SELECT project_id::text FROM olp.notification_rules WHERE id=$1", id).Scan(&projectID); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Project(projectID, View); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(projectID)); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -623,18 +638,14 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+ruleFields+")"+ruleFrom+" WHERE r.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_rule.update",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_rule.update",
 		"notification_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 
-func (s *Server) notificationDeliveries(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDeliveries(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err

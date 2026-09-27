@@ -31,11 +31,11 @@ const operatorJobTimeout = 5 * time.Minute
 
 // Register mounts the media-job routes on the management surface.
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/media-jobs", m.Access.Handle(m.list))
-	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}", m.Access.Handle(m.get))
-	mux.HandleFunc("POST /api/v1/media-jobs/{job_id}/refresh", m.Access.HandleTimeout(1024, operatorJobTimeout, m.refresh))
-	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}/content", m.Access.HandleStream(1024, operatorJobTimeout, m.content))
-	mux.HandleFunc("DELETE /api/v1/media-jobs/{job_id}", m.Access.HandleTimeout(1024, operatorJobTimeout, m.delete))
+	m.Access.Route(mux, "GET /api/v1/media-jobs", m.list)
+	m.Access.Route(mux, "GET /api/v1/media-jobs/{job_id}", m.get)
+	m.Access.Route(mux, "POST /api/v1/media-jobs/{job_id}/refresh", m.refresh, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
+	m.Access.Stream(mux, "GET /api/v1/media-jobs/{job_id}/content", m.content, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
+	m.Access.Route(mux, "DELETE /api/v1/media-jobs/{job_id}", m.delete, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
 }
 
 func (m *Management) log() *slog.Logger {
@@ -45,22 +45,42 @@ func (m *Management) log() *slog.Logger {
 	return slog.Default()
 }
 
-func (m *Management) scopedJob(r *http.Request, p access.Principal, write bool) (*JobRecord, error) {
+func (m *Management) scopedJob(r *http.Request, q Querier, p access.Principal, need access.Need) (*JobRecord, error) {
 	if _, err := uuid.Parse(r.PathValue("job_id")); err != nil {
 		return nil, access.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
 	}
-	record, err := Job(r.Context(), m.Pool, r.PathValue("job_id"))
+	record, err := Job(r.Context(), q, r.PathValue("job_id"))
 	if err != nil {
 		return nil, mapJobError(err)
 	}
 	var keyProject *string
-	if err = m.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
+	if err = q.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
 		return nil, mapJobError(err)
 	}
-	if err := access.ProjectAccess(p, keyProject, write); err != nil {
+	if err := p.Project(keyProject, need); err != nil {
 		return nil, err
 	}
 	return &record, nil
+}
+
+// reauthorizeJob resolves the caller and the job's project again under the
+// installation lock, so a job mutation never starts under authority revoked
+// since admission. The lock is released before the provider call runs.
+func (m *Management) reauthorizeJob(r *http.Request, need access.Need) (access.Principal, *JobRecord, error) {
+	tx, err := m.Access.Begin(r)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := m.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	record, err := m.scopedJob(r, tx, p, need)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	return p, record, nil
 }
 
 func (m *Management) jobsAvailable() error {
@@ -76,18 +96,14 @@ func (m *Management) audit(r *http.Request, p access.Principal, action, id strin
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	if err := access.Audit(r.Context(), tx, r, p.ID, action, "media_job", id, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, p.Actor(), action, "media_job", id, "success"); err != nil {
 		return err
 	}
 	return tx.Commit(r.Context())
 }
 
-func (m *Management) refresh(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	record, err := m.scopedJob(r, p, true)
+func (m *Management) refresh(r *http.Request, _ access.Principal) (access.Reply, error) {
+	p, record, err := m.reauthorizeJob(r, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -104,12 +120,8 @@ func (m *Management) refresh(r *http.Request) (access.Reply, error) {
 	return access.Detail(jobItem(updated), updated.ETag), nil
 }
 
-func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
-	if err != nil {
-		return err
-	}
-	record, err := m.scopedJob(r, p, true)
+func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Principal) error {
+	record, err := m.scopedJob(r, m.Pool, p, access.Change)
 	if err != nil {
 		return err
 	}
@@ -151,12 +163,8 @@ func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (m *Management) delete(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	record, err := m.scopedJob(r, p, true)
+func (m *Management) delete(r *http.Request, _ access.Principal) (access.Reply, error) {
+	p, record, err := m.reauthorizeJob(r, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -171,6 +179,10 @@ func (m *Management) delete(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, mapJobError(err)
 	}
 	if updated.Lifecycle != LifecycleDeleted {
+		// The provider delete was requested even though it is not confirmed.
+		if err := m.audit(r, p, "media_job.delete_pending", record.ID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Reply{}, access.Fail(http.StatusConflict, "media_job_delete_pending", "The media job delete was initiated but the provider has not confirmed; reconciliation continues.")
 	}
 	if err := m.audit(r, p, "media_job.delete", record.ID); err != nil {
@@ -196,11 +208,7 @@ func contentFilename(jobID, variant, contentType string) string {
 	return "olp-media-" + jobID + "-" + variant + ext
 }
 
-func (m *Management) list(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {
 	query := r.URL.Query()
 	filters := Filters{AllProjects: p.AllProjects, AllowedProjects: p.ProjectIDs()}
 	if raw := query.Get("api_key_id"); raw != "" {
@@ -284,12 +292,8 @@ func (m *Management) list(r *http.Request) (access.Reply, error) {
 	return access.OK(response), nil
 }
 
-func (m *Management) get(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	record, err := m.scopedJob(r, p, false)
+func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, error) {
+	record, err := m.scopedJob(r, m.Pool, p, access.View)
 	if err != nil {
 		return access.Reply{}, err
 	}

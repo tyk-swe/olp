@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -209,6 +210,13 @@ func (h *accessHarness) refresh() {
 	if err := h.Runtime.Refresh(h.t.Context()); err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// authority is the key authority a gateway resolves for secret now.
+func (h *accessHarness) authority(secret string) (access.Authority, error) {
+	h.t.Helper()
+	h.refresh()
+	return h.Runtime.Authenticate(secret)
 }
 
 // gateway performs an SDK-style request against the inference surface.

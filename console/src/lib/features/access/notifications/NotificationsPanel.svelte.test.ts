@@ -2,6 +2,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { operationsFor } from '$lib/features/access/session/test/grants';
 import {
   createNotificationRule,
   listNotificationDeliveries,
@@ -13,12 +14,20 @@ import {
 } from '$lib/features/access/notifications/api';
 import NotificationsProbe from './test/NotificationsProbe.svelte';
 
-const role = vi.hoisted(() => ({ current: 'operator' }));
+const role = vi.hoisted(
+  (): { current: 'operator' | 'developer'; global: boolean } => ({
+    current: 'operator',
+    global: true
+  })
+);
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({
     role: role.current,
-    globalScope: true,
-    user: { access_scope: 'global' },
+    globalScope: role.global,
+    user: {
+      access_scope: role.global ? 'global' : 'assigned',
+      operations: operationsFor(role.current, role.global)
+    },
     can: (capability: string) =>
       capability === 'api_keys.manage' ||
       (capability === 'settings.update' && role.current === 'operator')
@@ -124,6 +133,7 @@ let component: ReturnType<typeof mount> | undefined;
 beforeEach(() => {
   vi.mocked(createNotificationRule).mockReset();
   role.current = 'operator';
+  role.global = true;
   host = document.createElement('div');
   document.body.append(host);
   client = new QueryClient({
@@ -205,10 +215,16 @@ it('lists grant lapse rules and the lapses they delivered', async () => {
   );
 });
 
-it('offers grant lapses only to those who manage installation settings', async () => {
-  role.current = 'developer';
-  await render();
+it.each([
+  { current: 'developer' as const, global: true },
+  { current: 'operator' as const, global: false }
+])(
+  'withholds grant lapse subscriptions from $current with global=$global',
+  async (principal) => {
+    Object.assign(role, principal);
+    await render();
 
-  expect(host.querySelector('#rule-event')).toBeNull();
-  expect(host.querySelector('#rule-subject')).not.toBeNull();
-});
+    expect(host.querySelector('#rule-event')).toBeNull();
+    expect(host.querySelector('#rule-subject')).not.toBeNull();
+  }
+);

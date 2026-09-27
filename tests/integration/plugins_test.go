@@ -40,6 +40,10 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 	owner := h.owner()
 	operator := h.invite(owner, "operator@example.com", "operator")
 	viewer := h.invite(owner, "viewer@example.com", "viewer")
+	assignedOwner := h.invite(owner, "assigned-owner@example.com", "owner")
+	profile := h.want(assignedOwner, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	assignedOwner = login(h, "assigned-owner@example.com")
 	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
 		"name": "automation", "scopes": []string{"read", "configure", "access"}, "expires_at": time.Now().Add(time.Hour),
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)["secret"].(string)
@@ -49,6 +53,7 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 
 	h.want(nil, "POST", "/api/v1/plugins", module, wasm, 401)
 	h.want(operator, "POST", "/api/v1/plugins", module, wasm, 403)
+	h.want(assignedOwner, "POST", "/api/v1/plugins", module, wasm, 403)
 	if status, _ := h.machine(token, "POST", "/api/v1/plugins", nil, wasm); status != 403 {
 		t.Fatalf("a management token installed a plugin: %d", status)
 	}
@@ -70,7 +75,7 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 		t.Fatalf("installing the same digest again changed it: %v", again)
 	}
 
-	for _, reader := range []*browser{viewer, operator} {
+	for _, reader := range []*browser{viewer, operator, assignedOwner} {
 		items := h.want(reader, "GET", "/api/v1/plugins", nil, nil, 200)["items"].([]any)
 		if len(items) != 1 || !reflect.DeepEqual(items[0].(map[string]any)["manifest"], manifest) {
 			t.Fatalf("readers see %v", items)
@@ -86,6 +91,7 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 	// Until an owner approves exactly the declared origins, nothing can use it.
 	wantUsable(t, h, digest, plugins.CodeNotApproved)
 	h.want(viewer, "POST", path+"/approve", map[string]any{"origins": manifest["origins"]}, etagHeader(installed), 403)
+	h.want(assignedOwner, "POST", path+"/approve", map[string]any{"origins": manifest["origins"]}, etagHeader(installed), 403)
 	h.want(owner, "POST", path+"/approve", map[string]any{"origins": manifest["origins"]}, nil, 428)
 	for _, origins := range [][]string{{"https://api.example.com"}, {"https://api.example.com", "https://login.example.com", "https://extra.example.com"}, {}} {
 		mismatch := h.want(owner, "POST", path+"/approve", map[string]any{"origins": origins}, etagHeader(installed), 422)
@@ -106,6 +112,7 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 	}
 
 	h.want(operator, "DELETE", path, nil, etagHeader(approved), 403)
+	h.want(assignedOwner, "DELETE", path, nil, etagHeader(approved), 403)
 	h.want(owner, "DELETE", path, nil, nil, 428)
 	h.want(owner, "DELETE", path, nil, etagHeader(installed), 412)
 	h.want(owner, "DELETE", path, nil, etagHeader(approved), 204)

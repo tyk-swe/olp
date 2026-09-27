@@ -83,11 +83,11 @@ func TestPluginProfileHostingPlacesTheStaticCredential(t *testing.T) {
 		t.Fatalf("placed query %q", req.URL.RawQuery)
 	}
 	for _, placed := range []string{secret, "Token " + secret, "sk+acme%26secret"} {
-		if !slices.Contains(sensitive, placed) {
+		if !slices.Contains(sensitive.Values(), placed) {
 			t.Errorf("%q is not redacted: %q", placed, sensitive)
 		}
 	}
-	if slices.Contains(sensitive, "olp") {
+	if slices.Contains(sensitive.Values(), "olp") {
 		t.Error("a value without the credential is redacted")
 	}
 }
@@ -408,7 +408,7 @@ func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
 	if req.URL.EscapedPath() != "/accounts/acme%2Fprod/v2/chat/completions" {
 		t.Fatalf("placed the request at %s", req.URL.EscapedPath())
 	}
-	if !slices.Equal(sensitive, []string{"secret", "Token secret"}) {
+	if !slices.Equal(sensitive.Values(), []string{"secret", "Token secret"}) {
 		t.Fatalf("redacts %q; options are not secret", sensitive)
 	}
 	moved := c
@@ -579,7 +579,7 @@ func TestPluginGrantProfilePlacesTheAccessTokenAndGrantFacts(t *testing.T) {
 	if req.Header.Get("Authorization") != "Bearer at-123" || req.Header.Get("X-Acme-Account") != "acct 7" || req.URL.RawQuery != "placement=eu-acct+7&project=p%2F1" {
 		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
 	}
-	if !slices.Contains(sensitive, "at-123") || !slices.Contains(sensitive, "Bearer at-123") || slices.Contains(sensitive, "acct 7") {
+	if !slices.Contains(sensitive.Values(), "at-123") || !slices.Contains(sensitive.Values(), "Bearer at-123") || slices.Contains(sensitive.Values(), "acct 7") {
 		t.Fatalf("redacts %q", sensitive)
 	}
 	for name, secret := range map[string][]byte{

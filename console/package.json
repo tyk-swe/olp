@@ -16,7 +16,7 @@
     "test:e2e": "svelte-kit sync && playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts",
+    "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts && node scripts/generate-requirements.mjs",
     "verify": "pnpm format:check && pnpm check && pnpm test"
   },
   "dependencies": {

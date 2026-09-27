@@ -1,4 +1,4 @@
--- Plugin providers (ADR 0005). No vendor list price applies to a provider whose
+-- Plugin providers (ADR 0007). No vendor list price applies to a provider whose
 -- profile a plugin supplies, so its attempts stay unpriced until an operator
 -- sets a price scoped to that provider.
 ALTER TABLE olp.prices

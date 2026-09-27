@@ -61,7 +61,7 @@ var errAnotherAccount = errors.New("the refresh authorizes another account than 
 // and a rotating refresh token is spent once. The new access token rewrites
 // the secret of the grant's credential version and advances the grant's
 // generation, which gateways poll; the refresh token stays under
-// RefreshPurpose. A refresh that fails permanently lapses the grant, and a
+// secrets.ProviderGrantRefresh. A refresh that fails permanently lapses the grant, and a
 // grant that no configuration uses any more is retired rather than refreshed.
 type Refresher struct {
 	Pool         *pgxpool.Pool
@@ -235,7 +235,7 @@ func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentia
 // run runs the grant's refresh through its plugin, on behalf of the provider
 // and over its network path, and checks what the refresh returns.
 func (r *Refresher) run(ctx context.Context, conn *pgx.Conn, g *dueGrant) (abi.Grant, error) {
-	token, err := r.Keys.Read(ctx, conn, r.Installation, g.refreshTokenID, RefreshPurpose)
+	token, err := r.Keys.Read(ctx, conn, r.Installation, g.refreshTokenID, secrets.ProviderGrantRefresh)
 	if err != nil {
 		return abi.Grant{}, fmt.Errorf("the refresh token is unreadable: %w", err)
 	}
@@ -333,7 +333,7 @@ func (r *Refresher) write(ctx context.Context, g *dueGrant, served []byte, refre
 	err := pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
 		// Writing a secret holds the installation row, which transactions
 		// that end grants take before the grant's.
-		if err := r.Keys.Store(ctx, tx, r.Installation, g.credentialID, "provider_credential", served, nil); err != nil {
+		if err := r.Keys.Store(ctx, tx, r.Installation, g.credentialID, secrets.ProviderCredential, served, nil); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `UPDATE olp.provider_grants SET generation=generation+1,expires_at=$3,refresh_at=$4,
@@ -344,7 +344,7 @@ func (r *Refresher) write(ctx context.Context, g *dueGrant, served []byte, refre
 		if refreshToken == "" {
 			return nil
 		}
-		return r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, RefreshPurpose, []byte(refreshToken), nil)
+		return r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, secrets.ProviderGrantRefresh, []byte(refreshToken), nil)
 	})
 	return generation, err
 }

@@ -124,13 +124,15 @@ func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record,
 	return scanRecord(q.QueryRow(ctx, query, id))
 }
 
-func checkProvider(ctx context.Context, q access.Queryer, p access.Principal, id string, write bool) (*record, error) {
+// visibleProvider loads a provider p may see; one outside p's scope is
+// missing.
+func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
 	current, err := load(ctx, q, id, false)
 	if err != nil {
 		return nil, err
 	}
-	if !p.CanProject(current.ProjectID, write) {
-		return nil, pgx.ErrNoRows
+	if err = p.Project(current.ProjectID, access.View); err != nil {
+		return nil, err
 	}
 	return current, nil
 }

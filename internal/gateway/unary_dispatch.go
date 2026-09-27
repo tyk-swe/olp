@@ -82,8 +82,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	credentialValues, err := s.applySlotCredential(actx, req, plan.Config(), x.request.release, slot, body)
-	if err != nil {
+	if err := s.applySlotCredential(actx, x, req, plan.Config(), slot, body); err != nil {
 		if actx.Err() != nil {
 			return fail(state.classify(err, false), nil)
 		}
@@ -103,10 +102,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	fact.Status = response.StatusCode
 	if response.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
-		failure := &attemptFailure{status: response.StatusCode, upstream: openai.ParseErrorBody(raw)}
-		if failure.upstream != nil {
-			failure.upstream.Message = redactCredentials(failure.upstream.Message, credentialValues)
-		}
+		failure := &attemptFailure{status: response.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := state.rejected(response.StatusCode, failure.upstream)
 		if class == classRateLimit {
 			failure.retryAfter = retryAfter(response.Header.Get("Retry-After"), s.now())

@@ -73,11 +73,11 @@ func geminiClientKey(r *http.Request, allowedQuery ...string) (string, *Error) {
 		if len(values) != 1 || values[0] == "" {
 			return "", invalidRequest("invalid_request", "Provide one Gemini API key.", nil)
 		}
-		token = values[0]
+		token = strings.TrimSpace(values[0])
 	}
 	if values := query["key"]; len(values) > 0 {
 		forms++
-		token = values[0]
+		token = strings.TrimSpace(values[0])
 	}
 	if forms > 1 {
 		return "", invalidRequest("invalid_request", "Provide the Gemini API key in one location.", nil)
@@ -114,7 +114,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	token, e := geminiClientKey(r)
 	if e == nil {
 		var authority access.Authority
-		authority, e = s.authenticate(r, "inference")
+		authority, e = s.authorizeKey(token, "inference")
 		if e == nil {
 			x.authority = authority
 			x.keyID, x.affinity = authority.ID, []byte(authority.ID)
@@ -397,6 +397,15 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 				_, serverContent := doc.Root().Lookup("serverContent")
 				_, toolCall := doc.Root().Lookup("toolCall")
 				_, providerError = doc.Root().Lookup("error")
+				if providerError {
+					// An in-band provider error can echo an applied credential;
+					// scrub it before the frame reaches the client.
+					scrubbed, err := redactNativeFailureDocument(doc, x.sensitive)
+					if err != nil {
+						return end(fmt.Errorf("%w: provider error could not be redacted", errGeminiLiveProtocol))
+					}
+					payload = scrubbed.Bytes()
+				}
 				if x.strict() && (serverContent || toolCall) {
 					mu.Lock()
 					inFlight = !turnComplete

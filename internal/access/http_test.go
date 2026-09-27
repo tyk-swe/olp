@@ -18,7 +18,7 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 			t.Parallel()
 			finished := make(chan error, 1)
 			s := &Server{Origin: "https://console.test"}
-			server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
+			server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
 				var body map[string]any
 				err := Decode(r, &body)
 				finished <- err
@@ -59,7 +59,7 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 
 func TestHandleStreamProblemBeforeCommit(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+	server := httptest.NewServer(s.serveStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
 		return Fail(http.StatusConflict, "media_job_busy", "The media job is being reconciled by another worker; retry shortly.")
 	}))
 	defer server.Close()
@@ -82,7 +82,7 @@ func TestHandleStreamProblemBeforeCommit(t *testing.T) {
 
 func TestHandleStreamErrorAfterCommit(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+	server := httptest.NewServer(s.serveStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		if _, err := fmt.Fprintf(w, "event: frame\ndata: {}\n\n"); err != nil {
@@ -124,7 +124,7 @@ func TestHandleStreamResponseController(t *testing.T) {
 	const expected = "event: frame\ndata: {}\n\n"
 	flushed := make(chan error, 1)
 	release := make(chan struct{})
-	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+	server := httptest.NewServer(s.serveStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
 		if _, err := io.WriteString(w, expected); err != nil {
 			flushed <- err
 			return err
@@ -170,7 +170,7 @@ func TestHandleStreamResponseController(t *testing.T) {
 
 func TestAccessBodyReadDeadlineAllowsKeepAlive(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
+	server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
 		var body map[string]any
 		err := Decode(r, &body)
 		return OK(body), err

@@ -11,8 +11,11 @@ Administrators belong to one trusted installation. See
 
 Owners manage membership, OIDC, local-login availability, and other users'
 sessions. Operators can read membership and manage keys/settings. Developers can
-manage keys. Viewers can read key metadata, settings, and audit records. Every
-user manages their own profile and sessions. The last usable owner cannot be
+manage keys. Viewers can read configuration, key metadata, and usage, and with
+an installation-wide scope also settings and audit records. Every user manages
+their own profile and sessions. The
+[operation table](security.md#management-authorization) lists exactly what each
+role holds. The last usable owner cannot be
 removed, disabled, or stranded by authentication configuration changes.
 
 Disabling or changing a member's role revokes their sessions. Losing membership
@@ -62,8 +65,9 @@ omitting the supported-methods field defaults to `client_secret_basic`.
 Unsupported token authentication methods are rejected during configuration.
 Discovery and endpoints must use HTTPS and public addresses. The dedicated
 client rejects redirects, credentials in URLs, private/reserved DNS answers,
-oversized responses, and unbounded waits. Provider egress settings cannot weaken
-identity egress.
+oversized responses, and unbounded waits. It applies the provider egress
+address denylist without any operator exceptions and is never built from the
+provider policy, so provider egress settings cannot weaken identity egress.
 
 Authorization binds a single-use encrypted flow to the browser, configuration
 ETag, state, nonce, PKCE verifier, and initiating session when applicable. ID
@@ -85,12 +89,15 @@ installation role. Global users can access all projects and unassigned resources
 within that role's permissions. Assigned users see only their member projects;
 project managers can write resources and project viewers can read them, subject
 to installation-role permissions. Assigned users cannot administer installation
-membership, OIDC, or global settings. Keep at least one manager per project.
+membership, other members' sessions, OIDC, or global settings. Keep at least one
+manager per project.
 
 Manage projects and membership through `/api/v1/projects` and
 `/api/v1/projects/{id}/members`. Providers, routes, and gateway keys carry a
 project boundary; a key can use only routes in its own project, including the
 unassigned boundary. Management tokens can also be limited to named projects.
+A project, or a resource in one, outside the caller's scope answers 404 exactly
+as if it did not exist; a visible project the caller cannot change answers 403.
 
 `GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
 manage shared accrued-cost budgets. A group requires a positive daily or monthly
@@ -114,7 +121,13 @@ pricing also require `settings`; imports with unchanged pricing or only provider
 and route changes require `configure`. Requests carrying an `olpm_` bearer
 credential are non-browser traffic: they do not send Origin or CSRF proofs and
 are authenticated by token digest, expiry, and revocation. Every other bearer or
-cookie request keeps the full browser defenses. Token administration itself —
+cookie request keeps the full browser defenses. A token acts within its
+creator's current authority: it fails authentication while the creator is
+inactive or OIDC-deauthorized, loses operations the creator's current role does
+not hold, and reaches only the creator's projects when the creator has an
+assigned access scope. Nothing is revoked, so a creator who regains authority
+also restores their tokens; see
+[the decision](adr/0005-management-tokens-act-within-their-creators-authority.md). Token administration itself —
 create, list, read, revoke — is always session-owner-only; no management token
 can manage tokens. Installing, approving, permitting and uninstalling
 [provider plugins](plugins.md) is session-owner-only in the same way, while any
@@ -162,6 +175,14 @@ recovery error that does not confirm whether the address exists.
 
 ## Mutation and audit boundaries
 
+Every management route is authorized before its handler runs, from the
+security requirement the [management contract](../openapi/management.json)
+declares for it; see
+[the decision](adr/0006-management-routes-are-authorized-from-the-contract.md).
+The session response lists the operations the member may perform, and the
+console offers an action only when the requirement of the call it leads to
+admits the member, so an assigned member never sees installation pages it
+cannot open.
 Protected writes reauthorize inside their feature transaction. Access mutations
 take the installation row lock so ownership checks and writes commit together;
 password hashing, OIDC discovery, and token verification run outside that lock.

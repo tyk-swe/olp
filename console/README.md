@@ -7,10 +7,10 @@ static `build/` output with `index.html` as the SPA fallback. Start with the
 ## Local development
 
 The [development workflow](../CONTRIBUTING.md#local-development) starts Vite
-with `make dev`. It proxies `/api/`, `/v1/`, `/anthropic/`, `/gemini/`, and
-`/v1beta/` to Go on port 8082, preserving the browser origin and cookies.
-The checked-in proxy does not include `/bedrock/` or enable WebSocket proxying;
-use the Go listener directly for Bedrock and realtime clients.
+with `make dev`. It proxies `/api/`, `/v1/`, `/native/`, `/anthropic/`,
+`/gemini/`, `/v1beta/`, and `/bedrock/` to Go on port 8082, preserving the
+browser origin and cookies. The checked-in proxy does not enable WebSocket
+proxying; use the Go listener directly for realtime clients.
 
 For an already running backend, `pnpm --dir console dev` starts Vite alone.
 Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.

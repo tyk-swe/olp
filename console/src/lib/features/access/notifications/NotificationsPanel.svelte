@@ -2,6 +2,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { holds } from '$lib/features/access/session/authorization';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
@@ -27,11 +28,8 @@
   const queryClient = useQueryClient();
   const access = useRole();
   const canManage = $derived(access.can('api_keys.manage'));
-  // Provider events concern the whole installation, so only a principal that
-  // manages installation settings subscribes a destination to them.
-  const canWatchProviders = $derived(
-    access.can('settings.update') && access.globalScope
-  );
+  // Installation-wide notifications are installation settings.
+  const installationWide = $derived(holds(access.user, 'settings'));
 
   const destinations = createQuery(() => ({
     queryKey: notificationKeys.destinations(),
@@ -312,7 +310,11 @@
             placeholder="https://hooks.example.com/olp"
           />
         </div>
-        <ProjectScopeField id="dest-project" bind:value={destProjectId} />
+        <ProjectScopeField
+          id="dest-project"
+          bind:value={destProjectId}
+          unassigned={installationWide}
+        />
         <div class="form-field">
           <label for="dest-secret">Signing secret</label><input
             id="dest-secret"
@@ -432,7 +434,7 @@
             required
           />
         </div>
-        {#if canWatchProviders}
+        {#if installationWide}
           <div class="form-field">
             <label for="rule-event">Event</label><select
               id="rule-event"
@@ -446,7 +448,11 @@
           </div>
         {/if}
         {#if watchesBudget}
-          <ProjectScopeField id="rule-project" bind:value={ruleProjectId} />
+          <ProjectScopeField
+            id="rule-project"
+            bind:value={ruleProjectId}
+            unassigned={installationWide}
+          />
           <div class="form-field">
             <label for="rule-subject-kind">Subject</label><select
               id="rule-subject-kind"

@@ -137,8 +137,13 @@ func TestAWSStaticProcessAndSSOCredentialsSignOnce(t *testing.T) {
 	secret := []byte(`{"access_key_id":"ABCDEFGHIJKLMNOP","secret_access_key":"abcdefghijklmnopabcdefghijklmnop","session_token":"fixture-session"}`)
 	a := NewAuth(localPolicy())
 	req, _ := http.NewRequest("POST", "https://bedrock-runtime.us-east-1.amazonaws.com/model/m/converse", strings.NewReader("{}"))
-	if _, e := a.Apply(context.Background(), req, cfg, secret, []byte("{}")); e != nil || !strings.Contains(req.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || req.Header.Get("X-Amz-Security-Token") != "fixture-session" {
+	applied, e := a.Apply(context.Background(), req, cfg, secret, []byte("{}"))
+	if e != nil || !strings.Contains(req.Header.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || req.Header.Get("X-Amz-Security-Token") != "fixture-session" {
 		t.Fatalf("static signing: %v", e)
+	}
+	// A provider diagnostic can echo only the signature, not the whole header.
+	if signature := sigV4Signature(req.Header.Get("Authorization")); signature == "" || !applied.Contains("upstream echoed "+signature) {
+		t.Fatal("the standalone SigV4 signature is not redacted")
 	}
 	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"} {
 		t.Setenv(name, "")

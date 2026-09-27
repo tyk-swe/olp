@@ -6,7 +6,7 @@ defines a dialect: codecs and interaction contracts stay first-party. Plugins
 are confined: OLP runs their code on [wazero](https://wazero.io) and grants
 every capability they have, unless a deployment enables the experimental
 [unconfined tier](#unconfined-plugins-experimental).
-[ADR 0005](adr/0005-confined-provider-plugins.md) records the design; the
+[ADR 0007](adr/0007-confined-provider-plugins.md) records the design; the
 [authoring guide](plugin-authoring.md) covers writing one.
 
 This page covers installing, reviewing and approving plugins, creating
@@ -26,8 +26,10 @@ terms of use.
 An owner installs a plugin from the console's **Plugins** page, or with
 `POST /api/v1/plugins` carrying the module as an `application/wasm` body. A
 module is at most 32 MiB, and an installation holds at most 64 plugin digests.
-Installation needs an owner signed in with a user session, like management-token
-administration; management tokens cannot install plugins.
+Installation needs an owner signed in with a user session and installation-wide
+access, like management-token administration. The same requirement applies to
+approval, uninstalling and permitting unconfined plugins; management tokens
+cannot perform these operations.
 
 OLP stores the module by the SHA-256 digest of its bytes, which identifies the
 plugin from then on. Before storing it, OLP instantiates the module within the
@@ -244,7 +246,7 @@ issue an API key, and rotate that authorization. A profile that declares a
 grant authenticates providers with one: rotating upstream authorization the
 plugin obtains when an operator signs in to the upstream account, which OLP
 holds beneath an ordinary, immutable credential version
-([ADR 0006](adr/0006-grants-beneath-immutable-credentials.md)).
+([ADR 0008](adr/0008-grants-beneath-immutable-credentials.md)).
 
 In the provider wizard's Connection stage, choosing such a profile replaces the
 credential field with grant enrollment. After saving the draft, the plugin
@@ -420,7 +422,7 @@ activate the provider.
 
 The observed principal is part of the provider's serving identity, in place of
 any principal a serving binding declares
-([ADR 0006](adr/0006-grants-beneath-immutable-credentials.md)):
+([ADR 0008](adr/0008-grants-beneath-immutable-credentials.md)):
 
 - Every credential slot of a provider revision observes the same principal.
   Activation refuses slots whose credential versions observe different
@@ -442,7 +444,7 @@ targets of one route.
 A grant serves only the plugin build that enrolled it, which its credential
 version records: a build is known by its digest, since any build's manifest may
 claim any name, and a plugin gets only its own grant
-([ADR 0005](adr/0005-confined-provider-plugins.md)). Moving a provider to
+([ADR 0007](adr/0007-confined-provider-plugins.md)). Moving a provider to
 another build of its plugin, an upgrade included, therefore takes a new grant
 enrollment for each of its credential slots: until then, probing, validating
 or activating a slot that holds the other build's grant is refused with

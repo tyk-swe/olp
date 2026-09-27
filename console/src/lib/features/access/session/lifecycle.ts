@@ -560,8 +560,10 @@ export class AuthenticationLifecycle {
     this.validationGeneration++;
   }
 
+  // Cached queries belong to one principal's exact authority: a changed role,
+  // access scope, or operation set starts a fresh partition.
   private principalPartition(user: AuthenticatedUser): string {
-    return `principal:${user.id}:${user.role}`;
+    return `principal:${user.id}:${user.role}:${user.access_scope}:${[...user.operations].sort().join(',')}`;
   }
 
   private rotateAuthenticatedRequests(): void {

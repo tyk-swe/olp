@@ -131,7 +131,7 @@ func (s *Service) attachWithSource(ctx context.Context, id, upstreamJobID string
 	if update.ExpiresAt != nil && update.ExpiresAt.Before(expires) {
 		expires = *update.ExpiresAt
 	}
-	if err := s.Keys.Store(ctx, tx, s.Installation, id, "media_job_source", source, &expires); err != nil {
+	if err := s.Keys.Store(ctx, tx, s.Installation, id, secrets.MediaJobSource, source, &expires); err != nil {
 		return JobRecord{}, dbError(err)
 	}
 	record, err := AttachUpstream(ctx, tx, id, upstreamJobID, update, id)
@@ -169,7 +169,7 @@ func (s *Service) ReadNativeVideoSource(ctx context.Context, record JobRecord, a
 		return nil, dbError(err)
 	}
 	defer tx.Rollback(ctx)
-	source, err := s.Keys.Read(ctx, tx, s.Installation, record.ID, "media_job_source")
+	source, err := s.Keys.Read(ctx, tx, s.Installation, record.ID, secrets.MediaJobSource)
 	if err != nil {
 		return nil, &JobError{Kind: JobErrorNotFound, Message: "native video source unavailable"}
 	}
@@ -189,7 +189,7 @@ func (s *Service) FinalizeDeletion(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	if finalized {
-		if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", id); err != nil {
+		if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.MediaJobSource); err != nil {
 			return false, dbError(err)
 		}
 	}
@@ -564,7 +564,7 @@ func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimI
 	if err := finalizeDeletionClaimed(ctx, tx, record.ID, claimID); err != nil {
 		return mutationFailure(err)
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", record.ID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", record.ID, secrets.MediaJobSource); err != nil {
 		return mutationFailure(dbError(err))
 	}
 	if err := tx.Commit(ctx); err != nil {

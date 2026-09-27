@@ -104,6 +104,11 @@ func TestSignedHeadersReachTheUpstreamRedacted(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest || strings.Contains(message, received.Get("X-Acme-Signature")) || !strings.Contains(message, "signed [REDACTED]") {
 		t.Fatalf("the signed header was not redacted: %d %s", resp.StatusCode, message)
 	}
+	for _, value := range []string{secretA, received.Get("X-Acme-Signature")} {
+		if strings.Contains(fmt.Sprint(result), value) || strings.Contains(fmt.Sprint(h.sink.last(t)), value) {
+			t.Fatal("a signed credential escaped through a provider error field or accounting")
+		}
+	}
 }
 
 // The hook runs once per upstream request, never per stream event.
