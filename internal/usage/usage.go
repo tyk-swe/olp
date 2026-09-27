@@ -78,8 +78,9 @@ const (
 	// TaskMediaReconciliation advances durable media jobs toward a terminal
 	// state and retires orphaned upstream objects.
 	TaskMediaReconciliation Task = "media_reconciliation"
-
-	TaskBudgetAlertDelivery Task = "budget_alert_delivery"
+	// TaskNotificationDelivery evaluates budget threshold rules and delivers
+	// every event notification rules subscribe their destinations to.
+	TaskNotificationDelivery Task = "notification_delivery"
 	// TaskGrantRefresh refreshes grants ahead of their access tokens' expiry.
 	TaskGrantRefresh Task = "grant_refresh"
 )

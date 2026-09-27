@@ -11,21 +11,29 @@ import (
 
 const notificationSecretPurpose = "notification_secret"
 
+// The events a notification rule subscribes its destination to. A budget
+// threshold concerns an API key's or budget group's spend; a provider event,
+// such as a grant lapse (ADR 0006), concerns the whole installation.
+const (
+	BudgetThresholdEvent = "budget.threshold"
+	GrantLapsedEvent     = "provider.grant.lapsed"
+)
+
 const destinationFields = `'id',d.id,'name',d.name,'url',d.url,'project_id',d.project_id,'project_name',p.name,'enabled',d.enabled,'etag',d.etag,'created_by',d.created_by,'created_by_email',u.email,'created_at',d.created_at,'updated_at',d.updated_at`
 const destinationFrom = ` FROM olp.notification_destinations d
 	JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects p ON p.id=d.project_id`
 
-const ruleFields = `'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at`
-const ruleFrom = ` FROM olp.budget_alert_rules r
+const ruleFields = `'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'event',r.event,'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at`
+const ruleFrom = ` FROM olp.notification_rules r
 	JOIN olp.users u ON u.id=r.created_by
 	LEFT JOIN olp.projects p ON p.id=r.project_id
 	LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
 	LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
 	JOIN olp.notification_destinations d ON d.id=r.destination_id`
 
-const deliveryFields = `'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at`
-const deliveryFrom = ` FROM olp.budget_alert_deliveries v
-	JOIN olp.budget_alert_rules r ON r.id=v.rule_id`
+const deliveryFields = `'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'event',r.event,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'provider_id',v.payload->'provider_id','provider_name',v.payload->'provider_name','credential_version_id',v.credential_id,'credential_version',v.payload->'credential_version','status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at`
+const deliveryFrom = ` FROM olp.notification_deliveries v
+	JOIN olp.notification_rules r ON r.id=v.rule_id`
 
 type destinationInput struct {
 	Name      string           `json:"name"`
@@ -35,12 +43,15 @@ type destinationInput struct {
 	Enabled   *bool            `json:"enabled"`
 }
 
+// ruleInput is a notification rule as written. Only a budget threshold rule
+// has a subject, window and threshold.
 type ruleInput struct {
 	Name             string  `json:"name"`
 	ProjectID        *string `json:"project_id"`
-	SubjectKind      string  `json:"subject_kind"`
-	SubjectID        string  `json:"subject_id"`
-	WindowKind       string  `json:"window_kind"`
+	Event            string  `json:"event"`
+	SubjectKind      *string `json:"subject_kind"`
+	SubjectID        *string `json:"subject_id"`
+	WindowKind       *string `json:"window_kind"`
 	ThresholdPercent *int    `json:"threshold_percent"`
 	DestinationID    string  `json:"destination_id"`
 	Enabled          *bool   `json:"enabled"`
@@ -323,7 +334,7 @@ func (s *Server) notificationRule(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	id, err := IDParam(r, "budget_alert_rule_id")
+	id, err := IDParam(r, "notification_rule_id")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -341,22 +352,28 @@ func (s *Server) notificationRule(r *http.Request) (Reply, error) {
 	return Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input ruleInput) error {
-	if input.SubjectKind != "api_key" && input.SubjectKind != "budget_group" {
+// validateRuleSubject validates a budget threshold rule's subject, window and
+// threshold, and normalizes its subject identifier.
+func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input *ruleInput) error {
+	if input.SubjectKind == nil || *input.SubjectKind != "api_key" && *input.SubjectKind != "budget_group" {
 		return Invalid("subject_kind", "Use api_key or budget_group.")
 	}
-	if input.WindowKind != "day" && input.WindowKind != "month" {
+	if input.WindowKind == nil || *input.WindowKind != "day" && *input.WindowKind != "month" {
 		return Invalid("window_kind", "Use day or month.")
 	}
 	if input.ThresholdPercent == nil || *input.ThresholdPercent < 1 || *input.ThresholdPercent > 100 {
 		return Invalid("threshold_percent", "Use a threshold from 1 to 100.")
 	}
-	subjectID, err := ParseUUID(input.SubjectID)
+	if input.SubjectID == nil {
+		return Invalid("subject_id", "Use a valid subject identifier.")
+	}
+	subjectID, err := ParseUUID(*input.SubjectID)
 	if err != nil {
 		return Invalid("subject_id", "Use a valid subject identifier.")
 	}
+	input.SubjectID = &subjectID
 	var subjectProject *string
-	switch input.SubjectKind {
+	switch *input.SubjectKind {
 	case "api_key":
 		err = tx.QueryRow(r.Context(),
 			"SELECT project_id::text FROM olp.api_keys WHERE id=$1", subjectID).Scan(&subjectProject)
@@ -377,11 +394,14 @@ func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input ruleInput
 	return nil
 }
 
-func (s *Server) validateRuleDestination(r *http.Request, tx pgx.Tx, input ruleInput) error {
+// validateRuleDestination validates that a rule's destination belongs to the
+// rule's project, and normalizes its identifier.
+func (s *Server) validateRuleDestination(r *http.Request, tx pgx.Tx, input *ruleInput) error {
 	destinationID, err := ParseUUID(input.DestinationID)
 	if err != nil {
 		return Invalid("destination_id", "Use a valid destination identifier.")
 	}
+	input.DestinationID = destinationID
 	var destinationProject *string
 	if err = tx.QueryRow(r.Context(),
 		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", destinationID).Scan(&destinationProject); err != nil {
@@ -397,14 +417,46 @@ func (s *Server) validateRuleDestination(r *http.Request, tx pgx.Tx, input ruleI
 	return nil
 }
 
-func (s *Server) validateRule(r *http.Request, tx pgx.Tx, input ruleInput) error {
+// validateRule validates a rule for its event, and normalizes its
+// identifiers.
+func (s *Server) validateRule(r *http.Request, tx pgx.Tx, input *ruleInput) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if err := s.validateRuleSubject(r, tx, input); err != nil {
-		return err
+	switch input.Event {
+	case BudgetThresholdEvent:
+		if err := s.validateRuleSubject(r, tx, input); err != nil {
+			return err
+		}
+	case GrantLapsedEvent:
+		if err := validateProviderEventRule(*input); err != nil {
+			return err
+		}
+	default:
+		return Invalid("event", "Use budget.threshold or provider.grant.lapsed.")
 	}
 	return s.validateRuleDestination(r, tx, input)
+}
+
+// validateProviderEventRule validates a rule subscribed to a provider event,
+// which concerns the whole installation: it is installation-wide and watches
+// no budget.
+func validateProviderEventRule(input ruleInput) error {
+	if input.ProjectID != nil {
+		return Invalid("project_id", "Provider event rules are installation-wide.")
+	}
+	for _, field := range []struct {
+		name string
+		set  bool
+	}{
+		{"subject_kind", input.SubjectKind != nil}, {"subject_id", input.SubjectID != nil},
+		{"window_kind", input.WindowKind != nil}, {"threshold_percent", input.ThresholdPercent != nil},
+	} {
+		if field.set {
+			return Invalid(field.name, "Only budget.threshold rules watch a budget.")
+		}
+	}
+	return nil
 }
 
 func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
@@ -438,7 +490,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
 		return Reply{}, err
 	}
-	if err = s.validateRule(r, tx, input); err != nil {
+	if err = s.validateRule(r, tx, &input); err != nil {
 		return Reply{}, err
 	}
 	enabled := true
@@ -446,15 +498,13 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		enabled = *input.Enabled
 	}
 	id, etag := NewID(), NewID()
-	subjectID, _ := ParseUUID(input.SubjectID)
-	destinationID, _ := ParseUUID(input.DestinationID)
 	if _, err = tx.Exec(r.Context(),
-		`INSERT INTO olp.budget_alert_rules
-		 (id, name, project_id, subject_kind, subject_id, window_kind, threshold_percent,
+		`INSERT INTO olp.notification_rules
+		 (id, name, project_id, event, subject_kind, subject_id, window_kind, threshold_percent,
 		  destination_id, enabled, etag, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		id, strings.TrimSpace(input.Name), input.ProjectID, input.SubjectKind, subjectID,
-		input.WindowKind, *input.ThresholdPercent, destinationID, enabled, etag, p.UserID()); err != nil {
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		id, strings.TrimSpace(input.Name), input.ProjectID, input.Event, input.SubjectKind, input.SubjectID,
+		input.WindowKind, input.ThresholdPercent, input.DestinationID, enabled, etag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -464,8 +514,8 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/rules/" + id,
 		Body: json.RawMessage(data)}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.create",
-		"budget_alert_rule", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.ID, "notification_rule.create",
+		"notification_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -486,16 +536,16 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 		"threshold_percent", "destination_id", "enabled"}
 	for field := range patch {
 		if !slices.Contains(allowed, field) {
-			return Reply{}, Invalid(field, "Unknown alert rule field.")
+			return Reply{}, Invalid(field, "Unknown notification rule field.")
 		}
 	}
-	id, err := IDParam(r, "budget_alert_rule_id")
+	id, err := IDParam(r, "notification_rule_id")
 	if err != nil {
 		return Reply{}, err
 	}
 	var projectID *string
 	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
+		"SELECT project_id::text FROM olp.notification_rules WHERE id=$1", id).Scan(&projectID); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)
@@ -557,26 +607,24 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 		}
 	}
 	next.ProjectID = projectID
-	if err = s.validateRule(r, tx, next); err != nil {
+	if err = s.validateRule(r, tx, &next); err != nil {
 		return Reply{}, err
 	}
-	subjectID, _ := ParseUUID(next.SubjectID)
-	destinationID, _ := ParseUUID(next.DestinationID)
 	enabled := next.Enabled != nil && *next.Enabled
 	etag = NewID()
 	if _, err = tx.Exec(r.Context(),
-		`UPDATE olp.budget_alert_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,
+		`UPDATE olp.notification_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,
 		 threshold_percent=$6,destination_id=$7,enabled=$8,etag=$9,updated_at=now() WHERE id=$1`,
-		id, strings.TrimSpace(next.Name), next.SubjectKind, subjectID, next.WindowKind,
-		*next.ThresholdPercent, destinationID, enabled, etag); err != nil {
+		id, strings.TrimSpace(next.Name), next.SubjectKind, next.SubjectID, next.WindowKind,
+		next.ThresholdPercent, next.DestinationID, enabled, etag); err != nil {
 		return Reply{}, err
 	}
 	if err = tx.QueryRow(r.Context(),
 		"SELECT jsonb_build_object("+ruleFields+")"+ruleFrom+" WHERE r.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.update",
-		"budget_alert_rule", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.ID, "notification_rule.update",
+		"notification_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))

@@ -3,8 +3,13 @@
 package integration_test
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -203,5 +208,123 @@ func TestALapsedSlotIsReenrolledByDeviceAuthorization(t *testing.T) {
 	h.refresh()
 	if lapsed, served := h.Runtime.Eligibility(lapsedID), h.Runtime.Eligibility(reenrolled["credential_id"].(string)); lapsed != runtime.Lapsed || served != runtime.Eligible {
 		t.Fatalf("the gateway finds the lapsed version %q and the re-enrolled one %q", lapsed, served)
+	}
+}
+
+// A lapse is delivered once to each enabled rule subscribed to grant lapses,
+// as a signed webhook like a budget alert. It reports the provider, the
+// credential slot, the credential version and its observed principal, and no
+// secret material, even when the slot's grant was re-enrolled before the old
+// one lapsed and the active revision alone still binds the lapsed version.
+func TestAGrantLapseIsDeliveredAsASignedWebhook(t *testing.T) {
+	h := newAccessHarness(t)
+	policy := alertPolicy()
+	h.Server.Egress = policy
+	owner := h.owner()
+	hook := newWebhookFixture(t)
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	credentialID := enrollGrant(t, h, owner, path)
+	certifyPluginProvider(t, h, owner, path)
+	provider := h.want(owner, "GET", path, nil, nil, 200)
+	slot := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+
+	destination := func(name, secret string) string {
+		t.Helper()
+		body := map[string]any{"name": name, "url": hook.URL + "/" + name}
+		if secret != "" {
+			body["secret"] = secret
+		}
+		return h.want(owner, "POST", "/api/v1/notifications/destinations", body, idem(uuid.NewString()), 201)["id"].(string)
+	}
+	rule := func(body map[string]any, status int) map[string]any {
+		t.Helper()
+		return h.want(owner, "POST", "/api/v1/notifications/rules", body, idem(uuid.NewString()), status)
+	}
+	signed, plain, muted := destination("signed", "signing-key"), destination("plain", ""), destination("muted", "")
+	lapses := rule(map[string]any{"name": "Lapses", "event": "provider.grant.lapsed", "destination_id": signed}, 201)
+	if lapses["event"] != "provider.grant.lapsed" || lapses["subject_kind"] != nil || lapses["project_id"] != nil {
+		t.Fatalf("lapse rule %v", lapses)
+	}
+	alsoLapses := rule(map[string]any{"name": "Also lapses", "event": "provider.grant.lapsed", "destination_id": plain}, 201)
+	rule(map[string]any{"name": "Muted lapses", "event": "provider.grant.lapsed", "destination_id": muted, "enabled": false}, 201)
+	// A destination is subscribed to grant lapses once, installation-wide,
+	// and a lapse rule watches no budget.
+	rule(map[string]any{"name": "Again", "event": "provider.grant.lapsed", "destination_id": signed}, 409)
+	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Lapses"}, idem(uuid.NewString()), 201)["id"].(string)
+	for field, value := range map[string]any{"project_id": project, "subject_kind": "api_key", "window_kind": "day", "threshold_percent": 50} {
+		body := map[string]any{"name": "Refused", "event": "provider.grant.lapsed", "destination_id": plain, field: value}
+		if problem := rule(body, 422); problemCode(t, problem) != "validation_failed" {
+			t.Fatalf("a lapse rule with %s: %v", field, problem)
+		}
+	}
+
+	// The operator re-enrolls the slot's grant, which the draft stages, and
+	// the upstream then revokes the grant the active revision serves.
+	reenrolled := enrollSlot(t, h, owner, path, slot["id"].(string))["credential_id"].(string)
+	authority.RevokeRefreshTokens()
+	dueNow(t, h, credentialID)
+	if !pass(t, grantRefresher(t, h)) || readGrant(t, h, credentialID).lapsed == nil || readGrant(t, h, reenrolled).lapsed != nil {
+		t.Fatal("only the served grant should have lapsed")
+	}
+	var enqueued map[string]int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT jsonb_object_agg(rule_id, n) FROM (SELECT rule_id, count(*) AS n
+		FROM olp.notification_deliveries WHERE credential_id=$1 AND status='pending' GROUP BY rule_id) d`, credentialID).Scan(&enqueued); err != nil {
+		t.Fatal(err)
+	}
+	if len(enqueued) != 2 || enqueued[lapses["id"].(string)] != 1 || enqueued[alsoLapses["id"].(string)] != 1 {
+		t.Fatalf("the lapse enqueued deliveries %v", enqueued)
+	}
+
+	deliveryPass(t, h, policy)
+	if hook.count() != 2 {
+		t.Fatalf("delivered %d webhooks, want one per enabled lapse rule", hook.count())
+	}
+	for i := range hook.count() {
+		hit := hook.hit(i)
+		validateWebhookBody(t, "provider.grant.lapsed", hit.body)
+		for _, secret := range append(authority.Issued(), "acct-reference", "invalid_grant") {
+			if strings.Contains(string(hit.body), secret) {
+				t.Fatalf("the lapse webhook carries %q: %s", secret, hit.body)
+			}
+		}
+		var body map[string]any
+		if err := json.Unmarshal(hit.body, &body); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"event": "provider.grant.lapsed", "rule_id": lapses["id"], "rule_name": "Lapses",
+			"provider_id": provider["id"], "provider_name": provider["name"], "credential_version_id": credentialID, "credential_version": float64(1),
+			"credential_slots": []any{map[string]any{"id": slot["id"], "name": slot["name"]}}, "observed_principal": "operator@reference.example"}
+		signature := ""
+		if hit.path == "/plain" {
+			want["rule_id"], want["rule_name"] = alsoLapses["id"], "Also lapses"
+		} else {
+			mac := hmac.New(sha256.New, []byte("signing-key"))
+			mac.Write(hit.body)
+			signature = "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		}
+		if hit.signature != signature {
+			t.Fatalf("the %s webhook is signed %q, want %q", hit.path, hit.signature, signature)
+		}
+		for field, value := range want {
+			if !reflect.DeepEqual(body[field], value) {
+				t.Fatalf("the %s webhook reports %s %v, want %v: %s", hit.path, field, body[field], value, hit.body)
+			}
+		}
+	}
+
+	// The deliveries list shows the lapse, and no pass delivers it again.
+	deliveries := h.want(owner, "GET", "/api/v1/notifications/deliveries?rule_id="+lapses["id"].(string), nil, nil, 200)["items"].([]any)
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries %v", deliveries)
+	}
+	if delivery := deliveries[0].(map[string]any); delivery["event"] != "provider.grant.lapsed" || delivery["status"] != "delivered" || delivery["attempts"] != float64(1) ||
+		delivery["provider_id"] != provider["id"] || delivery["credential_version_id"] != credentialID || delivery["credential_version"] != float64(1) || delivery["window_id"] != nil {
+		t.Fatalf("delivery %v", delivery)
+	}
+	deliveryPass(t, h, policy)
+	if hook.count() != 2 {
+		t.Fatalf("a delivered lapse was delivered again: %d webhooks", hook.count())
 	}
 }
