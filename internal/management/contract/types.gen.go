@@ -204,6 +204,81 @@ func (e ConfigurationDocumentApiVersion) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationPlanItemAction.
+const (
+	Bind     ConfigurationPlanItemAction = "bind"
+	Blocker  ConfigurationPlanItemAction = "blocker"
+	Conflict ConfigurationPlanItemAction = "conflict"
+	Create   ConfigurationPlanItemAction = "create"
+	Enroll   ConfigurationPlanItemAction = "enroll"
+	Noop     ConfigurationPlanItemAction = "noop"
+	Replace  ConfigurationPlanItemAction = "replace"
+	Reuse    ConfigurationPlanItemAction = "reuse"
+	Stage    ConfigurationPlanItemAction = "stage"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationPlanItemAction enum.
+func (e ConfigurationPlanItemAction) Valid() bool {
+	switch e {
+	case Bind:
+		return true
+	case Blocker:
+		return true
+	case Conflict:
+		return true
+	case Create:
+		return true
+	case Enroll:
+		return true
+	case Noop:
+		return true
+	case Replace:
+		return true
+	case Reuse:
+		return true
+	case Stage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationPlanItemKind.
+const (
+	ConfigurationPlanItemKindConfiguration     ConfigurationPlanItemKind = "configuration"
+	ConfigurationPlanItemKindCredential        ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindNetworkCredential ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindPlugin            ConfigurationPlanItemKind = "plugin"
+	ConfigurationPlanItemKindPricing           ConfigurationPlanItemKind = "pricing"
+	ConfigurationPlanItemKindProject           ConfigurationPlanItemKind = "project"
+	ConfigurationPlanItemKindProvider          ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRoute             ConfigurationPlanItemKind = "route"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
+func (e ConfigurationPlanItemKind) Valid() bool {
+	switch e {
+	case ConfigurationPlanItemKindConfiguration:
+		return true
+	case ConfigurationPlanItemKindCredential:
+		return true
+	case ConfigurationPlanItemKindNetworkCredential:
+		return true
+	case ConfigurationPlanItemKindPlugin:
+		return true
+	case ConfigurationPlanItemKindPricing:
+		return true
+	case ConfigurationPlanItemKindProject:
+		return true
+	case ConfigurationPlanItemKindProvider:
+		return true
+	case ConfigurationPlanItemKindRoute:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContentPolicyRuleAction.
 const (
 	Block  ContentPolicyRuleAction = "block"
@@ -1638,11 +1713,22 @@ type ConfigurationModelEntry struct {
 
 // ConfigurationPlanItem defines model for ConfigurationPlanItem.
 type ConfigurationPlanItem struct {
-	Action string `json:"action"`
+	// Action What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.
+	Action ConfigurationPlanItemAction `json:"action"`
+
+	// Detail Qualifies the action, or names the conflict or blocker, such as `secret_binding_required`, `grant_enrollment_required`, `plugin_not_installed` or `plugin_not_approved`
 	Detail string `json:"detail"`
-	Key    string `json:"key"`
-	Kind   string `json:"kind"`
+
+	// Key Natural identity of the item: a name, slug or credential reference; a plugin's digest
+	Key  string                    `json:"key"`
+	Kind ConfigurationPlanItemKind `json:"kind"`
 }
+
+// ConfigurationPlanItemAction What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.
+type ConfigurationPlanItemAction string
+
+// ConfigurationPlanItemKind defines model for ConfigurationPlanItem.Kind.
+type ConfigurationPlanItemKind string
 
 // ConfigurationPlanResponse defines model for ConfigurationPlanResponse.
 type ConfigurationPlanResponse struct {
@@ -1690,7 +1776,7 @@ type ConfigurationPromotionRequest struct {
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
 	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
 
-	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed
+	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.
 	SecretBindings *map[string]string `json:"secret_bindings,omitempty"`
 }
 
@@ -1739,7 +1825,7 @@ type ConfigurationRouteTarget struct {
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
 type ConfigurationSlotEntry struct {
-	// CredentialRef Stable 'provider-name/slot-name-or-default' reference; null for credentialless authentication
+	// CredentialRef Stable 'provider-name/slot-name-or-default' reference to the slot's credential; null for credentialless authentication. Every slot of a provider that authenticates with a grant has one: exports never carry grant material, and importing leaves the slot for grant enrollment.
 	CredentialRef nullable.Nullable[string]     `json:"credential_ref"`
 	Enabled       bool                          `json:"enabled"`
 	IsDefault     bool                          `json:"is_default"`

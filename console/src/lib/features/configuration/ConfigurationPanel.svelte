@@ -1,11 +1,14 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
   import { ApiProblem, errorMessage } from '$lib/api/http';
   import { copyText } from '$lib/clipboard';
   import {
     applyConfiguration,
     exportConfiguration,
+    grantEnrollments,
     missingSecretBindings,
+    pinningProviders,
     planConfiguration,
     type ConfigurationDocument,
     type ConfigurationPlan,
@@ -116,6 +119,16 @@
   }
 
   const requiredSecrets = $derived(plan ? missingSecretBindings(plan) : []);
+  const enrollments = $derived(plan ? grantEnrollments(plan) : []);
+  const actions = $derived(
+    plan?.actions.filter((item) => item.action !== 'enroll') ?? []
+  );
+
+  function pinnedBy(digest: string): string {
+    return artifactDocument
+      ? pinningProviders(artifactDocument, digest).join(', ')
+      : '';
+  }
 
   function itemLabel(item: ConfigurationPlanItem): string {
     return item.detail
@@ -123,6 +136,17 @@
       : `${item.key} — ${item.action}`;
   }
 </script>
+
+{#snippet unavailablePlugin(item: ConfigurationPlanItem)}
+  {@const approval = item.detail === 'plugin_not_approved'}
+  Plugin build <span class="mono">{item.key}</span> (pinned by {pinnedBy(
+    item.key
+  )})
+  {approval ? 'awaits approval' : 'is not installed here'}: {approval
+    ? 'an owner approves it'
+    : 'install and approve it'} on the
+  <a href={resolve('/plugins')}>Plugins page</a>, then plan again.
+{/snippet}
 
 <section class="settings-section" aria-labelledby="promotion-title">
   <div class="section-heading">
@@ -187,12 +211,23 @@
   {#if plan}
     <div class="card" data-testid="promotion-plan">
       <small class="mono">Digest {plan.digest}</small>
-      {#if plan.actions.length}
+      {#if actions.length}
         <h3>Actions</h3>
         <ul data-testid="plan-actions">
-          {#each plan.actions as item (item.kind + item.key + item.action)}<li>
+          {#each actions as item (item.kind + item.key + item.action)}<li>
               {itemLabel(item)}
             </li>{/each}
+        </ul>
+      {/if}
+      {#if enrollments.length}
+        <h3>Grant enrollment</h3>
+        <p>
+          Exports never carry grants. After applying, enroll a grant for each of
+          these credential slots; their providers activate only once the slots
+          they serve with hold one.
+        </p>
+        <ul data-testid="plan-grant-enrollments">
+          {#each enrollments as ref (ref)}<li class="mono">{ref}</li>{/each}
         </ul>
       {/if}
       {#if plan.conflicts.length}
@@ -207,7 +242,9 @@
         <h3>Blockers</h3>
         <ul data-testid="plan-blockers" class="promotion-problems">
           {#each plan.blockers as item (item.kind + item.key)}<li>
-              {itemLabel(item)}
+              {#if item.kind === 'plugin'}{@render unavailablePlugin(
+                  item
+                )}{:else}{itemLabel(item)}{/if}
             </li>{/each}
         </ul>
       {/if}

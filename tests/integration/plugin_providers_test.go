@@ -174,7 +174,13 @@ func (u *pluginUpstream) receivedPaths() []string {
 // declares.
 func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string, ldflags ...string) string {
 	t.Helper()
-	module := testutil.BuildPlugin(t, "./sdk/plugin/reference", append([]string{"-X=main.upstream=" + upstream.URL + "/v1", "-X=main.version=" + version}, ldflags...)...)
+	return installPlugin(t, h, owner, testutil.BuildPlugin(t, "./sdk/plugin/reference", append([]string{"-X=main.upstream=" + upstream.URL + "/v1", "-X=main.version=" + version}, ldflags...)...))
+}
+
+// installPlugin installs a plugin module, approves its origins, and returns
+// its digest.
+func installPlugin(t *testing.T, h *accessHarness, owner *browser, module []byte) string {
+	t.Helper()
 	installed := h.want(owner, "POST", "/api/v1/plugins", module, wasm, 201)
 	origins := installed["manifest"].(map[string]any)["origins"]
 	h.want(owner, "POST", "/api/v1/plugins/"+digestOf(module)+"/approve", map[string]any{"origins": origins}, etagHeader(installed), 200)

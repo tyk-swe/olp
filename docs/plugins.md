@@ -9,7 +9,8 @@ records the design; the [authoring guide](plugin-authoring.md) covers writing
 one.
 
 This page covers installing, reviewing and approving plugins, creating
-providers from their profiles, enrolling grants, and uninstalling plugins.
+providers from their profiles, enrolling grants, promoting plugin providers
+between installations, and uninstalling plugins.
 
 ## Upstream terms of use
 
@@ -277,6 +278,18 @@ a secret purpose that gateway code never reads. The access token serves until it
 expires. A pasted credential can't be staged for a provider that authenticates
 with a grant, and activation refuses a credential slot whose version doesn't
 match the provider's authentication.
+
+## Configuration promotion
+
+[Configuration exports](configuration.md#configuration-promotion-artifacts)
+reference the plugin build each plugin provider pins by its digest, with the
+provider's profile and options, and carry neither the module nor grant
+material. To apply an export on another installation, install and approve the
+same build there: until then, the plan reports a `plugin` blocker for the
+digest. A static plugin credential binds through `secret_bindings` like any
+other secret. A credential slot a grant backs imports without a credential: the
+plan lists it for grant enrollment, and the imported provider activates once
+grant enrollment has given its serving slots credential versions.
 
 ## Uninstalling
 

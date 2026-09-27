@@ -281,7 +281,11 @@ API keys, users, management tokens, usage, audit, request or media data,
 certification evidence, runtime IDs, or secret values. Slots that hold
 credential authority export a stable `credential_ref` of
 `provider-name/slot-name-or-default`; credentialless authentication modes export
-`null`. Slot `allowed_api_keys` restrictions are not portable — API keys are
+`null`. A plugin provider's configuration references the plugin build it pins by
+digest (`profile_revision`), never the module. Every slot of a provider that
+authenticates with a [grant](plugins.md#grant-enrollment) exports its
+`credential_ref`, enrolled or not, and no grant material: no tokens, observed
+principal or grant facts. Slot `allowed_api_keys` restrictions are not portable — API keys are
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
@@ -300,11 +304,19 @@ unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
 credential references), cross-project targets, bindings for refs the artifact
 does not declare, and secrets over 64 KiB. A plugin provider pins its plugin
-profile as a saved draft does: `plugin_not_installed`, `plugin_not_approved`
-and `plugin_profile_unknown` refuse the artifact, and its endpoint follows from
-the profile's address and the provider's plugin options. Plan reports
-`secret_binding_required` blockers for credential refs that do not already
-resolve to a current same-named slot credential on the destination.
+profile as a saved draft does, and its endpoint follows from the profile's
+address and the provider's plugin options. A plugin build the destination lacks
+is a `plugin` blocker keyed by its digest, `plugin_not_installed` or
+`plugin_not_approved`, until an owner installs and approves that build; its
+providers are validated against the profile once it is usable. A profile the
+build does not declare (`plugin_profile_unknown`) refuses the artifact. Plan
+reports `secret_binding_required` blockers for credential refs that do not
+already resolve to a current same-named slot credential of the provider's
+authentication on the destination, static plugin credentials included. A slot a
+grant backs takes no secret binding: unless it already holds a grant on the
+destination, plan reports its ref as an `enroll` action
+(`grant_enrollment_required`), and after applying the provider activates only
+once a grant enrollment gives each slot it serves with a credential.
 
 `POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
 desired state in one installation-serialized transaction:
