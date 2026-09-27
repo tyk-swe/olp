@@ -8,7 +8,9 @@ export type PendingIdentityAction =
   { purpose: 'oidc_link' } | { purpose: 'oidc_unlink'; resourceId: string };
 
 export type RecentAuthenticationCallback = {
-  purpose: RecentAuthenticationPurpose;
+  // The profile page continues every security operation but permitting an
+  // unconfined plugin, which the Plugins page continues.
+  purpose: Exclude<RecentAuthenticationPurpose, 'plugin_permit'>;
   resourceId?: string;
 };
 

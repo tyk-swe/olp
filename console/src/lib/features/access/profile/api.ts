@@ -10,7 +10,7 @@ export type ProfileUpdate = { display_name: string };
 export type PasswordChange = { current_password: string; new_password: string };
 export type PasswordEnrollment = { new_password: string };
 export type RecentAuthenticationPurpose =
-  'password_enrollment' | 'oidc_link' | 'oidc_unlink';
+  'password_enrollment' | 'oidc_link' | 'oidc_unlink' | 'plugin_permit';
 
 export async function getProfile(): Promise<UserProfile> {
   const { data, error, response } = await apiClient.GET('/api/v1/profile');
