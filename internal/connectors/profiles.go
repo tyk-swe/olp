@@ -354,9 +354,23 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	return err == nil && slices.Contains(p.Operations, operation)
 }
 
-// ApplySemantic configures only profile-owned headers and query settings. Call
-// before authentication so final SigV4 signs the complete request. Authentication
-// never chooses the semantic configuration of an explicit profile.
+// host is the hosting stage of Apply. It places a request the caller addressed
+// from the connector: a profile's semantic headers and query settings, or the
+// API revision an automatic Anthropic provider sends.
+func (c Config) host(req *http.Request) error {
+	if err := c.ApplySemantic(req); err != nil {
+		return err
+	}
+	if c.Kind == "anthropic" && c.ProfileID == "" {
+		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
+	}
+	return nil
+}
+
+// ApplySemantic configures only profile-owned headers and query settings.
+// Hosting applies it before authentication, so signing covers the complete
+// request. Authentication never chooses the semantic configuration of an
+// explicit profile.
 func (c Config) ApplySemantic(req *http.Request) error {
 	if c.ProfileID == "" {
 		return nil

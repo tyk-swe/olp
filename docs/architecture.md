@@ -20,6 +20,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Registered non-generation strict operation contracts | `internal/operationplan/`, `internal/operationregistry/` |
 | Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Transformed provider preparation and wire defaults | `internal/providerinvoke/` |
+| Provider profiles, addressing, and upstream hosting, authentication and signing | `internal/connectors/` |
 | OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
 | Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |

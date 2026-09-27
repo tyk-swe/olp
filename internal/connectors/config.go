@@ -1,5 +1,6 @@
-// Package connectors owns provider addressing and authentication. It does not
-// retry inference calls: the gateway's attempt executor is the only retry owner.
+// Package connectors owns provider addressing and the preparation of upstream
+// requests: hosting, authentication and signing. It does not retry inference
+// calls: the gateway's attempt executor is the only retry owner.
 package connectors
 
 import (
@@ -27,9 +28,6 @@ type Config struct {
 	Models                                                                                map[string]json.RawMessage
 }
 
-func SecretRequired(mode string) bool {
-	return mode != "none" && mode != "adc" && mode != "default_chain" && mode != "azure_default"
-}
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
 	case "openai":

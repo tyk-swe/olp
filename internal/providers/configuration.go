@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http"
 	"net/textproto"
 	"strings"
 
@@ -213,17 +212,6 @@ func (c *Configuration) transportFingerprint() string {
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
-}
-
-// applyCredential adds the credential to an upstream request.
-func (c *Configuration) applyCredential(req *http.Request, credential []byte) error {
-	switch c.AuthMode {
-	case AuthAPIKey:
-		req.Header.Set("Authorization", "Bearer "+string(credential))
-	case AuthHeaders:
-		return egress.ApplyCredentialHeaders(req.Header, c.Options.CredentialHeaders, credential)
-	}
-	return nil
 }
 
 func value(v *string) string {
