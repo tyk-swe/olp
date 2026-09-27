@@ -157,6 +157,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var gw *gateway.Server
 	var mediaService *media.Service
 	var mediaSpool *media.Spool
+	var pluginHost *plugins.Host
 	var policy egress.Policy
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
@@ -187,7 +188,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 		}
-		var pluginHost *plugins.Host
 		if c.Mode.Management() || c.Mode.Inference() {
 			// Gateways and control's probes run signing hooks per upstream
 			// request, so the host compiles the modules it keeps.
@@ -209,6 +209,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				AdmissionPool:      inferencePool,
 				Signer:             pluginHost,
 			}, log)
+			rt.GrantRefreshed = gw.GrantRefreshed
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
 				if outage != nil {
@@ -217,6 +218,16 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				// Control-only processes also execute playground requests.
 				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
+		}
+		if c.Mode == config.Worker {
+			// A worker runs a grant's refresh once per access token, which
+			// the interpreter is ready for sooner than the compiler.
+			refreshing, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer refreshing.Close(context.Background())
+			pluginHost = plugins.NewHost(refreshing, pool)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 			spoolDir := c.MediaSpoolDir
@@ -357,7 +368,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if mediaService == nil && limiter == nil {
 			log.Warn("worker plane skipped: no shared state is configured", "mode", c.Mode)
 		} else {
-			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, keys, installation, &policy, log)
+			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, &policy, log)
 		}
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)

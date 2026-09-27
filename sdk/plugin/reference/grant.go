@@ -18,7 +18,8 @@ import (
 // PKCE (RFC 7636). It returns the operator's browser to a loopback address
 // where nothing listens, so the operator pastes the callback URL from the
 // address bar into OLP; or, for an operator on another machine, it displays
-// the code as code#state to paste instead.
+// the code as code#state to paste instead. Its refresh tokens rotate: each
+// renews the access token once, and the token response carries the next.
 const (
 	clientID = "olp-reference"
 	redirect = "http://127.0.0.1:1455/callback"
@@ -50,14 +51,26 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 	if err != nil {
 		return plugin.Grant{}, err
 	}
+	return issue(url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}})
+}
+
+// RefreshGrant spends the grant's refresh token for the next one. The
+// authority refuses a spent or revoked refresh token with invalid_grant, which
+// OLP takes as the end of the grant.
+func (reference) RefreshGrant(_ context.Context, refresh plugin.GrantRefresh) (plugin.Grant, error) {
+	return issue(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh.RefreshToken}, "client_id": {clientID}})
+}
+
+// issue asks the authority's token endpoint for a grant, and the authority
+// who the grant authorizes.
+func issue(form url.Values) (plugin.Grant, error) {
 	var issued struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int64  `json:"expires_in"`
 		Account      string `json:"account"`
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}
-	if err = call("POST", authority+"/token", form, "", &issued); err != nil {
+	if err := call("POST", authority+"/token", form, "", &issued); err != nil {
 		return plugin.Grant{}, err
 	}
 	// The token response names the account; who signed in is the
@@ -65,7 +78,7 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 	var user struct {
 		Subject string `json:"sub"`
 	}
-	if err = call("GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
+	if err := call("GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
 		return plugin.Grant{}, err
 	}
 	return plugin.Grant{

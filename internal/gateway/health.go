@@ -88,6 +88,13 @@ func (h *healthTracker) cooldown(providerID, slotID string, d time.Duration) {
 	h.provider(providerID).cooldowns[slotID] = h.now().Add(cooldownDuration(d))
 }
 
+// endCooldown ends a credential slot's cooldown before it runs out.
+func (h *healthTracker) endCooldown(providerID, slotID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.provider(providerID).cooldowns, slotID)
+}
+
 // cooldownDuration bounds how long one rejection sidelines a credential slot.
 // An upstream that named no delay gets the default wait, and one that named an
 // implausible delay is not believed past the cap: a slot that never comes back

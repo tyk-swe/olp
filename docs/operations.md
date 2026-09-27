@@ -66,6 +66,9 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   historical credentials, checks current credential revocation before upstream
   calls, records completion/deletion and finishes accounting. Claims survive
   restart and hand off between workers.
+- **Grant refresh:** every five seconds, refreshes the
+  [grants](plugins.md#grant-refresh) that are due through their plugins, each
+  under its own advisory lock so a rotating refresh token is spent once.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without
@@ -89,9 +92,10 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   attempts with `2^(attempts-1)`-minute backoff. See
   [budget notifications](#budget-threshold-notifications).
 
-The first three tasks become stale after 20 seconds without a successful
-checkpoint; maintenance, cost reconciliation, and budget alert delivery after
-180 seconds. A skipped follower pass does not establish leader success.
+Media reconciliation, grant refresh, the consumer and epoch detection become
+stale after 20 seconds without a successful checkpoint; maintenance, cost
+reconciliation, and budget alert delivery after 180 seconds. Media
+reconciliation and grant refresh also run without Valkey. A skipped follower pass does not establish leader success.
 `asynchronous_plane: healthy` requires current expected tasks, a
 healthy/backlogged consumer checkpoint, and zero request-metadata pending and
 lag counts. A current fleet with pending work is `backlogged`; missing task

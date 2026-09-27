@@ -9,7 +9,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
 | Provider plugin install, approval, confined runtime, hosted plugin code and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
-| Grants beneath credential versions and grant enrollment sessions | `internal/grants/`, with its API in `internal/providers/grants.go` |
+| Grants beneath credential versions, grant enrollment sessions and grant refresh | `internal/grants/`, with its API in `internal/providers/grants.go` |
 | Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |
@@ -83,8 +83,10 @@ a failed activation from retaining revoked access.
 availability, dispatch, retained resources and continuations, and media
 reconciliation ask it whether a credential version is eligible and for its
 usable secret: from the pinned release, or from the secret authority for a
-historical revision's version. An ineligible version carries its reason into
-plan and attempt records.
+historical revision's version. A version with a grant serves the grant's
+current access token: a worker's refresh advances the grant's generation, and
+each poll reloads the access tokens whose generation changed. An ineligible
+version carries its reason into plan and attempt records.
 
 OIF is an in-process contract, not a public API or another request authority.
 `internal/oif` owns immutable JSON source spans, exact presence and numeric

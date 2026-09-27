@@ -12,11 +12,12 @@
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
 //
 // The SDK implements the ABI in package abi, so a plugin only implements
-// Plugin, Signer if a profile declares signing, and GrantEnroller if its
-// profiles authenticate with a grant. OLP runs the module confined: it reaches
-// nothing but the capabilities OLP grants, which are a clock, randomness, Log
-// and, for grant enrollment steps, Fetch. See docs/plugin-authoring.md in the
-// OpenLLMProxy repository.
+// Plugin, Signer if a profile declares signing, and GrantEnroller and
+// GrantRefresher if its profiles authenticate with a grant. OLP runs the
+// module confined: it reaches nothing but the capabilities OLP grants, which
+// are a clock, randomness, Log and, for grant enrollment steps and grant
+// refresh, Fetch. See docs/plugin-authoring.md in the OpenLLMProxy
+// repository.
 package plugin
 
 import (
@@ -71,12 +72,13 @@ type Provider = abi.Provider
 // GrantAuthentication declares that a profile authenticates with a grant.
 type GrantAuthentication = abi.GrantAuthentication
 
-// Grant enrollment steps' parameters and results.
+// Grant enrollment steps' and grant refresh's parameters and results.
 type (
 	GrantStart         = abi.GrantStart
 	GrantAuthorization = abi.GrantAuthorization
 	GrantExchange      = abi.GrantExchange
 	Grant              = abi.Grant
+	GrantRefresh       = abi.GrantRefresh
 )
 
 // Error is a failure a plugin reports to OLP with a code of its own.
@@ -120,6 +122,20 @@ type GrantEnroller interface {
 	ExchangeGrant(ctx context.Context, exchange GrantExchange) (Grant, error)
 }
 
+// GrantRefresher is implemented by a plugin whose grants carry a refresh
+// token. OLP's workers call it to renew a grant's access token ahead of its
+// expiry, and early when the upstream refused it; ProviderOf(ctx) returns the
+// provider the grant's credential version belongs to, and OLP grants the call
+// Fetch.
+type GrantRefresher interface {
+	// RefreshGrant exchanges the grant's refresh token for a new access
+	// token, and returns the refresh token that replaces it when the upstream
+	// rotates it. It reports a grant the upstream will no longer refresh,
+	// such as one whose refresh token was revoked, as an *Error with code
+	// abi.CodeInvalidGrant; OLP retries any other failure.
+	RefreshGrant(ctx context.Context, refresh GrantRefresh) (Grant, error)
+}
+
 var registered Plugin
 
 // methods serve the methods OLP calls, each given the call's context and
@@ -130,6 +146,7 @@ var methods = map[string]func(ctx context.Context, params json.RawMessage) (any,
 	abi.MethodSign:          sign,
 	abi.MethodGrantStart:    enrollment(abi.MethodGrantStart, GrantEnroller.StartGrant),
 	abi.MethodGrantExchange: enrollment(abi.MethodGrantExchange, GrantEnroller.ExchangeGrant),
+	abi.MethodGrantRefresh:  refreshGrant,
 }
 
 type providerKey struct{}
@@ -219,6 +236,20 @@ func enrollment[P, R any](method string, step func(GrantEnroller, context.Contex
 		}
 		return step(enroller, ctx, p)
 	}
+}
+
+// refreshGrant answers the grant_refresh call with the plugin's
+// GrantRefresher.
+func refreshGrant(ctx context.Context, params json.RawMessage) (any, error) {
+	refresher, ok := registered.(GrantRefresher)
+	if !ok {
+		return nil, unknownMethod(abi.MethodGrantRefresh)
+	}
+	var refresh GrantRefresh
+	if err := json.Unmarshal(params, &refresh); err != nil {
+		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A grant_refresh call carries the grant to refresh."}
+	}
+	return refresher.RefreshGrant(ctx, refresh)
 }
 
 func unknownMethod(method string) *abi.Error {

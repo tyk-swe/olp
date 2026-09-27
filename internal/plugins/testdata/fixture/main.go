@@ -5,7 +5,8 @@
 //	go build -buildmode=c-shared -ldflags=-X=main.behaviour=loop ...
 //
 // Its profile signs requests, and the credential of a request sets how, so
-// one build serves every signing test.
+// one build serves every signing test; likewise a grant's refresh token sets
+// how it refreshes.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 // Secret is the value the log and panic behaviours leak.
@@ -94,6 +96,25 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 		"X-Fixture-Signature": r.Method + " " + r.URL + " " + strconv.Itoa(len(r.Body)),
 		"X-Fixture-Calls":     strconv.Itoa(calls),
 	}}, nil
+}
+
+// RefreshGrant refreshes as the refresh token's prefix up to a colon says:
+// "log" logs the refresh token, and "fetch:URL" GETs the URL and returns its
+// body as the access token. Anything else reports invalid_grant.
+func (fixture) RefreshGrant(_ context.Context, r plugin.GrantRefresh) (plugin.Grant, error) {
+	behaviour, rest, _ := strings.Cut(r.RefreshToken, ":")
+	switch behaviour {
+	case "log":
+		plugin.Log.Info("refreshing with "+r.RefreshToken, "profile", r.Profile)
+		return plugin.Grant{AccessToken: "refreshed"}, nil
+	case "fetch":
+		response, err := plugin.Fetch(plugin.HTTPRequest{Method: "GET", URL: rest})
+		if err != nil {
+			return plugin.Grant{}, err
+		}
+		return plugin.Grant{AccessToken: string(response.Body)}, nil
+	}
+	return plugin.Grant{}, &plugin.Error{Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"}
 }
 
 func init() { plugin.Register(fixture{}) }

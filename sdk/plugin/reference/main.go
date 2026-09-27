@@ -6,8 +6,8 @@
 // upstream's own envelope; one serves Chat Completions signing each request
 // with the API key; one serves Chat Completions at a workspace the operator
 // names; one serves Chat Completions for accounts that sign in through the
-// upstream's authority, whose grants the plugin enrolls; and one serves OpenAI
-// Responses where the upstream serves only streaming requests.
+// upstream's authority, whose grants the plugin enrolls and refreshes; and one
+// serves OpenAI Responses where the upstream serves only streaming requests.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main

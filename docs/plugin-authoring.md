@@ -381,17 +381,44 @@ code, as an `*plugin.Error` with a code of your own; any other error is reported
 as `internal`. OLP redacts the session and the pasted value from what the step
 logs; keep tokens the plugin receives out of its log.
 
+A plugin whose grants carry a refresh token also implements
+`plugin.GrantRefresher`. OLP's workers call it a quarter of the access token's
+lifetime before it expires (at most ten minutes before), and at once when the
+upstream refuses the access token, on behalf of the provider the grant belongs
+to:
+
+```go
+func (acme) RefreshGrant(ctx context.Context, refresh plugin.GrantRefresh) (plugin.Grant, error)
+```
+
+`RefreshGrant` receives the grant's current `RefreshToken` and the `Facts` its
+enrollment reported, exchanges the refresh token with `plugin.Fetch`, and
+returns the new `AccessToken` and `ExpiresIn`, with the `RefreshToken` that
+replaces the spent one if the upstream rotates it; an empty one keeps the
+current token. It may report the `Principal` and `Facts` it observes, and OLP
+checks they are the grant's. OLP calls it for one grant at a time, whatever the
+number of workers, so a rotating refresh token is spent once.
+
+Report a grant the upstream will no longer refresh, such as one whose refresh
+token was revoked or expired, as an `*plugin.Error` with code
+`abi.CodeInvalidGrant` (`invalid_grant`): OLP stops refreshing the grant, as it
+does when the refresh authorizes another principal or other facts. Any other
+failure is transient, and OLP retries it with backoff. OLP redacts the refresh
+token from what the refresh logs.
+
 The reference plugin's `reference-grant-chat` profile implements this flow
-against a fictional authority with the authorization code flow and PKCE.
+against a fictional authority with the authorization code flow and PKCE, and
+refreshes its grants with rotating refresh tokens.
 
 ### Fetch
 
 `plugin.Fetch` sends an HTTP request through OLP, the only way a plugin reaches
-the network. OLP grants it to grant enrollment steps, and sends a request only
-to one of the plugin's approved origins, over the provider's network path and
-egress policy. It sets the framing headers itself; a plugin may not set `Host`,
-`Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect rather
-than following it, and any response the upstream sent, whatever its status.
+the network. OLP grants it to grant enrollment steps and grant refresh, and
+sends a request only to one of the plugin's approved origins, over the
+provider's network path and egress policy. It sets the framing headers itself;
+a plugin may not set `Host`, `Content-Length`, hop-by-hop or `Proxy-` headers.
+It returns a redirect rather than following it, and any response the upstream
+sent, whatever its status.
 Request and response bodies are at most 512 KiB. A request OLP refuses or can't
 complete fails with an `*plugin.Error`: `origin_not_approved`, `http_failed` or
 `invalid_request`.
@@ -404,8 +431,8 @@ grants only:
 - a clock: `time.Now` reads the host's wall and monotonic clocks;
 - randomness: `crypto/rand` reads the host's cryptographic source;
 - logging, through `plugin.Log`;
-- to grant enrollment steps, HTTP to the plugin's approved origins, through
-  `plugin.Fetch`.
+- to grant enrollment steps and grant refresh, HTTP to the plugin's approved
+  origins, through `plugin.Fetch`.
 
 There is no filesystem, other network access, environment or argument list.
 Sleeping spends the call's time limit, including the time `Fetch` waits, so
@@ -518,11 +545,12 @@ OLP calls, through `olp_call`:
 | `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
 | `grant_start` | `{"profile": "…"}` | `{"url": "…", "session": "…"}` |
 | `grant_exchange` | `{"profile": "…", "session": "…", "input": "…"}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600, "principal": "…", "facts": {"name": "value"}}` |
+| `grant_refresh` | `{"profile": "…", "refresh_token": "…", "facts": {"name": "value"}}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600}`, optionally with `principal` and `facts` |
 
 OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
 the provider whose request it signs, and the grant steps only for profiles that
-declare `"grant": {"facts": ["name"]}`, on behalf of the provider enrolling a
-grant.
+declare `"grant": {"facts": ["name"]}`, on behalf of the provider enrolling or
+refreshing a grant.
 
 ### Capabilities
 
@@ -534,4 +562,5 @@ The plugin calls, through `host_call`:
 | `http` | `{"method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>"}` | `{"status": 200, "header": {"Name": ["value"]}, "body": "<base64>"}` |
 
 A call may use only the capabilities OLP grants it; any other capability returns
-`unknown_method`. OLP grants `http` to `grant_start` and `grant_exchange`.
+`unknown_method`. OLP grants `http` to `grant_start`, `grant_exchange` and
+`grant_refresh`.

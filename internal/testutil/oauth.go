@@ -26,16 +26,24 @@ type OAuthIdentity struct {
 // plugin's authority in tests. It runs the authorization code flow with PKCE
 // (RFC 7636, S256 only): /authorize signs an account in at once and redirects
 // to the client's redirect URI with a code and the request's state; /token
-// exchanges each code once, for the verifier that matches its challenge;
-// /userinfo names the subject of an access token.
+// exchanges each code once, for the verifier that matches its challenge, and
+// each refresh token once, rotating it; /userinfo names the subject of an
+// access token.
 type OAuthServer struct {
 	*httptest.Server
 	mu sync.Mutex
 	// signIn is the account that signs in at the next authorization.
 	signIn OAuthIdentity
-	codes  map[string]oauthCode
-	tokens map[string]OAuthIdentity
-	issued []string
+	// lifetime is how many seconds the access tokens it issues last.
+	lifetime int64
+	codes    map[string]oauthCode
+	tokens   map[string]OAuthIdentity
+	// refreshes holds the refresh tokens not yet spent or revoked, and spent
+	// those spent.
+	refreshes map[string]OAuthIdentity
+	spent     map[string]bool
+	issued    []string
+	reused    []string
 }
 
 type oauthCode struct {
@@ -48,8 +56,10 @@ type oauthCode struct {
 func NewOAuthServer(t testing.TB) *OAuthServer {
 	t.Helper()
 	s := &OAuthServer{
-		signIn: OAuthIdentity{Subject: "operator@reference.example", Account: "acct-reference"},
-		codes:  map[string]oauthCode{}, tokens: map[string]OAuthIdentity{},
+		signIn:   OAuthIdentity{Subject: "operator@reference.example", Account: "acct-reference"},
+		lifetime: 3600,
+		codes:    map[string]oauthCode{}, tokens: map[string]OAuthIdentity{},
+		refreshes: map[string]OAuthIdentity{}, spent: map[string]bool{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /authorize", s.authorize)
@@ -67,6 +77,37 @@ func (s *OAuthServer) SignInAs(identity OAuthIdentity) {
 	s.signIn = identity
 }
 
+// IssueFor makes the access tokens the server issues later last seconds.
+func (s *OAuthServer) IssueFor(seconds int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lifetime = seconds
+}
+
+// RevokeAccessTokens revokes every access token issued so far, as an
+// upstream that ends sessions early does. Refresh tokens stay valid.
+func (s *OAuthServer) RevokeAccessTokens() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clear(s.tokens)
+}
+
+// RevokeRefreshTokens revokes every refresh token not yet spent, so no grant
+// the server issued can be refreshed again.
+func (s *OAuthServer) RevokeRefreshTokens() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clear(s.refreshes)
+}
+
+// Reused returns the spent refresh tokens a client presented again, each
+// time it did. The server refused them.
+func (s *OAuthServer) Reused() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.reused...)
+}
+
 // Authorized reports the account whose access token authorizes a request's
 // Authorization: Bearer header.
 func (s *OAuthServer) Authorized(r *http.Request) (OAuthIdentity, bool) {
@@ -77,7 +118,8 @@ func (s *OAuthServer) Authorized(r *http.Request) (OAuthIdentity, bool) {
 	return identity, found && ok
 }
 
-// Issued returns the access and refresh tokens the server has issued.
+// Issued returns the access and refresh tokens the server has issued, in
+// pairs.
 func (s *OAuthServer) Issued() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,26 +146,51 @@ func (s *OAuthServer) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *OAuthServer) token(w http.ResponseWriter, r *http.Request) {
-	if r.ParseForm() != nil || r.PostForm.Get("grant_type") != "authorization_code" {
-		oauthError(w, "unsupported_grant_type", "Only authorization codes are exchanged.")
+	if r.ParseForm() != nil {
+		oauthError(w, "invalid_request", "The token request is not a form.")
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	code, found := s.codes[r.PostForm.Get("code")]
-	// A code is spent by its first exchange, whatever the outcome.
-	delete(s.codes, r.PostForm.Get("code"))
-	verified := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
-	if !found || code.clientID != r.PostForm.Get("client_id") || code.redirect != r.PostForm.Get("redirect_uri") ||
-		base64.RawURLEncoding.EncodeToString(verified[:]) != code.challenge {
-		oauthError(w, "invalid_grant", "The authorization code is unknown, spent or not this client's.")
-		return
+	switch r.PostForm.Get("grant_type") {
+	case "authorization_code":
+		code, found := s.codes[r.PostForm.Get("code")]
+		// A code is spent by its first exchange, whatever the outcome.
+		delete(s.codes, r.PostForm.Get("code"))
+		verified := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
+		if !found || code.clientID != r.PostForm.Get("client_id") || code.redirect != r.PostForm.Get("redirect_uri") ||
+			base64.RawURLEncoding.EncodeToString(verified[:]) != code.challenge {
+			oauthError(w, "invalid_grant", "The authorization code is unknown, spent or not this client's.")
+			return
+		}
+		s.issue(w, code.identity)
+	case "refresh_token":
+		// A refresh token is spent by its first use, which issues the next.
+		refresh := r.PostForm.Get("refresh_token")
+		identity, found := s.refreshes[refresh]
+		if !found {
+			if s.spent[refresh] {
+				s.reused = append(s.reused, refresh)
+			}
+			oauthError(w, "invalid_grant", "The refresh token is unknown, spent or revoked.")
+			return
+		}
+		delete(s.refreshes, refresh)
+		s.spent[refresh] = true
+		s.issue(w, identity)
+	default:
+		oauthError(w, "unsupported_grant_type", "Only authorization codes and refresh tokens are exchanged.")
 	}
+}
+
+// issue answers a token request with a new access token and refresh token
+// for identity. The caller holds the lock.
+func (s *OAuthServer) issue(w http.ResponseWriter, identity OAuthIdentity) {
 	access, refresh := oauthToken(), oauthToken()
-	s.tokens[access] = code.identity
+	s.tokens[access], s.refreshes[refresh] = identity, identity
 	s.issued = append(s.issued, access, refresh)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "account": code.identity.Account})
+	json.NewEncoder(w).Encode(map[string]any{"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": s.lifetime, "account": identity.Account})
 }
 
 func (s *OAuthServer) userinfo(w http.ResponseWriter, r *http.Request) {

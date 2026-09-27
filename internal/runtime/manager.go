@@ -102,12 +102,22 @@ type Manager struct {
 	Mounted      map[string]MountedProvider
 	log          *slog.Logger
 
+	// GrantRefreshed, when set before Start, is told of each credential
+	// version of the installed release whose grant a poll found refreshed,
+	// with the provider it belongs to.
+	GrantRefreshed func(providerID, credentialID string)
+
 	mu        sync.RWMutex
 	authority authorityState
 	release   *Release
 	failed    int64
 	inputs    *usage.RoutingInputs
 	desired   atomic.Int64
+	// grants holds what the manager serves for the installed release's
+	// credential versions with grants, and refreshRequested the generation
+	// whose access token each asked workers to refresh early.
+	grants           map[string]servedGrant
+	refreshRequested map[string]int64
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -124,6 +134,8 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 		log:          log,
 		release:      emptyRelease(),
 		stop:         make(chan struct{}),
+
+		refreshRequested: map[string]int64{},
 	}
 }
 
@@ -166,11 +178,12 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// Refresh reloads authority and installs any newer release.
+// Refresh reloads authority, installs any newer release and reloads the
+// access tokens of refreshed grants.
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshInputs(ctx))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {

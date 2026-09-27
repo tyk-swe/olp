@@ -188,8 +188,9 @@ enum or pattern with `validation_failed`, naming the option as
 `configuration.options.plugin_options.<name>`. An empty value leaves an option
 unset. The hosting adaptation places the values in the address, headers,
 query parameters and envelope fields it declares, and every call OLP makes to
-the plugin on behalf of the provider, such as its signing hook or its
-[grant enrollment](#grant-enrollment) steps, carries them.
+the plugin on behalf of the provider, such as its signing hook, its
+[grant enrollment](#grant-enrollment) steps or its
+[grant refresh](#grant-refresh), carries them.
 
 Options are part of the provider's configuration like any other setting:
 changing them is a draft change whose certification starts over, the revision
@@ -273,10 +274,39 @@ upstream account the plugin reports) and the grant facts, which
 token's expiry. The grant itself, its access token and refresh token, is
 encrypted beneath the version and never leaves OLP. Gateways receive only the
 access token, through the credential source; the refresh token is stored under
-a secret purpose that gateway code never reads. The access token serves until it
-expires. A pasted credential can't be staged for a provider that authenticates
-with a grant, and activation refuses a credential slot whose version doesn't
-match the provider's authentication.
+a secret purpose that gateway code never reads. A pasted credential can't be
+staged for a provider that authenticates with a grant, and activation refuses a
+credential slot whose version doesn't match the provider's authentication.
+
+## Grant refresh
+
+Workers refresh each grant that has a refresh token through its plugin, a
+quarter of the access token's lifetime before it expires and at most ten
+minutes before. The refresh runs on behalf of the provider as its active
+revision configures it, or its draft before the first activation, with its
+options and over its network path; its HTTP reaches only the plugin's approved
+origins. A per-grant PostgreSQL advisory lock keeps the refresh to one worker,
+so a refresh token that rotates is spent once however many workers run.
+
+A refresh advances the grant beneath the same credential version: the new
+access token replaces the old one, and the grant's generation advances.
+Gateways compare generations on every authority poll, every five seconds, and
+reload only the access tokens that changed: no release is published and no API
+key is reloaded.
+
+When the upstream refuses a grant's access token, as a credential failure, the
+credential version cools down like any other and the gateway asks workers to
+refresh the grant at once. Once the gateway serves the refreshed token, the
+cooldown ends and the slot serves again. An upstream that doesn't say when its
+access tokens expire gets a refresh only this way.
+
+A refresh that fails is retried after 30 seconds, doubling with each failure
+up to ten minutes, while the version keeps serving its last access token. A
+plugin reports a grant the upstream will no longer refresh, such as one whose
+refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
+a refresh that authorizes another account than the grant's, or a plugin that
+implements no refresh: OLP discards the refresh token, records why, and
+refreshes the grant no more. Enroll a grant again to replace it.
 
 ## Uninstalling
 
@@ -308,18 +338,19 @@ and returns it for later calls. A call that exceeds a limit fails with
 leaves nothing behind; the OLP process is unaffected.
 
 Installing reads a manifest once, on wazero's interpreter, which is ready
-soonest. Signing hooks run on modules compiled to machine code, which take
-longer to prepare but then sign about ten times faster; `BenchmarkSign` in
-`internal/plugins` measures both.
+soonest, and a worker process refreshes grants on it too. Signing hooks run on
+modules compiled to machine code, which take longer to prepare but then sign
+about ten times faster; `BenchmarkSign` in `internal/plugins` measures both.
 
 The runtime grants a plugin a clock, randomness and logging, and nothing else:
-no filesystem, environment or arguments. Grant enrollment steps are also granted
-HTTP, which reaches only the plugin's approved origins, over the provider's
-network path (its proxy, trust roots and network credential) and the egress
-policy; a redirect comes back to the plugin rather than being followed. What a
-plugin logs, including its standard output and standard error, reaches OLP's
-log with the secret values of the call redacted, attributed by `plugin_digest`
-and `plugin_method`.
+no filesystem, environment or arguments. Grant enrollment steps and grant
+refresh are also granted HTTP, which reaches only the plugin's approved
+origins, over the provider's network path (its proxy, trust roots and network
+credential) and the egress policy; a redirect comes back to the plugin rather
+than being followed. What a plugin logs, including its standard output and
+standard error, reaches OLP's log with the secret values of the call redacted,
+such as the refresh token a grant refresh receives, attributed by
+`plugin_digest` and `plugin_method`.
 
 ## Permissions and audit
 

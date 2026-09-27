@@ -6,9 +6,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,10 +27,12 @@ import (
 
 // pluginTable is an olp.plugins table holding at most one approved plugin,
 // which it serves to Usable whatever digest is asked for, counting the reads.
+// Its manifest declares only its approved origins.
 type pluginTable struct {
-	mu     sync.Mutex
-	module []byte
-	reads  int
+	mu      sync.Mutex
+	module  []byte
+	origins []string
+	reads   int
 }
 
 func (p *pluginTable) install(module []byte) {
@@ -47,12 +52,13 @@ func (p *pluginTable) QueryRow(context.Context, string, ...any) pgx.Row {
 	defer p.mu.Unlock()
 	p.reads++
 	module := p.module
+	manifest, err := json.Marshal(abi.Manifest{Origins: p.origins})
 	return scanner(func(dest ...any) error {
 		if module == nil {
 			return pgx.ErrNoRows
 		}
-		*dest[0].(*[]byte), *dest[1].(*bool), *dest[2].(*[]byte) = []byte(`{}`), true, module
-		return nil
+		*dest[0].(*[]byte), *dest[1].(*bool), *dest[2].(*[]byte) = manifest, true, module
+		return err
 	})
 }
 
@@ -213,6 +219,42 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 				t.Fatalf("the next call ran on an instance that signed %s requests", calls)
 			}
 		})
+	}
+}
+
+// A grant's refresh reaches the plugin's approved origins, and only those,
+// through the client the caller gives it, on behalf of the grant's provider.
+func TestGrantRefreshReachesOnlyTheApprovedOrigins(t *testing.T) {
+	t.Parallel()
+	authority := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("at-2")) }))
+	t.Cleanup(authority.Close)
+	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+	table.origins = []string{authority.URL}
+	grant, err := host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "fetch:" + authority.URL + "/token"}, authority.Client(), nil)
+	if err != nil || grant.AccessToken != "at-2" {
+		t.Fatalf("refreshed %+v: %v", grant, err)
+	}
+	_, err = host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "fetch:https://elsewhere.example/token"}, authority.Client(), nil)
+	if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != abi.CodeOriginNotApproved {
+		t.Fatalf("refreshing at an origin nobody approved: %v", err)
+	}
+	_, err = host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "spent"}, authority.Client(), nil)
+	if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != abi.CodeInvalidGrant {
+		t.Fatalf("refreshing with a spent refresh token: %v", err)
+	}
+}
+
+func TestGrantRefreshOutputReachesTheLogRedacted(t *testing.T) {
+	t.Parallel()
+	var logged bytes.Buffer
+	host, _ := newTestHost(t, Interpreted, DefaultLimits, slog.New(slog.NewJSONHandler(&logged, nil)), fixture(t, "well-behaved"))
+	token := "log:" + fixtureSecret
+	if _, err := host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: token}, http.DefaultClient, []string{token}); err != nil {
+		t.Fatal(err)
+	}
+	output := logged.String()
+	if strings.Contains(output, fixtureSecret) || !strings.Contains(output, `"msg":"refreshing with [REDACTED]"`) || !strings.Contains(output, `"plugin_method":"grant_refresh"`) {
+		t.Fatalf("grant refresh output %s", output)
 	}
 }
 

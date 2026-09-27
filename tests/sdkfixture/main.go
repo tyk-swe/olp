@@ -73,6 +73,10 @@ func (s *staticRuntime) NetworkSecret(ctx context.Context, release *runtime.Rele
 	return s.Secret(ctx, release, credentialID)
 }
 
+// CredentialRefused ignores refusals: the fixture's credentials have no
+// grants.
+func (s *staticRuntime) CredentialRefused(string) {}
+
 func run() error {
 	path := os.Getenv("OLP_SDK_SMOKE_METADATA")
 	if path == "" {

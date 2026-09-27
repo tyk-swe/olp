@@ -62,6 +62,10 @@ type Runtime interface {
 	Release() *runtime.Release
 	Authenticate(secret string) (access.Authority, error)
 	runtime.Credentials
+	// CredentialRefused reports that the upstream refused a credential
+	// version's secret, so that a grant beneath the version is refreshed
+	// early.
+	CredentialRefused(credentialID string)
 }
 
 // Server serves the native OpenAI surface from pinned runtime releases.

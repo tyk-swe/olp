@@ -80,6 +80,8 @@ const (
 	TaskMediaReconciliation Task = "media_reconciliation"
 
 	TaskBudgetAlertDelivery Task = "budget_alert_delivery"
+	// TaskGrantRefresh refreshes grants ahead of their access tokens' expiry.
+	TaskGrantRefresh Task = "grant_refresh"
 )
 
 // Outcome is what one worker pass achieved.

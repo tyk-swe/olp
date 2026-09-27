@@ -137,6 +137,11 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 	case classCredential:
 		s.health.cooldown(providerID, credentialHealthKey(slot), credentialCooldown)
 		s.Admission.cooldown(ctx, providerID, slot, credentialCooldown, true)
+		if failure.dispatched && slot.CredentialID != nil {
+			// The upstream refused the credential: a grant beneath it is
+			// refreshed early, which ends the cooldown (GrantRefreshed).
+			s.Runtime.CredentialRefused(*slot.CredentialID)
+		}
 	case classRateLimit:
 		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
 		s.Admission.cooldown(ctx, providerID, slot, cooldownDuration(failure.retryAfter), false)
@@ -144,4 +149,15 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		return true
 	}
 	return false
+}
+
+// GrantRefreshed ends the cooldown a credential failure put a credential
+// version with a grant in, once this gateway serves the grant's refreshed
+// access token: the token the upstream refused is replaced. Every gateway
+// ends the shared cooldown when it reloads the token, so a replica that was
+// still serving the refused token and refused again meanwhile does not keep
+// the version out of service.
+func (s *Server) GrantRefreshed(providerID, credentialID string) {
+	s.health.endCooldown(providerID, credentialHealthKey(&runtime.Slot{CredentialID: &credentialID}))
+	s.Admission.endCredentialCooldown(context.Background(), providerID, credentialID)
 }

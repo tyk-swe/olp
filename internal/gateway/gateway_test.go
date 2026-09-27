@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +46,8 @@ type fakeRuntime struct {
 	keys    map[string]access.Authority
 	stale   bool
 	revoked map[string]bool
+	// refused records the credential versions the upstream refused.
+	refused []string
 }
 
 func (f *fakeRuntime) Release() *runtime.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
@@ -91,6 +94,18 @@ func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id str
 
 func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
 	return f.Secret(ctx, release, id)
+}
+
+func (f *fakeRuntime) CredentialRefused(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refused = append(f.refused, id)
+}
+
+func (f *fakeRuntime) refusals() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.refused)
 }
 
 type capture struct {
@@ -453,6 +468,56 @@ func TestCredentialFailureCoolsVersionAndFailsOver(t *testing.T) {
 	}
 	if !h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+env.Attempts[0].CredentialID) {
 		t.Fatal("rejected credential version should be cooling down")
+	}
+}
+
+// A credential failure the upstream stated asks the credential source to
+// refresh a grant beneath the version early. The refreshed grant ends the
+// version's cooldown, so its slot serves again at once.
+func TestUpstreamCredentialFailureRequestsAnEarlyGrantRefresh(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.mock.set("a", status(http.StatusUnauthorized, `{"error":{"message":"expired token","type":"invalid_request_error","code":"invalid_api_key"}}`))
+	h.chat(fullKey, nil)
+	providerID := h.sink.last(t).Attempts[0].ProviderID
+	if refused := h.rt.refusals(); !slices.Equal(refused, []string{h.credA}) {
+		t.Fatalf("refused credential versions %v", refused)
+	}
+	h.mock.set("a", completion(modelA, answerText))
+	h.chat(fullKey, nil)
+	if attempts := h.sink.last(t).Attempts; attempts[0].CredentialID == h.credA {
+		t.Fatal("the refused credential version served before its grant was refreshed")
+	}
+	h.gateway.GrantRefreshed(providerID, h.credA)
+	h.chat(fullKey, nil)
+	if attempts := h.sink.last(t).Attempts; len(attempts) != 1 || attempts[0].CredentialID != h.credA || attempts[0].Class != classSuccess {
+		t.Fatalf("after the refresh, attempts %+v", attempts)
+	}
+}
+
+// unreadableSecrets serves every credential version but one, whose secret
+// the credential source can't read.
+type unreadableSecrets struct {
+	*fakeRuntime
+	credentialID string
+}
+
+func (u unreadableSecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, error) {
+	if id == u.credentialID {
+		return nil, runtime.ErrCredentialUnavailable
+	}
+	return u.fakeRuntime.Secret(ctx, release, id)
+}
+
+// A credential the gateway could not apply never reached the upstream, which
+// refused nothing, so no grant refresh is requested.
+func TestUnappliedCredentialRequestsNoGrantRefresh(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.gateway.Runtime = unreadableSecrets{fakeRuntime: h.rt, credentialID: h.credA}
+	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || h.sink.last(t).Attempts[0].Class != classCredential {
+		t.Fatalf("status %d attempts %+v", resp.StatusCode, h.sink.last(t).Attempts)
+	}
+	if refused := h.rt.refusals(); len(refused) != 0 {
+		t.Fatalf("refused credential versions %v", refused)
 	}
 }
 
