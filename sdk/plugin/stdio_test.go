@@ -119,3 +119,101 @@ func TestCapabilitiesAreUnavailableOutsideOLP(t *testing.T) {
 		t.Fatal("a capability was available outside OLP")
 	}
 }
+
+// carrying is a plugin whose Carrier answers with carry.
+type carrying struct {
+	manifestOnly
+	carry func(context.Context, HTTPRequest) (CarriedResponse, error)
+}
+
+func (c carrying) Carry(ctx context.Context, r HTTPRequest) (CarriedResponse, error) {
+	return c.carry(ctx, r)
+}
+
+func carryCall(id uint64, url string) abi.Frame {
+	params, _ := json.Marshal(HTTPRequest{Method: "POST", URL: url, Header: map[string][]string{"Authorization": {"Bearer sk-acme"}}, Body: []byte(`{"stream":true}`)})
+	return abi.Frame{ID: id, Request: &abi.Request{Method: abi.MethodCarry, Params: params, Provider: &Provider{Profile: "acme-chat"}}}
+}
+
+// part reads the next frame, which must be a part of call id.
+func (o *olp) part(id uint64) HTTPResponse {
+	o.t.Helper()
+	frame := o.read()
+	var part HTTPResponse
+	if frame.ID != id || frame.Part == nil || json.Unmarshal(frame.Part, &part) != nil {
+		o.t.Fatalf("frame %+v, want a part of call %d", frame, id)
+	}
+	return part
+}
+
+// A Carrier's response streams to OLP as parts of its call: its head, then
+// its body as the plugin reads it, so each event reaches OLP before the
+// upstream sends the next. The call's response then ends it.
+func TestCarrierStreamsTheResponseOverStdio(t *testing.T) {
+	body, upstream := io.Pipe()
+	var carried HTTPRequest
+	var provider Provider
+	o := serveOverStdio(t, carrying{carry: func(ctx context.Context, r HTTPRequest) (CarriedResponse, error) {
+		carried = r
+		provider, _ = ProviderOf(ctx)
+		return CarriedResponse{Status: 200, Header: map[string][]string{"Content-Type": {"text/event-stream"}}, Body: body}, nil
+	}})
+	o.read()
+	o.write(carryCall(3, "https://api.acme.example/v1/chat/completions"))
+	if head := o.part(3); head.Status != 200 || head.Header["Content-Type"][0] != "text/event-stream" || head.Body != nil {
+		t.Fatalf("head %+v", head)
+	}
+	if carried.URL != "https://api.acme.example/v1/chat/completions" || carried.Header["Authorization"][0] != "Bearer sk-acme" || string(carried.Body) != `{"stream":true}` || provider.Profile != "acme-chat" {
+		t.Fatalf("carried %+v for %+v", carried, provider)
+	}
+	for _, event := range []string{"data: {\"n\":1}\n\n", "data: [DONE]\n\n"} {
+		go upstream.Write([]byte(event))
+		if part := o.part(3); string(part.Body) != event || part.Status != 0 {
+			t.Fatalf("part %+v, want %q", part, event)
+		}
+	}
+	upstream.Close()
+	if answered := o.read(); answered.ID != 3 || answered.Response == nil || answered.Response.Error != nil {
+		t.Fatalf("call 3 answered %+v", answered)
+	}
+}
+
+// OLP's cancellation of a carry call reaches the Carrier's context and closes
+// a body the plugin is reading, and what the plugin reports ends the call: a
+// request it never sent as not sent, any other failure as a failure.
+func TestCarryCancellationReachesTheCarrier(t *testing.T) {
+	body, _ := io.Pipe()
+	o := serveOverStdio(t, carrying{carry: func(ctx context.Context, r HTTPRequest) (CarriedResponse, error) {
+		if r.URL == "https://api.acme.example/connecting" {
+			<-ctx.Done()
+			return CarriedResponse{}, &Error{Code: abi.CodeNotSent, Message: "cancelled while connecting"}
+		}
+		return CarriedResponse{Status: 200, Body: body}, nil
+	}})
+	o.read()
+	o.write(carryCall(1, "https://api.acme.example/connecting"))
+	o.write(abi.Frame{ID: 1, Cancel: true})
+	if answered := o.read(); answered.ID != 1 || answered.Response == nil || answered.Response.Error == nil || answered.Response.Error.Code != abi.CodeNotSent {
+		t.Fatalf("call 1 answered %+v", answered)
+	}
+	o.write(carryCall(2, "https://api.acme.example/streaming"))
+	if head := o.part(2); head.Status != 200 {
+		t.Fatalf("head %+v", head)
+	}
+	o.write(abi.Frame{ID: 2, Cancel: true})
+	if answered := o.read(); answered.ID != 2 || answered.Response == nil || answered.Response.Error == nil || answered.Response.Error.Code != abi.CodeInternal {
+		t.Fatalf("call 2 answered %+v", answered)
+	}
+}
+
+// A plugin can't declare a profile that carries traffic without a Carrier:
+// it reports no manifest, so OLP never permits it.
+func TestServeRefusesACarryingProfileWithoutACarrier(t *testing.T) {
+	declared := Manifest{Name: "acme", Version: "1.0.0", Profiles: []Profile{{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", CarriesTraffic: true}}}
+	if response := serveWith(t, manifestOnly(declared), `{"method":"manifest"}`); response.Error == nil || response.Error.Code != abi.CodeInternal {
+		t.Fatalf("manifest response %+v", response)
+	}
+	if response := serveWith(t, carrying{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
+		t.Fatalf("manifest response %+v", response)
+	}
+}

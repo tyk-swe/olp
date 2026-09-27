@@ -101,12 +101,21 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if _, err := s.auth.Apply(ctx, req, cfg.transport(), credential, body); err != nil {
+	transport := cfg.transport()
+	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
+	if err != nil {
 		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
-	client, err := s.connectionClient(ctx, cfg, credential)
-	if err != nil {
-		return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	var client *http.Client
+	switch {
+	case transport.CarriedByPlugin() && s.Plugins == nil:
+		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
+	case transport.CarriedByPlugin():
+		client = transport.CarrierClient(s.Plugins, sensitive)
+	default:
+		if client, err = s.connectionClient(ctx, cfg, credential); err != nil {
+			return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

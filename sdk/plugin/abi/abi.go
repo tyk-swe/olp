@@ -16,7 +16,8 @@
 // OLP then writes its calls, and cancellations of them, to the plugin's
 // standard input; the plugin writes their responses, and its capability
 // requests, to its standard output. Calls run concurrently, so every Frame
-// carries the ID of the request it belongs to.
+// carries the ID of the request it belongs to. A call whose result streams,
+// such as MethodCarry, is answered with its parts before its response.
 //
 // The ABI is versioned as a whole and, during 0.x, carries no compatibility
 // promise between versions: OLP refuses a plugin built for another version.
@@ -65,6 +66,16 @@ const (
 	// what the operator pasted back is exchanged for, on behalf of the
 	// enrolling provider (Request.Provider). It may use CapabilityHTTP.
 	MethodGrantExchange = "grant_exchange"
+	// MethodCarry takes an HTTPRequest: one finished upstream request of a
+	// profile that declares CarriesTraffic, which the plugin sends upstream
+	// itself, on behalf of the request's provider (Request.Provider). Only an
+	// unconfined plugin serves it, over stdio: it streams the upstream's
+	// response as HTTPResponse parts of the call, the first holding its
+	// Status and Header and each part its Body's next bytes, as they arrive.
+	// The call's Response then ends the response, with no result, or reports
+	// why the plugin could not carry it. CodeNotSent reports a request that
+	// never reached the upstream.
+	MethodCarry = "carry"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -92,6 +103,11 @@ const (
 	// CodeHTTPFailed: OLP could not complete an HTTP request, such as one
 	// the egress policy refuses or one that timed out.
 	CodeHTTPFailed = "http_failed"
+	// CodeNotSent: a plugin carrying a request did not send it upstream, such
+	// as when it could not connect, so OLP may try the request elsewhere.
+	// OLP treats any other failure to carry a request as an unknown upstream
+	// outcome, which it never tries elsewhere.
+	CodeNotSent = "not_sent"
 )
 
 // Request is one call, from OLP to a plugin or from a plugin to OLP.
@@ -166,6 +182,12 @@ type Profile struct {
 	// grant that the plugin's grant enrollment obtains, instead of a static
 	// credential.
 	Grant *GrantAuthentication `json:"grant,omitempty"`
+	// CarriesTraffic declares that an unconfined plugin carries the profile's
+	// upstream traffic instead of OLP's transport: OLP hands the plugin each
+	// finished request, placed, authenticated and signed, with MethodCarry,
+	// and reads the response and its stream back. The plugin then sees all
+	// caller content, so the profile serves only transformed routes.
+	CarriesTraffic bool `json:"carries_traffic,omitempty"`
 }
 
 // Option is a non-secret setting a profile declares, whose value the operator
@@ -440,8 +462,8 @@ type Grant struct {
 	Facts map[string]string `json:"facts,omitempty"`
 }
 
-// HTTPRequest is the parameter of CapabilityHTTP. OLP sets the framing
-// headers itself and follows no redirect.
+// HTTPRequest is the parameter of CapabilityHTTP, for which OLP sets the
+// framing headers itself and follows no redirect, and of MethodCarry.
 type HTTPRequest struct {
 	Method string              `json:"method"`
 	URL    string              `json:"url"`
@@ -450,9 +472,10 @@ type HTTPRequest struct {
 	Body []byte `json:"body,omitempty"`
 }
 
-// HTTPResponse is the result of CapabilityHTTP.
+// HTTPResponse is the result of CapabilityHTTP, and each part of the result of
+// MethodCarry, of which only the first has a Status and Header.
 type HTTPResponse struct {
-	Status int                 `json:"status"`
+	Status int                 `json:"status,omitempty"`
 	Header map[string][]string `json:"header,omitempty"`
 	Body   []byte              `json:"body,omitempty"`
 }
@@ -473,6 +496,10 @@ type Frame struct {
 	Call     uint64    `json:"call,omitempty"`
 	Request  *Request  `json:"request,omitempty"`
 	Response *Response `json:"response,omitempty"`
+	// Part is one part of the result of the call ID, for a method whose
+	// result streams, such as MethodCarry. The plugin writes a call's parts
+	// in order, then the call's Response.
+	Part json.RawMessage `json:"part,omitempty"`
 	// Cancel tells the plugin that OLP no longer waits for the response to
 	// call ID, such as when the request the call serves ended. The plugin
 	// still answers the call, promptly.

@@ -132,10 +132,35 @@ func (s *session) send(frame abi.Frame) error {
 	if err != nil {
 		return err
 	}
+	return s.write(data)
+}
+
+// write writes one frame, encoded.
+func (s *session) write(frame []byte) error {
 	s.writing.Lock()
 	defer s.writing.Unlock()
-	_, err = s.out.Write(append(data, '\n'))
+	_, err := s.out.Write(append(frame, '\n'))
 	return err
+}
+
+// sendPart streams one part of the result of the call ctx belongs to.
+func sendPart(ctx context.Context, part any) error {
+	s := serving.Load()
+	if s == nil {
+		return &abi.Error{Code: "unavailable", Message: "Streaming a result is available only inside OLP."}
+	}
+	data, err := json.Marshal(part)
+	if err != nil {
+		return err
+	}
+	call, _ := ctx.Value(callKey{}).(uint64)
+	if data, err = json.Marshal(abi.Frame{ID: call, Part: data}); err != nil {
+		return err
+	}
+	if len(data) >= maxFrame {
+		return &abi.Error{Code: abi.CodeInternal, Message: "A part of the plugin's result exceeds 1 MiB."}
+	}
+	return s.write(data)
 }
 
 // hostCall passes a capability request to OLP for the call ctx belongs to.

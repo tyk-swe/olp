@@ -148,9 +148,10 @@ matches. The declarations apply to gateway attempts and probes alike.
 A plugin profile that changes only authorization, address and declared headers
 reports `strict: true` in the catalogue and serves strict routes. A
 [signing hook](#signing-hooks) changes only authorization, so a profile with one
-is strict too. An envelope or any rewrite changes the dialect's bodies, and
-forced streaming changes how non-streaming requests reach the upstream, so such
-a profile reports `strict: false` and serves only
+is strict too. An envelope or any rewrite changes the dialect's bodies, forced
+streaming changes how non-streaming requests reach the upstream, and an
+unconfined plugin that [carries the traffic](#carrying-traffic) sees and may
+change all of it, so such a profile reports `strict: false` and serves only
 [transformed routes](provider-routing.md#route-fidelity): validating or
 activating a strict route with a target using it fails with
 `422 target_capability`, telling you to declare the route transformed.
@@ -406,7 +407,9 @@ signing hook or a grant enrollment step.
   fails with `plugin_timed_out`. A plugin that leaves a call unanswered that
   long may be stuck, so OLP stops it, and the calls in flight on it fail with
   `plugin_failed`. This holds for a call whose caller gave up, such as a
-  request that ended: OLP tells the plugin, which still answers it.
+  request that ended: OLP tells the plugin, which still answers it. A request
+  the plugin [carries](#carrying-traffic) instead lasts as long as the request
+  does, and the plugin answers it within 10 seconds once OLP cancels it.
 - A subprocess that exits fails its calls in flight with `plugin_failed`,
   naming its exit status, and so does one that writes a message over 1 MiB or
   anything else the ABI doesn't allow.
@@ -417,6 +420,38 @@ What the plugin logs for a call is attributed to it and redacted of the call's
 secret values, within the same bounds as a confined plugin's. Its standard
 error, and records it logs without a call, are logged a line at a time with
 the plugin's digest, redacted of the secret values of every call in flight.
+
+### Carrying traffic
+
+A profile of an unconfined plugin may declare `carries_traffic` in its
+manifest: the plugin then carries every request of a provider using the
+profile itself, instead of OLP's transport. OLP places, authenticates and signs
+each request as for any plugin profile and hands the finished request to the
+plugin, which returns the upstream's response and streams its events back as
+they arrive. This covers control's probes, model listings and certification as
+well as the gateway's requests, so the plugin must reach the upstream from
+every process. The profile's address is still checked like any provider
+endpoint, such as for `https`, but the provider's network path and the egress
+policy's address checks don't govern what the plugin sends. Its catalogue
+profile reports `transport: plugin`.
+
+- The plugin sees all caller content, so the profile serves only transformed
+  routes: validating or activating a strict route with a target using it fails
+  with `422 target_capability`, telling you to declare the route transformed.
+- It carries HTTP requests and their SSE streams only. Plugin profiles serve
+  only dialects whose traffic is HTTP and SSE, so one that names a WebSocket or
+  realtime dialect, such as `gemini-live`, is refused at review with
+  `plugin_dialect_unknown`.
+- A failure the plugin reports as not sent, such as a connection it could not
+  open, fails over to the route's next target like a connection failure. OLP
+  treats any other failure, and a server error the upstream answered with, as
+  an unknown outcome: the attempt is `ambiguous` and the request fails with
+  `502 ambiguous_upstream_result`, without failing over. A rejection the
+  upstream stated, such as a `429`, is classified as for any provider.
+- When the caller goes away or the attempt times out, OLP cancels the request,
+  and the plugin stops it upstream.
+- OLP holds at most 8 MiB of a response the plugin streams faster than the
+  caller reads it; a caller that falls further behind loses the response.
 
 ### Without the tier
 

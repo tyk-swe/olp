@@ -139,10 +139,12 @@ text.
 
 A profile whose adaptation changes only authorization, address and declared
 headers serves strict routes, whether or not it signs requests. An envelope or
-any rewrite changes the dialect's bodies, and forced streaming changes how
-non-streaming requests reach the upstream, so such a profile serves only
-[transformed routes](provider-routing.md#route-fidelity), and strict activation
-of a target using it tells the route author to declare the route transformed.
+any rewrite changes the dialect's bodies, forced streaming changes how
+non-streaming requests reach the upstream, and a plugin that
+[carries the traffic](#carrying-traffic) sees and may change all of it, so such
+a profile serves only [transformed routes](provider-routing.md#route-fidelity),
+and strict activation of a target using it tells the route author to declare
+the route transformed.
 
 ### Signing hook
 
@@ -475,6 +477,58 @@ Nothing confines the plugin, so it reaches the network and files itself. OLP's
 capabilities remain available to it and behave as they do for a confined
 plugin, granted by call, which is why `plugin.Fetch` takes the call's context.
 
+### Carrying traffic
+
+An unconfined plugin may carry its profiles' upstream traffic itself, such as
+through an upstream's own client or a transport OLP doesn't speak. A profile
+declares it with `CarriesTraffic`, and the plugin implements `plugin.Carrier`:
+
+```go
+Profiles: []plugin.Profile{{
+	ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", CarriesTraffic: true,
+	Hosting: plugin.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}},
+}},
+
+func (acme) Carry(ctx context.Context, r plugin.HTTPRequest) (plugin.CarriedResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, r.Method, r.URL, bytes.NewReader(r.Body))
+	if err != nil {
+		return plugin.CarriedResponse{}, &plugin.Error{Code: abi.CodeNotSent, Message: err.Error()}
+	}
+	req.Header = r.Header
+	resp, err := http.DefaultClient.Do(req)
+	if dial, ok := errors.AsType[*net.OpError](err); ok && dial.Op == "dial" {
+		return plugin.CarriedResponse{}, &plugin.Error{Code: abi.CodeNotSent, Message: err.Error()}
+	}
+	if err != nil {
+		return plugin.CarriedResponse{}, err
+	}
+	return plugin.CarriedResponse{Status: resp.StatusCode, Header: resp.Header, Body: resp.Body}, nil
+}
+```
+
+OLP places, authenticates and signs each request of the profile as usual, then
+hands the finished request to `Carry` instead of sending it: the gateway's
+requests, and control's probes, model listings and certification alike. The
+plugin sees all caller content, so the profile serves only transformed routes.
+It carries HTTP requests and their SSE streams only, never WebSocket or realtime
+traffic.
+
+- The SDK streams the response's body to OLP as it reads it, so each stream
+  event reaches the caller as the upstream sends it, and closes the body at the
+  end.
+- `ctx` ends when OLP stops waiting, such as when the caller goes away or an
+  attempt times out, and the SDK then closes the body. Send the request with
+  `ctx`, so the cancellation reaches the upstream, and return promptly.
+- Report a request that never reached the upstream, such as one whose
+  connection failed, as a `*plugin.Error` with code `abi.CodeNotSent`: OLP may
+  then try the request on another target. OLP treats every other failure,
+  including one reading the body or a server error the upstream answered with,
+  as an unknown outcome, which it never tries elsewhere.
+
+A confined plugin can't carry traffic: OLP refuses its manifest with the field
+`manifest.profiles[i].carries_traffic`, and a plugin declaring a profile that
+carries traffic without implementing `Carrier` reports no manifest.
+
 ## ABI reference
 
 The ABI is defined in package
@@ -537,8 +591,8 @@ A response carries either a result or an error:
 ```
 
 Error codes `invalid_request`, `unknown_method`, `internal`, `state_mismatch`,
-`origin_not_approved` and `http_failed` are shared; a plugin may report codes of
-its own.
+`origin_not_approved`, `http_failed` and `not_sent` are shared; a plugin may
+report codes of its own.
 
 ### Calls for a provider
 
@@ -562,11 +616,15 @@ OLP calls, through `olp_call`:
 | `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
 | `grant_start` | `{"profile": "…"}` | `{"url": "…", "session": "…"}` |
 | `grant_exchange` | `{"profile": "…", "session": "…", "input": "…"}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600, "principal": "…", "facts": {"name": "value"}}` |
+| `carry` | `{"method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>"}` | none, after [streamed parts](#stdio-transport) |
 
 OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
-the provider whose request it signs, and the grant steps only for profiles that
+the provider whose request it signs, the grant steps only for profiles that
 declare `"grant": {"facts": ["name"]}`, on behalf of the provider enrolling a
-grant.
+grant, and `carry` only on an unconfined plugin, for profiles that declare
+`"carries_traffic": true`, on behalf of the provider whose request it carries.
+A `carry` call that fails with the error code `not_sent` reports a request that
+never reached the upstream.
 
 ### Capabilities
 
@@ -615,6 +673,21 @@ still answers the call, promptly:
 
 ```json
 {"id": 7, "cancel": true}
+```
+
+A `carry` call streams its result: the plugin writes the upstream's response
+as parts of the call, each an HTTP response with the call's ID, as the response
+arrives. The first part holds its status and headers, and each later part only
+the next bytes of its body, at most 1 MiB per frame. The call's response then
+ends it, with no result, or with the error that stopped it. OLP waits for a
+`carry` call for as long as the request it carries lasts, and gives the plugin
+10 seconds to answer it once OLP cancels it.
+
+```json
+{"id": 8, "request": {"method": "carry", "params": {"method": "POST", "url": "https://api.acme.example/v1/chat/completions", "header": {}, "body": "…"}, "provider": {"profile": "acme-chat", "options": {}}}}
+{"id": 8, "part": {"status": 200, "header": {"Content-Type": ["text/event-stream"]}}}
+{"id": 8, "part": {"body": "ZGF0YTogey4uLn0KCg=="}}
+{"id": 8, "response": {}}
 ```
 
 A plugin that writes a line that is not such a frame, or a frame over 1 MiB,

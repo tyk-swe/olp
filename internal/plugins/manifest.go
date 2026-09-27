@@ -24,10 +24,10 @@ var (
 	versionLabel = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$`)
 )
 
-// decodeManifest reads the manifest a plugin reported. Fields this OLP does
-// not know make it invalid rather than ignored: a plugin must not declare
-// behaviour that would silently not run.
-func decodeManifest(raw []byte) (abi.Manifest, error) {
+// decodeManifest reads the manifest a plugin reported, which is unconfined
+// or not. Fields this OLP does not know make it invalid rather than ignored: a
+// plugin must not declare behaviour that would silently not run.
+func decodeManifest(raw []byte, unconfined bool) (abi.Manifest, error) {
 	var m abi.Manifest
 	if len(raw) > maxManifestBytes {
 		return m, invalidManifest("manifest", "The manifest exceeds 64 KiB.")
@@ -37,10 +37,10 @@ func decodeManifest(raw []byte) (abi.Manifest, error) {
 	if err := decoder.Decode(&m); err != nil {
 		return m, invalidManifest("manifest", "The manifest is not one this OLP understands: "+err.Error()+".")
 	}
-	return m, validateManifest(m)
+	return m, validateManifest(m, unconfined)
 }
 
-func validateManifest(m abi.Manifest) error {
+func validateManifest(m abi.Manifest, unconfined bool) error {
 	if !identifier.MatchString(m.Name) {
 		return invalidManifest("manifest.name", "Name the plugin with 1–64 lowercase letters, digits and hyphens, starting and ending with a letter or digit.")
 	}
@@ -80,7 +80,10 @@ func validateManifest(m abi.Manifest) error {
 			return invalidManifest(field+".dialect", "Name the built-in dialect the profile serves.")
 		}
 		if !slices.Contains(connectors.PluginDialects(), p.Dialect) {
-			return &Error{Code: CodeDialectUnknown, Field: field + ".dialect", Message: fmt.Sprintf("Plugin profiles can't serve a dialect named %q. A plugin names one of the built-in dialects %s, and never defines one.", p.Dialect, strings.Join(connectors.PluginDialects(), ", "))}
+			return &Error{Code: CodeDialectUnknown, Field: field + ".dialect", Message: fmt.Sprintf("Plugin profiles can't serve a dialect named %q. A plugin names one of the built-in dialects %s, whose traffic is HTTP and SSE, and never defines one.", p.Dialect, strings.Join(connectors.PluginDialects(), ", "))}
+		}
+		if p.CarriesTraffic && !unconfined {
+			return invalidManifest(field+".carries_traffic", "Only an unconfined plugin carries traffic. A confined plugin's profiles reach the upstream over OLP's transport.")
 		}
 		if err := connectors.ValidatePluginProfile(p); err != nil {
 			if refusal, ok := errors.AsType[*connectors.ProfileError](err); ok {

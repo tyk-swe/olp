@@ -160,7 +160,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	pluginHost := plugins.NewHost(pluginRuntime, unconfined, pool)
 	t.Cleanup(func() { pluginHost.Close(context.Background()) })
-	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost, UnconfinedPlugins: unconfined != nil}, log)
+	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost, Carrier: pluginHost, UnconfinedPlugins: unconfined != nil}, log)
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
 	if err != nil {
 		t.Fatal(err)

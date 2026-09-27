@@ -26,11 +26,18 @@ func (h *harness) servePluginProfile(hosting abi.Hosting) {
 // servePlugin moves the harness's first provider onto a plugin profile.
 func (h *harness) servePlugin(profile abi.Profile) {
 	h.t.Helper()
-	digest := strings.Repeat("cd", 32)
-	plugin, err := connectors.NewPluginProfile(digest, abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{profile}}, profile.ID)
+	plugin, err := connectors.NewPluginProfile(strings.Repeat("cd", 32), abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{profile}}, profile.ID)
 	if err != nil {
 		h.t.Fatal(err)
 	}
+	h.pinPlugin(plugin)
+}
+
+// pinPlugin moves the harness's first provider onto a plugin's profile.
+func (h *harness) pinPlugin(plugin *connectors.PluginProfile) {
+	h.t.Helper()
+	profile := plugin.Profile()
+	var err error
 	secrets := map[string][]byte{}
 	for id, provider := range h.rt.release.Snapshot.Providers {
 		for _, slot := range provider.Slots {
@@ -38,7 +45,7 @@ func (h *harness) servePlugin(profile abi.Profile) {
 		}
 		if provider.Slots[0].ID == h.slotA {
 			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
-			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, digest, plugin.Address(nil)
+			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, profile.Revision, plugin.Address(nil)
 			h.rt.release.Snapshot.Providers[id] = provider
 		}
 	}

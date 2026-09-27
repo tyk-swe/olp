@@ -471,7 +471,9 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
 	cfg := provider.Connector()
-	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil, Declared: cfg.Classification()}}
+	// A plugin that carries the request reports only whether it was sent, so
+	// the attempt must not risk repeating work it may have done.
+	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || cfg.CarriedByPlugin(), Declared: cfg.Classification()}}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -578,8 +580,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(classCredential, nil)
 	}
 
-	client, err := s.providerClient(actx, x.request.release, provider, slot)
-	if err != nil {
+	var client *http.Client
+	if cfg.CarriedByPlugin() {
+		client = cfg.CarrierClient(s.cfg.Carrier, credentialValues)
+	} else if client, err = s.providerClient(actx, x.request.release, provider, slot); err != nil {
 		return fail(classCredential, nil)
 	}
 	if contract != nil && contract.ToolContinuation() {
@@ -588,6 +592,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 	}
 	resp, err := client.Do(req)
+	if cfg.CarriedByPlugin() {
+		// The plugin reports whether it sent a request it failed; any other
+		// failure may have reached the upstream.
+		st.dispatched.Store(!errors.Is(err, connectors.ErrNotSent))
+	}
 	if err != nil {
 		return fail(st.classify(err, false), nil)
 	}

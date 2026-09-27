@@ -347,7 +347,9 @@ matching observations; they are preferences, not response guarantees.
 
 Eligibility filtering precedes ordering and `max_attempts`. Each actual
 credential attempt consumes the route's budget, which can exceed target count.
-Fallback never restarts a committed stream or an ambiguously created media job.
+Fallback never restarts a committed stream or an ambiguously created media job,
+nor a request an unconfined plugin carried unless the plugin reported it
+[not sent](plugins.md#carrying-traffic).
 
 ## Explain and observe
 

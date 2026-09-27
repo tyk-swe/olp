@@ -30,7 +30,7 @@ func validManifest() abi.Manifest {
 }
 
 func TestManifestValidation(t *testing.T) {
-	if err := validateManifest(validManifest()); err != nil {
+	if err := validateManifest(validManifest(), false); err != nil {
 		t.Fatalf("refused a valid manifest: %v", err)
 	}
 	many := func(n int, item func(int) string) []string {
@@ -101,8 +101,24 @@ func TestManifestValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
 			tc.mutate(&m)
-			wantError(t, validateManifest(m), tc.code, tc.field)
+			wantError(t, validateManifest(m, false), tc.code, tc.field)
 		})
+	}
+}
+
+// Only an unconfined plugin carries its profiles' traffic, and only a
+// dialect's HTTP and SSE traffic: a profile that carries traffic can't serve
+// a WebSocket or realtime dialect.
+func TestOnlyUnconfinedPluginsCarryHTTPTraffic(t *testing.T) {
+	carrying := validManifest()
+	carrying.Profiles[0].CarriesTraffic = true
+	if err := validateManifest(carrying, true); err != nil {
+		t.Fatalf("refused an unconfined plugin that carries traffic: %v", err)
+	}
+	wantError(t, validateManifest(carrying, false), CodeManifestInvalid, "manifest.profiles[0].carries_traffic")
+	for _, dialect := range []string{"gemini-live", "openai-realtime"} {
+		carrying.Profiles[0].Dialect = dialect
+		wantError(t, validateManifest(carrying, true), CodeDialectUnknown, "manifest.profiles[0].dialect")
 	}
 }
 
@@ -114,7 +130,7 @@ func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := decodeManifest(data); err != nil || !reflect.DeepEqual(decoded, declared) {
+	if decoded, err := decodeManifest(data, false); err != nil || !reflect.DeepEqual(decoded, declared) {
 		t.Fatalf("decoded %+v: %v", decoded, err)
 	}
 	for _, extended := range []string{
@@ -122,9 +138,9 @@ func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
 		strings.Replace(string(data), `"response":"response"`, `"response":"response","events":"response"`, 1),
 		strings.Replace(string(data), `"class":`, `"retry_after":5,"class":`, 1),
 	} {
-		_, err = decodeManifest([]byte(extended))
+		_, err = decodeManifest([]byte(extended), false)
 		wantError(t, err, CodeManifestInvalid, "manifest")
 	}
-	_, err = decodeManifest([]byte(`{"name":"` + strings.Repeat("a", maxManifestBytes) + `"}`))
+	_, err = decodeManifest([]byte(`{"name":"`+strings.Repeat("a", maxManifestBytes)+`"}`), false)
 	wantError(t, err, CodeManifestInvalid, "manifest")
 }

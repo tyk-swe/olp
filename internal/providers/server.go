@@ -50,7 +50,8 @@ type Server struct {
 	// enables none: providers may pin unconfined plugins only where it does.
 	Unconfined *plugins.Unconfined
 	Quotas     QuotaSource
-	// Plugins runs plugins' grant enrollment steps.
+	// Plugins runs plugins' grant enrollment steps, and carries the probes of
+	// profiles whose unconfined plugin carries their traffic.
 	Plugins     *plugins.Host
 	Log         *slog.Logger
 	client      *http.Client
