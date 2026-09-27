@@ -238,11 +238,28 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 		if e := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); e != nil {
 			return egress.Sensitive{}, ErrAuthentication
 		}
-		sensitive.Add(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, req.Header.Get("Authorization"))
+		header := req.Header.Get("Authorization")
+		sensitive.Add(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, header)
+		// An upstream diagnostic may echo only the signature, not the header.
+		sensitive.Add(sigV4Signature(header))
 	default:
 		return egress.Sensitive{}, ErrAuthentication
 	}
 	return sensitive, nil
+}
+
+// sigV4Signature extracts the signature value a SigV4 Authorization header
+// carries as its ", Signature=<hex>" parameter.
+func sigV4Signature(authorization string) string {
+	i := strings.Index(authorization, "Signature=")
+	if i < 0 {
+		return ""
+	}
+	rest := authorization[i+len("Signature="):]
+	if j := strings.IndexByte(rest, ','); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }
 func cacheKey(c Config, secret []byte) [32]byte {
 	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.AzureScope()+"\x00"), secret...))

@@ -105,7 +105,8 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 
 // recordProbe stores a probe outcome on the provider and audits it in one
 // transaction. The upstream call ran without the installation lock, so the
-// caller is authorized again under it before anything is written.
+// caller's authority and project reach are decided again under it before
+// anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
 	tx, err := s.Access.Begin(r)
 	if err != nil {
@@ -114,6 +115,13 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 	defer tx.Rollback(r.Context())
 	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
+		return err
+	}
+	current, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
@@ -211,6 +219,9 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {
@@ -489,6 +500,9 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {

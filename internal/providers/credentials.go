@@ -152,6 +152,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
+		return access.Reply{}, err
+	}
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 	}
@@ -615,6 +618,9 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if locked.ETag != current.ETag {

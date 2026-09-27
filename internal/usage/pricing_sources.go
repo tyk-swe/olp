@@ -396,6 +396,12 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	// The fetch ran without the installation lock, so authority is decided
+	// again under it before the snapshot and audit record are written.
+	principal, err = s.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	snapshot, err := scanSnapshot(tx.QueryRow(r.Context(),
 		`INSERT INTO olp.pricing_source_snapshots (id, source_id, sha256, document)
 		 VALUES ($1, $2, $3, $4::jsonb)

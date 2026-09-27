@@ -45,22 +45,42 @@ func (m *Management) log() *slog.Logger {
 	return slog.Default()
 }
 
-func (m *Management) scopedJob(r *http.Request, p access.Principal, need access.Need) (*JobRecord, error) {
+func (m *Management) scopedJob(r *http.Request, q Querier, p access.Principal, need access.Need) (*JobRecord, error) {
 	if _, err := uuid.Parse(r.PathValue("job_id")); err != nil {
 		return nil, access.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
 	}
-	record, err := Job(r.Context(), m.Pool, r.PathValue("job_id"))
+	record, err := Job(r.Context(), q, r.PathValue("job_id"))
 	if err != nil {
 		return nil, mapJobError(err)
 	}
 	var keyProject *string
-	if err = m.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
+	if err = q.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
 		return nil, mapJobError(err)
 	}
 	if err := p.Project(keyProject, need); err != nil {
 		return nil, err
 	}
 	return &record, nil
+}
+
+// reauthorizeJob resolves the caller and the job's project again under the
+// installation lock, so a job mutation never starts under authority revoked
+// since admission. The lock is released before the provider call runs.
+func (m *Management) reauthorizeJob(r *http.Request, need access.Need) (access.Principal, *JobRecord, error) {
+	tx, err := m.Access.Begin(r)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := m.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	record, err := m.scopedJob(r, tx, p, need)
+	if err != nil {
+		return access.Principal{}, nil, err
+	}
+	return p, record, nil
 }
 
 func (m *Management) jobsAvailable() error {
@@ -82,8 +102,8 @@ func (m *Management) audit(r *http.Request, p access.Principal, action, id strin
 	return tx.Commit(r.Context())
 }
 
-func (m *Management) refresh(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, access.Change)
+func (m *Management) refresh(r *http.Request, _ access.Principal) (access.Reply, error) {
+	p, record, err := m.reauthorizeJob(r, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -101,7 +121,7 @@ func (m *Management) refresh(r *http.Request, p access.Principal) (access.Reply,
 }
 
 func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Principal) error {
-	record, err := m.scopedJob(r, p, access.Change)
+	record, err := m.scopedJob(r, m.Pool, p, access.Change)
 	if err != nil {
 		return err
 	}
@@ -143,8 +163,8 @@ func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Pr
 	return nil
 }
 
-func (m *Management) delete(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, access.Change)
+func (m *Management) delete(r *http.Request, _ access.Principal) (access.Reply, error) {
+	p, record, err := m.reauthorizeJob(r, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -273,7 +293,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 }
 
 func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, access.View)
+	record, err := m.scopedJob(r, m.Pool, p, access.View)
 	if err != nil {
 		return access.Reply{}, err
 	}
