@@ -73,19 +73,21 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
 	provider, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := principal.Project(provider.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err := access.Match(r, provider.ETag); err != nil {
 		return access.Reply{}, err

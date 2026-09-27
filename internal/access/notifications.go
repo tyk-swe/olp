@@ -155,6 +155,11 @@ func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Re
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created destination, so the caller
+		// must still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if err = s.validateDestination(input); err != nil {
@@ -425,6 +430,11 @@ func (s *Server) createNotificationRule(r *http.Request, _ Principal) (Reply, er
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created rule, so the caller must
+		// still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if input.ProjectID != nil {

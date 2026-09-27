@@ -145,19 +145,21 @@ func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = principal.Authorize(operation); err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, principal, nil)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the policy, so the caller must still reach
+	// the scoped resource's project before a replay is served.
 	project, err := policyProject(r.Context(), tx, scope, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := principal.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, principal, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
 	if err != nil {

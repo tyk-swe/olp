@@ -77,19 +77,21 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	_, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	_, replayed, err := a.Replay(r, tx, p, input)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -141,19 +143,21 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(locked.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, input)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
@@ -446,19 +450,21 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the provider's slots, so the caller must
+	// still reach its project before a replay is served.
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, input)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current.SlotsETag); err != nil {
 		return access.Reply{}, err

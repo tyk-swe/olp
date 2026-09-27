@@ -99,6 +99,11 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created budget group, so the caller
+		// must still reach its project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	if err := validateBudgetGroup(&input); err != nil {

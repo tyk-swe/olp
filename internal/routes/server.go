@@ -385,6 +385,11 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 		return access.Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created draft, so the caller must
+		// still reach its project to receive it.
+		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Commit(r, tx, *replayed)
 	}
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {

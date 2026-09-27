@@ -117,19 +117,21 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the draft, so the caller must still reach
+	// its project before a replay is served.
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -449,13 +451,8 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the route, so the caller must still reach
+	// its project before a replay is served.
 	var state, current string
 	var project *string
 	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
@@ -463,6 +460,13 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	}
 	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current); err != nil {
 		return access.Reply{}, err
@@ -573,19 +577,21 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the restored draft, so the caller must still
+	// reach the route's project before a replay is served.
 	project, err := routeProject(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {

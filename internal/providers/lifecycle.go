@@ -109,6 +109,11 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created provider, so the caller must
+		// still reach its project to receive it.
+		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.ValidText("name", input.Name, 100); err != nil {
@@ -295,19 +300,21 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
-	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
