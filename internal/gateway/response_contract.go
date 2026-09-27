@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -117,25 +116,6 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 		return nil, nil, resources.ErrContract
 	}
 	return r, &contract, nil
-}
-func (s *Server) authorizeResponseContract(ctx context.Context, x *execution, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
-	current, ok := x.request.release.Snapshot.Routes[res.RouteSlug]
-	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
-		return notFoundError("not_found", "The stored response is unavailable to this key.")
-	}
-	p, _, e := s.resolveResource(ctx, x, authority, res, operationGeneration, use)
-	if e != nil {
-		return e
-	}
-	if !p.provider.Enabled || !p.slot.Allows(p.model, res.RouteSlug, authority.ID) || p.model != contract.Binding || p.provider.RevisionID != contract.Receipt.Serving.RevisionID || p.provider.ProfileID != contract.Receipt.ProfileID || p.provider.ProfileRevision != contract.Receipt.ProfileRevision {
-		return pinUnavailable()
-	}
-	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
-		if _, err := s.providerNetworkSecret(ctx, x.request.release, &p.provider); err != nil {
-			return pinUnavailable()
-		}
-	}
-	return nil
 }
 func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
 	provider, ok := x.snapshot().Providers[fact.ProviderID]

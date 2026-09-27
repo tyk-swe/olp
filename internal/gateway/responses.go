@@ -323,17 +323,13 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 		return
 	}
 	x.authority = authority
-	if contract != nil {
-		if e := s.authorizeResponseContract(r.Context(), x, authority, res, contract, use); e != nil {
-			s.stateFail(x, w, e, x.family)
-			return
-		}
-		x.responseContract = contract
-	}
-	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation", use)
+	p, route, e := s.admitStoredResponse(r.Context(), x, authority, res, contract, use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
+	}
+	if contract != nil {
+		x.responseContract = contract
 	}
 	x.route = route
 	ctx, cancel := s.stateDeadline(r.Context(), route)
