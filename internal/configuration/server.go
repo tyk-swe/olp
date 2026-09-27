@@ -128,8 +128,9 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 		if err != nil {
 			return access.Reply{}, err
 		}
+		// Changing pricing is an installation setting as well.
 		if changed {
-			if _, err := s.Access.Principal(r, tx, access.Settings); err != nil {
+			if err := p.Authorize(access.Settings); err != nil {
 				return access.Reply{}, err
 			}
 		}

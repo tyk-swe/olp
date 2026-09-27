@@ -6,10 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,11 +67,29 @@ func scanUser(row pgx.Row) (User, error) {
 
 // Principal authenticates the caller and authorizes op.
 func (s *Server) Principal(r *http.Request, q Queryer, op Operation) (Principal, error) {
+	checkDeclared(r, op)
 	p, err := s.Authenticate(r, q)
 	if err != nil {
 		return p, err
 	}
 	return p, p.Authorize(op)
+}
+
+// checkDeclared reports a handler that authorizes an operation its route's
+// contract requirement does not name, so the contract stays the complete
+// record of what each route demands. Tests fail on the first discrepancy.
+func checkDeclared(r *http.Request, op Operation) {
+	if r.Pattern == "" {
+		return
+	}
+	if req, ok := requirementFor(r.Pattern); ok && (req.Public || req.mentions(op)) {
+		return
+	}
+	message := fmt.Sprintf("%s authorizes %s, which its contract requirement does not declare", r.Pattern, op)
+	if testing.Testing() {
+		panic(message)
+	}
+	slog.Warn(message)
 }
 
 // Authenticate resolves the caller from a management token or the session

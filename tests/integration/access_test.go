@@ -25,21 +25,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/process"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func accessDatabase(t *testing.T) (*pgxpool.Pool, string) {
@@ -155,26 +151,9 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool, installation, ring)
-	catalogue := providers.New(server, &policy)
+	// The management API is composed exactly as a process composes it.
 	mux := http.NewServeMux()
-	management.Register(mux)
-	server.Register(mux)
-	catalogue.Register(mux)
-	(&management.Overview{Access: server}).Register(mux)
-	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
-	(&resources.Management{Access: server, Pool: pool}).Register(mux)
-	routes.New(server).Register(mux)
-	(&configuration.Server{
-		Access: server, Egress: &policy, VendorKind: providers.VendorKind,
-		StoreNetworkCredential: catalogue.StoreNetworkCredential,
-		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
-			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
-			return id, err
-		},
-	}).Register(mux)
-	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
-	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
+	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log}.Register(mux)
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)

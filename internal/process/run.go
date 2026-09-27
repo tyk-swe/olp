@@ -101,7 +101,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			return err
 		}
 		defer closeAssets()
-		management.Register(public)
 		public.Handle("/", assets)
 		public.Handle("/health", assets)
 	}
@@ -265,7 +264,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
 			control.NotificationsActive = limiter != nil
-			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, log)
+			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
