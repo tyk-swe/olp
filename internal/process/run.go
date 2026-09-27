@@ -194,7 +194,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		if c.Mode.Management() || c.Mode.Inference() {
 			// Gateways and control's probes run signing hooks per upstream
-			// request, so the host compiles the modules it keeps.
+			// request, so the host compiles the modules it keeps. Unconfined
+			// plugins may carry the requests themselves.
 			serving, err := plugins.NewRuntime(startup, plugins.Compiled, plugins.DefaultLimits, log)
 			if err != nil {
 				return err
@@ -213,6 +214,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				TrustedProxies:     c.TrustedProxyCIDRs,
 				AdmissionPool:      inferencePool,
 				Signer:             pluginHost,
+				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
 			rt.GrantRefreshed = gw.GrantRefreshed

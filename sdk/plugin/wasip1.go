@@ -58,6 +58,12 @@ func hostCall(_ context.Context, request abi.Request) abi.Response {
 	return response
 }
 
+// sendPart fails: a WASI reactor answers each call with one response, so
+// none of its results stream. Only an unconfined plugin carries traffic.
+func sendPart(context.Context, any) error {
+	return &abi.Error{Code: abi.CodeInternal, Message: "Only an unconfined plugin streams a result."}
+}
+
 // reclaim takes back a buffer olp_alloc lent to OLP.
 func reclaim(ptr, size uint32) []byte {
 	buffer, ok := lent[ptr]

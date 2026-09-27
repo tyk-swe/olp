@@ -89,7 +89,7 @@ func Compile(config Config) (*Template, error) {
 	}
 	profile, _ := provider.Profile()
 	if !profile.Strict {
-		return nil, incompatible("target_capability", "/profile", "strict_profile", "This provider profile changes more than authorization, address and headers.")
+		return nil, incompatible("target_capability", "/profile", "strict_profile", "This provider profile changes more than authorization, address and headers, or its plugin carries its traffic.")
 	}
 	if !slices.Contains(profile.Operations, "generation") {
 		return nil, incompatible("target_capability", "/operation", "operation_contract", "This profile has no strict generation contract.")

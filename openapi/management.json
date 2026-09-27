@@ -4951,6 +4951,10 @@
         "additionalProperties": false,
         "description": "A provider profile the plugin supplies around a built-in dialect.",
         "properties": {
+          "carries_traffic": {
+            "description": "Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.",
+            "type": "boolean"
+          },
           "dialect": {
             "description": "The built-in dialect the profile serves.",
             "type": "string"
@@ -6682,6 +6686,7 @@
             "type": "boolean"
           },
           "transport": {
+            "description": "How the profile reaches the upstream: http, websocket, or plugin where an unconfined plugin carries its traffic.",
             "type": "string"
           }
         },

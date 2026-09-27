@@ -112,7 +112,7 @@ func (u *Unconfined) Inspect(ctx context.Context, name string) (ExecutableFile, 
 	}
 	executable := u.Load(file.Digest, name)
 	defer executable.Close(context.WithoutCancel(ctx))
-	manifest, err := inspect(ctx, executable)
+	manifest, err := inspect(ctx, executable, true)
 	return file, manifest, err
 }
 

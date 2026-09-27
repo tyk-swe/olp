@@ -3006,6 +3006,9 @@ type PluginPagination struct {
 
 // PluginProfile A provider profile the plugin supplies around a built-in dialect.
 type PluginProfile struct {
+	// CarriesTraffic Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.
+	CarriesTraffic *bool `json:"carries_traffic,omitempty"`
+
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
@@ -3575,7 +3578,9 @@ type ProviderProfile struct {
 	SemanticHeaders []string               `json:"semantic_headers"`
 
 	// Strict Whether the profile may serve strict routes: its hosting changes only authorization, address and headers, or is a qualified built-in binding.
-	Strict    bool   `json:"strict"`
+	Strict bool `json:"strict"`
+
+	// Transport How the profile reaches the upstream: http, websocket, or plugin where an unconfined plugin carries its traffic.
 	Transport string `json:"transport"`
 }
 

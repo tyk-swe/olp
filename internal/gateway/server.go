@@ -54,6 +54,10 @@ type Config struct {
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
 	Signer connectors.Signer
+	// Carrier runs the unconfined plugins that carry their profiles' traffic.
+	// Without one, a provider whose profile's plugin carries its traffic
+	// sends no request.
+	Carrier connectors.Carrier
 	// UnconfinedPlugins is set where the deployment enables unconfined
 	// plugins. Elsewhere, the gateway refuses targets of providers whose
 	// plugin is unconfined.

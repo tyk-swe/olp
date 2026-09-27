@@ -19,12 +19,13 @@ const loadTimeout = 2 * time.Minute
 
 // Host runs the code of installed plugins, by digest, for the processes that
 // serve providers: a plugin profile's signing hook runs once per upstream
-// request, and a grant's refresh in a worker ahead of its access token's
-// expiry. A confined plugin's module is loaded from the database on its first
-// call and kept compiled, with its pool of instances, for the calls after it,
-// so no request compiles anything; an unconfined plugin's process likewise
-// keeps running between calls. A Host keeps the code of the plugins it called
-// most recently, and runs only plugins that Usable admits. It is safe for
+// request, and an unconfined plugin may carry the request itself (Carry); a
+// grant's refresh runs in a worker ahead of its access token's expiry. A
+// confined plugin's module is loaded from the database on its first call and
+// kept compiled, with its pool of instances, for the calls after it, so no
+// request compiles anything; an unconfined plugin's process likewise keeps
+// running between calls. A Host keeps the code of the plugins it called most
+// recently, and runs only plugins that Usable admits. It is safe for
 // concurrent use.
 type Host struct {
 	runtime    *Runtime
@@ -94,33 +95,28 @@ func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Pro
 // gateway attempt, record only that it failed, so the Host logs why.
 func (h *Host) Call(ctx context.Context, digest string, call Call, result any) error {
 	entry := h.use(digest)
-	defer func() {
-		h.mu.Lock()
-		entry.calls--
-		h.mu.Unlock()
-	}()
-	var err error
-	select {
-	case <-entry.loaded:
-		err = entry.err
-		if err == nil {
-			err = entry.code.Call(ctx, call, result)
-		}
-	case <-ctx.Done():
-		err = ctx.Err()
+	defer h.done(entry)
+	code, err := entry.wait(ctx)
+	if err == nil {
+		err = code.Call(ctx, call, result)
 	}
-	if err != nil && ctx.Err() == nil && !awaitingApproval(call.Method, err) {
-		h.runtime.log.Warn("plugin call failed", "plugin_digest", digest, "plugin_method", call.Method, "error", err)
-	}
+	h.failed(ctx, digest, call.Method, err)
 	return err
 }
 
-// awaitingApproval reports whether err is a device authorization's poll
+// failed logs why a call of method on the plugin with digest failed, unless
+// its caller stopped waiting for it, or it is a device authorization's poll
 // finding the device not approved yet, which its caller expects every
 // interval.
-func awaitingApproval(method string, err error) bool {
-	reported, ok := errors.AsType[*abi.Error](err)
-	return ok && method == abi.MethodGrantPoll && (reported.Code == abi.CodeAuthorizationPending || reported.Code == abi.CodeSlowDown)
+func (h *Host) failed(ctx context.Context, digest, method string, err error) {
+	if err == nil || ctx.Err() != nil {
+		return
+	}
+	if reported, ok := errors.AsType[*abi.Error](err); ok && method == abi.MethodGrantPoll &&
+		(reported.Code == abi.CodeAuthorizationPending || reported.Code == abi.CodeSlowDown) {
+		return
+	}
+	h.runtime.log.Warn("plugin call failed", "plugin_digest", digest, "plugin_method", method, "error", err)
 }
 
 // Close releases the code of every plugin the Host holds, stopping unconfined
@@ -142,8 +138,18 @@ func (h *Host) Close(ctx context.Context) {
 	}
 }
 
+// wait returns the plugin's code once it is loaded.
+func (entry *hosted) wait(ctx context.Context) (code, error) {
+	select {
+	case <-entry.loaded:
+		return entry.code, entry.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // use returns the plugin's code for a call, starting to load it when the
-// Host holds none.
+// Host holds none. The call's done ends its use.
 func (h *Host) use(digest string) *hosted {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -156,6 +162,13 @@ func (h *Host) use(digest string) *hosted {
 	h.clock++
 	entry.calls, entry.used = entry.calls+1, h.clock
 	return entry
+}
+
+// done ends a call's use of a plugin's code.
+func (h *Host) done(entry *hosted) {
+	h.mu.Lock()
+	entry.calls--
+	h.mu.Unlock()
 }
 
 // load reads a plugin and prepares its code: it compiles a confined plugin's

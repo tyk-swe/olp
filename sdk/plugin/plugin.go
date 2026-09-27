@@ -25,6 +25,9 @@
 //
 //	func main() { plugin.Serve() }
 //
+// An unconfined plugin may also carry its profiles' upstream traffic itself,
+// implementing Carrier.
+//
 // A WASI reactor never runs main, so the same source builds either way. See
 // docs/plugin-authoring.md in the OpenLLMProxy repository.
 package plugin
@@ -34,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -160,6 +164,37 @@ type GrantRefresher interface {
 	RefreshGrant(ctx context.Context, refresh GrantRefresh) (Grant, error)
 }
 
+// Carrier is implemented by an unconfined plugin whose profiles declare
+// CarriesTraffic: it carries their upstream traffic instead of OLP's
+// transport.
+type Carrier interface {
+	// Carry sends one upstream request of a profile that carries traffic,
+	// which OLP placed, authenticated and signed, and returns the upstream's
+	// response. The SDK streams its Body to OLP as it reads it, so a stream's
+	// events reach the caller as the upstream sends them, and closes it.
+	// ProviderOf(ctx) returns the provider the request is for, and ctx ends
+	// when OLP no longer waits for the response, such as when the caller
+	// cancels: send the request with ctx, so the cancellation reaches the
+	// upstream.
+	//
+	// Report a request that never reached the upstream, such as one whose
+	// connection failed, as an *Error with code abi.CodeNotSent, and OLP may
+	// try the request elsewhere. OLP treats any other failure, including one
+	// reading the body, as an unknown upstream outcome, which it never tries
+	// elsewhere.
+	Carry(ctx context.Context, request HTTPRequest) (CarriedResponse, error)
+}
+
+// CarriedResponse is the upstream's response to a request a Carrier carried.
+type CarriedResponse struct {
+	Status int
+	Header map[string][]string
+	// Body is the response body, or nil for none. The SDK closes it once it
+	// read it, or as soon as OLP cancels the call, even while reading it, as
+	// the body of an *http.Response allows.
+	Body io.ReadCloser
+}
+
 var registered Plugin
 
 // methods serve the methods OLP calls, each given the call's context and
@@ -172,6 +207,7 @@ var methods = map[string]func(ctx context.Context, params json.RawMessage) (any,
 	abi.MethodGrantExchange: enrollment(abi.MethodGrantExchange, GrantEnroller.ExchangeGrant),
 	abi.MethodGrantPoll:     enrollment(abi.MethodGrantPoll, GrantPoller.PollGrant),
 	abi.MethodGrantRefresh:  refreshGrant,
+	abi.MethodCarry:         carry,
 }
 
 type providerKey struct{}
@@ -228,9 +264,9 @@ func handle(ctx context.Context, request abi.Request) (response abi.Response) {
 }
 
 // manifest answers the manifest call. A profile that declares signing needs a
-// Signer, and one that authenticates with a grant a GrantEnroller, so a plugin
-// that declares one without implementing it reports no manifest, and OLP
-// refuses to install it.
+// Signer, one that authenticates with a grant a GrantEnroller, and one that
+// carries traffic a Carrier, so a plugin that declares one without
+// implementing it reports no manifest, and OLP refuses to install it.
 func manifest(context.Context, json.RawMessage) (any, error) {
 	m := registered.Manifest()
 	if _, signs := registered.(Signer); !signs && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.Signing }) {
@@ -238,6 +274,9 @@ func manifest(context.Context, json.RawMessage) (any, error) {
 	}
 	if _, enrolls := registered.(GrantEnroller); !enrolls && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.Grant != nil }) {
 		return nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile authenticates with a grant, but the plugin does not implement GrantEnroller."}
+	}
+	if _, carries := registered.(Carrier); !carries && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.CarriesTraffic }) {
+		return nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile carries traffic, but the plugin does not implement Carrier."}
 	}
 	return m, nil
 }
@@ -253,6 +292,51 @@ func sign(ctx context.Context, params json.RawMessage) (any, error) {
 		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."}
 	}
 	return signer.Sign(ctx, request)
+}
+
+// carryChunk bounds the body bytes one part of a carried response holds, so
+// that each part, in base64 within a frame, stays well within 1 MiB.
+const carryChunk = 64 << 10
+
+// carry answers the carry call with the plugin's Carrier: it streams the
+// response as the call's parts, its head first, then its body as it reads it.
+func carry(ctx context.Context, params json.RawMessage) (any, error) {
+	carrier, ok := registered.(Carrier)
+	if !ok {
+		return nil, unknownMethod(abi.MethodCarry)
+	}
+	var request HTTPRequest
+	if err := json.Unmarshal(params, &request); err != nil {
+		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A carry request carries the request to send."}
+	}
+	response, err := carrier.Carry(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if response.Body == nil {
+		return nil, sendPart(ctx, HTTPResponse{Status: response.Status, Header: response.Header})
+	}
+	defer response.Body.Close()
+	// A body that ignores the call's context still stops when OLP cancels.
+	defer context.AfterFunc(ctx, func() { response.Body.Close() })()
+	if err = sendPart(ctx, HTTPResponse{Status: response.Status, Header: response.Header}); err != nil {
+		return nil, err
+	}
+	chunk := make([]byte, carryChunk)
+	for {
+		n, err := response.Body.Read(chunk)
+		if n > 0 {
+			if sent := sendPart(ctx, HTTPResponse{Body: chunk[:n]}); sent != nil {
+				return nil, sent
+			}
+		}
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil, nil
+		case err != nil:
+			return nil, fmt.Errorf("reading the upstream's response: %w", err)
+		}
+	}
 }
 
 // enrollment serves a grant enrollment step with the plugin's implementation

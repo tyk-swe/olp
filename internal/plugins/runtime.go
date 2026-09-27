@@ -173,11 +173,12 @@ func (r *Runtime) Inspect(ctx context.Context, module []byte) (abi.Manifest, err
 		return abi.Manifest{}, err
 	}
 	defer m.Close(context.WithoutCancel(ctx))
-	return inspect(ctx, m)
+	return inspect(ctx, m, false)
 }
 
-// inspect reads the manifest a plugin's code declares and validates it.
-func inspect(ctx context.Context, plugin code) (abi.Manifest, error) {
+// inspect reads the manifest a plugin's code declares, which is unconfined or
+// not, and validates it.
+func inspect(ctx context.Context, plugin code, unconfined bool) (abi.Manifest, error) {
 	var raw json.RawMessage
 	if err := plugin.Call(ctx, Call{Method: abi.MethodManifest}, &raw); err != nil {
 		if reported, ok := errors.AsType[*abi.Error](err); ok {
@@ -185,7 +186,7 @@ func inspect(ctx context.Context, plugin code) (abi.Manifest, error) {
 		}
 		return abi.Manifest{}, err
 	}
-	return decodeManifest(raw)
+	return decodeManifest(raw, unconfined)
 }
 
 func (m *Module) checkABI(ctx context.Context) error {
@@ -293,8 +294,8 @@ func (c Call) request() (abi.Request, error) {
 // decodeResult decodes the plugin's response to a call of method into
 // result, or returns the failure the plugin reported, redacted by out.
 func decodeResult(out *output, method string, response abi.Response, result any) error {
-	if response.Error != nil {
-		return &abi.Error{Code: out.redact(response.Error.Code), Message: out.redact(response.Error.Message)}
+	if err := reportedFailure(out, response); err != nil {
+		return err
 	}
 	if result == nil {
 		return nil
@@ -305,6 +306,15 @@ func decodeResult(out *output, method string, response abi.Response, result any)
 		return refuse(CodeFailed, "The plugin's result does not match the "+method+" result.")
 	}
 	return nil
+}
+
+// reportedFailure returns the failure the plugin's response reports, redacted
+// by out, or nil when it reports none.
+func reportedFailure(out *output, response abi.Response) error {
+	if response.Error == nil {
+		return nil
+	}
+	return &abi.Error{Code: out.redact(response.Error.Code), Message: out.redact(response.Error.Message)}
 }
 
 // run serves one call on an instance within the runtime's limits.

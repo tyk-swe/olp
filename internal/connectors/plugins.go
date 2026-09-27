@@ -167,19 +167,24 @@ func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*P
 	if declared.Grant != nil {
 		authentication = AuthGrant
 	}
+	transport := "http"
+	if declared.CarriesTraffic {
+		transport = pluginTransport
+	}
 	p := Profile{
 		ID: declared.ID, Revision: plugin.Digest, Label: declared.Label, Kind: KindPlugin,
 		Dialect: declared.Dialect, DialectRevision: base.DialectRevision, Hosting: pluginHosting,
-		Authentication: []string{authentication}, Transport: "http", Operations: []string{"generation"},
+		Authentication: []string{authentication}, Transport: transport, Operations: []string{"generation"},
 		// Semantic headers and query settings belong to the dialect, so the
 		// provider configures them as it would for the dialect's direct hosting.
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
 		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil, OptionsSchema: optionsSchema(declared.Options),
 		// An adaptation that changes only authorization, address and declared
 		// headers serves strict routes. An envelope or rewrite changes the
-		// dialect's bodies, and forced streaming how non-streaming requests
-		// reach the upstream, so the profile serves transformed routes only.
-		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming,
+		// dialect's bodies, forced streaming how non-streaming requests reach
+		// the upstream, and a plugin that carries the traffic sees and may
+		// change all of it, so the profile serves transformed routes only.
+		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming && !declared.CarriesTraffic,
 	}
 	completeProfileMetadata(&p)
 	return &PluginProfile{profile: p, hosting: placed, declared: declared, origins: slices.Clone(origins), patterns: patterns}, nil
