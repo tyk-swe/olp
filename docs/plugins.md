@@ -231,8 +231,8 @@ anything. Compiling takes a few seconds for a typical Go plugin, so a process
 compiles ahead of use: as it starts, the plugins that providers' drafts or
 active revisions pin, and in control, a plugin as soon as an owner approves it.
 A plugin build no process prepared is compiled by its first call instead.
-Signing adds about a millisecond per request for a small body, growing with the
-body's size.
+Signing adds about two milliseconds per request for a small body, growing with
+the body's size.
 
 ## Grant enrollment
 

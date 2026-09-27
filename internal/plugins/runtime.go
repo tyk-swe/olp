@@ -63,8 +63,9 @@ var (
 
 // An Engine is how a runtime runs plugin code. For the reference plugin, a
 // 5 MiB Go module, the interpreter is ready in about 0.4 s and signs a small
-// request in about 10 ms; the compiler takes about 3 s and then signs in about
-// 1 ms. BenchmarkSign measures both.
+// request in about 15 ms; the compiler takes about 3 s and then signs in about
+// 2 ms, counting every frame towards the call's stack limit. BenchmarkSign
+// measures both.
 type Engine int
 
 const (
