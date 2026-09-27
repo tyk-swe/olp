@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiClient } from '$lib/api/client';
 import { ApiProblem } from '$lib/api/http';
 import { providerKeys } from './providerKeys';
 import type { Provider } from './api';
@@ -210,6 +211,7 @@ afterEach(async () => {
   client.clear();
   host.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function set(selector: string, value: string) {
@@ -456,6 +458,66 @@ describe('grant re-enrollment in the credential pool', () => {
       expect.objectContaining({ id: provider.id }),
       'slot-default'
     );
+  });
+
+  it('disables a slot whose grant lapsed, keeping its credential version rather than binding it again', async () => {
+    pooled = {
+      ...slots,
+      health: {
+        ...slots.health,
+        'slot-default': { ...slots.health['slot-default'], lapsed: true }
+      }
+    };
+    // Like OLP, which binds the credential version a slot write names and
+    // refuses a lapsed one, while a write naming none keeps the slot's.
+    let written: (typeof slots.items)[number] | undefined;
+    const put = vi.spyOn(apiClient, 'PUT').mockImplementation((async (
+      _path: string,
+      { body }: { body: { slot: (typeof slots.items)[number] } }
+    ) => {
+      written = body.slot;
+      if (body.slot.credential_version_id) {
+        const error = {
+          type: 'https://openllmproxy.dev/problems/credential_lapsed',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: "That credential version's grant lapsed. Enroll a new grant."
+        };
+        return { error, response: new Response(null, { status: 422 }) };
+      }
+      pooled = {
+        ...pooled,
+        etag: 'slots-v2',
+        items: [
+          { ...body.slot, credential_version_id: 'credential-1' },
+          slots.items[1]!
+        ]
+      };
+      return { data: pooled, response: new Response(null, { status: 200 }) };
+    }) as unknown as typeof apiClient.PUT);
+    await openProvider();
+    button(pool(), 'Edit')!.click();
+    flushSync();
+    const enabled = pool().querySelector<HTMLInputElement>(
+      'form input[type="checkbox"]'
+    )!;
+    enabled.checked = false;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    pool()
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => {
+      flushSync();
+      expect(pool().querySelector('li')?.textContent).toContain('Disabled');
+    });
+    expect(put).toHaveBeenCalledOnce();
+    expect(written).toMatchObject({
+      id: 'slot-default',
+      enabled: false,
+      credential_version_id: null
+    });
+    expect(pool().querySelector('form')).toBeNull();
+    expect(pool().querySelector('[role="alert"]')).toBeNull();
   });
 
   it('re-enrolls a lapsed slot by device authorization, showing its lapse beside the panel until the new version is staged', async () => {

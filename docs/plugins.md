@@ -379,7 +379,8 @@ even while its last access token would still work upstream:
   **grant lapsed** and the slot **Grant lapsed**, with **Re-enroll grant** as
   the slot's call to action.
 - Probing or validating a lapsed version, or binding one to a slot, is refused
-  with `422 credential_lapsed`.
+  with `422 credential_lapsed`. A slot write that names no credential version
+  keeps the slot's, so a lapsed slot can still be edited or disabled.
 
 Lapse is terminal: only a new grant enrollment replaces the grant. Re-enroll
 the slot's grant from the credential pool, by pasting back or by

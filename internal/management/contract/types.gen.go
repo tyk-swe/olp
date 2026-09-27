@@ -2122,9 +2122,11 @@ type CredentialResponse struct {
 
 // CredentialSlot defines model for CredentialSlot.
 type CredentialSlot struct {
-	AllowedApiKeys      *[]openapi_types.UUID                 `json:"allowed_api_keys,omitempty"`
-	AllowedModels       *[]string                             `json:"allowed_models,omitempty"`
-	AllowedRoutes       *[]string                             `json:"allowed_routes,omitempty"`
+	AllowedApiKeys *[]openapi_types.UUID `json:"allowed_api_keys,omitempty"`
+	AllowedModels  *[]string             `json:"allowed_models,omitempty"`
+	AllowedRoutes  *[]string             `json:"allowed_routes,omitempty"`
+
+	// CredentialVersionId The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 	Enabled             *bool                                 `json:"enabled,omitempty"`
 	Id                  *openapi_types.UUID                   `json:"id,omitempty"`

@@ -96,6 +96,10 @@
           body: {
             slot: {
               ...editing,
+              // A write that names no credential version keeps the slot's.
+              // Naming it would bind it again, which OLP refuses once it is
+              // revoked or its grant lapsed.
+              credential_version_id: null,
               allowed_models: parseManualModelNames(models),
               allowed_routes: parseManualModelNames(routes),
               allowed_api_keys: parseManualModelNames(keys)
