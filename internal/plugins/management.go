@@ -37,6 +37,9 @@ var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 type Management struct {
 	Access  *access.Server
 	Runtime *Runtime
+	// Host runs installed plugins' code for this process. Approving a plugin
+	// prepares its code there, as providers are about to use it.
+	Host *Host
 	// Unconfined is the deployment's unconfined tier, or nil where it does
 	// not enable one. No API path lists or permits unconfined plugins then.
 	Unconfined *Unconfined
@@ -202,7 +205,11 @@ func (s *Management) approve(r *http.Request) (access.Reply, error) {
 	if plugin, err = loadPlugin(r.Context(), tx, digest); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(plugin, plugin.Etag.String()))
+	reply, err := access.Commit(r, tx, access.Detail(plugin, plugin.Etag.String()))
+	if err == nil {
+		s.Host.Prepare(digest)
+	}
+	return reply, err
 }
 
 func (s *Management) uninstall(r *http.Request) (access.Reply, error) {

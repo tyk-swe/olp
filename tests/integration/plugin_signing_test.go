@@ -4,12 +4,14 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -19,6 +21,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 // signedUpstream is the fictional upstream of the reference plugin's signed
@@ -122,5 +127,40 @@ func TestPluginSigningHookSignsEveryUpstreamRequest(t *testing.T) {
 		if strings.Contains(fmt.Sprint(headers), pluginCredential) {
 			t.Fatalf("the credential travelled: %v", headers)
 		}
+	}
+}
+
+// A process prepares the plugins that providers pin as it starts, so their
+// first calls find them compiled; it leaves other plugins alone.
+func TestAProcessPreparesThePluginsProvidersPin(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	upstream := newSignedUpstream(t, pluginCredential)
+	pinned := installReferencePlugin(t, h, owner, upstream.pluginUpstream, "0.1.0")
+	unpinned := installReferencePlugin(t, h, owner, upstream.pluginUpstream, "0.2.0")
+	h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Reference signed", "credential": pluginCredential, "model": vendorModel,
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "static_credential", "profile_id": "reference-signed-chat", "profile_revision": pinned}}, idem(uuid.NewString()), 201)
+
+	engine, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close(context.Background())
+	host := plugins.NewHost(engine, nil, h.Pool)
+	defer host.Close(context.Background())
+	if err = host.PreparePinned(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Were a call to load a plugin now, it would find none installed.
+	if _, err = h.Pool.Exec(t.Context(), "DELETE FROM olp.plugins"); err != nil {
+		t.Fatal(err)
+	}
+	request := abi.SignRequest{Profile: "reference-signed-chat", Method: "POST", URL: upstream.URL + "/v1/chat/completions", Credential: pluginCredential}
+	provider := abi.Provider{Profile: "reference-signed-chat"}
+	if signed, err := host.Sign(t.Context(), pinned, provider, request, nil); err != nil || signed.Headers["X-Reference-Signature"] == "" {
+		t.Fatalf("the pinned plugin was not prepared: %+v %v", signed, err)
+	}
+	if _, err = host.Sign(t.Context(), unpinned, provider, request, nil); err == nil || !strings.Contains(err.Error(), plugins.CodeNotInstalled) {
+		t.Fatalf("a plugin no provider pins was prepared: %v", err)
 	}
 }

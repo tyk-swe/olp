@@ -205,7 +205,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		},
 	}).Register(mux)
 	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	(&plugins.Management{Access: server, Runtime: pluginRuntime, Unconfined: unconfined}).Register(mux)
+	(&plugins.Management{Access: server, Runtime: pluginRuntime, Host: pluginHost, Unconfined: unconfined}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
 	gw.Register(mux)

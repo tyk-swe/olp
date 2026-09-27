@@ -338,3 +338,21 @@ func BenchmarkSign(b *testing.B) {
 		}
 	}
 }
+
+// A prepared plugin's code is loaded before its first call, which then reads
+// nothing more.
+func TestAPreparedPluginIsLoadedBeforeItsFirstCall(t *testing.T) {
+	t.Parallel()
+	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+	host.Prepare(fixtureDigest)
+	for deadline := time.Now().Add(time.Minute); table.read() == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the plugin was not prepared")
+		}
+	}
+	// Were the call to load the plugin, it would find none installed.
+	table.install(nil)
+	if calls := signedCalls(t, host); calls != "1" || table.read() != 1 {
+		t.Fatalf("the prepared plugin signed %s calls after %d reads", calls, table.read())
+	}
+}

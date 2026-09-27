@@ -227,10 +227,12 @@ probe reports `upstream_unavailable`.
 
 Each process keeps the modules of the plugins it signs with compiled, by digest,
 with a bounded pool of instances, so no request compiles or instantiates
-anything. The first request a process signs with a plugin build loads the
-module from the database and compiles it, which takes a few seconds for a
-typical Go plugin. After that, signing adds about a millisecond per request for
-a small body, growing with the body's size.
+anything. Compiling takes a few seconds for a typical Go plugin, so a process
+compiles ahead of use: as it starts, the plugins that providers' drafts or
+active revisions pin, and in control, a plugin as soon as an owner approves it.
+A plugin build no process prepared is compiled by its first call instead.
+Signing adds about a millisecond per request for a small body, growing with the
+body's size.
 
 ## Grant enrollment
 

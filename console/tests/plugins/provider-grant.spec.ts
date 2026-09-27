@@ -116,16 +116,15 @@ test('an operator connects a provider by signing in to an upstream account', asy
   await page.getByRole('button', { name: /Save and sign in upstream/ }).click();
 
   // OLP shows the plugin's authorization URL, which the operator copies and
-  // opens to sign in upstream. The plugin's first call compiles its module,
-  // which takes seconds.
+  // opens to sign in upstream. Control compiled the plugin's module once the
+  // owner approved it.
   const enrollment = page.getByRole('region', { name: 'Sign in upstream' });
   const authorization = enrollment.getByRole('link', {
     name: 'Open authorization page'
   });
   await expect(authorization).toHaveAttribute(
     'href',
-    new RegExp(`^${upstream.authority}/authorize\\?`),
-    { timeout: 15_000 }
+    new RegExp(`^${upstream.authority}/authorize\\?`)
   );
   const authorizationURL = (await authorization.getAttribute('href'))!;
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
