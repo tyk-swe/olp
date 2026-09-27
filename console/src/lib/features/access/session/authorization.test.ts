@@ -21,7 +21,8 @@ const CAPABILITY_INVENTORY = {
   'playground.use': true,
   'settings.read': true,
   'settings.update': true,
-  'pricing.update': true
+  'pricing.update': true,
+  'plugins.manage': true
 } satisfies Record<Capability, true>;
 const CAPABILITIES = Object.keys(CAPABILITY_INVENTORY) as Capability[];
 
