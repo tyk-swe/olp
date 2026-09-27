@@ -21,7 +21,8 @@ export default [
       'node_modules/**',
       'playwright-report/**',
       'test-results/**',
-      'src/lib/api/schema.d.ts'
+      'src/lib/api/schema.d.ts',
+      'src/lib/api/requirements.ts'
     ]
   },
   ...svelte.configs['flat/recommended'],

@@ -11,7 +11,8 @@ const session: AuthenticatedSession = {
     email: 'operator@example.com',
     display_name: 'Operator',
     role: 'operator',
-    access_scope: 'global' as const
+    access_scope: 'global' as const,
+    operations: []
   },
   csrf_token: 'csrf-token'
 };

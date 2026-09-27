@@ -7,7 +7,11 @@ type Schemas = components['schemas'];
 export type SetupStatus = Schemas['SetupStatus'];
 export type CreateOwnerInput = Schemas['SetupRequest'];
 
-type SetupUser = Schemas['UserResponse'] & { role: 'owner' };
+type SetupUser = Schemas['UserResponse'] & {
+  role: 'owner';
+  access_scope: 'global';
+  operations: readonly Schemas['ManagementOperation'][];
+};
 
 export type CreateOwnerResponse = Omit<Schemas['SessionResponse'], 'user'> & {
   user: SetupUser;
@@ -51,7 +55,9 @@ export async function createOwner(
     typeof value.user?.id !== 'string' ||
     typeof value.user?.email !== 'string' ||
     typeof value.user?.display_name !== 'string' ||
-    value.user?.role !== 'owner'
+    value.user?.role !== 'owner' ||
+    value.user?.access_scope !== 'global' ||
+    !Array.isArray(value.operations)
   ) {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
@@ -60,5 +66,8 @@ export async function createOwner(
     });
   }
 
-  return value as CreateOwnerResponse;
+  return {
+    ...value,
+    user: { ...(value.user as SetupUser), operations: value.operations }
+  };
 }

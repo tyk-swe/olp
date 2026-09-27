@@ -99,6 +99,9 @@ export async function revokeSession(id: string): Promise<void> {
 export type ManagementToken = Schemas['ManagementTokenResponse'];
 export type ManagementTokenSecret = Schemas['CreateManagementTokenResponse'];
 
+export type ManagementTokenScope = Schemas['ManagementTokenScope'];
+
+// Every ManagementTokenScope, in the order the token form presents them.
 export const MANAGEMENT_TOKEN_SCOPES = [
   'read',
   'access_read',
@@ -108,9 +111,7 @@ export const MANAGEMENT_TOKEN_SCOPES = [
   'keys',
   'playground',
   'usage'
-] as const;
-
-export type ManagementTokenScope = (typeof MANAGEMENT_TOKEN_SCOPES)[number];
+] as const satisfies readonly ManagementTokenScope[];
 
 export async function listManagementTokenPage(
   cursor?: string,

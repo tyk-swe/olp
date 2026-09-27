@@ -119,7 +119,7 @@
       </a>
 
       <div class="primary-nav">
-        <Navigation role={user.role} variant="bar" />
+        <Navigation grant={user} variant="bar" />
       </div>
 
       <div class="topbar-actions">
@@ -150,7 +150,7 @@
             <a href={resolve('/settings/profile')} onclick={closeAccountMenu}
               >Personal profile</a
             >
-            {#if can(user.role, 'settings.read')}<a
+            {#if can(user, 'settings.read')}<a
                 href={resolve('/settings')}
                 onclick={closeAccountMenu}>Installation settings</a
               >{/if}
@@ -167,7 +167,7 @@
       </div>
     </div>
 
-    <Navigation role={user.role} variant="subnav" />
+    <Navigation grant={user} variant="subnav" />
   </header>
 
   <main id="main-content" tabindex="-1">
@@ -215,7 +215,7 @@
       >
     </div>
     <Navigation
-      role={user.role}
+      grant={user}
       label="Mobile primary"
       onNavigate={closeNavigation}
     />

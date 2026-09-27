@@ -33,6 +33,7 @@ Thumbs.db
 /.claude/settings.local.json
 
 /console/src/lib/api/schema.d.ts
+/console/src/lib/api/requirements.ts
 /.local/
 
 **/test-results/

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { setupProgress } from './setupProgress';
+import { operationsFor } from '$lib/features/access/session/test/grants';
+
+function grant(role: 'owner' | 'operator' | 'developer' | 'viewer') {
+  return { operations: operationsFor(role), access_scope: 'global' as const };
+}
 
 const empty = {
   loading: false,
@@ -8,7 +13,7 @@ const empty = {
   enabledModels: false,
   activeRoute: false,
   apiKey: false,
-  role: 'owner' as const
+  grant: grant('owner')
 };
 const ready = {
   ...empty,
@@ -59,7 +64,7 @@ describe('setup guidance', () => {
   );
 
   it('offers only permitted actions and retains viewing links for blocked steps', () => {
-    const developer = setupProgress({ ...empty, role: 'developer' });
+    const developer = setupProgress({ ...empty, grant: grant('developer') });
     expect(developer.nextStep?.href).toBe('/api-keys/new');
     expect(developer.steps[1]).toMatchObject({
       href: '/providers',
@@ -67,7 +72,7 @@ describe('setup guidance', () => {
       current: true
     });
     expect(developer.steps[1].permissionNote).toContain('owner or operator');
-    const viewer = setupProgress({ ...empty, role: 'viewer' });
+    const viewer = setupProgress({ ...empty, grant: grant('viewer') });
     expect(viewer.nextStep).toBeUndefined();
     expect(viewer.steps[4].href).toBe('/api-keys');
   });
@@ -77,13 +82,18 @@ describe('setup guidance', () => {
       '/api-keys/new'
     );
     expect(
-      setupProgress({ ...ready, apiKey: false, role: 'viewer' }).nextStep
+      setupProgress({ ...ready, apiKey: false, grant: grant('viewer') })
+        .nextStep
     ).toBeUndefined();
   });
 });
 
 it('links completed steps to their inventory without asking for more setup', () => {
-  const progress = setupProgress({ ...ready, apiKey: false, role: 'viewer' });
+  const progress = setupProgress({
+    ...ready,
+    apiKey: false,
+    grant: grant('viewer')
+  });
   expect(progress.steps[1]).toMatchObject({
     href: '/providers',
     complete: true,

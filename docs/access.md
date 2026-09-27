@@ -172,6 +172,10 @@ Every management route is authorized before its handler runs, from the
 security requirement the [management contract](../openapi/management.json)
 declares for it; see
 [the decision](adr/0006-management-routes-are-authorized-from-the-contract.md).
+The session response lists the operations the member may perform, and the
+console offers an action only when the requirement of the call it leads to
+admits the member, so an assigned member never sees installation pages it
+cannot open.
 Protected writes reauthorize inside their feature transaction. Access mutations
 take the installation row lock so ownership checks and writes commit together;
 password hashing, OIDC discovery, and token verification run outside that lock.

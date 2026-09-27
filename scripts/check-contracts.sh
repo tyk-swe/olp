@@ -14,7 +14,9 @@ trap 'rm -rf -- "$scratch"' EXIT
 make api
 cp internal/management/contract/types.gen.go "$scratch/types.gen.go"
 cp console/src/lib/api/schema.d.ts "$scratch/schema.d.ts"
+cp console/src/lib/api/requirements.ts "$scratch/requirements.ts"
 make api
 cmp "$scratch/types.gen.go" internal/management/contract/types.gen.go
 cmp "$scratch/schema.d.ts" console/src/lib/api/schema.d.ts
+cmp "$scratch/requirements.ts" console/src/lib/api/requirements.ts
 git diff --exit-code -- internal/management/contract/types.gen.go

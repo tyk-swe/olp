@@ -17,7 +17,8 @@ function captureSimulation() {
       email: 'operator@example.com',
       display_name: 'Operator',
       role: 'operator',
-      access_scope: 'global'
+      access_scope: 'global',
+      operations: []
     },
     csrf_token: 'csrf-routing-token'
   });

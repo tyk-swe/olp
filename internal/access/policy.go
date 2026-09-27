@@ -166,6 +166,18 @@ func (p Principal) Authorize(op Operation) error {
 	return nil
 }
 
+// Operations lists every operation p may perform, which the console uses to
+// show only what the server would admit.
+func (p Principal) Operations() []Operation {
+	var ops []Operation
+	for _, op := range Operations() {
+		if p.Authorize(op) == nil {
+			ops = append(ops, op)
+		}
+	}
+	return ops
+}
+
 // Actor is who an audit record attributes an action to: a member, a
 // management token, or the installation itself.
 type Actor struct {

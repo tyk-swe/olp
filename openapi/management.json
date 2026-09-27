@@ -2271,17 +2271,7 @@
           },
           "scopes": {
             "items": {
-              "enum": [
-                "read",
-                "access_read",
-                "access",
-                "settings",
-                "configure",
-                "keys",
-                "playground",
-                "usage"
-              ],
-              "type": "string"
+              "$ref": "#/components/schemas/ManagementTokenScope"
             },
             "type": "array"
           }
@@ -3169,6 +3159,39 @@
         ],
         "type": "object"
       },
+      "ManagementOperation": {
+        "description": "A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access",
+          "self",
+          "manage_sessions",
+          "manage_tokens",
+          "manage_projects",
+          "local_login"
+        ],
+        "type": "string"
+      },
+      "ManagementTokenScope": {
+        "description": "A management operation that may be delegated to a management token.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access"
+        ],
+        "type": "string"
+      },
       "ManagementTokenResponse": {
         "properties": {
           "all_projects": {
@@ -3219,7 +3242,7 @@
           },
           "scopes": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ManagementTokenScope"
             },
             "type": "array"
           }
@@ -8596,6 +8619,13 @@
           "installation_name": {
             "type": "string"
           },
+          "operations": {
+            "description": "The management operations the signed-in member may perform now; the console shows only what the server would admit.",
+            "items": {
+              "$ref": "#/components/schemas/ManagementOperation"
+            },
+            "type": "array"
+          },
           "user": {
             "$ref": "#/components/schemas/UserResponse"
           }
@@ -8603,7 +8633,8 @@
         "required": [
           "user",
           "installation_name",
-          "csrf_token"
+          "csrf_token",
+          "operations"
         ],
         "type": "object"
       },

@@ -231,28 +231,28 @@ func TestOperationNamesRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTokenScopesMatchTheContract(t *testing.T) {
+func TestOperationsMatchTheContract(t *testing.T) {
 	var document struct {
 		Components struct {
 			Schemas map[string]struct {
-				Properties map[string]struct {
-					Items struct {
-						Enum []string `json:"enum"`
-					} `json:"items"`
-				} `json:"properties"`
+				Enum []string `json:"enum"`
 			} `json:"schemas"`
 		} `json:"components"`
 	}
 	if err := json.Unmarshal(openapi.Document, &document); err != nil {
 		t.Fatal(err)
 	}
-	var names []string
-	for _, op := range TokenScopes() {
-		names = append(names, op.String())
+	names := func(ops []Operation) []string {
+		var out []string
+		for _, op := range ops {
+			out = append(out, op.String())
+		}
+		return out
 	}
-	enum := document.Components.Schemas["CreateManagementTokenRequest"].Properties["scopes"].Items.Enum
-	if !slices.Equal(slices.Sorted(slices.Values(enum)), slices.Sorted(slices.Values(names))) {
-		t.Fatalf("the contract offers token scopes %v, the policy delegates %v", enum, names)
+	for schema, ops := range map[string][]Operation{"ManagementOperation": Operations(), "ManagementTokenScope": TokenScopes()} {
+		if enum := document.Components.Schemas[schema].Enum; !slices.Equal(enum, names(ops)) {
+			t.Errorf("the contract's %s lists %v, the policy %v", schema, enum, names(ops))
+		}
 	}
 }
 

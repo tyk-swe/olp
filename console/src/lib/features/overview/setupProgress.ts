@@ -1,7 +1,7 @@
 import {
   can,
   type Capability,
-  type FixedRole
+  type Grant
 } from '$lib/features/access/session/authorization';
 
 type SetupInput = {
@@ -11,7 +11,7 @@ type SetupInput = {
   enabledModels: boolean;
   activeRoute: boolean;
   apiKey: boolean;
-  role: FixedRole | null;
+  grant: Grant | null;
 };
 
 const definitions = [
@@ -72,7 +72,7 @@ export function setupProgress(input: SetupInput) {
   const currentIndex = completed.findIndex((value) => !value);
   const steps = definitions.map((definition, index) => {
     const allowed =
-      !('capability' in definition) || can(input.role, definition.capability);
+      !('capability' in definition) || can(input.grant, definition.capability);
     return {
       label: definition.label,
       description: definition.description,

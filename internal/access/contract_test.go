@@ -69,6 +69,8 @@ type archetype struct {
 	CreatorRole string   `json:"creator_role,omitempty"`
 	Global      bool     `json:"global"`
 	Scopes      []string `json:"scopes,omitempty"`
+	// Operations is what the principal holds, as a session reports it.
+	Operations []string `json:"operations"`
 }
 
 func (a archetype) principal() Principal {
@@ -108,6 +110,12 @@ func TestRouteAuthorizationMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	callers := archetypes()
+	for i := range callers {
+		callers[i].Operations = []string{}
+		for _, op := range callers[i].principal().Operations() {
+			callers[i].Operations = append(callers[i].Operations, op.String())
+		}
+	}
 	routes := map[string]string{}
 	for pattern, req := range requirements {
 		var row strings.Builder

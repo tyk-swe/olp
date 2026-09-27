@@ -1,17 +1,17 @@
 {
   "archetypes": [
-    {"name":"owner global","kind":"user","role":"owner","global":true},
-    {"name":"owner assigned","kind":"user","role":"owner","global":false},
-    {"name":"operator global","kind":"user","role":"operator","global":true},
-    {"name":"operator assigned","kind":"user","role":"operator","global":false},
-    {"name":"developer global","kind":"user","role":"developer","global":true},
-    {"name":"developer assigned","kind":"user","role":"developer","global":false},
-    {"name":"viewer global","kind":"user","role":"viewer","global":true},
-    {"name":"viewer assigned","kind":"user","role":"viewer","global":false},
-    {"name":"token every scope, owner global","kind":"machine","creator_role":"owner","global":true,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"]},
-    {"name":"token every scope, owner assigned","kind":"machine","creator_role":"owner","global":false,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"]},
-    {"name":"token every scope, operator global","kind":"machine","creator_role":"operator","global":true,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"]},
-    {"name":"token read+configure, owner global","kind":"machine","creator_role":"owner","global":true,"scopes":["read","configure"]}
+    {"name":"owner global","kind":"user","role":"owner","global":true,"operations":["read","usage","keys","playground","configure","settings","access_read","access","self","manage_sessions","manage_tokens","manage_projects","local_login"]},
+    {"name":"owner assigned","kind":"user","role":"owner","global":false,"operations":["read","usage","keys","playground","configure","self"]},
+    {"name":"operator global","kind":"user","role":"operator","global":true,"operations":["read","usage","keys","playground","configure","settings","access_read","self"]},
+    {"name":"operator assigned","kind":"user","role":"operator","global":false,"operations":["read","usage","keys","playground","configure","self"]},
+    {"name":"developer global","kind":"user","role":"developer","global":true,"operations":["read","usage","keys","playground","self"]},
+    {"name":"developer assigned","kind":"user","role":"developer","global":false,"operations":["read","usage","keys","playground","self"]},
+    {"name":"viewer global","kind":"user","role":"viewer","global":true,"operations":["read","usage","self"]},
+    {"name":"viewer assigned","kind":"user","role":"viewer","global":false,"operations":["read","usage","self"]},
+    {"name":"token every scope, owner global","kind":"machine","creator_role":"owner","global":true,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"],"operations":["read","usage","keys","playground","configure","settings","access_read","access"]},
+    {"name":"token every scope, owner assigned","kind":"machine","creator_role":"owner","global":false,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"],"operations":["read","usage","keys","playground","configure"]},
+    {"name":"token every scope, operator global","kind":"machine","creator_role":"operator","global":true,"scopes":["read","usage","keys","playground","configure","settings","access_read","access"],"operations":["read","usage","keys","playground","configure","settings","access_read"]},
+    {"name":"token read+configure, owner global","kind":"machine","creator_role":"owner","global":true,"scopes":["read","configure"],"operations":["read","configure"]}
   ],
   "routes": {
     "DELETE /api/v1/invitations/{invitation_id}": "Y-------Y---",

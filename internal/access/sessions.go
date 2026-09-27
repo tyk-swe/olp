@@ -13,7 +13,11 @@ import (
 func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
 	var name string
 	err := q.QueryRow(r.Context(), "SELECT name FROM olp.installation WHERE singleton").Scan(&name)
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token)}, err
+	operations := []string{}
+	for _, op := range (Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
+		operations = append(operations, op.String())
+	}
+	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token), "operations": operations}, err
 }
 func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
 	token := secrets.Token()
