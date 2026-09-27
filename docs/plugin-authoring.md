@@ -491,8 +491,9 @@ complete fails with an `*plugin.Error`: `origin_not_approved`, `http_failed` or
 
 ## What a plugin can reach
 
-OLP runs a plugin confined, within 64 MiB of memory and 10 seconds per call. It
-grants only:
+OLP runs a plugin confined, within 64 MiB of memory, an 8 MiB stack and 10
+seconds per call, on WebAssembly 2.0 without reference types (the Go toolchain
+uses none). It grants only:
 
 - a clock: `time.Now` reads the host's wall and monotonic clocks;
 - randomness: `crypto/rand` reads the host's cryptographic source;

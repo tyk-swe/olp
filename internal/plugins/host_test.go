@@ -203,9 +203,9 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 		// Time enough to instantiate the module afresh under the race
 		// detector; generous time elsewhere, so the memory limit is what
 		// stops the call.
-		"time":     {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Instances: 1}, true},
-		"memory":   {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}, true},
-		"reported": {"fail:" + fixtureSecret, "fixture_failed", Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}, false},
+		"time":     {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}, true},
+		"memory":   {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, true},
+		"reported": {"fail:" + fixtureSecret, "fixture_failed", Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

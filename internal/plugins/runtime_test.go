@@ -33,6 +33,17 @@ func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
 	return r
 }
 
+// newEngineRuntime starts a runtime on engine that discards plugin output.
+func newEngineRuntime(t *testing.T, engine Engine, limits Limits) *Runtime {
+	t.Helper()
+	r, err := NewRuntime(t.Context(), engine, limits, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close(context.Background()) })
+	return r
+}
+
 func fixture(t *testing.T, behaviour string) []byte {
 	return testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
 }
@@ -137,8 +148,8 @@ func TestCallPastItsLimitsFailsCleanly(t *testing.T) {
 	}{
 		// Time enough to instantiate the module under the race detector;
 		// generous time elsewhere, so the memory limit is what stops the call.
-		"time":   {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Instances: 1}},
-		"memory": {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}},
+		"time":   {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}},
+		"memory": {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

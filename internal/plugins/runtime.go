@@ -26,6 +26,7 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -38,13 +39,16 @@ type Limits struct {
 	// Time bounds one call, including waiting for an instance and
 	// instantiating the module for it.
 	Time time.Duration
+	// Stack bounds the stack of one call, in bytes: the parameters, locals
+	// and operands of every frame its plugin code has entered and not left.
+	Stack uint32
 	// Instances bounds how many instances of one module exist at once, and so
 	// how many of its calls run at once.
 	Instances int
 }
 
 // DefaultLimits are the limits OLP runs plugins within.
-var DefaultLimits = Limits{Memory: 64 << 20, Time: 10 * time.Second, Instances: 4}
+var DefaultLimits = Limits{Memory: 64 << 20, Time: 10 * time.Second, Stack: 8 << 20, Instances: 4}
 
 // maxMessage bounds every message a plugin returns or sends OLP. OLP's own
 // requests carry what they must, such as the body a sign request signs.
@@ -88,7 +92,11 @@ func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Log
 		// interpreter.
 		config = wazero.NewRuntimeConfig()
 	}
-	config = config.WithMemoryLimitPages(limits.Memory / wasmPage).WithCloseOnContextDone(true)
+	// Without reference types, a module has at most one table, which never
+	// grows, so declare bounds every table (declared.go).
+	config = config.WithCoreFeatures(api.CoreFeaturesV2 &^ api.CoreFeatureReferenceTypes).
+		WithMemoryLimitPages(limits.Memory / wasmPage).
+		WithCloseOnContextDone(true)
 	r := &Runtime{engine: wazero.NewRuntimeWithConfig(ctx, config), limits: limits, log: log}
 	// WASI supplies the clock, randomness and output streams. With no
 	// preopened directories, arguments or environment it reaches nothing else.
@@ -139,9 +147,14 @@ type instance struct {
 // this ABI version.
 func (r *Runtime) Load(ctx context.Context, module []byte) (*Module, error) {
 	sum := sha256.Sum256(module)
-	compiled, err := r.engine.CompileModule(ctx, module)
+	declared, err := declare(module)
 	if err != nil {
-		return nil, refuse(CodeModuleInvalid, "The upload is not a WebAssembly module OLP can run.")
+		return nil, err
+	}
+	// Every frame counts towards its call's stack limit.
+	compiled, err := r.engine.CompileModule(experimental.WithFunctionListenerFactory(ctx, frames(declared)), module)
+	if err != nil {
+		return nil, errNotModule
 	}
 	m := &Module{Digest: hex.EncodeToString(sum[:]), runtime: r, compiled: compiled, slots: make(chan struct{}, r.limits.Instances)}
 	if err = m.checkABI(ctx); err != nil {
@@ -325,6 +338,7 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	out := newOutput(m.runtime.log.With("plugin_digest", m.Digest, "plugin_method", call.Method), call.Secrets)
 	defer out.close()
 	ctx = call.context(ctx, out)
+	ctx = context.WithValue(ctx, stackKey{}, &stack{limit: uint64(m.runtime.limits.Stack) / 8})
 	instance, err := m.acquire(ctx, out)
 	if err == nil {
 		err = use(ctx, instance.module)
@@ -339,8 +353,11 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	if parent.Err() != nil {
 		return parent.Err()
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
 		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", m.runtime.limits.Time))
+	case errors.Is(err, errStackExhausted):
+		return refuse(CodeFailed, fmt.Sprintf("The plugin exhausted its %d KiB stack limit.", m.runtime.limits.Stack>>10))
 	}
 	return refuse(CodeFailed, "The plugin stopped: it trapped, exited or exhausted its memory limit.")
 }

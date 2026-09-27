@@ -36,7 +36,7 @@ plugin limits and reads the manifest it declares. It refuses the upload with a
 
 | Code | Reason |
 | --- | --- |
-| `plugin_module_invalid` | Not WebAssembly, not a plugin, a WASI command instead of a reactor, or it imports something OLP does not provide. |
+| `plugin_module_invalid` | Not WebAssembly, not a plugin, a WASI command instead of a reactor, it imports something OLP does not provide, or it declares more than the runtime allows (see [Confinement and limits](#confinement-and-limits)). |
 | `plugin_abi_unsupported` | Built for another plugin ABI version. During 0.x the ABI carries no compatibility promise ([ADR 0004](adr/0004-no-compatibility-promises-during-0x.md)); rebuild the plugin with the SDK of this OLP version. |
 | `plugin_manifest_invalid` | The manifest is invalid or declares something this OLP does not understand. The problem's `errors` names the field, such as `manifest.origins[0]` or `manifest.profiles[0].hosting.headers.Authorization`. |
 | `plugin_dialect_unknown` | A declared profile names a dialect plugin profiles can't serve, such as `manifest.profiles[0].dialect`. |
@@ -443,10 +443,19 @@ Plugin calls run on instances of the module within these limits:
 | Limit | Value |
 | --- | --- |
 | Linear memory per instance | 64 MiB |
+| Stack per call: parameters, locals and operands of every frame entered | 8 MiB |
 | Instances of a module at once | 4 |
 | Time per call, including waiting for and instantiating an instance | 10 seconds |
 | Message from the plugin | 1 MiB |
 | Log output per call | 16 KiB, 2 KiB per message or attribute |
+
+The runtime runs WebAssembly 2.0 without reference types, so a module has at
+most one table, which never grows. Before compiling a module, OLP refuses one
+whose table exceeds 65,536 elements, a function with more than 4,096 locals or
+more than 4,194,304 locals in all, or one importing anything but functions:
+wazero allocates what a module declares before any limit applies, so these
+bounds keep an upload from exhausting OLP's memory while it is installed. A
+module that the Go toolchain builds stays far within them.
 
 A call takes an idle instance, or instantiates the module when none is idle,
 and returns it for later calls. A call that exceeds a limit fails with
