@@ -13,7 +13,10 @@ import HealthPageProbe from './test/HealthPageProbe.svelte';
 const role = vi.hoisted(() => ({ globalScope: true }));
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
-  useRole: () => role
+  useRole: () => ({
+    globalScope: role.globalScope,
+    allows: () => role.globalScope
+  })
 }));
 vi.mock('$lib/features/runtime/health/api', () => ({
   getReadiness: vi.fn(),
@@ -66,10 +69,12 @@ it('reads installation-wide runtime generations for global members', async () =>
   await vi.waitFor(() => expect(listRuntimeGenerations).toHaveBeenCalled());
 });
 
-it('never requests runtime generations for assigned members', async () => {
+it('never requests installation-wide panels for assigned members', async () => {
   role.globalScope = false;
   component = mount(HealthPageProbe, { target: host, props: { client } });
   await vi.waitFor(() => expect(listProviderHealth).toHaveBeenCalled());
   expect(listRuntimeGenerations).not.toHaveBeenCalled();
+  expect(listRequestMetadataGatewayEpochs).not.toHaveBeenCalled();
   expect(host.textContent).not.toContain('Runtime generations');
+  expect(host.textContent).not.toContain('Unresolved gateway epochs');
 });

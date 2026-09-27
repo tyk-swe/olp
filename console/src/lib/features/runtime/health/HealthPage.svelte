@@ -21,9 +21,12 @@
   import ReadinessPanels from '$lib/features/runtime/health/ReadinessPanels.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
-  // Runtime generations span every project, so only installation-wide members
-  // can read them.
+  // Runtime generations and unresolved gateway epochs are installation-wide
+  // reads, so they run only for principals the contract admits.
   const access = useRole();
+  const epochsAllowed = $derived(
+    access.allows('GET /api/v1/request-metadata/gateway-epochs')
+  );
   const generationPagination = $state(emptyCursorHistory());
   const epochPagination = $state(emptyCursorHistory());
   const refetchInterval = 15_000;
@@ -64,14 +67,17 @@
     queryFn: () =>
       listRequestMetadataGatewayEpochs('unresolved', epochPagination.cursor),
     placeholderData: (previous) => previous,
+    enabled: epochsAllowed,
     refetchInterval
   }));
 
-  const panels = $derived(
-    access.globalScope
-      ? [readiness, providers, persistence, generations, epochs]
-      : [readiness, providers, persistence, epochs]
-  );
+  const panels = $derived([
+    readiness,
+    providers,
+    persistence,
+    ...(access.globalScope ? [generations] : []),
+    ...(epochsAllowed ? [epochs] : [])
+  ]);
   const fetching = $derived(panels.some((panel) => panel.isFetching));
   const checkedAt = $derived.by(() => {
     const stamps = panels
@@ -128,7 +134,9 @@
     {persistence}
   />
 
-  <GatewayEpochsPanel {epochs} pagination={epochPagination} {readiness} />
+  {#if epochsAllowed}
+    <GatewayEpochsPanel {epochs} pagination={epochPagination} {readiness} />
+  {/if}
 
   <ProviderHealthPanel {providers} bind:windowMinutes />
 {/if}
