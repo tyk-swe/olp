@@ -31,11 +31,7 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 	return id, nil
 }
 
-func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) networkCredentials(r *http.Request, principal access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -58,7 +54,7 @@ func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) {
+func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input rotateRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
@@ -72,7 +68,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Principal(r, tx, access.Configure)
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -111,7 +107,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) revokeNetworkCredential(r *http.Request) (access.Reply, error) {
+func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.network_credential.revoke", func(ctx context.Context, tx pgx.Tx, principal access.Principal, current *record) (access.Reply, error) {
 		id, err := access.IDParam(r, "credential_id")
 		if err != nil {

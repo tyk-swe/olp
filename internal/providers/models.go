@@ -78,11 +78,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 	return current, credential, nil
 }
 
-func (s *Server) probe(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -116,7 +112,7 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Principal(r, tx, access.Configure)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return err
 	}
@@ -151,12 +147,8 @@ type discoverRequest struct {
 	} `json:"models"`
 }
 
-func (s *Server) discover(r *http.Request) (access.Reply, error) {
+func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -213,7 +205,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, access.Configure)
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -262,11 +254,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) models(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -354,7 +342,7 @@ func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	return out, nil
 }
 
-func (s *Server) setModel(r *http.Request) (access.Reply, error) {
+func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -373,7 +361,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -430,15 +418,11 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) certify(r *http.Request) (access.Reply, error) {
+func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	r = r.WithContext(ctx)
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -499,7 +483,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, access.Configure)
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}

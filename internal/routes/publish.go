@@ -47,7 +47,7 @@ func check(d *draft, live map[string]*resolved) error {
 	return nil
 }
 
-func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -58,7 +58,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -102,7 +102,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, access.Detail(current.summary(), etag))
 }
 
-func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -313,11 +313,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	return &r, nil
 }
 
-func (s *Server) routes(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) routes(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -350,11 +346,7 @@ func (s *Server) routes(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) route(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -373,11 +365,7 @@ func (s *Server) route(r *http.Request) (access.Reply, error) {
 	return access.OK(item), nil
 }
 
-func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -423,11 +411,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -450,7 +434,7 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	return access.OK(v.json(live)), nil
 }
 
-func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
+func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
@@ -461,7 +445,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -504,11 +488,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -577,7 +557,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 	}), nil
 }
 
-func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
@@ -589,7 +569,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}

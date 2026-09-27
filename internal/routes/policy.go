@@ -102,11 +102,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	err = json.Unmarshal(data, &p)
 	return &p, etag, err
 }
-func (s *Server) policy(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) policy(r *http.Request, p access.Principal) (access.Reply, error) {
 	scope, id, _, err := policyScope(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -124,7 +120,7 @@ func (s *Server) policy(r *http.Request) (access.Reply, error) {
 	}
 	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag}, etag), nil
 }
-func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
+func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
 	scope, id, operation, err := policyScope(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -142,8 +138,11 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := a.Principal(r, tx, operation)
+	principal, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = principal.Authorize(operation); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, principal, nil)

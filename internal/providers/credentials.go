@@ -17,11 +17,7 @@ import (
 
 const maxSlots = 64
 
-func (s *Server) credentials(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -58,7 +54,7 @@ type rotateRequest struct {
 // rotate validates a new credential against the upstream, records it as the
 // next version, and selects it for the draft. Published revisions keep the
 // version they were activated with.
-func (s *Server) rotate(r *http.Request) (access.Reply, error) {
+func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -76,7 +72,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -140,7 +136,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, access.Configure)
+	p, err = a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -186,7 +182,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 
 // revoke marks a credential version unusable everywhere: drafts, published
 // revisions, and gateways that learn it through the authority refresh.
-func (s *Server) revoke(r *http.Request) (access.Reply, error) {
+func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.credential.revoke", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
 		if err != nil {
@@ -353,11 +349,7 @@ func (s *Server) quotaUnavailable(err error) {
 	log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
-func (s *Server) slots(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -419,7 +411,7 @@ func validSlot(in *slotInput, slotID string) error {
 	return nil
 }
 
-func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
+func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -446,7 +438,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -552,12 +544,8 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
+func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -621,7 +609,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if p, err = a.Principal(r, tx, access.Configure); err != nil {
+	if p, err = a.Reauthorize(r, tx); err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)

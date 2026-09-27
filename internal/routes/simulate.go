@@ -68,11 +68,7 @@ func validTuple(operation, surface, mode string) error {
 	return nil
 }
 
-func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -219,11 +215,7 @@ type simulationRequest struct {
 
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
-func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Reply, error) {
 	var input simulationRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
@@ -339,25 +331,24 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 
 // Register mounts the route surface.
 func (s *Server) Register(mux *http.ServeMux) {
-	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v1/route-drafts", h(s.drafts))
-	mux.HandleFunc("POST /api/v1/route-drafts", h(s.createDraft))
-	mux.HandleFunc("GET /api/v1/route-drafts/{draft_id}", h(s.draft))
-	mux.HandleFunc("PUT /api/v1/route-drafts/{draft_id}", h(s.replaceDraft))
-	mux.HandleFunc("DELETE /api/v1/route-drafts/{draft_id}", h(s.deleteDraft))
-	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/validate", h(s.validateDraft))
-	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/activate", h(s.activateDraft))
-	mux.HandleFunc("POST /api/v1/route-drafts/{draft_id}/simulate", s.Access.HandleWith(1<<20, s.simulateDraft))
-	mux.HandleFunc("GET /api/v1/routes", h(s.routes))
-	mux.HandleFunc("GET /api/v1/routes/{route_id}", h(s.route))
-	mux.HandleFunc("POST /api/v1/routes/{route_id}/retire", h(s.retireRoute))
-	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions", h(s.revisions))
-	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/diff", h(s.revisionDiff))
-	mux.HandleFunc("GET /api/v1/routes/{route_id}/revisions/{revision_id}", h(s.revision))
-	mux.HandleFunc("POST /api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
-	mux.HandleFunc("GET /api/v1/routing-policies/{scope}/{id}", h(s.policy))
-	mux.HandleFunc("PUT /api/v1/routing-policies/{scope}/{id}", h(s.putPolicy))
-	mux.HandleFunc("POST /api/v1/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))
+	s.Access.Route(mux, "GET /api/v1/route-drafts", s.drafts)
+	s.Access.Route(mux, "POST /api/v1/route-drafts", s.createDraft)
+	s.Access.Route(mux, "GET /api/v1/route-drafts/{draft_id}", s.draft)
+	s.Access.Route(mux, "PUT /api/v1/route-drafts/{draft_id}", s.replaceDraft)
+	s.Access.Route(mux, "DELETE /api/v1/route-drafts/{draft_id}", s.deleteDraft)
+	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/validate", s.validateDraft)
+	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/activate", s.activateDraft)
+	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/simulate", s.simulateDraft, access.MaxBody(1<<20))
+	s.Access.Route(mux, "GET /api/v1/routes", s.routes)
+	s.Access.Route(mux, "GET /api/v1/routes/{route_id}", s.route)
+	s.Access.Route(mux, "POST /api/v1/routes/{route_id}/retire", s.retireRoute)
+	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions", s.revisions)
+	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions/diff", s.revisionDiff)
+	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions/{revision_id}", s.revision)
+	s.Access.Route(mux, "POST /api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevision)
+	s.Access.Route(mux, "GET /api/v1/routing-policies/{scope}/{id}", s.policy)
+	s.Access.Route(mux, "PUT /api/v1/routing-policies/{scope}/{id}", s.putPolicy)
+	s.Access.Route(mux, "POST /api/v1/routing/simulate", s.simulateRouting, access.MaxBody(1<<20))
 }
 
 func simulationRoute(id, slug string, fidelity runtime.RouteFidelity, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {

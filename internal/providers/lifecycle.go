@@ -49,11 +49,7 @@ func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, sec
 	return id, version, err
 }
 
-func (s *Server) providers(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) providers(r *http.Request, principal access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -81,11 +77,7 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 	return access.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
-func (s *Server) provider(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) provider(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -96,7 +88,7 @@ func (s *Server) provider(r *http.Request) (access.Reply, error) {
 	return s.detailReply(r.Context(), s.Access.Pool, id)
 }
 
-func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	var input createRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -107,7 +99,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -223,7 +215,7 @@ func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error
 	return err
 }
 
-func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -238,7 +230,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -298,7 +290,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -433,7 +425,7 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 	return runtime.RevisionSlot{Slot: slot, Default: row.Default}
 }
 
-func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
@@ -505,7 +497,7 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 	})
 }
 
-func (s *Server) disableProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.disable", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if current.State != "active" {
 			return access.Reply{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
@@ -596,11 +588,7 @@ func (v *revisionRow) detail() map[string]any {
 	return m
 }
 
-func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -631,11 +619,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -650,11 +634,7 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	return access.OK(v.detail()), nil
 }
 
-func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -692,11 +672,7 @@ func capabilityKey(model string, c runtime.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -838,7 +814,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	return etag, err
 }
 
-func (s *Server) restoreActiveAsDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if current.ActiveRevisionID == nil {
 			return access.Reply{}, access.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
@@ -854,7 +830,7 @@ func (s *Server) restoreActiveAsDraft(r *http.Request) (access.Reply, error) {
 	})
 }
 
-func (s *Server) restoreRevisionAsDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreRevisionAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	ref := r.PathValue("revision_id")
 	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)

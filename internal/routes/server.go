@@ -315,11 +315,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 	return targets, nil
 }
 
-func (s *Server) drafts(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) drafts(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -354,11 +350,7 @@ func (s *Server) drafts(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) draft(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) draft(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -373,7 +365,7 @@ func (s *Server) draft(r *http.Request) (access.Reply, error) {
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
 
-func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	var input DraftInput
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -384,7 +376,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -418,7 +410,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -433,7 +425,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -474,7 +466,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -485,7 +477,7 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, access.Configure)
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
