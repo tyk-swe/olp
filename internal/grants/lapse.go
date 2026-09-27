@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -17,11 +18,18 @@ const workerAgent = "olp-worker"
 
 // permanent reports whether a refresh failure means the grant can no longer
 // be refreshed, which lapses it: the plugin reports that the upstream won't
-// refresh it, or that it refreshes no grants, or the refresh authorizes
-// another account. Every other failure is transient.
+// refresh it, or that it refreshes no grants; the plugin that enrolled it is
+// no longer installed, or no longer approved, which only reinstalling it and
+// enrolling again could undo; or the refresh authorizes another account.
+// Every other failure is transient, including an unconfined plugin that the
+// deployment's configuration or image does not serve: that may differ between
+// replicas during a rolling deployment, and is undone by deploying again.
 func permanent(failure error) bool {
 	if reported, ok := errors.AsType[*abi.Error](failure); ok {
 		return reported.Code == abi.CodeInvalidGrant || reported.Code == abi.CodeUnknownMethod
+	}
+	if refusal, ok := errors.AsType[*plugins.Error](failure); ok {
+		return refusal.Code == plugins.CodeNotInstalled || refusal.Code == plugins.CodeNotApproved
 	}
 	return errors.Is(failure, errAnotherAccount)
 }

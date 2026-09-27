@@ -354,8 +354,12 @@ A refresh that fails is retried after 30 seconds, doubling with each failure
 up to ten minutes, while the version keeps serving its last access token. A
 plugin reports a grant the upstream will no longer refresh, such as one whose
 refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
-a refresh that authorizes another account than the grant's, or a plugin that
-implements no refresh: the grant lapses.
+a refresh that authorizes another account than the grant's, a plugin that
+implements no refresh, or a plugin no longer installed or approved on the
+installation (`plugin_not_installed`, `plugin_not_approved`): the grant lapses.
+An unconfined plugin that the deployment doesn't serve, because it disables the
+tier or its image lacks the permitted executable, fails the refresh
+transiently: deploying again restores it.
 
 ### Lapsed grants
 

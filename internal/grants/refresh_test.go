@@ -47,8 +47,8 @@ func at(t *time.Time, from time.Time) time.Duration {
 
 // A refresh renews the grant's own account: a refresh that observes another
 // principal or reports other grant facts, like one the upstream refuses with
-// invalid_grant or a plugin that refreshes no grants, ends the grant's
-// refresh. Every other failure is retried.
+// invalid_grant, a plugin that refreshes no grants or one no longer installed
+// or approved, ends the grant's refresh. Every other failure is retried.
 func TestRefreshFailuresArePermanentOnlyWhenTheGrantCanNoLongerRefresh(t *testing.T) {
 	g := &dueGrant{principal: "user@acme.example", facts: map[string]string{"account": "7"}}
 	for name, grant := range map[string]abi.Grant{
@@ -82,6 +82,13 @@ func TestRefreshFailuresArePermanentOnlyWhenTheGrantCanNoLongerRefresh(t *testin
 		&abi.Error{Code: "temporarily_unavailable", Message: "try later"}: false,
 		&plugins.Error{Code: plugins.CodeTimedOut, Message: "time limit"}: false,
 		fmt.Errorf("wrapped: %w", &abi.Error{Code: abi.CodeInvalidGrant}): true,
+		// The grant's plugin is gone from this installation; a deployment's
+		// configuration or image may bring an unconfined one back.
+		&plugins.Error{Code: plugins.CodeNotInstalled}:                           true,
+		fmt.Errorf("wrapped: %w", &plugins.Error{Code: plugins.CodeNotApproved}): true,
+		&plugins.Error{Code: plugins.CodeUnconfinedDisabled}:                     false,
+		&plugins.Error{Code: plugins.CodeExecutableChanged}:                      false,
+		&plugins.Error{Code: plugins.CodeExecutableInvalid}:                      false,
 	} {
 		if permanent(err) != want {
 			t.Errorf("%v: permanent %v", err, !want)
