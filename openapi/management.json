@@ -9832,21 +9832,53 @@
         "properties": {
           "scope": {
             "type": "string",
-            "enum": ["system", "instructions", "system_instruction", "messages", "input", "contents"]
+            "enum": [
+              "system",
+              "instructions",
+              "system_instruction",
+              "messages",
+              "input",
+              "contents"
+            ]
           },
-          "index": { "type": "integer", "minimum": 0 },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
           "role": {
             "type": "string",
-            "enum": ["system", "developer", "user", "assistant", "tool", "model", "function", "instruction", "unspecified", "other"]
+            "enum": [
+              "system",
+              "developer",
+              "user",
+              "assistant",
+              "tool",
+              "model",
+              "function",
+              "instruction",
+              "unspecified",
+              "other"
+            ]
           },
           "parts": {
             "type": "array",
             "maxItems": 16,
-            "items": { "$ref": "#/components/schemas/InspectedPart" }
+            "items": {
+              "$ref": "#/components/schemas/InspectedPart"
+            }
           },
-          "omitted_parts": { "type": "integer", "minimum": 0 }
+          "omitted_parts": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
-        "required": ["scope", "index", "role", "parts", "omitted_parts"]
+        "required": [
+          "scope",
+          "index",
+          "role",
+          "parts",
+          "omitted_parts"
+        ]
       },
       "InspectedPart": {
         "type": "object",
@@ -9854,7 +9886,20 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["text", "image", "audio", "video", "media", "document", "tool_call", "tool_result", "reasoning", "refusal", "null", "opaque"]
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "media",
+              "document",
+              "tool_call",
+              "tool_result",
+              "reasoning",
+              "refusal",
+              "null",
+              "opaque"
+            ]
           },
           "call_ordinal": {
             "type": "integer",
@@ -9863,7 +9908,9 @@
             "description": "Content-free ordinal linking a result to a preceding call ID when that relationship is explicit."
           }
         },
-        "required": ["kind"]
+        "required": [
+          "kind"
+        ]
       },
       "InspectedRequestField": {
         "type": "object",
