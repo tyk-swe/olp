@@ -31,7 +31,11 @@ import {
   type CapabilityDeclaration,
   type CapabilityCertification
 } from '$lib/features/providers/models';
-import { rotateProviderCredential } from '$lib/features/providers/credentials';
+import {
+  isLiveGrant,
+  listProviderCredentials,
+  rotateProviderCredential
+} from '$lib/features/providers/credentials';
 import type { ProviderProfile } from '$lib/features/providers/profiles';
 import {
   cancelGrantEnrollment,
@@ -69,6 +73,9 @@ export class ProviderWizardState {
   wizardModelPagination = $state(emptyCursorHistory());
   wizardModels;
   capabilityOptions;
+  /** The draft provider's credential versions, while its profile takes a
+   * grant. */
+  draftCredentials;
   probe = $state<ProviderProbe | null>(null);
   /** The grant enrollment the operator is signing in through, if any. */
   grantEnrollment = $state<GrantEnrollment | null>(null);
@@ -102,6 +109,16 @@ export class ProviderWizardState {
       this.draft &&
       this.selectedSpec &&
       requiresGrant(this.selectedSpec, this.draft.authMode)
+    )
+  );
+  /** Set while a live grant, enrolled through the plugin build the
+   * Connection stage pins, backs the draft, so saving tests the connection
+   * rather than signing in upstream. */
+  grantEnrolled = $derived.by(() =>
+    isLiveGrant(
+      this.draftCredentials.data,
+      this.wizardProvider?.draft_credential_id,
+      this.draft?.profileRevision
     )
   );
   run = async (
@@ -225,13 +242,41 @@ export class ProviderWizardState {
         })
       ]);
       // A grant comes from the operator's sign-in upstream, which the grant
-      // enrollment panel collects before the connection is tested.
-      if (this.grantRequired && !snapshot.provider.draft_credential_id) {
+      // enrollment panel collects before the connection is tested. Unless a
+      // live grant of the pinned build backs the draft, its credential is
+      // none, a static credential from another profile, or a grant that
+      // lapsed, was revoked or came through another build.
+      if (
+        this.grantRequired &&
+        !(await this.holdsLiveGrant(snapshot.provider))
+      ) {
         this.grantEnrollment = await startGrantEnrollment(snapshot.provider);
         return;
       }
       await this.testConnection(snapshot.provider);
     });
+  };
+  /** Reports whether a live grant, enrolled through the plugin build the
+   * provider pins, backs its draft now. */
+  private holdsLiveGrant = async (provider: Provider) => {
+    if (!provider.draft_credential_id) return false;
+    const credentials = await this.queryClient.fetchQuery({
+      queryKey: providerKeys.credentials(provider.id),
+      queryFn: ({ signal }) => listProviderCredentials(provider.id, signal),
+      staleTime: 0
+    });
+    return isLiveGrant(
+      credentials,
+      provider.draft_credential_id,
+      provider.configuration.profile_revision
+    );
+  };
+  /** Tests the connection with the grant a completed enrollment staged. */
+  private testEnrolledGrant = async () => {
+    await this.queryClient.invalidateQueries({
+      queryKey: providerKeys.credentials(this.providerId)
+    });
+    await this.testConnection((await this.refetchWizardModels()).provider);
   };
   private testConnection = async (provider: Provider) => {
     this.probe = await probeProvider(provider);
@@ -258,7 +303,7 @@ export class ProviderWizardState {
         this.grantEnrollment = null;
         this.grantInput = '';
       }
-      await this.testConnection((await this.refetchWizardModels()).provider);
+      await this.testEnrolledGrant();
     });
   };
   /** Asks whether the operator approved the device upstream, and returns how
@@ -283,9 +328,7 @@ export class ProviderWizardState {
     if (unanswered(failure)) return interval;
     this.grantEnrollment = null;
     if (status?.status === 'completed') {
-      await this.run('grant', async () =>
-        this.testConnection((await this.refetchWizardModels()).provider)
-      );
+      await this.run('grant', this.testEnrolledGrant);
       return null;
     }
     this.errorMessage =
@@ -442,6 +485,12 @@ export class ProviderWizardState {
           signal
         ),
       enabled: Boolean(this.providerId)
+    }));
+    this.draftCredentials = createQuery(() => ({
+      queryKey: providerKeys.credentials(this.providerId),
+      queryFn: ({ signal }) => listProviderCredentials(this.providerId, signal),
+      enabled:
+        this.grantRequired && Boolean(this.wizardProvider?.draft_credential_id)
     }));
     this.capabilityOptions = createQuery(() => {
       const kind = this.wizardProvider?.configuration.kind;

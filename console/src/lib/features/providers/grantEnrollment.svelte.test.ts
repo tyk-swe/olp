@@ -19,6 +19,10 @@ import {
   startGrantEnrollment,
   type GrantEnrollment
 } from './grants';
+import {
+  listProviderCredentials,
+  type ProviderCredential
+} from './credentials';
 import { listProviderModelPage, type ProviderKindCapability } from './models';
 import type { ProviderProfile } from './profiles';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
@@ -38,6 +42,10 @@ vi.mock('./grants', () => ({
   continueGrantEnrollment: vi.fn(),
   pollGrantEnrollment: vi.fn(),
   cancelGrantEnrollment: vi.fn()
+}));
+vi.mock('./credentials', async (original) => ({
+  ...(await original<typeof import('./credentials')>()),
+  listProviderCredentials: vi.fn()
 }));
 vi.mock('./models', async (original) => ({
   ...(await original<typeof import('./models')>()),
@@ -123,6 +131,23 @@ const enrolled: Provider = {
   draft_credential_version: 1
 };
 
+/** The credential version a completed grant enrollment staged on the draft. */
+const grantVersion: ProviderCredential = {
+  id: 'credential-1',
+  version: 1,
+  active: false,
+  draft_selected: true,
+  created_at: '2026-09-27T06:05:00Z',
+  revoked_at: null,
+  grant: {
+    plugin_digest: digest,
+    principal: 'operator@reference.example',
+    facts: {},
+    expires_at: '2026-09-27T07:00:00Z',
+    lapsed_at: null
+  }
+};
+
 const enrollment: GrantEnrollment = {
   id: 'enrollment-1',
   provider_id: saved.id,
@@ -167,6 +192,7 @@ beforeEach(() => {
     nextCursor: null
   }));
   vi.mocked(startGrantEnrollment).mockResolvedValue(enrollment);
+  vi.mocked(listProviderCredentials).mockResolvedValue([grantVersion]);
   vi.mocked(probeProvider).mockResolvedValue({
     succeeded: true,
     detail: 'Reached the upstream; 1 models listed.',
@@ -343,6 +369,182 @@ describe('grant enrollment in the provider wizard', () => {
       expect(panel()).toBeNull();
     });
     expect(cancelGrantEnrollment).toHaveBeenCalledWith(enrollment);
+  });
+});
+
+function saveButton() {
+  return host.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
+}
+
+/** Enrolls the draft's grant, which takes the wizard to discovery, then
+ * returns to the Connection stage. */
+async function enrollThenReturn() {
+  vi.mocked(continueGrantEnrollment).mockImplementation(async () => {
+    provider = enrolled;
+    return {
+      provider_id: saved.id,
+      etag: 'v2',
+      credential_id: 'credential-1',
+      credential_version: 1,
+      principal: 'operator@reference.example'
+    };
+  });
+  await connectionStage();
+  submit(host.querySelector('form')!);
+  await vi.waitFor(() => {
+    flushSync();
+    expect(panel()).not.toBeNull();
+  });
+  set('#grant-input', 'code#s1');
+  submit(panel()!.querySelector('form')!);
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('Declare upstream models');
+  });
+  [...host.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === 'Back')!
+    .click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('#provider-plugin-profile')).not.toBeNull();
+  });
+}
+
+describe('saving the Connection stage of a draft that holds a credential', () => {
+  it('tests the connection when a live grant of the pinned build backs the draft', async () => {
+    await enrollThenReturn();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(saveButton().textContent).toContain('Save and test connection');
+    });
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => expect(probeProvider).toHaveBeenCalledTimes(2));
+    expect(startGrantEnrollment).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      'lapsed',
+      {
+        ...grantVersion,
+        grant: { ...grantVersion.grant!, lapsed_at: '2026-09-27T06:45:00Z' }
+      }
+    ],
+    ['was revoked', { ...grantVersion, revoked_at: '2026-09-27T06:45:00Z' }]
+  ])(
+    "signs in upstream again once the draft's grant %s",
+    async (_, version) => {
+      await enrollThenReturn();
+      vi.mocked(listProviderCredentials).mockResolvedValue([version]);
+      submit(host.querySelector('form')!);
+      await vi.waitFor(() => {
+        flushSync();
+        expect(panel()).not.toBeNull();
+      });
+      expect(startGrantEnrollment).toHaveBeenCalledTimes(2);
+      expect(probeProvider).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('signs in upstream again once the draft moves to another build of the plugin', async () => {
+    const nextDigest = 'f'.repeat(64);
+    client.setQueryData(
+      ['provider-profiles'],
+      [
+        referenceGrantChat,
+        {
+          ...referenceGrantChat,
+          revision: nextDigest,
+          plugin: { digest: nextDigest, name: 'reference', version: '0.2.0' }
+        }
+      ]
+    );
+    await enrollThenReturn();
+    set(
+      '#provider-plugin-profile',
+      `reference-grant-chat@${nextDigest}`,
+      'change'
+    );
+    expect(saveButton().textContent).toContain('Save and sign in upstream');
+    vi.mocked(updateProvider).mockImplementation(async () => {
+      provider = {
+        ...enrolled,
+        etag: 'v3',
+        configuration: {
+          ...enrolled.configuration,
+          profile_revision: nextDigest
+        }
+      };
+      return provider;
+    });
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => {
+      flushSync();
+      expect(panel()).not.toBeNull();
+    });
+    expect(startGrantEnrollment).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(startGrantEnrollment).mock.calls[1]![0]).toMatchObject({
+      etag: 'v3'
+    });
+    expect(probeProvider).toHaveBeenCalledOnce();
+  });
+
+  it('signs in upstream once the operator moves a draft holding a static credential to a grant profile', async () => {
+    const referenceChat: ProviderProfile = {
+      ...referenceGrantChat,
+      id: 'reference-chat',
+      label: 'Reference Chat Completions',
+      authentication: ['static_credential']
+    };
+    client.setQueryData(
+      ['provider-profiles'],
+      [referenceChat, referenceGrantChat]
+    );
+    provider = {
+      ...enrolled,
+      configuration: {
+        ...saved.configuration,
+        auth_mode: 'static_credential',
+        profile_id: referenceChat.id
+      }
+    };
+    vi.mocked(listProviderCredentials).mockResolvedValue([
+      { ...grantVersion, grant: null }
+    ]);
+    component = mount(PluginProviderProbe, { target: host, props: { client } });
+    flushSync();
+    await settle();
+    set('input[name="kind"][value="plugin"]', 'plugin', 'change');
+    set('#provider-plugin-profile', `reference-chat@${digest}`, 'change');
+    set('#provider-name', 'Reference account');
+    set('#initial-model', 'reference-model');
+    set('#provider-secret', 'static-secret');
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain('Declare upstream models');
+    });
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Back')!
+      .click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.querySelector('#provider-plugin-profile')).not.toBeNull();
+    });
+
+    set('#provider-plugin-profile', `reference-grant-chat@${digest}`, 'change');
+    expect(saveButton().textContent).toContain('Save and sign in upstream');
+    vi.mocked(updateProvider).mockImplementation(async () => {
+      provider = { ...enrolled, etag: 'v3' };
+      return provider;
+    });
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => {
+      flushSync();
+      expect(panel()).not.toBeNull();
+    });
+    expect(startGrantEnrollment).toHaveBeenCalledOnce();
+    expect(probeProvider).toHaveBeenCalledOnce();
   });
 });
 

@@ -245,7 +245,10 @@ holds beneath an ordinary, immutable credential version
 
 In the provider wizard's Connection stage, choosing such a profile replaces the
 credential field with grant enrollment. After saving the draft, the plugin
-starts one of two sign-ins, whichever its upstream uses. With an authorization
+starts one of two sign-ins, whichever its upstream uses, unless a live grant
+enrolled through the plugin build the draft pins already backs it: saving then
+tests the connection. A draft moved from a static credential or another build,
+or whose grant lapsed or was revoked, signs in again. With an authorization
 page:
 
 1. OLP shows the authorization URL the plugin builds, with its state and PKCE
