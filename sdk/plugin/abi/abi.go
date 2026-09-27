@@ -197,7 +197,8 @@ type Option struct {
 type GrantAuthentication struct {
 	// Facts names the grant facts the plugin reports for every grant it
 	// enrolls: non-secret values, such as the upstream account, that the
-	// profile's header and query parameter templates use as {grant.<name>}.
+	// profile's header and query parameter templates use as {grant.<name>},
+	// or the upstream's base URL, with which the address may begin.
 	Facts []string `json:"facts,omitempty"`
 }
 
@@ -211,8 +212,8 @@ type GrantAuthentication struct {
 // credential, such as "Token {credential}", or its grant's current access
 // token, and {options.<name>} for one of the profile's required options. A
 // profile that authenticates with a grant may also use {grant.<name>} for one
-// of its declared grant facts in header and query parameter values. Braces
-// appear nowhere else.
+// of its declared grant facts in header and query parameter values, and to
+// begin the address. Braces appear nowhere else.
 //
 // A profile with an envelope or rewrites changes the dialect's bodies, and one
 // that forces streaming changes how non-streaming requests reach the upstream,
@@ -222,7 +223,11 @@ type Hosting struct {
 	// such as https://api.example.com/v1 for /chat/completions. Its origin is
 	// one of the manifest's Origins. Options may appear in its path, such as
 	// https://api.example.com/accounts/{options.account}/v1; the credential
-	// never does.
+	// never does. A profile that authenticates with a grant may instead begin
+	// it with the grant fact that holds the upstream's base URL, such as
+	// {grant.api_base}/v1: each grant's value is then an http or https URL
+	// without credentials, query or fragment, at one of the manifest's
+	// Origins, written the same way, or its credential version can't serve.
 	Address string `json:"address"`
 	// Headers are the declared request headers, by name.
 	Headers map[string]string `json:"headers,omitempty"`

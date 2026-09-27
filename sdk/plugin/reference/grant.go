@@ -55,6 +55,7 @@ func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchang
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int64  `json:"expires_in"`
 		Account      string `json:"account"`
+		APIBase      string `json:"api_base"`
 	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}
 	if err = call(ctx, "POST", authority+"/token", form, "", &issued); err != nil {
@@ -68,9 +69,14 @@ func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchang
 	if err = call(ctx, "GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
 		return plugin.Grant{}, err
 	}
+	// An account on a regional API has its base URL named by the token
+	// response; every other account uses the shared API.
+	if issued.APIBase == "" {
+		issued.APIBase = upstream
+	}
 	return plugin.Grant{
 		AccessToken: issued.AccessToken, RefreshToken: issued.RefreshToken, ExpiresIn: issued.ExpiresIn,
-		Principal: user.Subject, Facts: map[string]string{"account": issued.Account},
+		Principal: user.Subject, Facts: map[string]string{"account": issued.Account, "api_base": issued.APIBase},
 	}, nil
 }
 

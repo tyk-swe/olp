@@ -44,7 +44,8 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
   // One profile places the credential, one signs requests with it, one
   // places the provider's workspace option in its address, and one
-  // authenticates with a grant the plugin enrolls.
+  // authenticates with a grant the plugin enrolls, whose facts name the
+  // address.
   for (const [id, address, authentication] of [
     ['reference-chat', 'https://api.example.com/v1', 'Static credential'],
     [
@@ -59,7 +60,7 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     ],
     [
       'reference-grant-chat',
-      'https://api.example.com/v1',
+      '{grant.api_base}',
       'Grant, enrolled by the plugin'
     ]
   ] as const) {

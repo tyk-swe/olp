@@ -36,12 +36,12 @@ const pluginCredential = "reference-static-secret"
 
 // pluginUpstream is the fictional upstream the reference plugin's profiles
 // place requests at: an OpenAI Chat Completions server, with an API per
-// workspace too, that takes its key as a token in the Authorization header, or
-// an access token its authority issued with the account it authorizes, and
-// wants clients to identify themselves. It lists its models on two pages,
-// answers a request to spend the quota with its own quota_exhausted code on a
-// 400, and records the headers and path of every request and the page token of
-// every listing.
+// workspace and per region too, that takes its key as a token in the
+// Authorization header, or an access token its authority issued with the
+// account it authorizes, and wants clients to identify themselves. It lists
+// its models on two pages, answers a request to spend the quota with its own
+// quota_exhausted code on a 400, and records the headers and path of every
+// request and the page token of every listing.
 type pluginUpstream struct {
 	*httptest.Server
 	mu          sync.Mutex
@@ -146,7 +146,7 @@ func startPluginUpstream(t *testing.T, u *pluginUpstream) *pluginUpstream {
 	return u
 }
 
-var pluginUpstreamPath = regexp.MustCompile(`^/v1(/workspaces/[a-z0-9-]+)?/chat/completions$`)
+var pluginUpstreamPath = regexp.MustCompile(`^(/regions/[a-z]+)?/v1(/workspaces/[a-z0-9-]+)?/chat/completions$`)
 
 func (u *pluginUpstream) received() []http.Header {
 	u.mu.Lock()

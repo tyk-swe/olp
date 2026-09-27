@@ -316,3 +316,57 @@ func TestPluginHTTPTakesTheProviderNetworkPath(t *testing.T) {
 		t.Fatalf("the plugin reached an authority the egress policy refuses: %v", refusal)
 	}
 }
+
+// A grant fact can address a provider: the reference plugin's grant profile
+// sends each account's requests to the API base URL its token response
+// names. A base URL outside the plugin's approved origins sends nothing, and
+// says why.
+func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	upstream := newGrantUpstream(t, authority)
+	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+
+	elsewhere := newGrantUpstream(t, authority)
+	authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-elsewhere", APIBase: elsewhere.URL + "/v1"})
+	enrollment := startGrantEnrollment(t, h, owner, path)
+	continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
+	if probe["succeeded"] != false || !strings.Contains(probe["detail"].(string), "places requests at "+elsewhere.URL+", which is not one of the plugin's approved origins") ||
+		len(elsewhere.received()) != 0 || len(upstream.received()) != 0 {
+		t.Fatalf("probed a grant whose API is at an unapproved origin: %v", probe)
+	}
+
+	// An account on a regional API, at the upstream's approved origin, is
+	// probed, certified and served there.
+	authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-eu", APIBase: upstream.URL + "/regions/eu/v1"})
+	enrollment = startGrantEnrollment(t, h, owner, path)
+	completed := continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
+	if completed["credential_version"] != float64(2) {
+		t.Fatalf("completed %v", completed)
+	}
+	certifyPluginProvider(t, h, owner, path)
+	draft := fidelityDraft("reference-regional", strings.TrimPrefix(path, "/api/v1/providers/"))
+	draft["fidelity"] = map[string]any{"mode": "strict"}
+	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Regional", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-regional"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	h.refresh()
+	before := len(upstream.receivedPaths())
+	status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-regional", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+	if status != 200 || !strings.Contains(fmt.Sprint(reply), "Hello from the reference upstream") || len(upstream.receivedPaths()) == before {
+		t.Fatalf("serving at the grant's base URL: %d %v", status, reply)
+	}
+	headers := upstream.received()
+	for i, received := range upstream.receivedPaths() {
+		if received != "/regions/eu/v1/chat/completions" || headers[i].Get("X-Reference-Account") != "acct-eu" {
+			t.Fatalf("the upstream received %s for %s", received, headers[i].Get("X-Reference-Account"))
+		}
+	}
+	if len(elsewhere.received()) != 0 {
+		t.Fatal("a request reached the unapproved origin")
+	}
+}

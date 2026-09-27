@@ -125,6 +125,10 @@ those of the equivalent streaming request. See
 No built-in kind's defaults apply to a plugin provider:
 
 - **Endpoint:** the profile's address, with the provider's options in place.
+  A grant profile whose address begins with a grant fact has
+  `https://grant.invalid` as its endpoint's origin, a name that never
+  resolves: OLP sends each request to the base URL of the serving credential
+  version's grant instead, only at one of the plugin's approved origins.
 - **Discovery:** only the profile's declared model listing, if it declares one.
   The probe and discover flows then list the upstream's models, following its
   pages, as for built-in kinds, and the catalogue entry reports
@@ -270,7 +274,8 @@ expired enrollments: their session state as they expire, and their record an
 hour later.
 
 The credential version records the plugin digest, the observed principal (the
-upstream account the plugin reports) and the grant facts, which
+upstream account the plugin reports) and the grant facts, such as the
+upstream account or the base URL of the API that serves it, which
 `GET /api/v1/providers/{id}/credentials` shows under `grant`, with the access
 token's expiry. The grant itself, its access token and refresh token, is
 encrypted beneath the version and never leaves OLP. Gateways receive only the
