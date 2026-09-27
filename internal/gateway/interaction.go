@@ -7,8 +7,10 @@ import (
 
 // servingAllowed constrains later Attempts to the baseline selected by the
 // first admitted dispatch. A matching model alias never establishes equivalent
-// accounts or serving environments. Unknown principal identity also pins the
-// credential slot; a secret refresh alone does not change a declared principal.
+// accounts or serving environments. A known principal, declared or observed by
+// grant enrollment, is the same for every slot of the provider revision, so
+// later attempts may use its other slots; an unknown principal pins the
+// credential slot. A secret refresh alone does not change a principal.
 func (x *execution) servingAllowed(provider *runtime.Provider, model string, slot runtime.Slot, selectBaseline bool) bool {
 	if !x.strict() {
 		return true

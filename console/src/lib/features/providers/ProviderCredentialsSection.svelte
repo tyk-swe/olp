@@ -101,8 +101,8 @@
     >
       <strong>Grant</strong><span
         >Credential versions come from grant enrollment: an operator signs in to
-        the upstream account through the provider plugin. There is no credential
-        to paste.</span
+        the upstream account through the provider plugin, and re-enrolls a
+        slot's grant from the credential pool. There is no credential to paste.</span
       >
     </div>{:else if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
       class="identity-note"
@@ -149,7 +149,9 @@
           <span
             ><strong>Version {credential.version}</strong><small
               >{formatDate(credential.created_at)}</small
-            ></span
+            >{#if credential.grant}<small
+                >Observed principal {credential.grant.principal}</small
+              >{/if}</span
           ><span
             class:success={credential.active}
             class:warning={credential.draft_selected && !credential.active}

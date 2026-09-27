@@ -151,9 +151,11 @@ values need a qualified representation and delivery-mode changes are rejected.
 
 Bindings can declare model/deployment, principal, snapshot, region and resource
 scope. Identity facts without independent observation remain operator declarations;
-a secret version is not proof of an upstream account. Binding/semantic/profile
-changes are visible separately in revision diffs. Credential rotation preserves
-semantic configuration; changes to a declared principal or resource scope are
+a secret version is not proof of an upstream account, while a grant's
+[observed principal](plugins.md#re-enrolling-and-the-observed-principal)
+replaces a declared principal. Binding/semantic/profile changes are visible
+separately in revision diffs. Credential rotation preserves semantic
+configuration; changes to a declared principal or resource scope are
 serving-identity changes rather than a secret-refresh shortcut.
 
 Semantic headers are independent from encrypted API credentials. Profile allowlists

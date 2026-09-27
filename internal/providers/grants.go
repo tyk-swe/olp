@@ -23,15 +23,31 @@ const maxGrantInput = 8 << 10
 // authenticates with a grant.
 const grantEnrollmentOnly = "A grant authenticates this provider: its credential versions come from grant enrollment, not a pasted credential."
 
+type grantStart struct {
+	SlotID string `json:"slot_id"`
+}
+
 // startGrantEnrollment runs the first step of grant enrollment for a draft
 // whose plugin profile authenticates with a grant: the plugin builds the
 // authorization request the operator opens to sign in upstream. The grant
-// will back the default credential slot.
+// will back the credential slot the request names, or the default slot; for a
+// slot a grant already backs, this re-enrolls its grant.
 func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
+	}
+	var input grantStart
+	if r.ContentLength != 0 {
+		if err = access.DecodeUnique(r, &input, 1<<10); err != nil {
+			return access.Reply{}, err
+		}
+	}
+	if input.SlotID != "" {
+		if input.SlotID, err = access.ParseUUID(input.SlotID); err != nil {
+			return access.Reply{}, access.Invalid("slot_id", "Use a credential slot identifier.")
+		}
 	}
 	p, err := a.Principal(r, a.Pool, "configure")
 	if err != nil {
@@ -54,9 +70,12 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	}
 	var slotID string
 	for _, slot := range slots {
-		if slot.Default {
+		if slot.ID == input.SlotID || input.SlotID == "" && slot.Default {
 			slotID = slot.ID
 		}
+	}
+	if slotID == "" {
+		return access.Reply{}, access.Invalid("slot_id", "Unknown credential slot for this connection.")
 	}
 	client, err := s.connectionClient(r.Context(), cfg, nil)
 	if err != nil {

@@ -31,6 +31,10 @@ type Config struct {
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	CredentialHeaders                                                                     []string
 	Models                                                                                map[string]json.RawMessage
+	// ObservedPrincipal is the upstream principal that grant enrollment
+	// observed for every credential slot of a provider authenticated by a
+	// grant, or empty.
+	ObservedPrincipal string
 }
 
 func DefaultEndpoint(kind, region, project string) string {
@@ -144,6 +148,17 @@ func (c Config) Model(model string) string {
 		return metadata.Deployment
 	}
 	return strings.TrimPrefix(model, "models/")
+}
+
+// ServingPrincipal is the upstream principal that serves a model, part of its
+// serving identity: the provider's observed principal, which replaces any
+// the model's serving binding declares, else the declared one, or "" when
+// the principal is unknown.
+func (c Config) ServingPrincipal(model string) string {
+	if c.ObservedPrincipal != "" {
+		return c.ObservedPrincipal
+	}
+	return c.Bindings[model].PrincipalID
 }
 func (c Config) URL(wire openai.Family, model string, stream bool) (string, error) {
 	if c.ProfileID != "" {

@@ -31,6 +31,11 @@ type RevisionCapability struct {
 type RevisionSlot struct {
 	Slot
 	Default bool `json:"default"`
+	// ObservedPrincipal is the upstream principal grant enrollment observed
+	// for the slot's unrevoked credential version, if a grant backs it.
+	// Activation publishes a revision only when its slots observe one
+	// principal (ADR 0006), which becomes the provider's.
+	ObservedPrincipal string `json:"observed_principal,omitempty"`
 }
 
 // Configuration is the subset of a provider configuration the gateway needs.
@@ -137,7 +142,19 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 			provider.DefaultSlotID = slot.ID
 		}
 	}
+	provider.ObservedPrincipal = ObservedPrincipal(slots)
 	return provider, nil
+}
+
+// ObservedPrincipal is the principal a provider revision's slots observe, or
+// "" when no grant backs them.
+func ObservedPrincipal(slots []RevisionSlot) string {
+	for _, slot := range slots {
+		if slot.ObservedPrincipal != "" {
+			return slot.ObservedPrincipal
+		}
+	}
+	return ""
 }
 
 // RouteRevision contains scanned metadata and the stored documents of one

@@ -128,7 +128,7 @@ func Compile(config Config) (*Template, error) {
 	}
 	config.Provider, config.Policy = provider, policy
 	binding := provider.Bindings[config.Model]
-	serving := ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: provider.Model(config.Model), ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, PrincipalID: binding.PrincipalID, Snapshot: binding.Snapshot, Region: provider.CloudRegion, ResourceScope: binding.ResourceScope}
+	serving := ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: provider.Model(config.Model), ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, PrincipalID: provider.ServingPrincipal(config.Model), Snapshot: binding.Snapshot, Region: provider.CloudRegion, ResourceScope: binding.ResourceScope}
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}

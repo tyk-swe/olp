@@ -2108,7 +2108,7 @@ type GrantEnrollment struct {
 	Id               openapi_types.UUID `json:"id"`
 	ProviderId       openapi_types.UUID `json:"provider_id"`
 
-	// SlotId The credential slot the grant will back: the provider's default slot.
+	// SlotId The credential slot the grant will back.
 	SlotId openapi_types.UUID `json:"slot_id"`
 }
 
@@ -2210,10 +2210,15 @@ type InspectedRequestField struct {
 // InspectedRequestFieldKind defines model for InspectedRequestField.Kind.
 type InspectedRequestFieldKind string
 
-// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported.
 type InspectedServingIdentity struct {
-	Model                 string             `json:"model"`
-	PrincipalDeclared     bool               `json:"principal_declared"`
+	Model string `json:"model"`
+
+	// PrincipalDeclared A serving binding declares the upstream principal.
+	PrincipalDeclared bool `json:"principal_declared"`
+
+	// PrincipalObserved Grant enrollment observed the upstream principal, which replaces any a binding declares.
+	PrincipalObserved     bool               `json:"principal_observed"`
 	ProviderRevisionId    openapi_types.UUID `json:"provider_revision_id"`
 	RegionDeclared        bool               `json:"region_declared"`
 	ResourceScopeDeclared bool               `json:"resource_scope_declared"`
@@ -2273,7 +2278,7 @@ type InteractionInspection struct {
 	ReturnDialect       *string                              `json:"return_dialect,omitempty"`
 	SemanticContext     *[]InspectedRequestField             `json:"semantic_context,omitempty"`
 
-	// Serving Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+	// Serving Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported.
 	Serving *InspectedServingIdentity   `json:"serving,omitempty"`
 	Status  InteractionInspectionStatus `json:"status"`
 }
@@ -3507,11 +3512,13 @@ type ProviderRevisionDiffResponse struct {
 	PluginChanged bool `json:"plugin_changed"`
 
 	// PluginOptionsChanged The revisions set different values for the plugin profile's options.
-	PluginOptionsChanged         bool  `json:"plugin_options_changed"`
-	ProfileChanged               bool  `json:"profile_changed"`
-	SemanticConfigurationChanged bool  `json:"semantic_configuration_changed"`
-	ServingBindingChanged        bool  `json:"serving_binding_changed"`
-	ToRevision                   int32 `json:"to_revision"`
+	PluginOptionsChanged         bool `json:"plugin_options_changed"`
+	ProfileChanged               bool `json:"profile_changed"`
+	SemanticConfigurationChanged bool `json:"semantic_configuration_changed"`
+
+	// ServingBindingChanged The revisions declare different serving bindings, or their credential slots observe different upstream principals.
+	ServingBindingChanged bool  `json:"serving_binding_changed"`
+	ToRevision            int32 `json:"to_revision"`
 }
 
 // ProviderRevisionListResponse defines model for ProviderRevisionListResponse.
@@ -4312,6 +4319,12 @@ type SlotList struct {
 type SlotWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Slot       CredentialSlot            `json:"slot"`
+}
+
+// StartGrantEnrollmentRequest defines model for StartGrantEnrollmentRequest.
+type StartGrantEnrollmentRequest struct {
+	// SlotId The credential slot the grant will back; the provider's default slot when omitted. Naming a slot a grant already backs re-enrolls its grant.
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
 }
 
 // Surface defines model for Surface.
@@ -5454,6 +5467,9 @@ type RotateProviderCredentialJSONRequestBody = RotateCredentialRequest
 
 // DiscoverProviderModelsJSONRequestBody defines body for DiscoverProviderModels for application/json ContentType.
 type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
+
+// StartGrantEnrollmentJSONRequestBody defines body for StartGrantEnrollment for application/json ContentType.
+type StartGrantEnrollmentJSONRequestBody = StartGrantEnrollmentRequest
 
 // ContinueGrantEnrollmentJSONRequestBody defines body for ContinueGrantEnrollment for application/json ContentType.
 type ContinueGrantEnrollmentJSONRequestBody = ContinueGrantEnrollmentRequest

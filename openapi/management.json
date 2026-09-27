@@ -2847,7 +2847,7 @@
             "type": "string"
           },
           "slot_id": {
-            "description": "The credential slot the grant will back: the provider's default slot.",
+            "description": "The credential slot the grant will back.",
             "format": "uuid",
             "type": "string"
           }
@@ -6884,6 +6884,7 @@
             "type": "boolean"
           },
           "serving_binding_changed": {
+            "description": "The revisions declare different serving bindings, or their credential slots observe different upstream principals.",
             "type": "boolean"
           },
           "to_revision": {
@@ -9589,6 +9590,17 @@
         ],
         "type": "object"
       },
+      "StartGrantEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "slot_id": {
+            "description": "The credential slot the grant will back; the provider's default slot when omitted. Naming a slot a grant already backs re-enrolls its grant.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Surface": {
         "enum": [
           "openai",
@@ -10839,6 +10851,11 @@
             "type": "string"
           },
           "principal_declared": {
+            "description": "A serving binding declares the upstream principal.",
+            "type": "boolean"
+          },
+          "principal_observed": {
+            "description": "Grant enrollment observed the upstream principal, which replaces any a binding declares.",
             "type": "boolean"
           },
           "snapshot_declared": {
@@ -10855,11 +10872,12 @@
           "provider_revision_id",
           "model",
           "principal_declared",
+          "principal_observed",
           "snapshot_declared",
           "region_declared",
           "resource_scope_declared"
         ],
-        "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
+        "description": "Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported."
       },
       "OperationDialect": {
         "type": "object",
@@ -18076,7 +18094,7 @@
                 }
               }
             },
-            "description": "Provider is incomplete or incompatible with live media jobs"
+            "description": "Provider is incomplete or incompatible with live media jobs, or its credential slots observe different upstream principals (principal_mismatch)"
           }
         },
         "security": [
@@ -18658,7 +18676,7 @@
     },
     "/api/v1/providers/{provider_id}/grant-enrollments": {
       "post": {
-        "description": "Starts grant enrollment for a provider draft whose plugin profile authenticates with a grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy.",
+        "description": "Starts grant enrollment for a credential slot of a provider draft whose plugin profile authenticates with a grant: the default slot, or the slot the body names, which re-enrolls a slot's grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy. The grant becomes a new credential version staged on the slot like a rotation: re-enrolling the same principal activates as a credential rotation, and another principal changes the provider's serving identity.",
         "operationId": "start_grant_enrollment",
         "parameters": [
           {
@@ -18680,6 +18698,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "content": {
@@ -18719,7 +18746,7 @@
                 }
               }
             },
-            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
+            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), the named credential slot is unknown (validation_failed), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
           },
           "428": {
             "content": {

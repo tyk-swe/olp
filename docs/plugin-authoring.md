@@ -353,7 +353,8 @@ rather than to a credential version, use none.
 A plugin with such a profile implements `plugin.GrantEnroller`; one that
 declares a grant profile without it reports no manifest, so OLP refuses to
 install it. OLP runs its steps in control when an operator enrolls a grant from
-the provider wizard, on behalf of the enrolling provider, so
+the provider wizard, or re-enrolls a slot's grant from the credential pool, on
+behalf of the enrolling provider, so
 [`plugin.ProviderOf(ctx)`](#calls-for-a-provider) returns its option values,
 such as the tenant whose authority the operator signs in to:
 
@@ -375,6 +376,11 @@ func (acme) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchange) (p
   the `Grant`: its `AccessToken` (at most 16 KiB, sendable in a header), any
   `RefreshToken`, `ExpiresIn` seconds, the observed `Principal` (the upstream
   account, 1–256 characters) and a value for every declared fact.
+
+The principal is part of the provider's serving identity, so report a stable
+identifier of the account, the same at every sign-in: re-enrolling the same
+account is then a credential rotation, and another account a serving identity
+change ([grant enrollment](plugins.md#re-enrolling-and-the-observed-principal)).
 
 Report a failure the operator should see, such as the upstream refusing the
 code, as an `*plugin.Error` with a code of your own; any other error is reported
