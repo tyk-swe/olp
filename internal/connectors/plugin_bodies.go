@@ -126,10 +126,13 @@ func (e *envelope) unwrap(body []byte) []byte {
 }
 
 // envelopeStream unwraps each event of an upstream's server-sent events.
-// Events are bounded by the event limit, as the dialect's codec bounds them.
+// Events are bounded by the event limit, as the dialect's codec bounds them,
+// and an event never grows: it is re-encoded in its shortest form, with the
+// event ID only when it changes.
 type envelopeStream struct {
 	envelope *envelope
 	events   *sse.Decoder
+	id       *string
 	pending  []byte
 }
 
@@ -143,6 +146,12 @@ func (s *envelopeStream) Read(p []byte) (int, error) {
 			return 0, err
 		}
 		event.Data = string(s.envelope.unwrap([]byte(event.Data)))
+		if event.ID != nil && s.id != nil && *event.ID == *s.id {
+			// The decoder carries the last ID onto every event, as clients do.
+			event.ID = nil
+		} else {
+			s.id = event.ID
+		}
 		s.pending = event.Encode()
 	}
 	n := copy(p, s.pending)
@@ -195,6 +204,10 @@ func (c Config) unwrapStream(reader io.Reader, maxEventBytes int) io.Reader {
 	return &envelopeStream{envelope: e, events: sse.NewDecoder(reader, maxEventBytes)}
 }
 
+// maxRewriteDepth bounds how deeply a rewrite value nests, so that with its
+// path it stays well within the depth OLP reads requests to.
+const maxRewriteDepth = 32
+
 // A rewrite is a parsed abi.Rewrite.
 type rewrite struct {
 	op    string
@@ -211,8 +224,9 @@ func parseRewrites(declared []abi.Rewrite, dialect string) ([]rewrite, error) {
 		field := fmt.Sprintf("hosting.rewrites[%d]", i)
 		switch r.Op {
 		case abi.RewriteSet, abi.RewriteDefault:
-			if len(r.Value) == 0 || !json.Valid(r.Value) {
-				return nil, &ProfileError{Field: field + ".value", Message: "Give the JSON value to " + r.Op + " the member to."}
+			// OLP places the value in requests as it reads them.
+			if _, err := oif.ParseJSON(r.Value, oif.Limits{MaxDepth: maxRewriteDepth}); len(r.Value) == 0 || err != nil {
+				return nil, &ProfileError{Field: field + ".value", Message: fmt.Sprintf("Give the JSON value to %s the member to, at most %d levels deep and naming each member once.", r.Op, maxRewriteDepth)}
 			}
 		case abi.RewriteDelete:
 			if len(r.Value) > 0 {

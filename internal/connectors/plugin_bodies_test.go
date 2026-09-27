@@ -88,6 +88,20 @@ func TestPluginEnvelopeUnwrapsEachStreamEvent(t *testing.T) {
 		t.Fatalf("unwrapped %+v, want %+v", events, want)
 	}
 
+	// Events reach the codec no larger than the upstream sent them, so an event
+	// within the limit stays within it.
+	longID := strings.Repeat("i", 40)
+	long := "data:{\"response\":\"" + strings.Repeat("x", 90) + "\"}\n\n"
+	passed := "data:[" + strings.Repeat("1,", 50) + "1]\n\n"
+	limit := max(len(long), len(passed))
+	events = nil
+	if err := sse.Decode(c.StreamPayload(strings.NewReader("id:"+longID+"\ndata:{\"response\":1}\n\n"+long+passed), limit), limit, func(f sse.Frame) error {
+		events = append(events, f)
+		return nil
+	}); err != nil || len(events) != 3 || *events[2].ID != longID || events[1].Data != `"`+strings.Repeat("x", 90)+`"` {
+		t.Fatalf("events at the limit: %+v %v", events, err)
+	}
+
 	oversized := "data: {\"response\":\"" + strings.Repeat("x", 64) + "\"}\n\n"
 	if _, err := io.ReadAll(c.StreamPayload(strings.NewReader(oversized), 32)); !errors.Is(err, sse.ErrEventTooLarge) {
 		t.Fatalf("read an event beyond the limit: %v", err)
@@ -220,21 +234,25 @@ func TestPluginEnvelopeAndRewriteValidationLocatesTheOffendingValue(t *testing.T
 		mutate func(*abi.Profile)
 		field  string
 	}{
-		"empty envelope":        {func(p *abi.Profile) { p.Hosting.Envelope = &abi.Envelope{} }, "hosting.envelope"},
-		"request member":        {func(p *abi.Profile) { p.Hosting.Envelope.Request = "the request" }, "hosting.envelope.request"},
-		"response member":       {func(p *abi.Profile) { p.Hosting.Envelope.Response = "/response" }, "hosting.envelope.response"},
-		"fields without body":   {func(p *abi.Profile) { p.Hosting.Envelope.Request = "" }, "hosting.envelope.fields"},
-		"too many fields":       {func(p *abi.Profile) { p.Hosting.Envelope.Fields = fields }, "hosting.envelope.fields"},
-		"field name":            {func(p *abi.Profile) { p.Hosting.Envelope.Fields["a b"] = "olp" }, "hosting.envelope.fields.a b"},
-		"field is the body":     {func(p *abi.Profile) { p.Hosting.Envelope.Fields["request"] = "olp" }, "hosting.envelope.fields.request"},
-		"credential in body":    {func(p *abi.Profile) { p.Hosting.Envelope.Fields["key"] = "{credential}" }, "hosting.envelope.fields.key"},
-		"unknown placeholder":   {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "{project}" }, "hosting.envelope.fields.project"},
-		"field control":         {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "olp\n" }, "hosting.envelope.fields.project"},
-		"model in a header":     {func(p *abi.Profile) { p.Hosting.Headers["X-Model"] = "{model}" }, "hosting.headers.X-Model"},
-		"too many rewrites":     {func(p *abi.Profile) { p.Hosting.Rewrites = rewrites }, "hosting.rewrites"},
-		"unknown op":            {func(p *abi.Profile) { p.Hosting.Rewrites[0].Op = "replace" }, "hosting.rewrites[0].op"},
-		"set without value":     {func(p *abi.Profile) { p.Hosting.Rewrites[0].Value = nil }, "hosting.rewrites[0].value"},
-		"invalid value":         {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{`) }, "hosting.rewrites[1].value"},
+		"empty envelope":      {func(p *abi.Profile) { p.Hosting.Envelope = &abi.Envelope{} }, "hosting.envelope"},
+		"request member":      {func(p *abi.Profile) { p.Hosting.Envelope.Request = "the request" }, "hosting.envelope.request"},
+		"response member":     {func(p *abi.Profile) { p.Hosting.Envelope.Response = "/response" }, "hosting.envelope.response"},
+		"fields without body": {func(p *abi.Profile) { p.Hosting.Envelope.Request = "" }, "hosting.envelope.fields"},
+		"too many fields":     {func(p *abi.Profile) { p.Hosting.Envelope.Fields = fields }, "hosting.envelope.fields"},
+		"field name":          {func(p *abi.Profile) { p.Hosting.Envelope.Fields["a b"] = "olp" }, "hosting.envelope.fields.a b"},
+		"field is the body":   {func(p *abi.Profile) { p.Hosting.Envelope.Fields["request"] = "olp" }, "hosting.envelope.fields.request"},
+		"credential in body":  {func(p *abi.Profile) { p.Hosting.Envelope.Fields["key"] = "{credential}" }, "hosting.envelope.fields.key"},
+		"unknown placeholder": {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "{project}" }, "hosting.envelope.fields.project"},
+		"field control":       {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "olp\n" }, "hosting.envelope.fields.project"},
+		"model in a header":   {func(p *abi.Profile) { p.Hosting.Headers["X-Model"] = "{model}" }, "hosting.headers.X-Model"},
+		"too many rewrites":   {func(p *abi.Profile) { p.Hosting.Rewrites = rewrites }, "hosting.rewrites"},
+		"unknown op":          {func(p *abi.Profile) { p.Hosting.Rewrites[0].Op = "replace" }, "hosting.rewrites[0].op"},
+		"set without value":   {func(p *abi.Profile) { p.Hosting.Rewrites[0].Value = nil }, "hosting.rewrites[0].value"},
+		"invalid value":       {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{`) }, "hosting.rewrites[1].value"},
+		"ambiguous value":     {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{"a":1,"a":2}`) }, "hosting.rewrites[1].value"},
+		"deep value": {func(p *abi.Profile) {
+			p.Hosting.Rewrites[0].Value = json.RawMessage(strings.Repeat("[", 40) + strings.Repeat("]", 40))
+		}, "hosting.rewrites[0].value"},
 		"delete with value":     {func(p *abi.Profile) { p.Hosting.Rewrites[2].Value = json.RawMessage(`1`) }, "hosting.rewrites[2].value"},
 		"relative path":         {func(p *abi.Profile) { p.Hosting.Rewrites[0].Path = "store" }, "hosting.rewrites[0].path"},
 		"empty member":          {func(p *abi.Profile) { p.Hosting.Rewrites[0].Path = "/generationConfig//seed" }, "hosting.rewrites[0].path"},

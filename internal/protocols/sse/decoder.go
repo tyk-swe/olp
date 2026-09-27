@@ -120,21 +120,32 @@ func (d *Decoder) Next() (Frame, error) {
 	return Frame{}, d.err
 }
 
-// Encode writes the event as a stream carries it, with a data line for each
-// line of its data.
+// Encode writes the event in its shortest wire form, with a data line for
+// each line of its data, so it never takes more bytes than the fields it
+// carries did on the wire.
 func (f Frame) Encode() []byte {
 	var b bytes.Buffer
+	field := func(name, value string) {
+		b.WriteString(name)
+		b.WriteByte(':')
+		if strings.HasPrefix(value, " ") {
+			// Decoding removes one leading space.
+			b.WriteByte(' ')
+		}
+		b.WriteString(value)
+		b.WriteByte('\n')
+	}
 	if f.Event != nil {
-		b.WriteString("event: " + *f.Event + "\n")
+		field("event", *f.Event)
 	}
 	if f.ID != nil {
-		b.WriteString("id: " + *f.ID + "\n")
+		field("id", *f.ID)
 	}
 	if f.RetryMS != nil {
-		b.WriteString("retry: " + strconv.FormatUint(*f.RetryMS, 10) + "\n")
+		field("retry", strconv.FormatUint(*f.RetryMS, 10))
 	}
 	for line := range strings.SplitSeq(f.Data, "\n") {
-		b.WriteString("data: " + line + "\n")
+		field("data", line)
 	}
 	b.WriteByte('\n')
 	return b.Bytes()
