@@ -107,61 +107,6 @@ func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
 	}
 	return rows.Err()
 }
-func (p Principal) CanProject(projectID *string, write bool) bool {
-	if p.AllProjects {
-		return true
-	}
-	if projectID == nil {
-		return false
-	}
-	role, ok := p.Projects[*projectID]
-	return ok && (!write || role == "manager")
-}
-func ProjectAccess(p Principal, projectID *string, write bool) error {
-	if !p.CanProject(projectID, false) {
-		return pgx.ErrNoRows
-	}
-	if write && !p.CanProject(projectID, true) {
-		return Forbidden()
-	}
-	return nil
-}
-func (p Principal) ProjectIDs() []string {
-	ids := make([]string, 0, len(p.Projects))
-	for id := range p.Projects {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids
-}
-
-// RequireProject checks that p may place a resource in projectID. A project
-// outside p's scope answers exactly like one that does not exist, so the
-// response never reveals another project; a visible project p cannot change
-// is refused.
-func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, projectID *string, write bool) error {
-	if projectID == nil {
-		if p.AllProjects {
-			return nil
-		}
-		return Forbidden()
-	}
-	notFound := Fail(404, "not_found", "The resource was not found.")
-	if !p.CanProject(projectID, false) {
-		return notFound
-	}
-	var exists bool
-	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return notFound
-	}
-	if !p.CanProject(projectID, write) {
-		return Forbidden()
-	}
-	return nil
-}
 func managementBearer(r *http.Request) (string, bool) {
 	const prefix = "Bearer olpm_"
 	header := r.Header.Get("Authorization")

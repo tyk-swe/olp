@@ -69,14 +69,8 @@ func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {
 	if err = ValidText("name", input.Name, 100); err != nil {
 		return Reply{}, err
 	}
-	id, etag := NewID(), NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, input.Name, etag, p.UserID()); err != nil {
-		if duplicateName(err) {
-			return Reply{}, Fail(409, "project_name_taken", "A project with this name already exists.")
-		}
-		return Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,'manager',$3)", id, p.UserID(), p.UserID()); err != nil {
+	id, etag, err := CreateProject(r.Context(), tx, input.Name, p.UserID())
+	if err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "project.create", "project", id, "success"); err != nil {

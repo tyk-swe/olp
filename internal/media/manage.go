@@ -45,7 +45,7 @@ func (m *Management) log() *slog.Logger {
 	return slog.Default()
 }
 
-func (m *Management) scopedJob(r *http.Request, p access.Principal, write bool) (*JobRecord, error) {
+func (m *Management) scopedJob(r *http.Request, p access.Principal, need access.Need) (*JobRecord, error) {
 	if _, err := uuid.Parse(r.PathValue("job_id")); err != nil {
 		return nil, access.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
 	}
@@ -57,7 +57,7 @@ func (m *Management) scopedJob(r *http.Request, p access.Principal, write bool) 
 	if err = m.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", record.APIKeyID).Scan(&keyProject); err != nil {
 		return nil, mapJobError(err)
 	}
-	if err := access.ProjectAccess(p, keyProject, write); err != nil {
+	if err := p.Project(keyProject, need); err != nil {
 		return nil, err
 	}
 	return &record, nil
@@ -83,7 +83,7 @@ func (m *Management) audit(r *http.Request, p access.Principal, action, id strin
 }
 
 func (m *Management) refresh(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, true)
+	record, err := m.scopedJob(r, p, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -101,7 +101,7 @@ func (m *Management) refresh(r *http.Request, p access.Principal) (access.Reply,
 }
 
 func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Principal) error {
-	record, err := m.scopedJob(r, p, true)
+	record, err := m.scopedJob(r, p, access.Change)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Pr
 }
 
 func (m *Management) delete(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, true)
+	record, err := m.scopedJob(r, p, access.Change)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -273,7 +273,7 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 }
 
 func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, error) {
-	record, err := m.scopedJob(r, p, false)
+	record, err := m.scopedJob(r, p, access.View)
 	if err != nil {
 		return access.Reply{}, err
 	}

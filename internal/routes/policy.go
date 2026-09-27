@@ -111,8 +111,8 @@ func (s *Server) policy(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	policy, etag, err := loadPolicy(r.Context(), s.Access.Pool, scope, id, false)
 	if err != nil {
@@ -156,7 +156,7 @@ func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(principal, project, true); err != nil {
+	if err := principal.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)

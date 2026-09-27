@@ -47,7 +47,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err = p.Project(current.ProjectID, access.Change); err != nil {
 		return nil, nil, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -263,7 +263,7 @@ func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	d, err := s.detail(r.Context(), s.Access.Pool, id)
@@ -369,7 +369,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {

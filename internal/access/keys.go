@@ -168,8 +168,8 @@ func (s *Server) apiKey(r *http.Request, p Principal) (Reply, error) {
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
@@ -198,7 +198,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err := validateKey(input, true); err != nil {
 		return Reply{}, err
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if input.BudgetGroupID != nil {
@@ -274,7 +274,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
-	if err := ProjectAccess(p, projectID, true); err != nil {
+	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {
@@ -381,7 +381,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
-	if err := ProjectAccess(p, projectID, true); err != nil {
+	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {

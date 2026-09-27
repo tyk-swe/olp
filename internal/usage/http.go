@@ -176,7 +176,7 @@ func (s *Server) getRequest(r *http.Request, p access.Principal) (access.Reply, 
 	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(keyProject, false) {
+	if p.Project(keyProject, access.View) != nil {
 		return access.Reply{}, access.Fail(404, "not_found", "The request does not exist.")
 	}
 	return access.OK(detail), nil

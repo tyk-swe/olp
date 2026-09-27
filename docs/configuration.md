@@ -302,7 +302,8 @@ resolve to a current same-named slot credential on the destination.
 `POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
 desired state in one installation-serialized transaction:
 
-- Missing projects are created; existing case-insensitive names are reused.
+- Missing projects are created with the applying member (or the token's
+  creator) as their manager; existing case-insensitive names are reused.
 - Missing providers become drafts; existing providers get their draft
   fields, models, and slots replaced and `draft_dirty` set — an active
   revision is never mutated and keeps serving until local certification

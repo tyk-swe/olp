@@ -85,8 +85,8 @@ func (s *Server) notificationDestination(r *http.Request, p Principal) (Reply, e
 		id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
@@ -167,7 +167,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Re
 		}
 		input.ProjectID = &parsed
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	enabled := true
@@ -232,13 +232,13 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, false); err != nil {
+	if err = p.Project(projectID, View); err != nil {
 		return Reply{}, err
 	}
 	if err = p.Authorize(notificationOperation(projectID)); err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, true); err != nil {
+	if err = p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -331,8 +331,8 @@ func (s *Server) notificationRule(r *http.Request, p Principal) (Reply, error) {
 		id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
@@ -434,7 +434,7 @@ func (s *Server) createNotificationRule(r *http.Request, _ Principal) (Reply, er
 		}
 		input.ProjectID = &parsed
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if err = s.validateRule(r, tx, input); err != nil {
@@ -506,13 +506,13 @@ func (s *Server) updateNotificationRule(r *http.Request, _ Principal) (Reply, er
 		"SELECT project_id::text FROM olp.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, false); err != nil {
+	if err = p.Project(projectID, View); err != nil {
 		return Reply{}, err
 	}
 	if err = p.Authorize(notificationOperation(projectID)); err != nil {
 		return Reply{}, err
 	}
-	if err = ProjectAccess(p, projectID, true); err != nil {
+	if err = p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	var data []byte

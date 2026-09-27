@@ -66,7 +66,7 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -128,7 +128,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -355,8 +355,8 @@ func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(row.ProjectID, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(row.ProjectID, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
 	if err != nil {
@@ -378,8 +378,8 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id<$2 ORDER BY v.id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
@@ -420,8 +420,8 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
@@ -461,7 +461,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, project, true); err != nil {
+	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current); err != nil {
@@ -497,8 +497,8 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
@@ -584,7 +584,7 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, project, true); err != nil {
+	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)

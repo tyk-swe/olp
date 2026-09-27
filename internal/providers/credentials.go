@@ -26,7 +26,7 @@ func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
@@ -87,7 +87,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -354,7 +354,7 @@ func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := checkProvider(r.Context(), s.Access.Pool, p, id, false)
+	current, err := visibleProvider(r.Context(), s.Access.Pool, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -453,7 +453,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.SlotsETag); err != nil {
@@ -563,7 +563,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	slots, err := loadSlots(r.Context(), tx, id)

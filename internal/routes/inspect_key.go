@@ -6,7 +6,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -31,8 +30,8 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	if err := q.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp.api_keys WHERE id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID); err != nil {
 		return key, err
 	}
-	if !principal.CanProject(authority.ProjectID, false) {
-		return key, pgx.ErrNoRows
+	if err := principal.Project(authority.ProjectID, access.View); err != nil {
+		return key, err
 	}
 	if !sameProject(authority.ProjectID, route.ProjectID) {
 		return key, access.Invalid("api_key_id", "The API key and route must belong to the same project.")

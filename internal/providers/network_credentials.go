@@ -36,7 +36,7 @@ func (s *Server) networkCredentials(r *http.Request, principal access.Principal)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err := checkProvider(r.Context(), s.Access.Pool, principal, id, false); err != nil {
+	if _, err := visibleProvider(r.Context(), s.Access.Pool, principal, id); err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
@@ -83,7 +83,7 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(principal, provider.ProjectID, true); err != nil {
+	if err := principal.Project(provider.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Match(r, provider.ETag); err != nil {

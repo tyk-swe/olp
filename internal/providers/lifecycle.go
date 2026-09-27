@@ -82,7 +82,7 @@ func (s *Server) provider(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	return s.detailReply(r.Context(), s.Access.Pool, id)
@@ -139,7 +139,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 			return access.Reply{}, err
 		}
 	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
@@ -238,7 +238,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -305,7 +305,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -597,7 +597,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
@@ -624,7 +624,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -643,7 +643,7 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -677,7 +677,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))

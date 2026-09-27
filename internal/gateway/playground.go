@@ -249,7 +249,7 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 // answered as missing, exactly like a route that does not exist.
 func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) *Error {
 	return func(route *runtime.Route) *Error {
-		if !principal.CanProject(route.ProjectID, false) {
+		if principal.Project(route.ProjectID, access.View) != nil {
 			return modelNotFound(route.Slug)
 		}
 		return nil

@@ -90,8 +90,8 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(d.ProjectID, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(d.ProjectID, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
 		return access.Reply{}, err
@@ -270,8 +270,8 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	}
 	route := snapshot.Routes[slug]
 	if _, ok := snapshot.Routes[slug]; ok {
-		if !p.CanProject(route.ProjectID, false) {
-			return access.Reply{}, pgx.ErrNoRows
+		if err := p.Project(route.ProjectID, access.View); err != nil {
+			return access.Reply{}, err
 		}
 	}
 	key, err := s.inspectionKey(r, tx, p, input.APIKeyID, route)

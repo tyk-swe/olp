@@ -1,11 +1,15 @@
 package access
 
 import (
+	"errors"
 	"slices"
 	"testing"
 )
 
-func TestPrincipalCanProjectMatrix(t *testing.T) {
+// TestProjectScopeTruthTable pins every project decision: allowed (0), 404 for
+// a resource outside the caller's scope, or 403 for a visible one it cannot
+// change.
+func TestProjectScopeTruthTable(t *testing.T) {
 	projectA, projectB := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	global := Principal{Kind: "user", AllProjects: true}
 	manager := Principal{Kind: "user", Projects: map[string]string{projectA: "manager"}}
@@ -17,28 +21,37 @@ func TestPrincipalCanProjectMatrix(t *testing.T) {
 		name      string
 		principal Principal
 		project   *string
-		write     bool
-		want      bool
+		need      Need
+		want      int
 	}{
-		{"global nil read", global, nil, false, true},
-		{"global nil write", global, nil, true, true},
-		{"global project write", global, &projectA, true, true},
-		{"manager nil", manager, nil, false, false},
-		{"manager own read", manager, &projectA, false, true},
-		{"manager own write", manager, &projectA, true, true},
-		{"manager other", manager, &projectB, false, false},
-		{"viewer nil", viewer, nil, false, false},
-		{"viewer own read", viewer, &projectA, false, true},
-		{"viewer own write", viewer, &projectA, true, false},
-		{"viewer other", viewer, &projectB, false, false},
-		{"machine all nil", machineAll, nil, true, true},
-		{"machine all project", machineAll, &projectB, true, true},
-		{"machine scoped own", machineScoped, &projectA, true, true},
-		{"machine scoped nil", machineScoped, nil, false, false},
-		{"machine scoped other", machineScoped, &projectB, true, false},
+		{"global nil view", global, nil, View, 0},
+		{"global nil change", global, nil, Change, 0},
+		{"global project change", global, &projectA, Change, 0},
+		{"manager nil", manager, nil, View, 404},
+		{"manager own view", manager, &projectA, View, 0},
+		{"manager own change", manager, &projectA, Change, 0},
+		{"manager other", manager, &projectB, View, 404},
+		{"manager other change", manager, &projectB, Change, 404},
+		{"viewer nil", viewer, nil, View, 404},
+		{"viewer own view", viewer, &projectA, View, 0},
+		{"viewer own change", viewer, &projectA, Change, 403},
+		{"viewer other", viewer, &projectB, View, 404},
+		{"machine all nil", machineAll, nil, Change, 0},
+		{"machine all project", machineAll, &projectB, Change, 0},
+		{"machine scoped own", machineScoped, &projectA, Change, 0},
+		{"machine scoped nil", machineScoped, nil, View, 404},
+		{"machine scoped other", machineScoped, &projectB, Change, 404},
 	} {
-		if got := tc.principal.CanProject(tc.project, tc.write); got != tc.want {
-			t.Fatalf("%s: CanProject = %v, want %v", tc.name, got, tc.want)
+		got := 0
+		if err := tc.principal.Project(tc.project, tc.need); err != nil {
+			problem, ok := errors.AsType[*Problem](err)
+			if !ok {
+				t.Fatalf("%s: %v is not a problem", tc.name, err)
+			}
+			got = problem.Status
+		}
+		if got != tc.want {
+			t.Fatalf("%s: Project = %d, want %d", tc.name, got, tc.want)
 		}
 	}
 }

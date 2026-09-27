@@ -359,8 +359,8 @@ func (s *Server) draft(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(d.ProjectID, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(d.ProjectID, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
@@ -387,7 +387,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
@@ -433,7 +433,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -485,7 +485,7 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {

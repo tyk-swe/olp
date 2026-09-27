@@ -32,8 +32,8 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			projectIDs[key] = id
 			continue
 		}
-		id := access.NewID()
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, project.Name, access.NewID(), p.UserID()); err != nil {
+		id, _, err := access.CreateProject(ctx, tx, project.Name, p.UserID())
+		if err != nil {
 			return err
 		}
 		projectIDs[key] = id
