@@ -11,6 +11,7 @@
     certifyProviderModel,
     getProviderCapabilityOptions
   } from './models';
+  import { dialectSurface, listProviderProfiles } from './profiles';
   let {
     provider,
     canManage,
@@ -39,6 +40,19 @@
     queryFn: () =>
       collectCursorPages((cursor) => listProviderModelPage(provider.id, cursor))
   }));
+  /** The client surface that speaks the provider's dialect natively. */
+  async function nativeSurface() {
+    const { kind, profile_id, profile_revision } = provider.configuration;
+    if (kind === 'anthropic') return 'anthropic';
+    if (kind === 'gemini' || kind === 'vertex_ai') return 'gemini';
+    if (kind !== 'plugin') return 'openai';
+    // A plugin profile names its dialect.
+    const profile = (await listProviderProfiles()).find(
+      (candidate) =>
+        candidate.id === profile_id && candidate.revision === profile_revision
+    );
+    return dialectSurface(profile?.dialect);
+  }
   async function validateSelected() {
     busy = true;
     controller = new AbortController();
@@ -56,16 +70,12 @@
             ? ['embeddings']
             : ['generation']
           : [operation];
+      const surface = await nativeSurface();
       const suggested = options.capabilities.filter(
         (tuple) =>
           desired.includes(tuple.operation) &&
           (tuple.mode === 'unary' || tuple.mode === 'streaming') &&
-          tuple.surface ===
-            (provider.configuration.kind === 'anthropic'
-              ? 'anthropic'
-              : ['gemini', 'vertex_ai'].includes(provider.configuration.kind)
-                ? 'gemini'
-                : 'openai')
+          tuple.surface === surface
       );
       for (const id of selected) {
         if (cancelled) break;

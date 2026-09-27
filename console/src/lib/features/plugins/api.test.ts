@@ -31,7 +31,14 @@ const plugin: Plugin = {
     name: 'acme',
     version: '1.0.0',
     origins: ['https://login.acme.example', 'https://api.acme.example'],
-    profiles: [{ id: 'acme-chat', label: 'Acme Chat', dialect: 'openai-chat' }]
+    profiles: [
+      {
+        id: 'acme-chat',
+        label: 'Acme Chat',
+        dialect: 'openai-chat',
+        hosting: { address: 'https://api.acme.example/v1' }
+      }
+    ]
   },
   installed_by: '01980000-0000-7000-8000-000000000401',
   installed_by_email: 'owner@example.com',

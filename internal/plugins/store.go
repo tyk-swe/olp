@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,28 +12,81 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 // Usable returns the manifest and module of an installed plugin whose
 // declared origins an owner approved. A plugin awaiting approval can't be
-// used, so everything that pins or runs a plugin obtains it here.
+// used, so everything that runs a plugin obtains it here, and everything that
+// pins one obtains its profile from Profile.
 func Usable(ctx context.Context, q access.Queryer, digest string) (abi.Manifest, []byte, error) {
+	var module []byte
+	manifest, err := usable(ctx, q, digest, &module)
+	return manifest, module, err
+}
+
+// Profile returns the profile id that a usable plugin declares, for a
+// provider to pin with the plugin's digest.
+func Profile(ctx context.Context, q access.Queryer, digest, id string) (*connectors.PluginProfile, error) {
+	manifest, err := usable(ctx, q, digest, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(manifest.Profiles, func(p abi.Profile) bool { return p.ID == id }) {
+		return nil, refuse(CodeProfileUnknown, "The plugin declares no profile with this ID.")
+	}
+	return connectors.NewPluginProfile(digest, manifest, id)
+}
+
+// Profiles returns the profiles of every usable plugin, which providers may
+// pin, newest build of each plugin first.
+func Profiles(ctx context.Context, q access.Queryer) ([]connectors.Profile, error) {
+	rows, err := q.Query(ctx, "SELECT digest, manifest FROM olp.plugins WHERE approved_at IS NOT NULL ORDER BY manifest->>'name', installed_at DESC, digest")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	profiles := []connectors.Profile{}
+	for rows.Next() {
+		var digest string
+		var manifest abi.Manifest
+		if err = rows.Scan(&digest, &manifest); err != nil {
+			return nil, err
+		}
+		for _, declared := range manifest.Profiles {
+			profile, err := connectors.NewPluginProfile(digest, manifest, declared.ID)
+			if err != nil {
+				return nil, err
+			}
+			profiles = append(profiles, profile.Profile())
+		}
+	}
+	return profiles, rows.Err()
+}
+
+// usable reads the manifest of a plugin that Usable admits, and its module
+// when module is not nil.
+func usable(ctx context.Context, q access.Queryer, digest string, module *[]byte) (abi.Manifest, error) {
 	var manifest abi.Manifest
-	var data, module []byte
+	var data, unread []byte
 	var approved bool
-	err := q.QueryRow(ctx, "SELECT manifest, module, approved_at IS NOT NULL FROM olp.plugins WHERE digest=$1", digest).Scan(&data, &module, &approved)
+	withModule := module != nil
+	if !withModule {
+		module = &unread
+	}
+	err := q.QueryRow(ctx, "SELECT manifest, approved_at IS NOT NULL, CASE WHEN $2 THEN module END FROM olp.plugins WHERE digest=$1", digest, withModule).Scan(&data, &approved, module)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return manifest, nil, refuse(CodeNotInstalled, "No plugin with this digest is installed.")
+		return manifest, refuse(CodeNotInstalled, "No plugin with this digest is installed.")
 	}
 	if err != nil {
-		return manifest, nil, err
+		return manifest, err
 	}
 	if !approved {
-		return manifest, nil, refuse(CodeNotApproved, "An owner has not approved the origins this plugin declares.")
+		return manifest, refuse(CodeNotApproved, "An owner has not approved the origins this plugin declares.")
 	}
-	return manifest, module, json.Unmarshal(data, &manifest)
+	return manifest, json.Unmarshal(data, &manifest)
 }
 
 const selectPlugin = `SELECT p.digest, p.abi_version, octet_length(p.module), p.manifest, p.etag::text,

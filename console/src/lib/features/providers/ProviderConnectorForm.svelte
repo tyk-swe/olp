@@ -2,6 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
+  import PluginProfileField from './PluginProfileField.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
@@ -10,7 +11,7 @@
   import {
     emptyProviderOptions,
     requiresCredential,
-    requiresSeedModel,
+    requiresProbeModel,
     selectProviderPreset,
     setProviderDraftKind,
     type ProviderDraft
@@ -67,10 +68,8 @@
   const credentialRequired = $derived(
     requiresCredential(selectedSpec, draft.authMode)
   );
-  const seedModelRequired = $derived(
-    requiresSeedModel(selectedSpec) ||
-      ['voyage', 'perplexity', 'cohere'].includes(draft.presetId)
-  );
+  const seedModelRequired = $derived(requiresProbeModel(draft, selectedSpec));
+  const plugin = $derived(draft.kind === 'plugin');
   const selectedPreset = $derived(
     selectedSpec.presets.find((preset) => preset.id === draft.presetId)
   );
@@ -156,6 +155,11 @@
       authEditable
       endpointReadonly={false}
     />
+    {#if plugin}<PluginProfileField
+        values={draft}
+        idPrefix="provider"
+        disabled={Boolean(busy)}
+      />{/if}
     {#if draft.kind === 'openai_compatible'}<div class="form-field full">
         <label for="compatible-provider">Compatible provider</label><select
           id="compatible-provider"
@@ -218,9 +222,11 @@
           : 'gpt-5.4'}
         required={seedModelRequired}
       /><small id="initial-model-help"
-        >{seedModelRequired
-          ? 'This provider needs an explicit model to test credentials.'
-          : 'Used for the initial connector probe; upstream discovery follows.'}</small
+        >{plugin
+          ? 'Plugin providers have no model discovery: the connection test certifies this declared model.'
+          : seedModelRequired
+            ? 'This provider needs an explicit model to test credentials.'
+            : 'Used for the initial connector probe; upstream discovery follows.'}</small
       >
     </div>
     {#if draft.authMode === 'headers'}<label class="form-field full"
@@ -242,7 +248,9 @@
           required
         /><small id="credential-help"
           >Sent once to this installation; never saved by the console or
-          returned by the API.</small
+          returned by the API.{#if plugin}
+            The plugin's hosting adaptation places it in the headers and query
+            parameters the profile declares.{/if}</small
         >
       </div>{:else}<div class="identity-note full">
         <strong>No stored credential</strong><span

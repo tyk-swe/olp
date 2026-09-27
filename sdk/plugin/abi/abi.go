@@ -96,13 +96,39 @@ type Manifest struct {
 }
 
 // Profile is a provider profile the plugin supplies around a built-in dialect.
+// Providers using it authenticate with a static credential, which its hosting
+// adaptation places.
 type Profile struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	// Dialect names the built-in dialect the profile serves, such as
 	// openai-chat. A plugin never defines a dialect.
 	Dialect string `json:"dialect"`
+	// Hosting places the dialect's requests at the upstream.
+	Hosting Hosting `json:"hosting"`
 }
+
+// Hosting is a profile's hosting adaptation: where and how the dialect's
+// requests reach the upstream. It is a declaration OLP runs itself, so no
+// plugin code runs per request.
+//
+// Header and query parameter values are templates. The placeholder
+// {credential} stands for the provider's static credential, such as
+// "Token {credential}"; braces appear nowhere else.
+type Hosting struct {
+	// Address is the upstream's base URL, which the dialect's paths extend,
+	// such as https://api.example.com/v1 for /chat/completions. Its origin is
+	// one of the manifest's Origins.
+	Address string `json:"address"`
+	// Headers are the declared request headers, by name.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Query holds the declared query parameters of the address, by name.
+	Query map[string]string `json:"query,omitempty"`
+}
+
+// CredentialPlaceholder is the template placeholder for a provider's static
+// credential.
+const CredentialPlaceholder = "{credential}"
 
 // LogRecord is the parameter of CapabilityLog.
 type LogRecord struct {

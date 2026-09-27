@@ -30,6 +30,9 @@ type Manifest = abi.Manifest
 // Profile is a provider profile a plugin supplies around a built-in dialect.
 type Profile = abi.Profile
 
+// Hosting is a profile's hosting adaptation, which OLP runs.
+type Hosting = abi.Hosting
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 

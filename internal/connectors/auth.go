@@ -197,14 +197,17 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 // call path runs in this order:
 //
 //  1. Hosting places the request. The caller addressed it from the connector;
-//     hosting adds its semantic headers, query settings and version headers.
+//     hosting adds its semantic headers, query settings and version headers,
+//     and a plugin profile's declared headers and query parameters, which may
+//     carry the credential.
 //  2. Authentication authorizes it, using the authenticator registered for
 //     the connector's auth mode.
 //  3. Signing runs last, over the finished request and its body.
 //
 // It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) ([]string, error) {
-	if err := c.host(req); err != nil {
+	placed, err := c.host(req, secret)
+	if err != nil {
 		return nil, err
 	}
 	authenticator, ok := authenticators[c.AuthMode]
@@ -215,7 +218,7 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 	if err != nil {
 		return nil, err
 	}
-	sensitive := append([]string{string(secret)}, authorized.sensitive...)
+	sensitive := append(append([]string{string(secret)}, placed...), authorized.sensitive...)
 	if authorized.sign == nil {
 		return sensitive, nil
 	}
@@ -258,6 +261,7 @@ var authenticators = map[string]authenticator{
 	"azure_client_secret": {credential: true, authenticate: (*Auth).authenticateAzure},
 	"default_chain":       {authenticate: (*Auth).authenticateAWS},
 	"static":              {credential: true, authenticate: (*Auth).authenticateAWS},
+	AuthStaticCredential:  {credential: true, authenticate: (*Auth).authenticatePlaced},
 }
 
 // SecretRequired reports whether an auth mode authorizes with a stored
@@ -269,6 +273,12 @@ func SecretRequired(mode string) bool {
 
 // authenticateNone sends no authorization.
 func (*Auth) authenticateNone(context.Context, *http.Request, Config, []byte) (authorization, error) {
+	return authorization{}, nil
+}
+
+// authenticatePlaced adds no authorization of its own: the plugin profile's
+// hosting adaptation placed the static credential.
+func (*Auth) authenticatePlaced(context.Context, *http.Request, Config, []byte) (authorization, error) {
 	return authorization{}, nil
 }
 

@@ -19,48 +19,68 @@
   } = $props();
 
   const disabled = $derived(Boolean(busy));
+  // Plugin providers have no upstream model list: the operator declares
+  // models and each is certified.
+  const plugin = $derived(provider?.configuration.kind === 'plugin');
 </script>
+
+{#snippet declaration()}
+  <div class="form-field">
+    <label for="manual-models-wizard">Upstream model identifiers</label>
+    <textarea
+      id="manual-models-wizard"
+      bind:value={manualModelNames}
+      placeholder="model-a&#10;model-b"></textarea>
+  </div>
+  <button
+    class="button button-secondary"
+    type="button"
+    onclick={onDeclareModels}
+    {disabled}
+    >{busy === 'declare-models'
+      ? 'Adding…'
+      : 'Add identifiers for review'}</button
+  >
+{/snippet}
 
 <section class="card stage" aria-labelledby="discovery-heading">
   <p class="eyebrow">Probe passed</p>
-  <h2 id="discovery-heading">Discover upstream models</h2>
-  {#if probe}<p class="success-line">✓ {probeSummary(probe)}</p>{/if}
-  <p>
-    The connector will call the upstream model-list API with the stored
-    identity. Discovered models begin disabled until their capabilities are
-    certified and reviewed.
-  </p>
-  <button
-    class="button button-primary"
-    type="button"
-    onclick={onDiscover}
-    {disabled}
-    >{busy === 'discover' ? 'Discovering…' : 'Discover upstream models'}</button
-  >
-  {#if provider?.configuration.kind === 'openai_compatible'}
-    <details class="manual-fallback">
-      <summary>Endpoint has no model-list API?</summary>
-      <p>
-        Declare identifiers manually. They remain disabled and capability-empty
-        until you complete the same review.
-      </p>
-      <div class="form-field">
-        <label for="manual-models-wizard">Upstream model identifiers</label>
-        <textarea
-          id="manual-models-wizard"
-          bind:value={manualModelNames}
-          placeholder="model-a&#10;model-b"></textarea>
-      </div>
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={onDeclareModels}
-        {disabled}
-        >{busy === 'declare-models'
-          ? 'Adding…'
-          : 'Add identifiers for review'}</button
-      >
-    </details>
+  {#if plugin}
+    <h2 id="discovery-heading">Declare upstream models</h2>
+    {#if probe}<p class="success-line">✓ {probeSummary(probe)}</p>{/if}
+    <p>
+      Plugin providers have no upstream model list. The probe model is already
+      declared; add any other model identifiers here. Each model is certified
+      individually before it can serve.
+    </p>
+    <div class="manual-fallback">{@render declaration()}</div>
+  {:else}
+    <h2 id="discovery-heading">Discover upstream models</h2>
+    {#if probe}<p class="success-line">✓ {probeSummary(probe)}</p>{/if}
+    <p>
+      The connector will call the upstream model-list API with the stored
+      identity. Discovered models begin disabled until their capabilities are
+      certified and reviewed.
+    </p>
+    <button
+      class="button button-primary"
+      type="button"
+      onclick={onDiscover}
+      {disabled}
+      >{busy === 'discover'
+        ? 'Discovering…'
+        : 'Discover upstream models'}</button
+    >
+    {#if provider?.configuration.kind === 'openai_compatible'}
+      <details class="manual-fallback">
+        <summary>Endpoint has no model-list API?</summary>
+        <p>
+          Declare identifiers manually. They remain disabled and
+          capability-empty until you complete the same review.
+        </p>
+        {@render declaration()}
+      </details>
+    {/if}
   {/if}
 </section>
 

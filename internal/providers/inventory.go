@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/plugins"
 )
 
 func (s *Server) kinds(r *http.Request) (access.Reply, error) {
@@ -162,9 +163,14 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
 }
 
+// profiles lists the built-in profiles and those of approved plugins.
 func (s *Server) profiles(r *http.Request) (access.Reply, error) {
 	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(map[string]any{"items": connectors.Profiles()}), nil
+	pluginProfiles, err := plugins.Profiles(r.Context(), s.Access.Pool)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return access.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
 }

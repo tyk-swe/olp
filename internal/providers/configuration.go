@@ -1,10 +1,13 @@
 package providers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/textproto"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -38,7 +42,8 @@ type Options struct {
 }
 
 // Configuration is the stored connection configuration; it is the contract's
-// ProviderConfiguration verbatim.
+// ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
+// as the profile revision; pin resolves that plugin profile.
 type Configuration struct {
 	ProviderID      string   `json:"-"`
 	ProfileID       string   `json:"profile_id,omitempty"`
@@ -52,6 +57,7 @@ type Configuration struct {
 	Deployment      *string  `json:"deployment"`
 	APIVersion      *string  `json:"api_version"`
 	Options         Options  `json:"options"`
+	plugin          *connectors.PluginProfile
 }
 
 // normalize applies defaults and canonical forms so equal configurations
@@ -77,10 +83,66 @@ func (c *Configuration) Normalize() {
 	if c.Options.ParameterDefaults == nil {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
-	if c.VendorMissing() {
+	switch {
+	case c.Kind == KindPlugin:
+		// No vendor list price applies to a plugin provider.
+		if c.VendorMissing() {
+			c.Options.VendorID = nil
+		}
+	case c.VendorMissing():
 		c.Options.VendorID = new(defaultVendor(c.Kind))
 	}
 }
+
+// pin resolves the plugin profile a plugin provider's draft pins, which must
+// belong to a usable plugin, and gives the provider its address as endpoint.
+func (c *Configuration) pin(ctx context.Context, q access.Queryer) error {
+	if c.Kind != KindPlugin {
+		return nil
+	}
+	if c.ProfileID == "" || !pluginDigest.MatchString(c.ProfileRevision) {
+		return access.Invalid("configuration.profile_revision", "Choose a plugin profile: its ID, and the plugin's digest as the profile revision.")
+	}
+	plugin, err := plugins.Profile(ctx, q, c.ProfileRevision, c.ProfileID)
+	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
+		field := "configuration.profile_revision"
+		if refusal.Code == plugins.CodeProfileUnknown {
+			field = "configuration.profile_id"
+		}
+		return &access.Problem{Status: 422, Code: refusal.Code, Detail: refusal.Message, Field: field}
+	}
+	if err != nil {
+		return err
+	}
+	c.plugin, c.Endpoint = plugin, new(plugin.Address())
+	return nil
+}
+
+// pluginDigest is the digest of the plugin a plugin provider pins, or "".
+func (c *Configuration) pluginDigest() string {
+	if c.Kind != KindPlugin {
+		return ""
+	}
+	return c.ProfileRevision
+}
+
+// pinned attaches the plugin profile a stored plugin provider configuration
+// pins, from the manifest of its installed plugin. Uninstalling a plugin is
+// refused while a provider pins it.
+func (c *Configuration) pinned(manifest []byte) error {
+	if c.Kind != KindPlugin || manifest == nil {
+		return nil
+	}
+	plugin, err := connectors.DecodePluginProfile(c.ProfileRevision, manifest, c.ProfileID)
+	c.plugin = plugin
+	return err
+}
+
+// pluginManifestColumn selects the manifest of the plugin that the provider p
+// pins, or NULL.
+const pluginManifestColumn = "(SELECT pl.manifest FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
+
+var pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // VendorMissing reports whether the configuration omits its vendor id.
 func (c *Configuration) VendorMissing() bool {
@@ -103,6 +165,9 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if kind == nil {
 		return access.Fail(422, "provider_kind_unavailable", "Unknown provider connector kind.")
 	}
+	if c.Kind == KindPlugin && c.plugin == nil {
+		return access.Invalid("configuration.profile_revision", "Choose a profile of an installed, approved plugin, with the plugin's digest as the profile revision.")
+	}
 	modeAllowed := false
 	for _, m := range kind.AuthModes {
 		modeAllowed = modeAllowed || m.Mode == c.AuthMode
@@ -120,7 +185,7 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.credential_headers", "Use at most 16 credential headers.")
 	}
 	for _, h := range c.Options.CredentialHeaders {
-		if h == "" || !validHeaderName(h) || reservedHeader(h) {
+		if !connectors.ConfigurableHeader(h) {
 			return access.Invalid("configuration.options.credential_headers", "Use valid header names other than hop-by-hop or framing headers.")
 		}
 	}
@@ -133,7 +198,11 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if err := c.transport().Validate(policy); err != nil {
 		return access.Invalid("configuration", err.Error())
 	}
-	if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
+	if c.Kind == KindPlugin {
+		if !c.VendorMissing() {
+			return access.Invalid("configuration.options.vendor_id", "A plugin provider has no vendor.")
+		}
+	} else if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
 		return access.Invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	if len(c.Options.Models) > 2000 {
@@ -182,18 +251,6 @@ func ValidQuota(q Limits) bool {
 	return true
 }
 
-func validHeaderName(name string) bool {
-	if name == "" || len(name) > 128 {
-		return false
-	}
-	for _, r := range name {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
-			return false
-		}
-	}
-	return true
-}
-
 // credentialRequired reports whether the auth mode needs a secret.
 func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
 
@@ -221,16 +278,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
-}
-func reservedHeader(h string) bool {
-	h = strings.ToLower(h)
-	if strings.HasPrefix(h, "x-olp-") {
-		return true
-	}
-	switch h {
-	case "host", "content-length", "transfer-encoding", "connection", "cookie", "proxy-authorization", "proxy-connection", "upgrade", "te", "trailer", "content-type", "content-encoding", "accept", "traceparent", "tracestate", "x-request-id":
-		return true
-	}
-	return false
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }

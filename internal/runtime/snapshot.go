@@ -81,7 +81,10 @@ type Limits struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
-	Network           *egress.ConnectionOptions        `json:"network,omitempty"`
+	Network *egress.ConnectionOptions `json:"network,omitempty"`
+	// Plugin is the plugin profile a plugin provider pins as its profile
+	// revision, which publication resolves so that gateways need no plugin.
+	Plugin            *connectors.PluginProfile        `json:"plugin,omitempty"`
 	ProfileID         string                           `json:"profile_id,omitempty"`
 	ProfileRevision   string                           `json:"profile_revision,omitempty"`
 	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
@@ -282,5 +285,5 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Network: p.Network, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, Plugin: p.Plugin, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

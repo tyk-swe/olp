@@ -1,6 +1,7 @@
 <script lang="ts">
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
+  import PluginProfileField from './PluginProfileField.svelte';
   import type { Provider } from '$lib/features/providers/api';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import ProviderActivationControls from '$lib/features/providers/ProviderActivationControls.svelte';
@@ -68,6 +69,12 @@
         onChange={onTouch}
       />
     {/if}
+    {#if current.configuration.kind === 'plugin'}<PluginProfileField
+        values={editValues}
+        idPrefix="detail"
+        disabled={!canManage || Boolean(busy) || current.state === 'disabled'}
+        onChange={onTouch}
+      />{/if}
   </div>
   <ProviderProfileEditor
     values={editValues}

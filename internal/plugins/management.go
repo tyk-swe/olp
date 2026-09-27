@@ -1,15 +1,19 @@
 package plugins
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -208,6 +212,15 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
 	}
+	// Provider writes hold the same installation lock, so no revision can pin
+	// the plugin between this check and the delete.
+	pinning, err := pinningProviders(r.Context(), tx, digest)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if len(pinning) > 0 {
+		return access.Reply{}, access.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Move those providers to another plugin before uninstalling it.")
+	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
 		return access.Reply{}, err
 	}
@@ -215,6 +228,32 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+}
+
+// pinningProviders names the providers whose draft or any published
+// revision pins a plugin digest as its profile revision, or returns "".
+func pinningProviders(ctx context.Context, q access.Queryer, digest string) (string, error) {
+	rows, err := q.Query(ctx, `SELECT p.name FROM olp.providers p
+		WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=$1
+		   OR EXISTS (SELECT 1 FROM olp.provider_revisions r WHERE r.provider_id=p.id AND r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=$1)
+		ORDER BY lower(p.name), p.id`, digest)
+	if err != nil {
+		return "", err
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(names) == 0 {
+		return "", err
+	}
+	const shown = 10
+	quoted := make([]string, 0, shown)
+	for _, name := range names[:min(len(names), shown)] {
+		quoted = append(quoted, strconv.Quote(name))
+	}
+	listed := strings.Join(quoted, ", ")
+	if len(names) > shown {
+		listed += fmt.Sprintf(" and %d more providers", len(names)-shown)
+	}
+	return listed, nil
 }
 
 func digestParam(r *http.Request) (string, error) {

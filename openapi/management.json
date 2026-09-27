@@ -4297,6 +4297,38 @@
         ],
         "type": "object"
       },
+      "PluginHosting": {
+        "additionalProperties": false,
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.",
+        "properties": {
+          "address": {
+            "description": "Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared request headers by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "query": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared query parameters by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
       "PolicyDecision": {
         "description": "Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.",
         "properties": {
@@ -4491,6 +4523,9 @@
             "description": "The built-in dialect the profile serves.",
             "type": "string"
           },
+          "hosting": {
+            "$ref": "#/components/schemas/PluginHosting"
+          },
           "id": {
             "type": "string"
           },
@@ -4501,7 +4536,8 @@
         "required": [
           "id",
           "label",
-          "dialect"
+          "dialect",
+          "hosting"
         ],
         "type": "object"
       },
@@ -4593,7 +4629,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Scopes the price to one provider. A price for plugin providers names its provider: no kind-wide or vendor price applies to them."
           },
           "provider_kind": {
             "$ref": "#/components/schemas/ProviderKind"
@@ -5316,9 +5353,11 @@
           "default_chain",
           "static",
           "azure_default",
-          "azure_client_secret"
+          "azure_client_secret",
+          "static_credential"
         ],
-        "type": "string"
+        "type": "string",
+        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places."
       },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
@@ -5373,7 +5412,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address."
           },
           "kind": {
             "$ref": "#/components/schemas/ProviderKind"
@@ -5386,7 +5426,7 @@
             "type": "string"
           },
           "profile_revision": {
-            "description": "Immutable provider profile composition revision selected with profile_id.",
+            "description": "Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.",
             "type": "string"
           }
         },
@@ -5700,9 +5740,11 @@
           "vertex_ai",
           "bedrock",
           "azure_openai",
-          "openai_compatible"
+          "openai_compatible",
+          "plugin"
         ],
-        "type": "string"
+        "type": "string",
+        "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
       },
       "ProviderKindCapabilityListResponse": {
         "properties": {
@@ -6072,7 +6114,7 @@
         "type": "object"
       },
       "ProviderProfile": {
-        "description": "Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.",
+        "description": "Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.",
         "properties": {
           "authentication": {
             "items": {
@@ -6122,6 +6164,9 @@
             },
             "type": "array"
           },
+          "plugin": {
+            "$ref": "#/components/schemas/ProviderProfilePlugin"
+          },
           "query_settings": {
             "items": {
               "type": "string"
@@ -6136,6 +6181,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "strict": {
+            "description": "Whether the profile may serve strict routes: its hosting changes only authorization, address and headers, or is a qualified built-in binding.",
+            "type": "boolean"
           },
           "transport": {
             "type": "string"
@@ -6156,7 +6205,8 @@
           "semantic_headers",
           "query_settings",
           "operation_dialects",
-          "default_schemas"
+          "default_schemas",
+          "strict"
         ],
         "type": "object"
       },
@@ -6171,6 +6221,29 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "ProviderProfilePlugin": {
+        "additionalProperties": false,
+        "description": "The installed provider plugin that supplies a profile.",
+        "properties": {
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module, which is the profile revision.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "name",
+          "version"
         ],
         "type": "object"
       },
@@ -6397,6 +6470,10 @@
           "network_configuration_changed": {
             "type": "boolean"
           },
+          "plugin_changed": {
+            "description": "The revisions pin different provider plugin digests, or only one pins a plugin.",
+            "type": "boolean"
+          },
           "profile_changed": {
             "type": "boolean"
           },
@@ -6427,6 +6504,7 @@
           "capabilities_added",
           "capabilities_removed",
           "profile_changed",
+          "plugin_changed",
           "semantic_configuration_changed",
           "serving_binding_changed",
           "network_configuration_changed"
@@ -14545,7 +14623,7 @@
     },
     "/api/v1/plugins/{plugin_digest}": {
       "delete": {
-        "description": "Uninstalls a provider plugin and deletes its module.",
+        "description": "Uninstalls a provider plugin and deletes its module. A plugin that a provider draft or published provider revision pins can't be uninstalled.",
         "operationId": "uninstall_plugin",
         "parameters": [
           {
@@ -14611,6 +14689,16 @@
               }
             },
             "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider revisions pin the plugin (plugin_pinned); the problem names the providers"
           },
           "412": {
             "content": {

@@ -165,7 +165,9 @@ type discoveredModel struct {
 func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	discovery := true
+	// A plugin provider has no upstream model listing: its operator declares
+	// models, and each is certified.
+	discovery := cfg.Kind != KindPlugin
 	for _, vendor := range vendors {
 		if vendor.ID == value(cfg.Options.VendorID) {
 			discovery = vendor.Discovery

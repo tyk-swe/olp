@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -78,8 +79,17 @@ func validateManifest(m abi.Manifest) error {
 		if p.Dialect == "" {
 			return invalidManifest(field+".dialect", "Name the built-in dialect the profile serves.")
 		}
-		if !builtinDialect(p.Dialect) {
-			return &Error{Code: CodeDialectUnknown, Field: field + ".dialect", Message: fmt.Sprintf("OLP has no dialect named %q. A plugin names a built-in dialect and never defines one.", p.Dialect)}
+		if !slices.Contains(connectors.PluginDialects(), p.Dialect) {
+			return &Error{Code: CodeDialectUnknown, Field: field + ".dialect", Message: fmt.Sprintf("Plugin profiles can't serve a dialect named %q. A plugin names one of the built-in dialects %s, and never defines one.", p.Dialect, strings.Join(connectors.PluginDialects(), ", "))}
+		}
+		if err := connectors.ValidatePluginProfile(p); err != nil {
+			if refusal, ok := errors.AsType[*connectors.ProfileError](err); ok {
+				return invalidManifest(field+"."+refusal.Field, refusal.Message)
+			}
+			return invalidManifest(field, err.Error())
+		}
+		if address, _ := url.Parse(p.Hosting.Address); !slices.Contains(m.Origins, address.Scheme+"://"+address.Host) {
+			return invalidManifest(field+".hosting.address", "Declare the address at one of the plugin's origins, in the same form.")
 		}
 	}
 	return nil
@@ -110,9 +120,4 @@ func canonicalOrigin(origin string) bool {
 		}
 	}
 	return origin == strings.ToLower(u.Scheme+"://"+u.Host)
-}
-
-// builtinDialect reports whether a built-in provider profile serves dialect.
-func builtinDialect(dialect string) bool {
-	return slices.ContainsFunc(connectors.Profiles(), func(p connectors.Profile) bool { return p.Dialect == dialect })
 }

@@ -250,7 +250,10 @@ into live-provider tests. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
 entry identifies a provider, uses the same nested `configuration` as the
 management API, and references an optional `credential_file`. Vertex entries
 also select a probe `model`. Credential files must have restricted permissions;
-ADC and the AWS default chain reject stored credentials.
+ADC and the AWS default chain reject stored credentials. A provider with a
+profile, including a [plugin provider](plugins.md#providers-from-plugin-profiles)
+and its static credential, mounts only secret material: its `configuration` must
+match the published revision.
 
 Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
 default credential slot and enforces its slot and connection limits. Releases

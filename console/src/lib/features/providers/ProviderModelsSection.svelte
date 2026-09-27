@@ -77,6 +77,8 @@
   // Discovery, manual declaration and capability review all fail with the same
   // 409 on a disabled provider, so they stay locked until it is a draft again.
   const editingLocked = $derived(providerDisabled(current));
+  // Plugin providers have no upstream model list; the operator declares models.
+  const plugin = $derived(current.configuration.kind === 'plugin');
 
   const capabilityOptions = createQuery(() => ({
     queryKey: providerKeys.capabilityOptions(current.configuration.kind),
@@ -191,8 +193,10 @@
   </div>
   <div class="discovery-row">
     <p class="muted">
-      Refresh the inventory from the upstream model-list API. Existing
-      capability certification is reconciled server-side.
+      {#if plugin}Plugin providers have no upstream model list. Rechecking
+        probes every declared model; declare further models below.{:else}Refresh
+        the inventory from the upstream model-list API. Existing capability
+        certification is reconciled server-side.{/if}
     </p>
     <button
       class="button button-secondary"
@@ -201,16 +205,21 @@
       disabled={!canManage || Boolean(busy) || editingLocked}
       >{busy === 'detail-discover'
         ? 'Discovering…'
-        : 'Run upstream discovery'}</button
+        : plugin
+          ? 'Recheck declared models'
+          : 'Run upstream discovery'}</button
     >
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
-  {#if canManage && !editingLocked && current.configuration.kind === 'openai_compatible'}<details
+  {#if canManage && !editingLocked && (plugin || current.configuration.kind === 'openai_compatible')}<details
       class="manual-fallback"
+      open={plugin}
     >
       <summary>Manual model identifiers</summary>
       <p>
-        Use only if this compatible endpoint has no list API. Models remain
+        {plugin
+          ? 'Declare the upstream models this plugin provider serves.'
+          : 'Use only if this compatible endpoint has no list API.'} Models remain
         disabled until capability review.
       </p>
       <div class="form-field">

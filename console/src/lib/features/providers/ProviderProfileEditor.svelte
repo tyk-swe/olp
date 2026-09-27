@@ -40,6 +40,8 @@
   }));
   const draft = $derived(values.document);
   const kind = $derived(draft?.text(['kind']));
+  // A plugin provider's profile is pinned by its plugin profile field.
+  const plugin = $derived(kind === 'plugin');
   const compatible = $derived(
     profiles.data?.filter((profile) => profile.kind === kind) ?? []
   );
@@ -102,32 +104,32 @@
 
 {#if draft}
   <div class="profile-editor">
-    <div class="form-field">
-      <label for={`${idPrefix}-profile`}>API profile</label>
-      <select
-        id={`${idPrefix}-profile`}
-        value={values.profileId
-          ? `${values.profileId}@${values.profileRevision}`
-          : ''}
-        onchange={(event) => chooseProfile(event.currentTarget.value)}
-        disabled={editDisabled || profiles.isPending || profiles.isError}
-      >
-        <option value="">Automatic provider · no profile selected</option>
-        {#if values.profileId && !selected}<option
-            value={`${values.profileId}@${values.profileRevision}`}
-            >{values.profileId} · revision {values.profileRevision}</option
-          >{/if}
-        {#each compatible as profile (`${profile.id}@${profile.revision}`)}<option
-            value={`${profile.id}@${profile.revision}`}
-            >{profile.label} · revision {profile.revision}</option
-          >{/each}
-      </select>
-      <small
-        >Profiles select the API dialect, hosting and supported configuration.
-        They do not establish model quality or complete interaction
-        compatibility.</small
-      >
-    </div>
+    {#if !plugin}<div class="form-field">
+        <label for={`${idPrefix}-profile`}>API profile</label>
+        <select
+          id={`${idPrefix}-profile`}
+          value={values.profileId
+            ? `${values.profileId}@${values.profileRevision}`
+            : ''}
+          onchange={(event) => chooseProfile(event.currentTarget.value)}
+          disabled={editDisabled || profiles.isPending || profiles.isError}
+        >
+          <option value="">Automatic provider · no profile selected</option>
+          {#if values.profileId && !selected}<option
+              value={`${values.profileId}@${values.profileRevision}`}
+              >{values.profileId} · revision {values.profileRevision}</option
+            >{/if}
+          {#each compatible as profile (`${profile.id}@${profile.revision}`)}<option
+              value={`${profile.id}@${profile.revision}`}
+              >{profile.label} · revision {profile.revision}</option
+            >{/each}
+        </select>
+        <small
+          >Profiles select the API dialect, hosting and supported configuration.
+          They do not establish model quality or complete interaction
+          compatibility.</small
+        >
+      </div>{/if}
     {#if profiles.isError || schemas.isError}<p
         class="inline-problem"
         role="alert"
@@ -145,7 +147,7 @@
         <strong>{selected.label}</strong><span
           >{selected.hosting} · {selected.dialect} · API {selected.dialect_revision}</span
         >
-      </p>{:else if !values.profileId}<p class="profile-summary">
+      </p>{:else if !values.profileId && !plugin}<p class="profile-summary">
         <strong>Automatic provider</strong><span
           >Endpoints follow the connector kind. Only transformed routes can use
           this provider.</span
@@ -228,7 +230,7 @@
           {onChange}
         />
       </details>
-    {:else if !values.profileId}
+    {:else if !values.profileId && !plugin}
       <details class="configuration-group">
         <summary>Parameter defaults</summary><NativeMapEditor
           {draft}

@@ -13,6 +13,11 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if mode != "unary" && mode != "streaming" && mode != "async" && mode != "realtime" {
 		return false
 	}
+	if kind == KindPlugin {
+		// A plugin profile serves generation in its dialect, which other
+		// surfaces reach through translation.
+		return operation == "generation" && surface != "bedrock" && (mode == "unary" || mode == "streaming")
+	}
 	if kind != "openai" && kind != "openai_compatible" && kind != "anthropic" && kind != "gemini" && kind != "vertex_ai" && kind != "azure_openai" && kind != "bedrock" {
 		return false
 	}

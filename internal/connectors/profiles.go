@@ -23,7 +23,8 @@ import (
 // Profile links independently owned dialect, hosting and authentication contracts.
 // Revision is OLP's immutable composition revision, not a provider model revision.
 // A provider without a profile is an Automatic provider: its endpoints follow
-// from its provider kind, and strict routes refuse it.
+// from its provider kind, and strict routes refuse it. A provider plugin
+// supplies the profiles of the plugin kind; see PluginProfile.
 type Profile struct {
 	OperationDialects map[string]string          `json:"operation_dialects"`
 	DefaultSchemas    map[string]json.RawMessage `json:"default_schemas"`
@@ -40,6 +41,13 @@ type Profile struct {
 	SemanticHeaders   []string                   `json:"semantic_headers"`
 	QuerySettings     []string                   `json:"query_settings"`
 	Documentation     string                     `json:"documentation"`
+	// Plugin is the provider plugin that supplies the profile, or nil for a
+	// built-in profile.
+	Plugin *Plugin `json:"plugin,omitempty"`
+	// Strict reports whether the profile may serve strict routes: its hosting
+	// changes only authorization, address and headers, or is a qualified
+	// built-in binding.
+	Strict bool `json:"strict"`
 }
 
 const ProfileRevision = "1"
@@ -70,7 +78,7 @@ var profileRegistry = []Profile{
 func init() {
 	for i := range profileRegistry {
 		p := &profileRegistry[i]
-		p.Revision, p.Transport = ProfileRevision, "http"
+		p.Revision, p.Transport, p.Strict = ProfileRevision, "http", true
 		p.Authentication = []string{"api_key", "headers", "none"}
 		p.Operations = []string{"generation", "token_count"}
 		p.SemanticHeaders, p.QuerySettings = []string{}, []string{}
@@ -164,6 +172,10 @@ func cloneProfile(p Profile) Profile {
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
 	p.QuerySettings = slices.Clone(p.QuerySettings)
+	if p.Plugin != nil {
+		plugin := *p.Plugin
+		p.Plugin = &plugin
+	}
 	return p
 }
 
@@ -189,12 +201,28 @@ func LookupProfile(id, revision string) (Profile, error) {
 	return cloneProfile(p), nil
 }
 
+// profile borrows the catalogue metadata of the connector's profile: its
+// plugin profile's, or a built-in profile's.
+func (c Config) profile() (Profile, error) {
+	if c.Plugin == nil {
+		return profileView(c.ProfileID, c.ProfileRevision)
+	}
+	if p := c.Plugin.profile; p.ID == c.ProfileID && p.Revision == c.ProfileRevision {
+		return p, nil
+	}
+	return Profile{}, errors.New("the plugin profile is not the configured profile revision")
+}
+
 func (c Config) Profile() (Profile, error) {
-	return LookupProfile(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
+	if err != nil {
+		return Profile{}, err
+	}
+	return cloneProfile(p), nil
 }
 
 func (c Config) Hosting() string {
-	if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
+	if p, err := c.profile(); err == nil {
 		return p.Hosting
 	}
 	return ""
@@ -207,7 +235,7 @@ func (c Config) ValidateProfile() error {
 		}
 		return nil
 	}
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return err
 	}
@@ -266,7 +294,7 @@ func (c Config) ValidateProfile() error {
 // TargetFamily is explicit for generation and operation-owned for other calls.
 // The raw model-specific Invoke profile deliberately cannot enter a chat codec.
 func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return "", err
 	}
@@ -324,8 +352,12 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {
+	if c.Kind == KindPlugin {
+		p, err := c.profile()
+		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
+	}
 	if c.ProfileID != "" {
-		if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
+		if p, err := c.profile(); err == nil {
 			switch p.Dialect {
 			case "gemini-interactions":
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
@@ -350,21 +382,26 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID == "" {
 		return true
 	}
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	return err == nil && slices.Contains(p.Operations, operation)
 }
 
 // host is the hosting stage of Apply. It places a request the caller addressed
-// from the connector: a profile's semantic headers and query settings, or the
-// API revision an automatic Anthropic provider sends.
-func (c Config) host(req *http.Request) error {
+// from the connector: a profile's semantic headers and query settings, a
+// plugin profile's declared headers and query parameters filled from the
+// credential, or the API revision an automatic Anthropic provider sends. It
+// returns the placed values that carry the credential.
+func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 	if err := c.ApplySemantic(req); err != nil {
-		return err
+		return nil, err
 	}
 	if c.Kind == "anthropic" && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
 	}
-	return nil
+	if c.Plugin != nil {
+		return c.Plugin.place(req, credential)
+	}
+	return nil, nil
 }
 
 // ApplySemantic configures only profile-owned headers and query settings.
@@ -378,7 +415,7 @@ func (c Config) ApplySemantic(req *http.Request) error {
 	if err := c.ValidateProfile(); err != nil {
 		return err
 	}
-	p, _ := profileView(c.ProfileID, c.ProfileRevision)
+	p, _ := c.profile()
 	if p.Hosting == "direct-anthropic" {
 		req.Header.Set("Anthropic-Version", p.DialectRevision)
 	}
@@ -430,6 +467,11 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
 	switch c.Hosting() {
+	case pluginHosting:
+		if c.Endpoint != c.Plugin.Address() {
+			return errors.New("a plugin provider's endpoint is its profile's address")
+		}
+		return nil
 	case "direct-gemini-interactions", "direct-gemini-live":
 		if u.Path != "/v1beta" {
 			return errors.New("Gemini lifecycle endpoint must end at /v1beta")
@@ -481,7 +523,7 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("cloud request must be a JSON object")
 	}
-	p, _ := profileView(c.ProfileID, c.ProfileRevision)
+	p, _ := c.profile()
 	version, _ := json.Marshal(p.DialectRevision)
 	if prior, found := fields["anthropic_version"]; found && string(prior) != string(version) {
 		return nil, errors.New("native cloud version collides with the configured profile")
@@ -604,6 +646,7 @@ func RegisterProfile(p Profile) error {
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
 		return errors.New("profile transport and capabilities are required")
 	}
+	p.Plugin, p.Strict = nil, template.Strict
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil

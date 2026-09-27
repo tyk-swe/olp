@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
@@ -99,5 +101,54 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A plugin provider's hosting adaptation places the static credential in the
+// headers it declares, and every placed value is redacted from upstream text.
+func TestPluginHostingPlacesAndRedactsTheStaticCredential(t *testing.T) {
+	h := newHarness(t, Config{})
+	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{{
+		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
+		Hosting: abi.Hosting{
+			Address: h.upstream.URL + "/a/v1",
+			Headers: map[string]string{"Authorization": "Token {credential}", "X-Acme-Key": "key={credential}", "X-Acme-Client": "olp"},
+		},
+	}}}
+	digest := strings.Repeat("ab", 32)
+	plugin, err := connectors.NewPluginProfile(digest, manifest, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := map[string][]byte{}
+	for id, provider := range h.rt.release.Snapshot.Providers {
+		for _, slot := range provider.Slots {
+			secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
+		}
+		if provider.Slots[0].ID == h.slotA {
+			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
+			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = "acme-chat", digest, plugin.Address()
+			h.rt.release.Snapshot.Providers[id] = provider
+		}
+	}
+	h.rt.release, err = runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var placed http.Header
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		placed = r.Header.Clone()
+		echo := r.Header.Get("Authorization") + " " + r.Header.Get("X-Acme-Key")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "Invalid prompt; " + echo, "code": echo, "type": echo}})
+	})
+	resp, result := h.chat(fullKey, nil)
+	if placed.Get("Authorization") != "Token "+secretA || placed.Get("X-Acme-Key") != "key="+secretA || placed.Get("X-Acme-Client") != "olp" {
+		t.Fatalf("the upstream received %v", placed)
+	}
+	message := result["error"].(map[string]any)["message"].(string)
+	if resp.StatusCode != http.StatusBadRequest || strings.Contains(message, secretA) || strings.Contains(message, "Token") || !strings.Contains(message, "[REDACTED]") {
+		t.Fatalf("placed credential was not redacted: %d %s", resp.StatusCode, message)
 	}
 }

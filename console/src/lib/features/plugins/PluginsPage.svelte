@@ -217,14 +217,20 @@
             <div class="table-shell">
               <table class="data-table">
                 <thead
-                  ><tr><th>Profile</th><th>Label</th><th>Dialect</th></tr
+                  ><tr
+                    ><th>Profile</th><th>Label</th><th>Dialect</th><th
+                      >Address</th
+                    ></tr
                   ></thead
                 >
                 <tbody>
                   {#each plugin.manifest.profiles as profile (profile.id)}
                     <tr
                       ><td><code>{profile.id}</code></td><td>{profile.label}</td
-                      ><td><code>{profile.dialect}</code></td></tr
+                      ><td><code>{profile.dialect}</code></td><td
+                        ><code class="address">{profile.hosting.address}</code
+                        ></td
+                      ></tr
                     >
                   {/each}
                 </tbody>
@@ -403,7 +409,8 @@
     padding: 0;
     list-style: none;
   }
-  .origins code {
+  .origins code,
+  .address {
     overflow-wrap: anywhere;
   }
   .approval {

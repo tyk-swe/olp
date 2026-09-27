@@ -43,8 +43,10 @@ tests check handler/contract parity.
 
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
 revision metadata and stored JSON. Runtime publication and retained-resource
-resolution share these pure decoders. Their callers still own SQL, transactions,
-authorization, credential checks, and operation eligibility. Publication alone
+resolution share these pure decoders. A plugin provider's revision decodes with
+the manifest of the plugin it pins (`PluginManifestColumn`), so snapshots carry
+its plugin profile and gateways need no plugin. Their callers still own SQL,
+transactions, authorization, credential checks, and operation eligibility. Publication alone
 drops empty provider limits; retained resources preserve the stored limits.
 
 The console usage feature owns `PricingRevisionsPanel`, including its queries,

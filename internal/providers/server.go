@@ -79,21 +79,30 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text"
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginManifestColumn
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
-	var configuration []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID)
+	var configuration, manifest []byte
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &manifest)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
+	if err = p.decodeConfiguration(configuration, manifest); err != nil {
 		return nil, err
+	}
+	return &p, nil
+}
+
+// decodeConfiguration reads a stored draft configuration, with the manifest
+// of the plugin it pins, if any.
+func (p *record) decodeConfiguration(configuration, manifest []byte) error {
+	if err := json.Unmarshal(configuration, &p.Configuration); err != nil {
+		return err
 	}
 	p.Configuration.Normalize()
 	p.Configuration.ProviderID = p.ID
-	return &p, nil
+	return p.Configuration.pinned(manifest)
 }
 
 // load reads one provider, locking the row inside a transaction when asked.
@@ -177,21 +186,19 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 
 func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
-	var configuration []byte
+	var configuration, manifest []byte
 	var d detail
 	var draft credentialState
 	var usableCredential bool
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID,
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &manifest,
 		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
 		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
+	if err = p.decodeConfiguration(configuration, manifest); err != nil {
 		return nil, err
 	}
-	p.Configuration.Normalize()
-	p.Configuration.ProviderID = p.ID
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
 	d.ProjectID = p.ProjectID
 	d.VendorID = p.Configuration.Options.VendorID

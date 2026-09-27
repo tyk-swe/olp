@@ -32,21 +32,23 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
   await expect(
     page.getByRole('heading', { name: 'Plugins', exact: true })
   ).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'No plugins installed' })
-  ).toBeVisible();
+  // Other journeys may leave their own builds of the plugin installed.
+  const plugin = page.getByRole('article', { name: 'reference 0.1.0' });
+  await expect(plugin).toHaveCount(0);
 
   await page.getByLabel('Plugin module (.wasm)').setInputFiles(module);
   await page.getByRole('button', { name: 'Install plugin' }).click();
   await expect(page.getByRole('status')).toContainText(
     'Installed reference 0.1.0.'
   );
-  const plugin = page.getByRole('article', { name: 'reference 0.1.0' });
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
   await expect(
     plugin.getByRole('cell', { name: 'reference-chat' })
   ).toBeVisible();
   await expect(plugin.getByRole('cell', { name: 'openai-chat' })).toBeVisible();
+  await expect(
+    plugin.getByRole('cell', { name: 'https://api.example.com/v1' })
+  ).toBeVisible();
   await expect(
     plugin
       .getByRole('region', { name: 'Declared origins' })
@@ -64,7 +66,7 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
   await expect(page.getByRole('status')).toContainText(
     'reference 0.1.0 is already installed; nothing changed.'
   );
-  await expect(page.getByRole('article')).toHaveCount(1);
+  await expect(plugin).toHaveCount(1);
 
   await plugin.getByRole('button', { name: 'Review and approve' }).click();
   const approval = plugin.getByRole('region', {
@@ -88,7 +90,5 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
   await expect(page.getByRole('status')).toContainText(
     'Uninstalled reference 0.1.0.'
   );
-  await expect(
-    page.getByRole('heading', { name: 'No plugins installed' })
-  ).toBeVisible();
+  await expect(plugin).toHaveCount(0);
 });

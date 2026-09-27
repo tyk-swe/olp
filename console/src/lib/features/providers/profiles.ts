@@ -7,6 +7,12 @@ import { nativeObject } from '$lib/json/nativeJson';
 
 type Schemas = components['schemas'];
 export type ProviderProfile = Schemas['ProviderProfile'];
+/** The installed provider plugin that supplies a plugin profile. */
+export type ProviderProfilePlugin = Schemas['ProviderProfilePlugin'];
+export type PluginProfileGroup = {
+  plugin: ProviderProfilePlugin;
+  profiles: ProviderProfile[];
+};
 export type NetworkCredential = Schemas['NetworkCredentialResponse'];
 export type FieldSchema = {
   type?: string | string[];
@@ -29,6 +35,35 @@ export async function listProviderProfiles(
   const response = await apiClient.GET('/api/v1/provider-profiles', { signal });
   return result(response.data, response.error, response.response).items;
 }
+/**
+ * The catalogue's plugin profiles grouped by the plugin build (digest) that
+ * supplies them, in catalogue order. Only approved plugins appear there.
+ */
+export function pluginProfileGroups(
+  profiles: readonly ProviderProfile[]
+): PluginProfileGroup[] {
+  const groups = new Map<string, PluginProfileGroup>();
+  for (const profile of profiles) {
+    if (profile.kind !== 'plugin' || !profile.plugin) continue;
+    const group = groups.get(profile.plugin.digest) ?? {
+      plugin: profile.plugin,
+      profiles: []
+    };
+    group.profiles.push(profile);
+    groups.set(profile.plugin.digest, group);
+  }
+  return [...groups.values()];
+}
+
+/** The client surface that speaks a generation dialect natively. */
+export function dialectSurface(
+  dialect: string | undefined
+): 'openai' | 'anthropic' | 'gemini' {
+  if (dialect === 'anthropic-messages') return 'anthropic';
+  if (dialect === 'gemini-generate-content') return 'gemini';
+  return 'openai';
+}
+
 export async function getConfigurationSchemas(
   signal?: AbortSignal
 ): Promise<ConfigurationSchemas> {
