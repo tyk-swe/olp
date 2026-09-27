@@ -131,8 +131,8 @@ func Register(p Plugin) {
 	registered = p
 }
 
-// serve answers one request message from OLP, which carries no call context
-// of its own.
+// serve answers one request message OLP passes a WASI reactor, which serves
+// one call at a time.
 func serve(message []byte) []byte {
 	var request abi.Request
 	response := answer(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The request is not a JSON call."})

@@ -35,7 +35,7 @@ func (s *Management) executables(r *http.Request) (access.Reply, error) {
 	}
 	files, err := tier.Executables()
 	if err != nil {
-		return access.Reply{}, err
+		return access.Reply{}, access.Fail(http.StatusServiceUnavailable, "unconfined_plugin_dir_unreadable", "OLP can't read the unconfined plugin directory the deployment names: "+err.Error())
 	}
 	items := make([]contract.UnconfinedExecutable, 0, len(files))
 	for _, file := range files {

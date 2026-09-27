@@ -22069,6 +22069,16 @@
               }
             },
             "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
           }
         },
         "security": [
