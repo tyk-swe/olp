@@ -288,13 +288,13 @@ Control runs no background jobs, so status requests drive a device
 authorization's polling. A status request made once the interval has passed
 since the last poll runs one plugin poll step; any other reports the status
 without reaching the upstream. When the upstream asks to slow down, the
-interval grows by 5 seconds from then on. The status is `pending` until the
-operator approves the device, then `completed`; `denied` when the operator
-denies it; and `expired` when the device authorization or the enrollment
-expires first. Polling stops at any of those, or when the enrollment is
-cancelled. A poll that fails otherwise, such as one that can't reach the
-upstream, ends the enrollment with the same problems as a failed continuation,
-and later status requests answer `grant_enrollment_used`. A status request that
+interval grows by 5 seconds from then on, up to 5 minutes. The status is
+`pending` until the operator approves the device, then `completed`; `denied`
+when the operator denies it; and `expired` when the device authorization or
+the enrollment expires first. Polling stops at any of those, or when the
+enrollment is cancelled. A poll that fails otherwise, such as one that can't
+reach the upstream, ends the enrollment with the same problems as a failed
+continuation, and later status requests answer `grant_enrollment_used`. A status request that
 ends before its poll does, such as one its client abandoned, leaves the
 enrollment pending, and the next one polls again.
 

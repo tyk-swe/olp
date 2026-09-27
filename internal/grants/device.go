@@ -171,11 +171,11 @@ func Poll(ctx context.Context, host *plugins.Host, e Enrollment, options map[str
 
 // Settle records why a poll step Watch claimed obtained no grant, or why its
 // grant could not be staged, and returns where the enrollment stands: Pending,
-// polled again after the interval, which grows by 5 seconds when the upstream
-// asked to slow down; Denied; or Expired. A poll whose status request ctx
-// ended first leaves the enrollment Pending too, since what it found is
-// unknown. Any other failure ends the enrollment and is the problem Settle
-// returns. An enrollment cancelled meanwhile is not found.
+// polled again after the interval, which grows by 5 seconds, up to 5 minutes,
+// when the upstream asked to slow down; Denied; or Expired. A poll whose
+// status request ctx ended first leaves the enrollment Pending too, since what
+// it found is unknown. Any other failure ends the enrollment and is the
+// problem Settle returns. An enrollment cancelled meanwhile is not found.
 func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) (Standing, error) {
 	var code string
 	if reported, ok := errors.AsType[*abi.Error](failed); ok {
@@ -188,7 +188,7 @@ func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) 
 	switch code {
 	case abi.CodeAuthorizationPending, abi.CodeSlowDown:
 		if code == abi.CodeSlowDown {
-			e.interval += slowDown
+			e.interval = min(e.interval+slowDown, maxInterval)
 		}
 		err := e.settle(ctx, db, "poll_interval=$2::integer,poll_at=now()+$2::integer*interval '1 second'", false, seconds(e.interval))
 		return Standing{Status: Pending, Interval: e.interval}, err

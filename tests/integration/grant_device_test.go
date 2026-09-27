@@ -107,6 +107,15 @@ func TestDeviceAuthorizationGrantEnrollmentPollsUntilTheOperatorApproves(t *test
 	if authority.DevicePolls() != 2 {
 		t.Fatalf("polled %d times within the interval", authority.DevicePolls())
 	}
+	// Slowing down never stretches the interval beyond the five minutes a
+	// device authorization may ask for.
+	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.grant_enrollments SET poll_interval=298 WHERE id=$1", enrollment["id"]); err != nil {
+		t.Fatal(err)
+	}
+	pollDue(t, h, enrollment)
+	if status := pollGrantEnrollment(h, owner, path, enrollment, 200); status["status"] != "pending" || status["interval"] != float64(300) || authority.DevicePolls() != 3 {
+		t.Fatalf("status %v after %d polls", status, authority.DevicePolls())
+	}
 
 	// The operator approves the device upstream, and another control replica
 	// serves the next status request.
@@ -121,7 +130,7 @@ func TestDeviceAuthorizationGrantEnrollmentPollsUntilTheOperatorApproves(t *test
 	// It stays completed, polling no more.
 	pollDue(t, h, enrollment)
 	if again := pollGrantEnrollment(h, owner, path, enrollment, 200); again["status"] != "completed" ||
-		again["completion"].(map[string]any)["credential_id"] != completion["credential_id"] || authority.DevicePolls() != 3 {
+		again["completion"].(map[string]any)["credential_id"] != completion["credential_id"] || authority.DevicePolls() != 4 {
 		t.Fatalf("status %v after %d polls", again, authority.DevicePolls())
 	}
 
