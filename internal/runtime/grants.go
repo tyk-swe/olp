@@ -7,9 +7,9 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/grants"
 )
 
 // servedGrant is what a gateway serves for the grant beneath a credential
@@ -180,7 +180,7 @@ func (m *Manager) CredentialRefused(credentialID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), PollInterval)
 		defer cancel()
-		if err := grants.RequestRefresh(ctx, m.pool, credentialID, grant.generation); err != nil {
+		if err := RequestRefresh(ctx, m.pool, credentialID, grant.generation); err != nil {
 			m.log.Warn("grant refresh not requested", "credential_id", credentialID, "error", err)
 			// A later refusal asks again.
 			m.mu.Lock()
@@ -190,4 +190,16 @@ func (m *Manager) CredentialRefused(credentialID string) {
 			m.mu.Unlock()
 		}
 	}()
+}
+
+// RequestRefresh asks workers to refresh the grant beneath a credential
+// version at once, because the upstream refused the access token of its
+// generation. It changes nothing once a refresh replaced that token, while a
+// failed refresh backs off, or when the grant can't be refreshed, such as a
+// lapsed grant.
+func RequestRefresh(ctx context.Context, db *pgxpool.Pool, credentialID string, generation int64) error {
+	_, err := db.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=now()
+		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,
+		credentialID, generation)
+	return err
 }

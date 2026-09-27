@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -384,7 +385,7 @@ func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
 		t.Fatalf("%d refresh tokens survived: %v", tokens, err)
 	}
-	if err := grants.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
+	if err := runtime.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
 		t.Fatal(err)
 	}
 	if grant = readGrant(t, h, credentialID); grant.refresh != nil || pass(t, refresher) {

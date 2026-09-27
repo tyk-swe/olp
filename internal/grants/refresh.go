@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -253,18 +254,14 @@ func (r *Refresher) run(ctx context.Context, conn *pgx.Conn, g *dueGrant) (abi.G
 }
 
 // client returns an HTTP client over the provider's network path, under the
-// egress policy.
+// egress policy, with the network credential gateways would use.
 func (r *Refresher) client(ctx context.Context, conn *pgx.Conn, g *dueGrant) (*http.Client, error) {
 	network := g.configuration.Options.Network
 	var secret []byte
 	if network != nil && network.CredentialID != "" {
-		var usable bool
-		err := conn.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", network.CredentialID, g.providerID).Scan(&usable)
-		if err == nil && usable {
-			secret, err = r.Keys.Read(ctx, conn, r.Installation, network.CredentialID, "provider_credential")
-		}
-		if err != nil || !usable {
-			return nil, errors.New("the provider's network credential is unavailable")
+		var err error
+		if secret, err = runtime.ReadNetworkSecret(ctx, conn, r.Keys, r.Installation, g.providerID, network.CredentialID); err != nil {
+			return nil, fmt.Errorf("the provider's network credential is unavailable: %w", err)
 		}
 	}
 	return r.Egress.ConnectionClient(network, secret, refreshTimeout)
@@ -407,18 +404,6 @@ func schedule(now time.Time, expiresIn int64, refreshable bool) (expires, refres
 		refresh = new(expires.Add(-min(lifetime/4, maxRefreshLead)))
 	}
 	return expires, refresh
-}
-
-// RequestRefresh asks workers to refresh the grant beneath a credential
-// version at once, because the upstream refused the access token of its
-// generation. It changes nothing once a refresh replaced that token, while a
-// failed refresh backs off, or when the grant can't be refreshed, such as a
-// lapsed grant.
-func RequestRefresh(ctx context.Context, db *pgxpool.Pool, credentialID string, generation int64) error {
-	_, err := db.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=now()
-		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,
-		credentialID, generation)
-	return err
 }
 
 // clip cuts text to valid UTF-8 of at most limit bytes, on a character
