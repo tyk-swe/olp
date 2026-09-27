@@ -621,7 +621,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if _, err = a.Principal(r, tx, "configure"); err != nil {
+	if p, err = a.Principal(r, tx, "configure"); err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
@@ -638,6 +638,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.slotList(r.Context(), tx, locked)

@@ -101,10 +101,32 @@ func (s *Server) probe(r *http.Request) (access.Reply, error) {
 	} else {
 		detail = classify(err).Detail
 	}
-	if _, err = s.Access.Pool.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
+	if err = s.recordProbe(r, "provider.probe", id, at, succeeded, detail); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Detail(map[string]any{"provider_id": id, "succeeded": succeeded, "checked_at": at, "probe_type": "models", "detail": detail, "discovered_models": discovered}, current.ETag), nil
+}
+
+// recordProbe stores a probe outcome on the provider and audits it in one
+// transaction. The upstream call ran without the installation lock, so the
+// caller is authorized again under it before anything is written.
+func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
+	tx, err := s.Access.Begin(r)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := s.Access.Principal(r, tx, "configure")
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
+		return err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.ID, action, "provider", id, auditOutcome(succeeded)); err != nil {
+		return err
+	}
+	return tx.Commit(r.Context())
 }
 
 // auditOutcome maps a probe result onto the audit outcome vocabulary.
@@ -177,7 +199,9 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		listed, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
 		if err != nil {
 			pe := classify(err)
-			a.Pool.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status='failed',last_probe_detail=$3 WHERE id=$1", id, at, pe.Detail)
+			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
+				return access.Reply{}, err
+			}
 			return access.Reply{}, access.Fail(422, "discovery_failed", pe.Detail)
 		}
 		for _, name := range listed {

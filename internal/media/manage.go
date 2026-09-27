@@ -171,6 +171,10 @@ func (m *Management) delete(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, mapJobError(err)
 	}
 	if updated.Lifecycle != LifecycleDeleted {
+		// The provider delete was requested even though it is not confirmed.
+		if err := m.audit(r, p, "media_job.delete_pending", record.ID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Reply{}, access.Fail(http.StatusConflict, "media_job_delete_pending", "The media job delete was initiated but the provider has not confirmed; reconciliation continues.")
 	}
 	if err := m.audit(r, p, "media_job.delete", record.ID); err != nil {

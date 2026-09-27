@@ -410,6 +410,9 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
+	if err = Audit(r.Context(), tx, r, p.ID, "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
+		return Reply{}, err
+	}
 	return Commit(r, tx, response)
 }
 func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) (Reply, error) {
