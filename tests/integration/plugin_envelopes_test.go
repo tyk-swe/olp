@@ -108,7 +108,12 @@ func TestPluginProfileWithAnEnvelopeServesTransformedRoutes(t *testing.T) {
 	module := testutil.BuildPlugin(t, "./sdk/plugin/reference", "-X=main.upstream="+upstream.URL+"/v1")
 	digest := digestOf(module)
 	installed := h.want(owner, "POST", "/api/v1/plugins", module, wasm, 201)
-	declared := installed["manifest"].(map[string]any)["profiles"].([]any)[1].(map[string]any)["hosting"].(map[string]any)
+	profiles := installed["manifest"].(map[string]any)["profiles"].([]any)
+	gemini := slices.IndexFunc(profiles, func(profile any) bool { return profile.(map[string]any)["id"] == "reference-gemini" })
+	if gemini < 0 {
+		t.Fatalf("the plugin declares no reference-gemini profile: %v", profiles)
+	}
+	declared := profiles[gemini].(map[string]any)["hosting"].(map[string]any)
 	if envelope := declared["envelope"].(map[string]any); envelope["request"] != "request" || envelope["response"] != "response" || len(declared["rewrites"].([]any)) != 3 {
 		t.Fatalf("the owner reviews %v", declared)
 	}

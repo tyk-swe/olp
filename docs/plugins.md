@@ -52,7 +52,9 @@ its manifest declares:
 - **profiles**, each naming the built-in dialect it serves and its hosting
   adaptation: the address its requests go to, at one of the plugin's origins,
   the headers and query parameters it declares, any model listing and failure
-  classification, and any envelope and rewrites of the dialect's bodies;
+  classification, and any envelope and rewrites of the dialect's bodies. A
+  profile whose manifest entry has `signing: true` also runs the plugin's
+  signing hook on every request;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -88,12 +90,12 @@ Pinning needs an installed plugin whose origins an owner approved:
 refuse the draft otherwise. The provider's endpoint is the profile's address,
 which OLP sets.
 
-OLP runs the profile's hosting adaptation itself; no plugin code runs per
-request. It fills the declared headers and query parameters from the static
-credential, such as `Authorization: Token {credential}`, and sends the request
-over OLP's own transport, with the provider's network options and the egress
-policy. The credential is stored like any credential version, and every value
-that carries it is redacted wherever upstream text is recorded.
+OLP runs the profile's hosting adaptation itself. It fills the declared headers
+and query parameters from the static credential, such as
+`Authorization: Token {credential}`, and sends the request over OLP's own
+transport, with the provider's network options and the egress policy. The
+credential is stored like any credential version, and every value that carries
+it is redacted wherever upstream text is recorded.
 
 A profile may also declare an envelope and rewrites for an upstream that speaks
 the dialect inside a JSON object of its own, or needs request members set or
@@ -130,9 +132,10 @@ and fail over like a `429`. The built-in rules classify every failure no rule
 matches. The declarations apply to gateway attempts and probes alike.
 
 A plugin profile that changes only authorization, address and declared headers
-reports `strict: true` in the catalogue and serves strict routes. An envelope or
-any rewrite changes the dialect's bodies, so such a profile reports
-`strict: false` and serves only
+reports `strict: true` in the catalogue and serves strict routes. A
+[signing hook](#signing-hooks) changes only authorization, so a profile with one
+is strict too. An envelope or any rewrite changes the dialect's bodies, so such
+a profile reports `strict: false` and serves only
 [transformed routes](provider-routing.md#route-fidelity): validating or
 activating a strict route with a target using it fails with
 `422 target_capability`, telling you to declare the route transformed.
@@ -146,6 +149,28 @@ A gateway serving from [mounted connectors](configuration.md#mounted-connectors)
 mounts a plugin provider's static credential with `credential_file`. The
 mounted `configuration` must match the published revision, including its
 `profile_revision` and endpoint.
+
+### Signing hooks
+
+A profile may declare a signing hook for an upstream whose keys must become
+signatures or timestamped tokens. The hook is the only plugin code that runs
+per request: once per upstream request, never per stream event, after hosting
+has placed the request and its body is final. It receives the finished request
+and the static credential, and returns headers to add, which OLP redacts like
+the credential. Gateways run it for traffic, and control for probes and
+certification. A signing profile need not place the credential at all.
+
+A hook that fails, exceeds the plugin limits or returns a header OLP refuses
+fails the attempt before anything is sent: the attempt records a credential
+failure, the slot cools down, and the route fails over. A probe reports
+`credential_invalid` with the reason.
+
+Each process keeps the modules of the plugins it signs with compiled, by digest,
+with a bounded pool of instances, so no request compiles or instantiates
+anything. The first request a process signs with a plugin build loads the
+module from the database and compiles it, which takes a few seconds for a
+typical Go plugin. After that, signing adds about a millisecond per request for
+a small body, growing with the body's size.
 
 ## Uninstalling
 
@@ -161,18 +186,25 @@ revision restorable and its retained resources servable.
 
 ## Confinement and limits
 
-Every plugin call runs on a fresh instance of the module, which is discarded
-afterwards, within these limits:
+Plugin calls run on instances of the module within these limits:
 
 | Limit | Value |
 | --- | --- |
 | Linear memory per instance | 64 MiB |
-| Time per call, including instantiation | 10 seconds |
-| Message across the ABI | 1 MiB |
+| Instances of a module at once | 4 |
+| Time per call, including waiting for and instantiating an instance | 10 seconds |
+| Message from the plugin | 1 MiB |
 | Log output per call | 16 KiB, 2 KiB per message or attribute |
 
-A call that exceeds a limit fails with `plugin_timed_out` or `plugin_failed` and
+A call takes an idle instance, or instantiates the module when none is idle,
+and returns it for later calls. A call that exceeds a limit fails with
+`plugin_timed_out` or `plugin_failed`, and its instance is discarded, so it
 leaves nothing behind; the OLP process is unaffected.
+
+Installing reads a manifest once, on wazero's interpreter, which is ready
+soonest. Signing hooks run on modules compiled to machine code, which take
+longer to prepare but then sign about ten times faster; `BenchmarkSign` in
+`internal/plugins` measures both.
 
 The runtime currently grants a plugin a clock, randomness and logging, and
 nothing else: no filesystem, network, environment or arguments. What a plugin

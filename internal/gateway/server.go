@@ -51,6 +51,9 @@ type Config struct {
 	// shares it with the public admission middleware so both bound the same
 	// capacity and the metrics endpoint reads one truth.
 	AdmissionPool *observability.Pool
+	// Signer runs the signing hooks of plugin profiles. Without one, a
+	// provider whose profile declares signing authorizes no request.
+	Signer connectors.Signer
 }
 
 // Runtime is the pinned authority, release and credential source.
@@ -103,6 +106,8 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	if pool == nil {
 		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
 	}
+	auth := connectors.NewAuth(policy)
+	auth.Signer = cfg.Signer
 	return &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
@@ -111,7 +116,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		egress:      policy,
 		client:      policy.Client(upstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
-		auth:        connectors.NewAuth(policy),
+		auth:        auth,
 		admission:   pool,
 		health:      newHealthTracker(time.Now),
 		now:         time.Now,

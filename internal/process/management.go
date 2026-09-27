@@ -23,10 +23,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, log *slog.Logger) {
+func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, pluginHost *plugins.Host, log *slog.Logger) {
 	control.Egress = policy
 	control.Register(mux)
-	catalogue := providers.New(control, policy)
+	catalogue := providers.New(control, policy, pluginHost)
 	catalogue.Log = log
 	if limiter != nil {
 		catalogue.Quotas = limiter

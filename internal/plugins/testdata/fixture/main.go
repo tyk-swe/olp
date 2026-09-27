@@ -1,12 +1,18 @@
 // Command fixture is a provider plugin that misbehaves on purpose. The linker
-// sets its behaviour, so one package builds every fixture the tests need:
+// sets how it reports its manifest, so one package builds every fixture the
+// tests need:
 //
 //	go build -buildmode=c-shared -ldflags=-X=main.behaviour=loop ...
+//
+// Its profile signs requests, and the credential of a request sets how, so
+// one build serves every signing test.
 package main
 
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
 )
@@ -25,7 +31,7 @@ func (fixture) Manifest() plugin.Manifest {
 		Origins: []string{"https://api.example.com"},
 		Profiles: []plugin.Profile{{ID: "fixture-chat", Label: "Fixture Chat", Dialect: "openai-chat", Hosting: plugin.Hosting{
 			Address: "https://api.example.com/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"},
-		}}},
+		}, Signing: true}},
 	}
 	switch behaviour {
 	case "unknown-dialect":
@@ -47,6 +53,39 @@ func (fixture) Manifest() plugin.Manifest {
 		panic("fixture panicked holding " + secret)
 	}
 	return m
+}
+
+// calls counts the requests this instance of the module has signed.
+var calls int
+
+// Sign signs as the credential's prefix up to a colon says: "loop" never
+// returns, "allocate" exhausts memory, "fail" reports a failure holding the
+// credential, "log" logs the credential, and "header:Name" returns that
+// header. Anything else returns X-Fixture-Signature and X-Fixture-Calls, this
+// instance's count of signed requests.
+func (fixture) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+	calls++
+	behaviour, rest, _ := strings.Cut(r.Credential, ":")
+	switch behaviour {
+	case "loop":
+		for {
+		}
+	case "allocate":
+		var held [][]byte
+		for {
+			held = append(held, make([]byte, 1<<20))
+		}
+	case "fail":
+		return plugin.SignResult{}, &plugin.Error{Code: "fixture_failed", Message: "signing with " + r.Credential + " failed"}
+	case "log":
+		plugin.Log.Info("signing with "+r.Credential, "url", r.URL)
+	case "header":
+		return plugin.SignResult{Headers: map[string]string{rest: "fixture"}}, nil
+	}
+	return plugin.SignResult{Headers: map[string]string{
+		"X-Fixture-Signature": r.Method + " " + r.URL + " " + strconv.Itoa(len(r.Body)),
+		"X-Fixture-Calls":     strconv.Itoa(calls),
+	}}, nil
 }
 
 func init() { plugin.Register(fixture{}) }

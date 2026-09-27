@@ -71,7 +71,7 @@ func TestPluginDiscoveryFollowsTheDeclaredListing(t *testing.T) {
 			}))
 			defer server.Close()
 			cfg := pluginConfiguration(t, server, abi.Hosting{Discovery: &abi.Discovery{Path: "/catalog/models", Models: "items", ID: "slug", Pagination: tc.pagination}})
-			models, err := New(nil, loopbackPolicy()).listModelFacts(context.Background(), cfg, []byte("secret"))
+			models, err := New(nil, loopbackPolicy(), nil).listModelFacts(context.Background(), cfg, []byte("secret"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,7 +100,7 @@ func TestPluginDiscoveryRefusesBrokenContinuations(t *testing.T) {
 				pagination.More = "more"
 			}
 			cfg := pluginConfiguration(t, server, abi.Hosting{Discovery: &abi.Discovery{Path: "/models", Models: "items", ID: "slug", Pagination: pagination}})
-			_, err := New(nil, loopbackPolicy()).listModelFacts(context.Background(), cfg, []byte("secret"))
+			_, err := New(nil, loopbackPolicy(), nil).listModelFacts(context.Background(), cfg, []byte("secret"))
 			if refusal, ok := errors.AsType[*probeError](err); !ok || refusal.Code != "provider_protocol_error" {
 				t.Fatalf("listed through %s: %v", name, err)
 			}
@@ -125,7 +125,7 @@ func TestPluginProvidersWithoutDiscoveryCertifyDeclaredModels(t *testing.T) {
 	}))
 	defer server.Close()
 	cfg := pluginConfiguration(t, server, abi.Hosting{})
-	probes := New(nil, loopbackPolicy())
+	probes := New(nil, loopbackPolicy(), nil)
 	if _, err := probes.listModelFacts(context.Background(), cfg, []byte("secret")); err == nil || classify(err).Code != "model_required" {
 		t.Fatalf("probed without a declared model: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPluginProbesClassifyAsDeclared(t *testing.T) {
 		"insufficient_quota": {Code: "upstream_rate_limit", Detail: "The upstream is rate limiting (HTTP 400)."},
 		"invalid_value":      {Code: "upstream_rejected", Detail: "The upstream answered HTTP 400."},
 	} {
-		status, body, err := New(nil, loopbackPolicy()).call(context.Background(), cfg, []byte("secret"), http.MethodGet, "/models?code="+code, nil)
+		status, body, err := New(nil, loopbackPolicy(), nil).call(context.Background(), cfg, []byte("secret"), http.MethodGet, "/models?code="+code, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

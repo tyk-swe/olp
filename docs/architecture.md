@@ -8,7 +8,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Change | Start here |
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
-| Provider plugin install, approval, confined runtime and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
+| Provider plugin install, approval, confined runtime, hosted plugin code and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
 | Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |
@@ -45,7 +45,8 @@ tests check handler/contract parity.
 revision metadata and stored JSON. Runtime publication and retained-resource
 resolution share these pure decoders. A plugin provider's revision decodes with
 the manifest of the plugin it pins (`PluginManifestColumn`), so snapshots carry
-its plugin profile and gateways need no plugin. Their callers still own SQL,
+its plugin profile and gateways read no manifest; a profile's signing hook runs
+on the module `plugins.Host` loads by digest. Their callers still own SQL,
 transactions, authorization, credential checks, and operation eligibility. Publication alone
 drops empty provider limits; retained resources preserve the stored limits.
 

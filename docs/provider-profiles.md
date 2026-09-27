@@ -27,11 +27,11 @@ under the `plugin` provider kind. A plugin profile's revision is the digest of
 the plugin module that supplies it, so a provider pins that build. It serves one
 built-in dialect's generation operation at the address its plugin declares,
 shares that dialect's revision and semantic headers and query settings, and
-authenticates with a static credential its declared headers and query
-parameters place. A plugin profile that also envelopes or rewrites the dialect's
-bodies is not `strict`. Its entry reports `model_discovery: true` when the
-plugin declares the upstream's model listing; otherwise operators declare its
-providers' models.
+authenticates with a static credential that its declared headers and query
+parameters place, or that its [signing hook](plugins.md#signing-hooks) signs
+with. A plugin profile that also envelopes or rewrites the dialect's bodies is
+not `strict`. Its entry reports `model_discovery: true` when the plugin declares
+the upstream's model listing; otherwise operators declare its providers' models.
 
 | Profile | Native generation address / contract |
 | --- | --- |

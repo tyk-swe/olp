@@ -75,7 +75,9 @@ test('an operator connects a provider through an approved plugin profile', async
   );
   const plugin = page.getByRole('article', { name: `reference ${version}` });
   await expect(
-    plugin.getByRole('cell', { name: upstream.address })
+    plugin
+      .getByRole('row', { name: 'reference-chat' })
+      .getByRole('cell', { name: upstream.address })
   ).toBeVisible();
   await plugin.getByRole('button', { name: 'Review and approve' }).click();
   await plugin

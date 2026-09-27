@@ -54,9 +54,12 @@ type Server struct {
 }
 
 // New prepares the provider surface with a bounded upstream client and at
-// most four concurrent probes.
-func New(a *access.Server, policy *egress.Policy) *Server {
-	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: connectors.NewAuth(policy), probes: make(chan struct{}, 4)}
+// most four concurrent probes, whose plugin profiles' signing hooks signer
+// runs.
+func New(a *access.Server, policy *egress.Policy, signer connectors.Signer) *Server {
+	auth := connectors.NewAuth(policy)
+	auth.Signer = signer
+	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
 }
 
 type record struct {

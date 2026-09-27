@@ -1,15 +1,21 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares two profiles at a fictional upstream, and the origins that upstream
-// uses: one serves the OpenAI Chat Completions dialect, with the upstream's
-// model listing and failure classification, and one serves Gemini
-// generateContent inside the upstream's own envelope.
+// declares three profiles at a fictional upstream, and the origins that
+// upstream uses: one serves the OpenAI Chat Completions dialect with the API
+// key in a header, the upstream's model listing and failure classification;
+// one serves Gemini generateContent inside the upstream's own envelope; and
+// one serves Chat Completions signing each request with the API key.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -72,8 +78,33 @@ func (reference) Manifest() plugin.Manifest {
 					{Op: plugin.RewriteDelete, Path: "/generationConfig/seed"},
 				},
 			},
+		}, {
+			ID: "reference-signed-chat", Label: "Reference Signed Chat Completions", Dialect: "openai-chat",
+			// The upstream authenticates each request by a signature made with
+			// the API key, which never travels itself.
+			Hosting: plugin.Hosting{Address: upstream, Headers: map[string]string{"X-Reference-Client": "olp"}},
+			Signing: true,
 		}},
 	}
+}
+
+// Sign signs a request of reference-signed-chat: X-Reference-Signature is the
+// hex HMAC-SHA256, keyed with the API key, of the X-Reference-Timestamp value
+// (Unix seconds), the method, the request URI and the body, each of the first
+// three followed by a line feed.
+func (reference) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+	target, err := url.Parse(r.URL)
+	if err != nil {
+		return plugin.SignResult{}, err
+	}
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(r.Credential))
+	mac.Write([]byte(timestamp + "\n" + r.Method + "\n" + target.RequestURI() + "\n"))
+	mac.Write(r.Body)
+	return plugin.SignResult{Headers: map[string]string{
+		"X-Reference-Timestamp": timestamp,
+		"X-Reference-Signature": hex.EncodeToString(mac.Sum(nil)),
+	}}, nil
 }
 
 func init() { plugin.Register(reference{}) }

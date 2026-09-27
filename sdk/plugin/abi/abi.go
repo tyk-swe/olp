@@ -45,6 +45,9 @@ const HostCall = "host_call"
 const (
 	// MethodManifest takes no parameters and returns the plugin's Manifest.
 	MethodManifest = "manifest"
+	// MethodSign takes a SignRequest and returns a SignResult. OLP calls it
+	// once per upstream request of a profile that declares Signing.
+	MethodSign = "sign"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -97,7 +100,7 @@ type Manifest struct {
 
 // Profile is a provider profile the plugin supplies around a built-in dialect.
 // Providers using it authenticate with a static credential, which its hosting
-// adaptation places.
+// adaptation places or its signing hook signs with.
 type Profile struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -106,6 +109,10 @@ type Profile struct {
 	Dialect string `json:"dialect"`
 	// Hosting places the dialect's requests at the upstream.
 	Hosting Hosting `json:"hosting"`
+	// Signing declares the profile's signing hook: OLP calls MethodSign once
+	// per upstream request, after hosting placed it, and adds the headers the
+	// plugin returns.
+	Signing bool `json:"signing,omitempty"`
 }
 
 // Hosting is a profile's hosting adaptation: where and how the dialect's
@@ -259,6 +266,30 @@ const (
 	// and the caller receives the upstream's rejection.
 	ClassTerminal = "terminal"
 )
+
+// SignRequest is the parameter of MethodSign: one upstream request, placed by
+// the profile's hosting adaptation, whose body is final.
+type SignRequest struct {
+	// Profile is the ID of the profile whose request this is.
+	Profile string `json:"profile"`
+	Method  string `json:"method"`
+	// URL is the request's absolute URL, including its query.
+	URL string `json:"url"`
+	// Header holds the request's headers by canonical name.
+	Header map[string][]string `json:"header"`
+	// Body is the request body, base64-encoded in JSON, or empty.
+	Body []byte `json:"body,omitempty"`
+	// Credential is the provider's static credential.
+	Credential string `json:"credential"`
+}
+
+// SignResult is the result of MethodSign.
+type SignResult struct {
+	// Headers are the headers to add to the request, by name. Each must be
+	// one the request lacks and a profile could declare. OLP redacts their
+	// values wherever it records upstream text.
+	Headers map[string]string `json:"headers"`
+}
 
 // LogRecord is the parameter of CapabilityLog.
 type LogRecord struct {

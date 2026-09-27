@@ -234,8 +234,8 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		}
 		placed.query[name] = value
 	}
-	if !placed.uses(credentialValue) {
-		return hosting{}, &ProfileError{Field: "hosting", Message: "Place the static credential with {credential} in a header or query parameter."}
+	if !placed.uses(credentialValue) && !declared.Signing {
+		return hosting{}, &ProfileError{Field: "hosting", Message: "Place the static credential with {credential} in a header or query parameter, or sign requests with it."}
 	}
 	if err := validateDiscovery(declaredHosting); err != nil {
 		return hosting{}, err

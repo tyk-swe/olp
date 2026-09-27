@@ -4,7 +4,7 @@
 // stores it by the SHA-256 digest of the module, and it can't be used until an
 // owner approves the origins its manifest declares. Runtime runs plugin code on
 // wazero within memory and time limits and grants it only a clock, randomness
-// and redacted logging.
+// and redacted logging; Host runs installed plugins' code by digest.
 package plugins
 
 import (
@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tetratelabs/wazero"
@@ -30,14 +31,19 @@ import (
 type Limits struct {
 	// Memory bounds an instance's linear memory, in bytes.
 	Memory uint32
-	// Time bounds one call, including instantiating the module for it.
+	// Time bounds one call, including waiting for an instance and
+	// instantiating the module for it.
 	Time time.Duration
+	// Instances bounds how many instances of one module exist at once, and so
+	// how many of its calls run at once.
+	Instances int
 }
 
 // DefaultLimits are the limits OLP runs plugins within.
-var DefaultLimits = Limits{Memory: 64 << 20, Time: 10 * time.Second}
+var DefaultLimits = Limits{Memory: 64 << 20, Time: 10 * time.Second, Instances: 4}
 
-// maxMessage bounds every message crossing the ABI in either direction.
+// maxMessage bounds every message a plugin returns or sends OLP. OLP's own
+// requests carry what they must, such as the body a sign request signs.
 const maxMessage = 1 << 20
 
 const wasmPage = 64 << 10
@@ -47,6 +53,21 @@ var (
 	i64 = api.ValueTypeI64
 )
 
+// An Engine is how a runtime runs plugin code. For the reference plugin, a
+// 5 MiB Go module, the interpreter is ready in about 0.4 s and signs a small
+// request in about 10 ms; the compiler takes about 3 s and then signs in about
+// 1 ms. BenchmarkSign measures both.
+type Engine int
+
+const (
+	// Interpreted interprets modules, which suits a module OLP calls once,
+	// such as one being installed.
+	Interpreted Engine = iota
+	// Compiled compiles modules to machine code, where wazero can, which
+	// suits modules OLP keeps and calls per request.
+	Compiled
+)
+
 // Runtime runs confined plugin modules. It is safe for concurrent use.
 type Runtime struct {
 	engine wazero.Runtime
@@ -54,16 +75,16 @@ type Runtime struct {
 	log    *slog.Logger
 }
 
-// NewRuntime starts a runtime whose plugin calls stay within limits and log to
-// log.
-func NewRuntime(ctx context.Context, limits Limits, log *slog.Logger) (*Runtime, error) {
-	// The interpreter compiles a Go-built module several times faster than
-	// wazero's compiler and needs no executable memory. Plugin code runs for
-	// manifests, grant steps and signing, never per stream event, so install
-	// latency matters more than execution speed.
-	config := wazero.NewRuntimeConfigInterpreter().
-		WithMemoryLimitPages(limits.Memory / wasmPage).
-		WithCloseOnContextDone(true)
+// NewRuntime starts a runtime whose plugin calls run on engine, stay within
+// limits and log to log.
+func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Logger) (*Runtime, error) {
+	config := wazero.NewRuntimeConfigInterpreter()
+	if engine == Compiled {
+		// The compiler where wazero has one for the platform, else the
+		// interpreter.
+		config = wazero.NewRuntimeConfig()
+	}
+	config = config.WithMemoryLimitPages(limits.Memory / wasmPage).WithCloseOnContextDone(true)
 	r := &Runtime{engine: wazero.NewRuntimeWithConfig(ctx, config), limits: limits, log: log}
 	// WASI supplies the clock, randomness and output streams. With no
 	// preopened directories, arguments or environment it reaches nothing else.
@@ -87,11 +108,27 @@ func NewRuntime(ctx context.Context, limits Limits, log *slog.Logger) (*Runtime,
 func (r *Runtime) Close(ctx context.Context) error { return r.engine.Close(ctx) }
 
 // Module is a compiled plugin module built for the ABI this runtime serves.
+// Its calls share a pool of instances, which Limits.Instances bounds: a call
+// takes an idle instance, or instantiates the module if none is idle, and
+// returns the instance for later calls unless the call failed.
 type Module struct {
 	// Digest is the lowercase hexadecimal SHA-256 digest of the module.
 	Digest   string
 	runtime  *Runtime
 	compiled wazero.CompiledModule
+	// slots holds a token for each instance that exists or is being made.
+	slots  chan struct{}
+	mu     sync.Mutex
+	idle   []*instance
+	closed bool
+}
+
+// An instance is one instantiation of a module, serving one call at a time.
+type instance struct {
+	module api.Module
+	// out is the output of the call the instance serves, or nil between
+	// calls.
+	out *output
 }
 
 // Load compiles a module and checks that it is a provider plugin built for
@@ -102,7 +139,7 @@ func (r *Runtime) Load(ctx context.Context, module []byte) (*Module, error) {
 	if err != nil {
 		return nil, refuse(CodeModuleInvalid, "The upload is not a WebAssembly module OLP can run.")
 	}
-	m := &Module{Digest: hex.EncodeToString(sum[:]), runtime: r, compiled: compiled}
+	m := &Module{Digest: hex.EncodeToString(sum[:]), runtime: r, compiled: compiled, slots: make(chan struct{}, r.limits.Instances)}
 	if err = m.checkABI(ctx); err != nil {
 		compiled.Close(ctx)
 		return nil, err
@@ -110,8 +147,18 @@ func (r *Runtime) Load(ctx context.Context, module []byte) (*Module, error) {
 	return m, nil
 }
 
-// Close releases the compiled module.
-func (m *Module) Close(ctx context.Context) error { return m.compiled.Close(ctx) }
+// Close releases the compiled module and its instances. A call still running
+// finishes, and its instance is closed afterwards.
+func (m *Module) Close(ctx context.Context) error {
+	m.mu.Lock()
+	idle := m.idle
+	m.idle, m.closed = nil, true
+	m.mu.Unlock()
+	for _, instance := range idle {
+		instance.module.Close(ctx)
+	}
+	return m.compiled.Close(ctx)
+}
 
 // Inspect loads a module and returns the manifest it declares. It refuses a
 // module that is not a plugin, was built for another ABI version, declares an
@@ -181,10 +228,10 @@ type Call struct {
 	Secrets []string
 }
 
-// Call serves call on a fresh instance of the module and decodes its result
-// into result. A call that exceeds its limits, traps or exits fails with an
-// *Error and leaves nothing behind; a failure the plugin reports is an
-// *abi.Error.
+// Call serves call on an instance of the module and decodes its result into
+// result. A call that exceeds its limits, traps or exits fails with an *Error,
+// and its instance is discarded, so it leaves nothing behind; a failure the
+// plugin reports is an *abi.Error.
 func (m *Module) Call(ctx context.Context, call Call, result any) error {
 	params, err := json.Marshal(call.Params)
 	if err != nil {
@@ -227,9 +274,7 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 	})
 }
 
-// run instantiates the module for one call and runs use within the
-// runtime's limits. The instance is discarded afterwards, so a failed call
-// leaves no state for the next.
+// run serves one call on an instance within the runtime's limits.
 func (m *Module) run(ctx context.Context, method string, secrets []string, use func(context.Context, api.Module) error) error {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, m.runtime.limits.Time)
@@ -237,18 +282,13 @@ func (m *Module) run(ctx context.Context, method string, secrets []string, use f
 	out := newOutput(m.runtime.log.With("plugin_digest", m.Digest, "plugin_method", method), secrets)
 	defer out.close()
 	ctx = context.WithValue(ctx, outputKey{}, out)
-	config := wazero.NewModuleConfig().
-		WithName("").
-		WithStartFunctions("_initialize").
-		WithSysWalltime().
-		WithSysNanotime().
-		WithRandSource(rand.Reader).
-		WithStdout(out.stream("stdout")).
-		WithStderr(out.stream("stderr"))
-	instance, err := m.runtime.engine.InstantiateModule(ctx, m.compiled, config)
+	instance, err := m.acquire(ctx, out)
 	if err == nil {
-		err = use(ctx, instance)
-		instance.Close(context.WithoutCancel(ctx))
+		err = use(ctx, instance.module)
+		// A failure the plugin reported leaves its instance as sound as a
+		// success does; after any other, the instance may be in any state.
+		_, reported := errors.AsType[*abi.Error](err)
+		m.release(instance, err == nil || reported)
 	}
 	if err == nil || isReported(err) {
 		return err
@@ -260,6 +300,70 @@ func (m *Module) run(ctx context.Context, method string, secrets []string, use f
 		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", m.runtime.limits.Time))
 	}
 	return refuse(CodeFailed, "The plugin stopped: it trapped, exited or exhausted its memory limit.")
+}
+
+// acquire takes an idle instance for a call whose output is out, or
+// instantiates the module when none is idle and the pool has room.
+func (m *Module) acquire(ctx context.Context, out *output) (*instance, error) {
+	select {
+	case m.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	m.mu.Lock()
+	var taken *instance
+	if n := len(m.idle); n > 0 {
+		taken, m.idle = m.idle[n-1], m.idle[:n-1]
+	}
+	m.mu.Unlock()
+	if taken != nil {
+		taken.out = out
+		return taken, nil
+	}
+	made := &instance{out: out}
+	config := wazero.NewModuleConfig().
+		WithName("").
+		WithStartFunctions("_initialize").
+		WithSysWalltime().
+		WithSysNanotime().
+		WithRandSource(rand.Reader).
+		WithStdout(console{made, "stdout"}).
+		WithStderr(console{made, "stderr"})
+	module, err := m.runtime.engine.InstantiateModule(ctx, m.compiled, config)
+	if err != nil {
+		<-m.slots
+		return nil, err
+	}
+	made.module = module
+	return made, nil
+}
+
+// release returns an instance to the pool after a call, or closes it.
+func (m *Module) release(taken *instance, reusable bool) {
+	taken.out = nil
+	m.mu.Lock()
+	if reusable && !m.closed {
+		m.idle = append(m.idle, taken)
+		taken = nil
+	}
+	m.mu.Unlock()
+	if taken != nil {
+		taken.module.Close(context.Background())
+	}
+	<-m.slots
+}
+
+// console carries one of an instance's output streams to the call it serves.
+type console struct {
+	instance *instance
+	name     string
+}
+
+func (c console) Write(p []byte) (int, error) {
+	if out := c.instance.out; out != nil {
+		return out.stream(c.name).Write(p)
+	}
+	return len(p), nil
 }
 
 // isReported reports whether err already says why a call failed: OLP refused

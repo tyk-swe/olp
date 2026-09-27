@@ -2775,6 +2775,9 @@ type PluginProfile struct {
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
+
+	// Signing Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.
+	Signing *bool `json:"signing,omitempty"`
 }
 
 // PluginRewrite A declared change to one member of the dialect's request body.
