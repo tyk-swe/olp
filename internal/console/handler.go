@@ -51,8 +51,6 @@ func Handler(directory string) (http.Handler, func() error, error) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", csp)
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if name == "" || name == "." {

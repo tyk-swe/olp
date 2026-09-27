@@ -361,7 +361,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			request := runtimeConfig.ForInstallation(installation)
 			admission.Tracing = &request
 		}
-		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: admission.Wrap(public)})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, admission.Wrap(public))})
 	}
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()

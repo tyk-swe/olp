@@ -127,10 +127,9 @@ func OK(body any) Reply                  { return Reply{Status: 200, Body: body}
 func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
 
 func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+	// Management responses carry credentials and member data; the public
+	// perimeter adds the rest of the API's security headers.
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	deadline, _ := ctx.Deadline()
 	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {

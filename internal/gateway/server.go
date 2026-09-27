@@ -183,7 +183,6 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h := w.Header()
 	h.Set("X-Request-Id", id)
 	h.Set("Cache-Control", "no-store")
-	h.Set("X-Content-Type-Options", "nosniff")
 	s.cors(w, r)
 	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
 }
