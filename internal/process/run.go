@@ -23,7 +23,6 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -107,7 +106,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// Reserved prefixes must never fall through to the SPA, in any public
 	// mode. When inference is enabled the gateway answers its catch-all
 	// prefixes itself and registers more specific handlers under the others;
-	// anything left over is answered honestly instead of reaching the console.
+	// anything left over is answered in the prefix's own error envelope
+	// instead of reaching the console.
 	for _, reserved := range surface.Reserved() {
 		handler := http.HandlerFunc(http.NotFound)
 		if c.Mode.Inference() {
@@ -115,7 +115,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				continue
 			}
 			if reserved.Surface.Inference {
-				handler = management.NotFound
+				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gateway.WriteNotFound(w, r, reserved.Surface.Name)
+				})
 			}
 		}
 		public.Handle(reserved.Path, handler)

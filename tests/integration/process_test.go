@@ -138,6 +138,17 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 						t.Fatalf("%s reached the console: %s", path, body)
 					}
 				}
+				if mode == "all" || mode == "gateway" {
+					// Prefixes the gateway only partly claims still answer in
+					// the client's own error envelope, never the management
+					// one.
+					if body := get(p.PublicOrigin, "/native/openai/models/x", 404); !strings.Contains(string(body), `"code":"not_found"`) {
+						t.Fatalf("/native fallback is not an OpenAI error: %s", body)
+					}
+					if body := get(p.PublicOrigin, "/ws/other", 404); !strings.Contains(string(body), `"status":"NOT_FOUND"`) {
+						t.Fatalf("/ws fallback is not a Gemini error: %s", body)
+					}
+				}
 				if mode == "control" {
 					get(p.PublicOrigin, "/v1/models", 404)
 				} else {

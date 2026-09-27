@@ -798,6 +798,14 @@ func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
 	writeSurfaceError(w, overloaded, requestSurface(r))
 }
 
+// WriteNotFound renders the surface's 404 for a request nothing routed.
+// Process composition mounts it under reserved inference prefixes the gateway
+// only partially claims, so an unknown endpoint or a method mismatch still
+// answers in the envelope the surface's other errors use.
+func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
+	writeSurfaceError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
+}
+
 func writeJSON(w http.ResponseWriter, body any) {
 	data, _ := json.Marshal(body)
 	w.Header().Set("Content-Type", "application/json")
