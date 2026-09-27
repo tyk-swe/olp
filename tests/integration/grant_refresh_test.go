@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -17,10 +18,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -288,9 +291,17 @@ func TestAnUpstreamCredentialFailureRefreshesTheGrantEarly(t *testing.T) {
 	if !pass(t, grantRefresher(t, h)) {
 		t.Fatal("the requested refresh did not run")
 	}
+	// The poll serves the refreshed token, and ends the cooldown apart from
+	// the poll.
 	h.refresh()
-	if status := chat(t, h, key); status != 200 {
-		t.Fatalf("after the refresh, the slot answered %d", status)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		status := chat(t, h, key)
+		if status == 200 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the refresh, the slot answered %d", status)
+		}
 	}
 }
 
@@ -374,10 +385,100 @@ func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
 		t.Fatalf("%d refresh tokens survived: %v", tokens, err)
 	}
-	if err := grants.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
+	if err := runtime.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
 		t.Fatal(err)
 	}
 	if grant = readGrant(t, h, credentialID); grant.refresh != nil || pass(t, refresher) {
 		t.Fatalf("a grant that can't be refreshed was scheduled again: %+v", grant)
+	}
+}
+
+// Revoking a credential version ends its grant: the refresh token is deleted
+// at once, and no worker refreshes the grant again.
+func TestRevokingACredentialVersionEndsItsGrant(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	credentialID := enrollGrant(t, h, owner, path)
+
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "POST", path+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	if grant := readGrant(t, h, credentialID); grant.refreshToken != nil || grant.refresh != nil || grant.lapsed != nil {
+		t.Fatalf("the revoked version's grant is %+v", grant)
+	}
+	var tokens int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+		t.Fatalf("%d refresh tokens survived the revocation: %v", tokens, err)
+	}
+	issued := len(authority.Issued())
+	dueNow(t, h, credentialID)
+	if pass(t, grantRefresher(t, h)) || len(authority.Issued()) != issued {
+		t.Fatal("a worker refreshed the grant of a revoked version")
+	}
+}
+
+// A refresh the upstream answered is kept although the pass that ran it is
+// interrupted while recording it: cancelled, as a worker's shutdown does, and
+// its database connection lost. Otherwise the upstream's rotated refresh token
+// would be lost while the spent one stays stored, and the next refresh would
+// lapse the grant.
+func TestARefreshIsKeptWhenItsPassIsInterrupted(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
+	refresher := grantRefresher(t, h)
+
+	// Writing a secret waits for the installation row, which the test holds
+	// until the refresh reached the upstream and is recording what it got.
+	held, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(context.Background())
+	if _, err = held.Exec(t.Context(), "SELECT FROM olp.installation WHERE singleton FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	dueNow(t, h, credentialID)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	passed := make(chan struct{})
+	go func() {
+		defer close(passed)
+		refresher.Pass(ctx)
+	}()
+	var recording int
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(20 * time.Millisecond) {
+		err = h.Pool.QueryRow(t.Context(), "SELECT pid FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%active_key_version%'").Scan(&recording)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, pgx.ErrNoRows) || time.Now().After(deadline) {
+			t.Fatalf("the refresh never recorded what it got: %v", err)
+		}
+	}
+	cancel()
+	if _, err = h.Pool.Exec(t.Context(), "SELECT pg_terminate_backend($1)", recording); err != nil {
+		t.Fatal(err)
+	}
+	if err = held.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-passed
+
+	issued := authority.Issued()
+	grant := readGrant(t, h, credentialID)
+	if grant.generation != 2 || grant.refreshToken == nil {
+		t.Fatalf("the interrupted refresh left the grant %+v", grant)
+	}
+	if stored, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *grant.refreshToken, grants.RefreshPurpose); err != nil || string(stored) != issued[len(issued)-1] {
+		t.Fatalf("the rotated refresh token was not kept: %v", err)
+	}
+	dueNow(t, h, credentialID)
+	if !pass(t, refresher) || readGrant(t, h, credentialID).generation != 3 || len(authority.Reused()) != 0 {
+		t.Fatalf("the next refresh spent a spent refresh token: %v", authority.Reused())
 	}
 }

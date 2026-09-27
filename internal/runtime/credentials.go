@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // Eligibility is whether a credential version may serve and, when it may not,
@@ -110,7 +113,7 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 
 // NetworkSecret serves an eligible network credential like Secret. A retained
 // revision is not authority for its network identity, so one the release does
-// not name must still belong to the provider and be unrevoked.
+// not name is read as ReadNetworkSecret reads it.
 func (m *Manager) NetworkSecret(ctx context.Context, release *Release, providerID, credentialID string) ([]byte, error) {
 	if err := m.eligible(credentialID); err != nil {
 		return nil, err
@@ -121,18 +124,40 @@ func (m *Manager) NetworkSecret(ctx context.Context, release *Release, providerI
 	if m.keys == nil {
 		return nil, fmt.Errorf("network credential %s is not installed: %w", credentialID, ErrCredentialUnavailable)
 	}
-	tx, err := m.pool.Begin(ctx)
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	var valid bool
-	if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", credentialID, providerID).Scan(&valid); err != nil || !valid {
-		return nil, fmt.Errorf("network credential %s of provider %s: %w", credentialID, providerID, ErrCredentialUnavailable)
+	return ReadNetworkSecret(ctx, tx, m.keys, m.installation, providerID, credentialID)
+}
+
+// ReadNetworkSecret reads the secret of a provider's network credential from
+// the secret authority, where no release vouches for it: the credential must
+// be the provider's and eligible, as key authority records it
+// (ReadIneligible). A gateway reads so what its release does not name; a
+// worker, which serves no release, reads so every network credential.
+func ReadNetworkSecret(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, providerID, credentialID string) ([]byte, error) {
+	unavailable := func(err error) error {
+		return fmt.Errorf("network credential %s of provider %s: %w: %w", credentialID, providerID, ErrCredentialUnavailable, err)
 	}
-	secret, err := m.keys.Read(ctx, tx, m.installation, credentialID, "provider_credential")
+	var owner string
+	if err := q.QueryRow(ctx, "SELECT provider_id::text FROM olp.provider_network_credentials WHERE id=$1", credentialID).Scan(&owner); err != nil {
+		return nil, unavailable(err)
+	}
+	if owner != providerID {
+		return nil, unavailable(errors.New("another provider's"))
+	}
+	ineligible, err := ReadIneligible(ctx, q, []string{credentialID})
 	if err != nil {
-		return nil, fmt.Errorf("network credential %s: %w: %w", credentialID, ErrCredentialUnavailable, err)
+		return nil, err
+	}
+	if eligibility := ineligible[credentialID]; eligibility != Eligible {
+		return nil, unavailable(errors.New(string(eligibility)))
+	}
+	secret, err := keys.Read(ctx, q, installation, credentialID, "provider_credential")
+	if err != nil {
+		return nil, unavailable(err)
 	}
 	return secret, nil
 }

@@ -67,7 +67,7 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation, optionally `Signing` and, if providers using it authenticate with a grant, its `Grant`. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`, and never a built-in profile's ID such as `openai-chat`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation, optionally `Signing` and, if providers using it authenticate with a grant, its `Grant`. |
 
 A profile serves one of OLP's built-in dialects whose requests and events are
 plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
@@ -178,14 +178,17 @@ such as the account or region a signature covers.
 `Sign` returns the headers to add: at most 16, each one a profile could declare
 and the request doesn't already carry. OLP redacts their values wherever it
 records upstream text, as it does the credential. If `Sign` fails, exceeds the
-plugin limits or returns a header OLP refuses, the request is not sent: the
-attempt fails as a credential failure before reaching the upstream, and the
-route fails over. A plugin that declares a signing profile without
+plugin limits or returns a header OLP refuses, the request is not sent and the
+route fails over. Report a credential you can't sign with as a `*plugin.Error`
+with a code of your own, such as `credential_expired`: that alone makes the
+attempt a credential failure, which cools the credential's slot down. A plain
+error, a panic or anything past the limits reports the `internal` code or
+none, and blames nothing on the credential. A plugin that declares a signing profile without
 implementing `Signer` reports no manifest, so OLP refuses to install it.
 
-Signing adds plugin code to every request. It runs in about a millisecond for a
-small body, and its cost grows with the body, which crosses the ABI as JSON, so
-keep `Sign` to the signature itself.
+Signing adds plugin code to every request. It runs in about two milliseconds
+for a small body, and its cost grows with the body, which crosses the ABI as
+JSON, so keep `Sign` to the signature itself.
 
 ### Envelopes and rewrites
 
@@ -491,8 +494,9 @@ complete fails with an `*plugin.Error`: `origin_not_approved`, `http_failed` or
 
 ## What a plugin can reach
 
-OLP runs a plugin confined, within 64 MiB of memory and 10 seconds per call. It
-grants only:
+OLP runs a plugin confined, within 64 MiB of memory, an 8 MiB stack and 10
+seconds per call, on WebAssembly 2.0 without reference types (the Go toolchain
+uses none). It grants only:
 
 - a clock: `time.Now` reads the host's wall and monotonic clocks;
 - randomness: `crypto/rand` reads the host's cryptographic source;
@@ -517,8 +521,9 @@ standard output or standard error is logged a line at a time as well, including
 the Go runtime's panic output.
 
 OLP redacts every secret value it handed the call, and bounds a call's output to
-16 KiB, and each message or attribute to 2 KiB, so a plugin can log freely
-without leaking what OLP gave it or flooding the log.
+16 KiB, counting 64 bytes for each record besides its text, and each message or
+attribute to 2 KiB, so a plugin can log freely without leaking what OLP gave it
+or flooding the log.
 
 ## Testing
 
@@ -553,15 +558,18 @@ environment, and one process serves all its calls from one OLP process. So:
 - calls run concurrently, each on a goroutine of its own, so package-level
   state needs synchronization;
 - a method's context is cancelled when OLP stops waiting for its call, such as
-  when the request it signs ends. Return promptly: a call left unanswered for
-  10 seconds, cancelled or not, makes OLP stop the process, failing every call
-  in flight, and start it again for the next call;
+  when the request it signs ends or its caller's deadline passes. Return
+  promptly: a call left unanswered for 10 seconds, cancelled or not, makes OLP
+  stop the process, failing every call in flight, and start it again for the
+  next call;
 - standard output carries the ABI, so `Serve` points `os.Stdout` at standard
   error, which OLP logs a line at a time;
 - log with the call's context, such as `plugin.Log.InfoContext(ctx, …)`, so OLP
   attributes the record to its call and redacts the call's secret values. OLP
   redacts a record without one, like standard error, of the secret values of
-  every call in flight.
+  every call in flight or recently answered;
+- OLP runs the executable in a process group of its own and kills the group
+  when it stops the plugin, so anything the plugin starts stops with it.
 
 Nothing confines the plugin, so it reaches the network and files itself. OLP's
 capabilities remain available to it and behave as they do for a confined

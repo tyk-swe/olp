@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -19,6 +20,9 @@ const (
 	maxLogText  = 2 << 10  // bytes of one message or attribute value
 	maxLogAttrs = 16       // attributes of one record
 	maxCallLog  = 16 << 10 // bytes of records per call
+	// recordCost is what a record costs the call's budget beyond its text:
+	// the time, level and attribution OLP's log adds to every record.
+	recordCost = 64
 )
 
 type outputKey struct{}
@@ -27,10 +31,13 @@ type outputKey struct{}
 func callOutput(ctx context.Context) *output { return ctx.Value(outputKey{}).(*output) }
 
 // output carries one call's plugin logging into OLP's log: redacted, with long
-// text cut, and silenced once the call has logged its budget.
+// text cut, and silenced once the call has logged its budget. It is safe for
+// concurrent use: an unconfined plugin's capability requests for one call are
+// served concurrently.
 type output struct {
 	log      *slog.Logger
 	replacer *strings.Replacer
+	mu       sync.Mutex
 	budget   int
 	streams  []*stream
 }
@@ -67,11 +74,13 @@ func (o *output) redact(text string) string {
 
 // record logs one record the plugin wrote.
 func (o *output) record(r abi.LogRecord) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.budget <= 0 {
 		return
 	}
 	message := o.clip(r.Message)
-	cost := len(message)
+	cost := recordCost + len(message)
 	keys := slices.Sorted(maps.Keys(r.Attrs))
 	attrs := make([]any, 0, min(len(keys), maxLogAttrs))
 	for _, key := range keys[:min(len(keys), maxLogAttrs)] {
@@ -115,6 +124,8 @@ func level(name string) slog.Level {
 // stream returns the writer of one of the module's output streams. Each line
 // it receives becomes a record.
 func (o *output) stream(name string) *stream {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	for _, s := range o.streams {
 		if s.name == name {
 			return s
@@ -127,7 +138,10 @@ func (o *output) stream(name string) *stream {
 
 // close logs any unfinished line.
 func (o *output) close() {
-	for _, s := range o.streams {
+	o.mu.Lock()
+	streams := o.streams
+	o.mu.Unlock()
+	for _, s := range streams {
 		s.flush()
 	}
 }

@@ -171,6 +171,27 @@ func TestOnlyCarriedFailuresReportedNotSentFailOver(t *testing.T) {
 	}
 }
 
+// A plugin that keeps failing after it sent a request never fails over, but
+// its failures count towards its provider's health, so the provider's circuit
+// opens and later requests go to the route's other target.
+func TestCarriedFailuresOpenTheCircuit(t *testing.T) {
+	h := newCarryingHarness(t, carrierFunc(func(ctx context.Context, _ abi.Provider, req *http.Request) (*http.Response, error) {
+		resp, err := forward(ctx, req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		return nil, errors.New("the plugin lost the response")
+	}))
+	for range circuitFailures {
+		if resp, body := h.chat(fullKey, nil); resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "ambiguous_upstream_result" {
+			t.Fatalf("status %d body %v", resp.StatusCode, body)
+		}
+	}
+	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || h.mock.count("a") != circuitFailures || h.mock.count("b") != 1 {
+		t.Fatalf("status %d a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+	}
+}
+
 // A carried target whose grant lapsed is skipped like any other target: its
 // plugin carries nothing, and the request fails over to the route's other
 // target.

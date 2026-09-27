@@ -43,7 +43,7 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	(&resources.Management{Access: control, Pool: control.Pool}).Register(mux)
 	(&management.Overview{Access: control}).Register(mux)
 	(&observability.Management{Access: control, Cache: cache, Pool: control.Pool}).Register(mux)
-	(&plugins.Management{Access: control, Runtime: pluginRuntime, Unconfined: unconfined}).Register(mux)
+	(&plugins.Management{Access: control, Runtime: pluginRuntime, Host: pluginHost, Unconfined: unconfined}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.

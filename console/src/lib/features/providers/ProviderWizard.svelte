@@ -95,7 +95,7 @@
           busy={wizard.busy}
           lockKind={Boolean(wizard.wizardProvider)}
           issues={wizard.validationIssues}
-          grantEnrolled={Boolean(wizard.wizardProvider?.draft_credential_id)}
+          grantEnrolled={wizard.grantEnrolled}
           onSubmit={async (event) => {
             const root = (event.currentTarget as HTMLFormElement).closest(
               'main'

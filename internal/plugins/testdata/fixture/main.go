@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -65,8 +66,9 @@ var calls atomic.Int64
 
 // Sign signs as the credential's prefix up to a colon says: "loop" never
 // returns, "allocate" exhausts memory, "exit" stops the plugin, "fail" reports
-// a failure holding the credential, "log" logs the credential, "wait" returns
-// once its call is cancelled, "header:Name" returns that header,
+// a failure holding the credential, "log" logs the credential, "stderr" writes
+// the credential to standard error just after it answers, "wait" returns once
+// its call is cancelled, "header:Name" returns that header,
 // and "option:name" returns X-Fixture-Option, the provider's profile and value
 // of that option. Anything else returns X-Fixture-Signature and
 // X-Fixture-Calls, this instance's count of signed requests.
@@ -88,6 +90,11 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_failed", Message: "signing with " + r.Credential + " failed"}
 	case "log":
 		plugin.Log.InfoContext(ctx, "signing with "+r.Credential, "url", r.URL)
+	case "stderr":
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			fmt.Fprintln(os.Stderr, "signed with "+r.Credential)
+		}()
 	case "wait":
 		<-ctx.Done()
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_cancelled", Message: "the call was cancelled"}

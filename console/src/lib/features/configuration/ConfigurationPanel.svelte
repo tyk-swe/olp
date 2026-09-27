@@ -61,6 +61,9 @@
     error = '';
     applyResult = '';
     plan = null;
+    // Secret bindings answer the artifact they were entered for. OLP refuses
+    // one this artifact doesn't take, such as for a slot a grant now backs.
+    secrets = {};
     try {
       artifactDocument = parseNativeJSON(artifact) as ConfigurationDocument;
     } catch {

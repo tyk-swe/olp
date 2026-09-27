@@ -64,6 +64,7 @@ func TestManifestValidation(t *testing.T) {
 		}, CodeManifestInvalid, "manifest.origins"},
 		"no profiles":          {func(m *abi.Manifest) { m.Profiles = nil }, CodeManifestInvalid, "manifest.profiles"},
 		"duplicate profile id": {func(m *abi.Manifest) { m.Profiles[1].ID = "acme-chat" }, CodeManifestInvalid, "manifest.profiles[1].id"},
+		"built-in profile id":  {func(m *abi.Manifest) { m.Profiles[0].ID = "gemini-interactions" }, CodeManifestInvalid, "manifest.profiles[0].id"},
 		"missing label":        {func(m *abi.Manifest) { m.Profiles[0].Label = "" }, CodeManifestInvalid, "manifest.profiles[0].label"},
 		"missing dialect":      {func(m *abi.Manifest) { m.Profiles[1].Dialect = "" }, CodeManifestInvalid, "manifest.profiles[1].dialect"},
 		"unknown dialect":      {func(m *abi.Manifest) { m.Profiles[1].Dialect = "acme-native" }, CodeDialectUnknown, "manifest.profiles[1].dialect"},

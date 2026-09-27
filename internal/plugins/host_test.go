@@ -203,9 +203,9 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 		// Time enough to instantiate the module afresh under the race
 		// detector; generous time elsewhere, so the memory limit is what
 		// stops the call.
-		"time":     {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Instances: 1}, true},
-		"memory":   {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}, true},
-		"reported": {"fail:" + fixtureSecret, "fixture_failed", Limits{Memory: 16 << 20, Time: time.Minute, Instances: 1}, false},
+		"time":     {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}, true},
+		"memory":   {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, true},
+		"reported": {"fail:" + fixtureSecret, "fixture_failed", Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -336,5 +336,23 @@ func BenchmarkSign(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+// A prepared plugin's code is loaded before its first call, which then reads
+// nothing more.
+func TestAPreparedPluginIsLoadedBeforeItsFirstCall(t *testing.T) {
+	t.Parallel()
+	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+	host.Prepare(fixtureDigest)
+	for deadline := time.Now().Add(time.Minute); table.read() == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the plugin was not prepared")
+		}
+	}
+	// Were the call to load the plugin, it would find none installed.
+	table.install(nil)
+	if calls := signedCalls(t, host); calls != "1" || table.read() != 1 {
+		t.Fatalf("the prepared plugin signed %s calls after %d reads", calls, table.read())
 	}
 }

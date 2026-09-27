@@ -36,7 +36,7 @@ plugin limits and reads the manifest it declares. It refuses the upload with a
 
 | Code | Reason |
 | --- | --- |
-| `plugin_module_invalid` | Not WebAssembly, not a plugin, a WASI command instead of a reactor, or it imports something OLP does not provide. |
+| `plugin_module_invalid` | Not WebAssembly, not a plugin, a WASI command instead of a reactor, it imports something OLP does not provide, or it declares more than the runtime allows (see [Confinement and limits](#confinement-and-limits)). |
 | `plugin_abi_unsupported` | Built for another plugin ABI version. During 0.x the ABI carries no compatibility promise ([ADR 0004](adr/0004-no-compatibility-promises-during-0x.md)); rebuild the plugin with the SDK of this OLP version. |
 | `plugin_manifest_invalid` | The manifest is invalid or declares something this OLP does not understand. The problem's `errors` names the field, such as `manifest.origins[0]` or `manifest.profiles[0].hosting.headers.Authorization`. |
 | `plugin_dialect_unknown` | A declared profile names a dialect plugin profiles can't serve, such as `manifest.profiles[0].dialect`. |
@@ -128,7 +128,10 @@ No built-in kind's defaults apply to a plugin provider:
   A grant profile whose address begins with a grant fact has
   `https://grant.invalid` as its endpoint's origin, a name that never
   resolves: OLP sends each request to the base URL of the serving credential
-  version's grant instead, only at one of the plugin's approved origins.
+  version's grant instead, only at one of the plugin's approved origins,
+  compared in their canonical form (lowercase, without the scheme's default
+  port). Grant enrollment refuses a grant whose base URL is elsewhere with
+  `grant_enrollment_failed`.
 - **Discovery:** only the profile's declared model listing, if it declares one.
   The probe and discover flows then list the upstream's models, following its
   pages, as for built-in kinds, and the catalogue entry reports
@@ -215,17 +218,24 @@ the static credential or the grant's access token and the provider's
 credential. Gateways run it for traffic, and control for probes and
 certification. A signing profile need not place the credential at all.
 
-A hook that fails, exceeds the plugin limits or returns a header OLP refuses
-fails the attempt before anything is sent: the attempt records a credential
-failure, the slot cools down, and the route fails over. A probe reports
-`credential_invalid` with the reason.
+A hook that fails fails the attempt before anything is sent, and the route
+fails over. Only a failure the plugin reports with a code of its own blames the
+credential: the attempt records a credential failure, the slot cools down, and
+a probe reports `credential_invalid` with the reason. A hook that can't run,
+because it exceeds the plugin limits, crashes, can't be loaded or returns a
+header OLP refuses, blames nothing on the credential: the attempt records a
+`connect` failure, as for an upstream the gateway can't reach, which skips the
+provider's other slots for that request and counts towards its circuit, and a
+probe reports `upstream_unavailable`.
 
 Each process keeps the modules of the plugins it signs with compiled, by digest,
 with a bounded pool of instances, so no request compiles or instantiates
-anything. The first request a process signs with a plugin build loads the
-module from the database and compiles it, which takes a few seconds for a
-typical Go plugin. After that, signing adds about a millisecond per request for
-a small body, growing with the body's size.
+anything. Compiling takes a few seconds for a typical Go plugin, so a process
+compiles ahead of use: as it starts, the plugins that providers' drafts or
+active revisions pin, and in control, a plugin as soon as an owner approves it.
+A plugin build no process prepared is compiled by its first call instead.
+Signing adds about two milliseconds per request for a small body, growing with
+the body's size.
 
 ## Grant enrollment
 
@@ -238,7 +248,10 @@ holds beneath an ordinary, immutable credential version
 
 In the provider wizard's Connection stage, choosing such a profile replaces the
 credential field with grant enrollment. After saving the draft, the plugin
-starts one of two sign-ins, whichever its upstream uses. With an authorization
+starts one of two sign-ins, whichever its upstream uses, unless a live grant
+enrolled through the plugin build the draft pins already backs it: saving then
+tests the connection. A draft moved from a static credential or another build,
+or whose grant lapsed or was revoked, signs in again. With an authorization
 page:
 
 1. OLP shows the authorization URL the plugin builds, with its state and PKCE
@@ -275,15 +288,15 @@ Control runs no background jobs, so status requests drive a device
 authorization's polling. A status request made once the interval has passed
 since the last poll runs one plugin poll step; any other reports the status
 without reaching the upstream. When the upstream asks to slow down, the
-interval grows by 5 seconds from then on. The status is `pending` until the
-operator approves the device, then `completed`; `denied` when the operator
-denies it; and `expired` when the device authorization or the enrollment
-expires first. Polling stops at any of those, or when the enrollment is
-cancelled. A poll that fails otherwise, such as one that can't reach the
-upstream, ends the enrollment with the same problems as a failed continuation,
-and later status requests answer `grant_enrollment_used`. A status request that
-ends before its poll does, such as one its client abandoned, leaves the
-enrollment pending, and the next one polls again.
+interval grows by 5 seconds from then on, up to 5 minutes. The status is
+`pending` until the operator approves the device, then `completed`; `denied`
+when the operator denies it; and `expired` when the device authorization or
+the enrollment expires first. Polling stops at any of those, or when the
+enrollment is cancelled. A poll that fails otherwise, such as one that can't
+reach the upstream, ends the enrollment with the same problems as a failed
+continuation, and later status requests answer `grant_enrollment_used`. A
+status request that ends before its poll does, such as one its client
+abandoned, leaves the enrollment pending, and the next one polls again.
 
 A grant enrollment lasts 10 minutes; a device authorization lasts as long as
 its user code, at most 30 minutes. Its session state, such as the PKCE verifier
@@ -320,11 +333,23 @@ credential slot whose version doesn't match the provider's authentication.
 
 Workers refresh each grant that has a refresh token through its plugin, a
 quarter of the access token's lifetime before it expires and at most ten
-minutes before. The refresh runs on behalf of the provider as its active
-revision configures it, or its draft before the first activation, with its
-options and over its network path; its HTTP reaches only the plugin's approved
-origins. A per-grant PostgreSQL advisory lock keeps the refresh to one worker,
-so a refresh token that rotates is spent once however many workers run.
+minutes before. The refresh runs on behalf of a configuration that uses the
+grant: one that pins the plugin build that enrolled it and selects its
+credential version in a credential slot, the provider's active revision before
+its draft. It runs with that configuration's options and over its network
+path, and its HTTP reaches only the plugin's approved origins. A per-grant
+PostgreSQL advisory lock keeps the refresh to one worker, so a refresh token
+that rotates is spent once however many workers run.
+
+A grant that no configuration uses any more, such as a credential version that
+re-enrolling its slot replaced, or one enrolled for a draft that moved to
+another plugin build, is retired when it next comes due instead of refreshed:
+OLP discards its refresh token and the grant lapses, so a restored revision
+that selects the version again serves it only after a new grant enrollment.
+Nothing served the grant, so no notification is sent; audit records
+`provider.grant.retire` with the credential version as resource and the worker
+as actor. Revoking a credential version ends its grant at once: OLP deletes
+the refresh token, and nothing refreshes the grant again.
 
 A refresh advances the grant beneath the same credential version: the new
 access token replaces the old one, and the grant's generation advances. The
@@ -344,8 +369,12 @@ A refresh that fails is retried after 30 seconds, doubling with each failure
 up to ten minutes, while the version keeps serving its last access token. A
 plugin reports a grant the upstream will no longer refresh, such as one whose
 refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
-a refresh that authorizes another account than the grant's, or a plugin that
-implements no refresh: the grant lapses.
+a refresh that authorizes another account than the grant's, a plugin that
+implements no refresh, or a plugin no longer installed or approved on the
+installation (`plugin_not_installed`, `plugin_not_approved`): the grant lapses.
+An unconfined plugin that the deployment doesn't serve, because it disables the
+tier or its image lacks the permitted executable, fails the refresh
+transiently: deploying again restores it.
 
 ### Lapsed grants
 
@@ -372,7 +401,8 @@ even while its last access token would still work upstream:
   **grant lapsed** and the slot **Grant lapsed**, with **Re-enroll grant** as
   the slot's call to action.
 - Probing or validating a lapsed version, or binding one to a slot, is refused
-  with `422 credential_lapsed`.
+  with `422 credential_lapsed`. A slot write that names no credential version
+  keeps the slot's, so a lapsed slot can still be edited or disabled.
 
 Lapse is terminal: only a new grant enrollment replaces the grant. Re-enroll
 the slot's grant from the credential pool, by pasting back or by
@@ -409,6 +439,16 @@ any principal a serving binding declares
 To pool several upstream accounts, create a provider for each and list them as
 targets of one route.
 
+A grant serves only the plugin build that enrolled it, which its credential
+version records: a build is known by its digest, since any build's manifest may
+claim any name, and a plugin gets only its own grant
+([ADR 0005](adr/0005-confined-provider-plugins.md)). Moving a provider to
+another build of its plugin, an upgrade included, therefore takes a new grant
+enrollment for each of its credential slots: until then, probing, validating
+or activating a slot that holds the other build's grant is refused with
+`422 credential_mismatch`. The active revision keeps serving, and its grants
+keep refreshing, until the provider is activated with the new build.
+
 ## Configuration promotion
 
 [Configuration exports](configuration.md#configuration-promotion-artifacts)
@@ -421,7 +461,8 @@ reports a `plugin` blocker for the digest. A static plugin credential binds thro
 other secret. A credential slot a grant backs imports without a credential: the
 plan lists it for grant enrollment, and the imported provider activates once
 grant enrollment, the credential pool's **Enroll grant** on each slot, has given
-its serving slots credential versions.
+its serving slots credential versions. A slot already holding a grant that
+another build enrolled is listed for grant enrollment too.
 
 ## Uninstalling
 
@@ -436,6 +477,14 @@ its published revisions pins the digest. Published revisions never change, so a
 digest that a provider has published stays installed, which keeps every
 revision restorable and its retained resources servable.
 
+Uninstalling retires the grants the build enrolled, since a grant serves only
+the build that enrolled it and no provider pins that build any more: OLP
+deletes their refresh tokens and they lapse, as a worker
+[retires](#grant-refresh) a grant nothing uses, with no notification. A draft
+slot that still holds one shows **Grant lapsed** until its grant is enrolled
+again, and audit records `provider.grant.retire` for each, with the owner as
+actor.
+
 ## Confinement and limits
 
 Plugin calls run on instances of the module within these limits:
@@ -443,10 +492,19 @@ Plugin calls run on instances of the module within these limits:
 | Limit | Value |
 | --- | --- |
 | Linear memory per instance | 64 MiB |
+| Stack per call: parameters, locals and operands of every frame entered | 8 MiB |
 | Instances of a module at once | 4 |
 | Time per call, including waiting for and instantiating an instance | 10 seconds |
 | Message from the plugin | 1 MiB |
-| Log output per call | 16 KiB, 2 KiB per message or attribute |
+| Log output per call | 16 KiB, counting 64 bytes per record besides its text; 2 KiB per message or attribute |
+
+The runtime runs WebAssembly 2.0 without reference types, so a module has at
+most one table, which never grows. Before compiling a module, OLP refuses one
+whose table exceeds 65,536 elements, a function with more than 4,096 locals or
+more than 4,194,304 locals in all, or one importing anything but functions:
+wazero allocates what a module declares before any limit applies, so these
+bounds keep an upload from exhausting OLP's memory while it is installed. A
+module that the Go toolchain builds stays far within them.
 
 A call takes an idle instance, or instantiates the module when none is idle,
 and returns it for later calls. A call that exceeds a limit fails with
@@ -541,9 +599,13 @@ which an owner permits again.
 
 A process starts an unconfined plugin's executable for the plugin's first
 call, with no arguments and an empty environment, in the unconfined plugin
-directory, after checking that the executable still has the permitted digest
-(`plugin_executable_changed` otherwise). One subprocess then serves every call
-the process makes to the plugin, concurrently, and keeps running between them.
+directory, in a process group of its own. It copies the executable into a
+sealed memory file, checks that the copy has the permitted digest
+(`plugin_executable_changed` otherwise) and runs the copy, so what runs is
+what it checked, however the file changes meanwhile; Linux is required. Calls
+that arrive while the subprocess starts wait for that one start, each giving
+up when its caller does. One subprocess then serves every call the process
+makes to the plugin, concurrently, and keeps running between them.
 Every call the confined runtime serves works through it, such as a profile's
 signing hook, a grant enrollment step or a grant refresh.
 
@@ -551,19 +613,23 @@ signing hook, a grant enrollment step or a grant refresh.
   fails with `plugin_timed_out`. A plugin that leaves a call unanswered that
   long may be stuck, so OLP stops it, and the calls in flight on it fail with
   `plugin_failed`. This holds for a call whose caller gave up, such as a
-  request that ended: OLP tells the plugin, which still answers it. A request
+  request that ended or whose own deadline passed: OLP tells the plugin, which
+  still answers it, and only that call ends. A request
   the plugin [carries](#carrying-traffic) instead lasts as long as the request
   does, and the plugin answers it within 10 seconds once OLP cancels it.
 - A subprocess that exits fails its calls in flight with `plugin_failed`,
   naming its exit status, and so does one that writes a message over 1 MiB or
-  anything else the ABI doesn't allow.
+  anything else the ABI doesn't allow. Stopping or reaping the subprocess
+  kills its process group, so what the plugin started stops with it.
 - OLP starts a stopped plugin again for its next call.
 - OLP bounds no unconfined plugin's memory.
 
 What the plugin logs for a call is attributed to it and redacted of the call's
 secret values, within the same bounds as a confined plugin's. Its standard
 error, and records it logs without a call, are logged a line at a time with
-the plugin's digest, redacted of the secret values of every call in flight.
+the plugin's digest, redacted of the secret values of every call in flight or
+answered within the last 10 seconds, since standard error may reach OLP after
+the response it preceded.
 
 ### Carrying traffic
 
@@ -590,8 +656,11 @@ profile reports `transport: plugin`.
   open, fails over to the route's next target like a connection failure. OLP
   treats any other failure, and a server error the upstream answered with, as
   an unknown outcome: the attempt is `ambiguous` and the request fails with
-  `502 ambiguous_upstream_result`, without failing over. A rejection the
-  upstream stated, such as a `429`, is classified as for any provider.
+  `502 ambiguous_upstream_result`, without failing over. Such failures still
+  count towards the provider's circuit, as connection and server failures do,
+  so a plugin that keeps failing after it sends opens it and later requests go
+  to the route's other targets. A rejection the upstream stated, such as a
+  `429`, is classified as for any provider.
 - When the caller goes away or the attempt times out, OLP cancels the request,
   and the plugin stops it upstream.
 - OLP holds at most 8 MiB of a response the plugin streams faster than the
@@ -632,12 +701,15 @@ Permissions stay recorded, so enabling the tier again restores them.
 Audit records `plugin.install`, `plugin.approve`, `plugin.permit` and
 `plugin.uninstall` with the owner as actor and the digest as resource. A
 repeated upload of an installed digest records nothing. It records
-`provider.grant.enroll` for every continuation that reaches the plugin, and for
-the poll that ends a device authorization: a success with the new credential
-version as resource, a failure, including a denied or expired device
-authorization, with the provider. It records `provider.grant.lapse` when a
-grant [lapses](#lapsed-grants). Audit never records what was pasted back or
-obtained.
+`provider.grant.enroll` for every start and continuation that reaches the
+plugin, and once for each device authorization that ends: a success with the
+new credential version as resource, a failure, including a start the plugin
+failed and a device authorization denied or expired, whether the upstream or
+OLP's own deadline expired it, with the provider. It records
+`provider.grant.lapse` when a grant [lapses](#lapsed-grants), and
+`provider.grant.retire` when a worker [retires](#grant-refresh) a grant nothing
+uses, or an owner [uninstalls](#uninstalling) the plugin that enrolled it.
+Audit never records what was pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'

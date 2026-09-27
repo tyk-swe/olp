@@ -143,11 +143,14 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	case "connect", "timeout", "protocol":
 		b.transportErrors++
 	case "ambiguous":
-		if fact.Interaction == nil {
+		// Ambiguity changes retry permission, not the evidence that the
+		// connection or provider failed to produce a usable response. That
+		// evidence counts for a strict interaction, and for traffic a plugin
+		// carries, whose every failure after sending is ambiguous; other
+		// side-effecting operations leave their ambiguous failures out.
+		if fact.Interaction == nil && !fact.Carried {
 			return
 		}
-		// Strict ambiguity changes retry permission, not the existing evidence
-		// that the connection or provider failed to produce a usable response.
 		if fact.Status >= 500 {
 			b.serverErrors++
 		} else {

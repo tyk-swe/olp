@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -84,5 +85,45 @@ func TestOutputStreamsLogOneRecordPerLine(t *testing.T) {
 	want := []string{"first [REDACTED] line", "second line", "unfinished", strings.Repeat("y", maxLogText) + "…", "last"}
 	if strings.Join(messages, "|") != strings.Join(want, "|") {
 		t.Fatalf("stream records %q, want %q", messages, want)
+	}
+}
+
+// Every record costs the call's budget, so a plugin can't log without bound
+// by logging empty records.
+func TestOutputChargesEveryRecord(t *testing.T) {
+	var logged bytes.Buffer
+	o := newOutput(slog.New(slog.NewJSONHandler(&logged, nil)), nil)
+	for range 10 * maxCallLog {
+		o.record(abi.LogRecord{})
+	}
+	if lines := logLines(t, &logged); len(lines) > maxCallLog/recordCost+1 {
+		t.Fatalf("a call logged %d empty records", len(lines))
+	}
+}
+
+// An unconfined plugin's capability requests for one call are served
+// concurrently, and all of them spend the call's one budget.
+func TestOutputBudgetHoldsForConcurrentRecords(t *testing.T) {
+	var logged bytes.Buffer
+	o := newOutput(slog.New(slog.NewJSONHandler(&logged, nil)), nil)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for range 64 {
+				o.record(abi.LogRecord{Message: strings.Repeat("x", 100)})
+			}
+		})
+	}
+	wg.Wait()
+	spent, warnings := 0, 0
+	for _, line := range logLines(t, &logged) {
+		if line.Level == "WARN" {
+			warnings++
+			continue
+		}
+		spent += recordCost + len(line.Message)
+	}
+	if spent > maxCallLog || warnings != 1 {
+		t.Fatalf("concurrent records spent %d bytes of a %d byte budget, with %d warnings", spent, maxCallLog, warnings)
 	}
 }

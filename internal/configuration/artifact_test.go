@@ -441,7 +441,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", false}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`)}},
@@ -552,21 +552,26 @@ func TestPlanMarksGrantSlotsForGrantEnrollment(t *testing.T) {
 		}
 	}
 
-	// A grant the destination slot already holds serves on.
+	// A grant the destination slot already holds serves on, if the plugin
+	// build the artifact pins enrolled it.
 	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
-	stubs := []queryStub{
-		{match: "FROM olp.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", true}, {"provider-id", "backup", "backup-id", "static-id", false}}},
-		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
+	held := func(backup string) []queryStub {
+		return []queryStub{
+			{match: "FROM olp.providers WHERE", row: []any{configuration}},
+			{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
+			{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest}, {"provider-id", "backup", "backup-id", "backup-cred-id", backup}}},
+			{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
+		}
 	}
-	result, err = testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/primary", Action: "reuse"}) ||
-		!slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/backup", Action: "enroll", Detail: "grant_enrollment_required"}) {
-		t.Fatalf("only a held grant is reused: %+v", result.Actions)
+	for _, backup := range []string{"", strings.Repeat("0", 64)} {
+		result, err = testServer().plan(t.Context(), mapQueryer{t: t, stub: held(backup)}, doc, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/primary", Action: "reuse"}) ||
+			!slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/backup", Action: "enroll", Detail: "grant_enrollment_required"}) {
+			t.Fatalf("a slot holding %q was reused: %+v", backup, result.Actions)
+		}
 	}
 
 	// Grant enrollment is the only source of a grant slot's credential.
@@ -586,7 +591,7 @@ func TestPlanRequiresABindingForAStaticSlotHoldingAGrant(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", true}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
 	}
 	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
@@ -612,7 +617,7 @@ func TestExportsReferenceEveryCredentialSlotAGrantBacks(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, false}, {"provider-id", "backup", "backup-id", nil, false}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, ""}, {"provider-id", "backup", "backup-id", nil, ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, nil, restrictions, []byte(`{}`)}, {"backup", false, 1, true, 0, 1, nil, restrictions, []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},

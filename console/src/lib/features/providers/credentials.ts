@@ -9,6 +9,24 @@ type Schemas = components['schemas'];
 
 export type ProviderCredential = Schemas['CredentialResponse'];
 
+/** Reports whether the credential version with the id is a live grant
+ * enrolled through the plugin build with the digest, which a provider pinning
+ * that build authenticates with: its grant hasn't lapsed and the version isn't
+ * revoked. */
+export function isLiveGrant(
+  credentials: ProviderCredential[] | undefined,
+  id: string | null | undefined,
+  pluginDigest: string | undefined
+): boolean {
+  const credential = credentials?.find((candidate) => candidate.id === id);
+  return Boolean(
+    credential?.grant &&
+    !credential.revoked_at &&
+    !credential.grant.lapsed_at &&
+    credential.grant.plugin_digest === pluginDigest
+  );
+}
+
 export async function listProviderCredentials(
   id: string,
   signal?: AbortSignal

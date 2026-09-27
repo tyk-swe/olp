@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -81,7 +82,7 @@ func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[st
 // origins, where OLP may send the operator.
 func approved(manifest abi.Manifest, address string) bool {
 	target, err := url.Parse(address)
-	return len(address) <= 8<<10 && err == nil && (target.Scheme == "https" || target.Scheme == "http") && slices.Contains(manifest.Origins, plugins.Origin(target))
+	return len(address) <= 8<<10 && err == nil && (target.Scheme == "https" || target.Scheme == "http") && slices.Contains(manifest.Origins, connectors.Origin(target))
 }
 
 // Save persists a started enrollment, its session state encrypted until the
@@ -196,13 +197,20 @@ func Exchange(ctx context.Context, host *plugins.Host, e Enrollment, input strin
 }
 
 // fits checks that a grant the plugin obtained is one the profile's hosting
-// adaptation can place.
+// adaptation can place, at one of the plugin's approved origins.
 func fits(manifest abi.Manifest, profile string, grant *abi.Grant) error {
 	i := slices.IndexFunc(manifest.Profiles, func(p abi.Profile) bool { return p.ID == profile })
 	if i < 0 || manifest.Profiles[i].Grant == nil {
 		return refused("the plugin declares no profile " + profile + " that authenticates with a grant")
 	}
 	if err := validate(manifest.Profiles[i].Grant, grant); err != nil {
+		return refused(err.Error())
+	}
+	placed, err := connectors.NewPluginProfile("", manifest, profile)
+	if err != nil {
+		return err
+	}
+	if err = placed.PlacesGrant(grant.Facts); err != nil {
 		return refused(err.Error())
 	}
 	return nil

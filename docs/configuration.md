@@ -316,8 +316,9 @@ once it is usable. A profile the build does not declare
 `secret_binding_required` blockers for credential refs that do not already
 resolve to a current same-named slot credential of the provider's
 authentication on the destination, static plugin credentials included. A slot a
-grant backs takes no secret binding: unless it already holds a grant on the
-destination, plan reports its ref as an `enroll` action
+grant backs takes no secret binding: unless it already holds a grant that the
+plugin build the artifact pins enrolled on the destination, plan reports its
+ref as an `enroll` action
 (`grant_enrollment_required`), and after applying the provider activates only
 once a grant enrollment gives each slot it serves with a credential.
 
@@ -356,7 +357,9 @@ All three endpoints require the `configure` operation and an all-projects
 principal, so assigned users and project-scoped machine tokens receive 403;
 all-project machine tokens with `read` and `configure` scopes can automate
 export, plan, and apply. The console exposes the workflow to global
-owner/operator sessions under **Settings → Configuration promotion**.
+owner/operator sessions under **Settings → Configuration promotion**, which
+asks for the secret bindings a plan requires and forgets them whenever the
+artifact changes.
 
 ### Versioned provider profiles and per-connection networking
 

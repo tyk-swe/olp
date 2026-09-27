@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import { formatBytes, formatDate } from '$lib/format';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -18,6 +18,7 @@
 
   const access = useRole();
   const canManage = $derived(access.can('plugins.manage'));
+  const queryClient = useQueryClient();
 
   const plugins = createQuery(() => ({
     queryKey: pluginKeys.list(),
@@ -40,14 +41,20 @@
     return plugin.approved_at ? 'Approved' : 'Pending approval';
   }
 
+  /** Runs an owner's action, then shows the plugins and unconfined
+   * executables as they are now, even once OLP refused it: another owner may
+   * have changed the plugin meanwhile, and trying again needs its ETag. */
   async function run(label: string, action: () => Promise<void>) {
     busy = label;
     error = notice = '';
     try {
       await action();
     } catch (cause) {
-      error = pluginProblem(cause) ?? errorMessage(cause);
+      error = isEtagMismatch(cause)
+        ? 'This plugin changed meanwhile. Review it as it is now, then try again.'
+        : (pluginProblem(cause) ?? errorMessage(cause));
     } finally {
+      await queryClient.invalidateQueries({ queryKey: pluginKeys.root });
       busy = '';
     }
   }
@@ -64,7 +71,6 @@
       const { plugin, created } = await installPlugin(upload);
       form.reset();
       module = null;
-      await plugins.refetch();
       notice = created
         ? `Installed ${title(plugin)}. Review its origins and approve it before it can be used.`
         : `${title(plugin)} is already installed; nothing changed.`;
@@ -75,7 +81,6 @@
     await run(`approve-${plugin.digest}`, async () => {
       await approvePlugin(plugin);
       reviewing = '';
-      await plugins.refetch();
       notice = `Approved ${title(plugin)}. It may now reach its declared origins.`;
     });
   }
@@ -88,7 +93,6 @@
     await run(`uninstall-${plugin.digest}`, async () => {
       await uninstallPlugin(plugin);
       if (reviewing === plugin.digest) reviewing = '';
-      await plugins.refetch();
       notice = `Uninstalled ${title(plugin)}.`;
     });
   }
@@ -277,7 +281,7 @@
           </section>
         </div>
         {#if canManage}
-          {#if reviewing === plugin.digest}
+          {#if reviewing === plugin.digest && !approved}
             <section class="approval" aria-labelledby={`${headingId}-approval`}>
               <h3 id={`${headingId}-approval`}>Approve these origins?</h3>
               <p>

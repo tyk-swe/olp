@@ -263,6 +263,25 @@ it('lists the credential slots a grant backs for enrollment after applying', asy
   expect(host.textContent).toContain('Apply');
 });
 
+it('forgets the secret bindings of an artifact once another replaces it', async () => {
+  vi.mocked(planConfiguration).mockResolvedValue(blockedPlan);
+  render();
+  pasteArtifact(JSON.stringify(document));
+  click('Plan');
+  await settle();
+  const input = host.querySelector<HTMLInputElement>('#secret-acme\\/default')!;
+  input.value = 'vendor-secret';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  // OLP refuses a binding the artifact doesn't reference, or one for a slot a
+  // grant backs, and the plan it refused would leave no input to clear it.
+  pasteArtifact(JSON.stringify(pluginDocument));
+  vi.mocked(planConfiguration).mockResolvedValue(cleanPlan);
+  click('Plan');
+  await settle();
+  expect(planConfiguration).toHaveBeenLastCalledWith(pluginDocument, {});
+});
+
 it('reports an invalid artifact', async () => {
   render();
   pasteArtifact('{not json');

@@ -7,8 +7,9 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 // servedGrant is what a gateway serves for the grant beneath a credential
@@ -23,7 +24,9 @@ type servedGrant struct {
 // versions whose grants workers refreshed since the last poll. A refresh
 // advances its grant's generation, so a poll compares generations and reads
 // only the secrets that changed, without a new release or an authority
-// reload. It tells GrantRefreshed of each refreshed grant.
+// reload. Only providers that authenticate with a grant have grants, so a
+// release without any reads nothing. It tells GrantRefreshed of each
+// refreshed grant, apart from the poll.
 func (m *Manager) refreshGrants(ctx context.Context) error {
 	if m.keys == nil {
 		// Mounted gateways refuse credentials that have grants.
@@ -31,6 +34,9 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 	}
 	providers := map[string]string{}
 	for _, provider := range m.Release().Snapshot.Providers {
+		if provider.AuthMode != connectors.AuthGrant {
+			continue
+		}
 		for _, slot := range provider.Slots {
 			if slot.CredentialID != nil {
 				providers[*slot.CredentialID] = provider.ID
@@ -68,7 +74,7 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 	known := m.grants
 	m.mu.RUnlock()
 	served := make(map[string]servedGrant, len(generations))
-	var refreshed []string
+	refreshed := map[string]string{}
 	for credentialID, generation := range generations {
 		previous, ok := known[credentialID]
 		if ok && previous.generation == generation {
@@ -81,17 +87,55 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 		}
 		served[credentialID] = servedGrant{generation: generation, secret: secret}
 		if ok {
-			refreshed = append(refreshed, credentialID)
+			refreshed[credentialID] = providers[credentialID]
 		}
 	}
 	m.serveGrants(served)
-	for _, credentialID := range refreshed {
-		m.log.Info("grant access token reloaded", "provider_id", providers[credentialID], "credential_id", credentialID, "generation", served[credentialID].generation)
-		if m.GrantRefreshed != nil {
-			m.GrantRefreshed(providers[credentialID], credentialID)
+	for credentialID, providerID := range refreshed {
+		m.log.Info("grant access token reloaded", "provider_id", providerID, "credential_id", credentialID, "generation", served[credentialID].generation)
+	}
+	m.grantsRefreshed(refreshed)
+	return nil
+}
+
+// grantsRefreshed tells GrantRefreshed of the grants a poll found refreshed,
+// by credential version and provider, apart from the poll: ending a cooldown
+// in the shared store may wait on it. One notifier at a time tells of them,
+// and of those later polls find until it is done, so a slow store holds up
+// no poll and gathers no goroutines.
+func (m *Manager) grantsRefreshed(refreshed map[string]string) {
+	if m.GrantRefreshed == nil || len(refreshed) == 0 {
+		return
+	}
+	m.mu.Lock()
+	idle := m.refreshedGrants == nil
+	if idle {
+		m.refreshedGrants = map[string]string{}
+	}
+	maps.Copy(m.refreshedGrants, refreshed)
+	m.mu.Unlock()
+	if idle {
+		m.wg.Go(m.tellRefreshedGrants)
+	}
+}
+
+// tellRefreshedGrants tells GrantRefreshed of refreshed grants until none is
+// left to tell of.
+func (m *Manager) tellRefreshedGrants() {
+	for {
+		m.mu.Lock()
+		pending := m.refreshedGrants
+		if len(pending) == 0 {
+			m.refreshedGrants = nil
+			m.mu.Unlock()
+			return
+		}
+		m.refreshedGrants = map[string]string{}
+		m.mu.Unlock()
+		for credentialID, providerID := range pending {
+			m.GrantRefreshed(providerID, credentialID)
 		}
 	}
-	return nil
 }
 
 // serveGrants replaces the grants the manager serves, forgetting the refresh
@@ -136,7 +180,7 @@ func (m *Manager) CredentialRefused(credentialID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), PollInterval)
 		defer cancel()
-		if err := grants.RequestRefresh(ctx, m.pool, credentialID, grant.generation); err != nil {
+		if err := RequestRefresh(ctx, m.pool, credentialID, grant.generation); err != nil {
 			m.log.Warn("grant refresh not requested", "credential_id", credentialID, "error", err)
 			// A later refusal asks again.
 			m.mu.Lock()
@@ -146,4 +190,16 @@ func (m *Manager) CredentialRefused(credentialID string) {
 			m.mu.Unlock()
 		}
 	}()
+}
+
+// RequestRefresh asks workers to refresh the grant beneath a credential
+// version at once, because the upstream refused the access token of its
+// generation. It changes nothing once a refresh replaced that token, while a
+// failed refresh backs off, or when the grant can't be refreshed, such as a
+// lapsed grant.
+func RequestRefresh(ctx context.Context, db *pgxpool.Pool, credentialID string, generation int64) error {
+	_, err := db.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=now()
+		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,
+		credentialID, generation)
+	return err
 }

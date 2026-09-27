@@ -143,32 +143,41 @@ func TestPluginProfilesWithoutSigningRunNoPluginCode(t *testing.T) {
 }
 
 // A signing hook that fails, or returns headers a signature can't add, fails
-// authentication, so the request is never sent.
-func TestPluginSigningFailuresFailAuthentication(t *testing.T) {
+// the request before it is sent. Only a failure the plugin reports blames the
+// credential; OLP's limits, a crashed plugin or a refused header don't.
+func TestPluginSigningFailuresFailTheRequest(t *testing.T) {
 	many := map[string]string{}
 	for i := range maxSignedHeaders + 1 {
 		many[fmt.Sprintf("X-Signature-%d", i)] = "v"
 	}
-	failed := errors.New("plugin_timed_out")
+	limited := errors.New("plugin_timed_out")
+	reported := &abi.Error{Code: "credential_expired", Message: "The key expired."}
+	crashed := &abi.Error{Code: abi.CodeInternal, Message: "The plugin panicked."}
 	for name, tc := range map[string]struct {
 		signer Signer
-		cause  error
+		want   error
 	}{
-		"no signer":         {nil, nil},
-		"hook failed":       {&recordingSigner{err: failed}, failed},
-		"hop-by-hop header": {&recordingSigner{headers: map[string]string{"Connection": "close"}}, nil},
-		"reserved header":   {&recordingSigner{headers: map[string]string{"Content-Type": "text/plain"}}, nil},
-		"semantic header":   {&recordingSigner{headers: map[string]string{"OpenAI-Beta": "assistants=v2"}}, nil},
-		"declared header":   {&recordingSigner{headers: map[string]string{"x-acme-client": "other"}}, nil},
-		"repeated header":   {&recordingSigner{headers: map[string]string{"X-Signature": "a", "x-signature": "b"}}, nil},
-		"invalid value":     {&recordingSigner{headers: map[string]string{"X-Signature": "a\r\nX-Injected: 1"}}, nil},
-		"too many headers":  {&recordingSigner{headers: many}, nil},
+		"no signer":         {nil, ErrSigningUnavailable},
+		"hook past limits":  {&recordingSigner{err: limited}, ErrSigningUnavailable},
+		"hook crashed":      {&recordingSigner{err: crashed}, ErrSigningUnavailable},
+		"hook reported":     {&recordingSigner{err: reported}, ErrAuthentication},
+		"hop-by-hop header": {&recordingSigner{headers: map[string]string{"Connection": "close"}}, ErrSigningUnavailable},
+		"reserved header":   {&recordingSigner{headers: map[string]string{"Content-Type": "text/plain"}}, ErrSigningUnavailable},
+		"semantic header":   {&recordingSigner{headers: map[string]string{"OpenAI-Beta": "assistants=v2"}}, ErrSigningUnavailable},
+		"declared header":   {&recordingSigner{headers: map[string]string{"x-acme-client": "other"}}, ErrSigningUnavailable},
+		"repeated header":   {&recordingSigner{headers: map[string]string{"X-Signature": "a", "x-signature": "b"}}, ErrSigningUnavailable},
+		"invalid value":     {&recordingSigner{headers: map[string]string{"X-Signature": "a\r\nX-Injected: 1"}}, ErrSigningUnavailable},
+		"too many headers":  {&recordingSigner{headers: many}, ErrSigningUnavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
 			_, err := signingAuth(tc.signer).Apply(context.Background(), req, pluginConfig(t, signingManifest()), []byte("secret"), nil)
-			if !errors.Is(err, ErrAuthentication) || errors.Is(err, ErrCredentialRejected) || tc.cause != nil && !errors.Is(err, tc.cause) {
-				t.Fatalf("want a transient authentication failure, got %v", err)
+			blamed := errors.Is(err, ErrAuthentication)
+			if !errors.Is(err, tc.want) || blamed != (tc.want == ErrAuthentication) || errors.Is(err, ErrCredentialRejected) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+			if rs, ok := tc.signer.(*recordingSigner); ok && rs.err != nil && !errors.Is(err, rs.err) {
+				t.Fatalf("the hook's failure %v is not in %v", rs.err, err)
 			}
 		})
 	}

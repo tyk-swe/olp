@@ -69,7 +69,10 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
 - **Grant refresh:** every five seconds, refreshes the
   [grants](plugins.md#grant-refresh) that are due through their plugins, each
   under its own advisory lock so a rotating refresh token is spent once. A
-  refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant.
+  refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant,
+  and a grant that no provider configuration uses any more is
+  [retired](plugins.md#grant-refresh) instead of refreshed. A refresh the
+  upstream answered is recorded even when the worker is shutting down.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without
@@ -213,7 +216,8 @@ subscribes a destination to one `event`, which never changes:
   window or threshold, are installation-wide with an installation-wide
   destination, and require settings permission; a destination is subscribed to
   them once. The worker that records a lapse enqueues, in the same transaction,
-  exactly one delivery for each enabled rule whose destination is enabled.
+  exactly one delivery for each enabled rule whose destination is enabled. A
+  retired grant, which nothing used, is not a lapse to notify.
 
 A destination may carry a signing secret: it is write-only, stored encrypted in
 the keyring, and never returned by any read. When configured, deliveries sign

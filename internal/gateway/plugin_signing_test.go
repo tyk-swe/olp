@@ -42,6 +42,9 @@ func (s *hashSigner) Sign(_ context.Context, _ string, _ abi.Provider, request a
 
 func (s *hashSigner) signed() int { s.mu.Lock(); defer s.mu.Unlock(); return s.calls }
 
+// recover makes the hook sign again.
+func (s *hashSigner) recover() { s.mu.Lock(); defer s.mu.Unlock(); s.fail = nil }
+
 func signature(credential string, body []byte) string {
 	sum := sha256.Sum256(append([]byte(credential), body...))
 	return hex.EncodeToString(sum[:])
@@ -133,10 +136,47 @@ func TestAStreamingRequestIsSignedOnce(t *testing.T) {
 	}
 }
 
-// A signing hook that fails, including one past its limits, fails the attempt
-// before anything is sent, so the route fails over.
-func TestASigningFailureFailsTheAttemptAsNotSent(t *testing.T) {
-	h := newSigningHarness(t, &hashSigner{fail: errors.New("plugin_timed_out: The plugin exceeded its 10s time limit.")})
+// A signing hook that can't run, such as one past its limits or a plugin that
+// crashed, fails the attempt before anything is sent, so the route fails
+// over, and blames nothing on the credential: the next request uses its slot.
+func TestAnUnavailableSigningHookFailsTheAttemptAsNotSent(t *testing.T) {
+	for name, failure := range map[string]error{
+		"past its limits": errors.New("plugin_timed_out: The plugin exceeded its 10s time limit."),
+		"crashed":         &abi.Error{Code: abi.CodeInternal, Message: "The plugin panicked."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			signer := &hashSigner{fail: failure}
+			h := newSigningHarness(t, signer)
+			failed := failOverFromSigning(t, h)
+			if failed.Class != classConnect {
+				t.Fatalf("the failed attempt was classified %s", failed.Class)
+			}
+			signer.recover()
+			if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 {
+				t.Fatalf("the slot was cooled: status %d, calls a=%d", resp.StatusCode, h.mock.count("a"))
+			}
+		})
+	}
+}
+
+// A failure the signing hook reports, such as a credential it can't sign
+// with, is a credential failure: the slot cools down.
+func TestAReportedSigningFailureCoolsTheCredential(t *testing.T) {
+	signer := &hashSigner{fail: &abi.Error{Code: "credential_expired", Message: "The key expired."}}
+	h := newSigningHarness(t, signer)
+	if failed := failOverFromSigning(t, h); failed.Class != classCredential {
+		t.Fatalf("the failed attempt was classified %s", failed.Class)
+	}
+	signer.recover()
+	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || h.mock.count("a") != 0 || h.mock.count("b") != 2 {
+		t.Fatalf("the cooled slot served: status %d, calls a=%d b=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
+	}
+}
+
+// failOverFromSigning sends a request whose signing fails on provider a and
+// returns the failed attempt, which sent nothing, after b served it.
+func failOverFromSigning(t *testing.T, h *harness) AttemptFact {
+	t.Helper()
 	resp, body := h.chat(fullKey, nil)
 	if resp.StatusCode != http.StatusOK || body["model"] != routeSlug {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
@@ -145,10 +185,12 @@ func TestASigningFailureFailsTheAttemptAsNotSent(t *testing.T) {
 	if len(env.Attempts) != 2 || env.Attempts[1].Class != classSuccess {
 		t.Fatalf("attempts %+v", env.Attempts)
 	}
-	if failed := env.Attempts[0]; failed.Class != classCredential || failed.Status != 0 || failed.FirstByte != nil || failed.BillingUncertain || !failed.UsageComplete {
-		t.Fatalf("the failed attempt was not recorded as not sent: %+v", failed)
-	}
 	if h.mock.count("a") != 0 || h.mock.count("b") != 1 {
 		t.Fatalf("calls a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
 	}
+	failed := env.Attempts[0]
+	if failed.Status != 0 || failed.FirstByte != nil || failed.BillingUncertain || !failed.UsageComplete {
+		t.Fatalf("the failed attempt was not recorded as not sent: %+v", failed)
+	}
+	return failed
 }

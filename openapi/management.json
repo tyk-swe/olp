@@ -2588,6 +2588,7 @@
           },
           "credential_version_id": {
             "default": null,
+            "description": "The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.",
             "format": "uuid",
             "type": [
               "string",

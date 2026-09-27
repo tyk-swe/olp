@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -21,9 +23,9 @@ const loadTimeout = 2 * time.Minute
 // serve providers: a plugin profile's signing hook runs once per upstream
 // request, and an unconfined plugin may carry the request itself (Carry); a
 // grant's refresh runs in a worker ahead of its access token's expiry. A
-// confined plugin's module is loaded from the database on its first call and
-// kept compiled, with its pool of instances, for the calls after it, so no
-// request compiles anything; an unconfined plugin's process likewise keeps
+// confined plugin's module is loaded from the database when it is prepared or
+// on its first call, and kept compiled, with its pool of instances, for the
+// calls after it, so no request compiles anything; an unconfined plugin's process likewise keeps
 // running between calls. A Host keeps the code of the plugins it called most
 // recently, and runs only plugins that Usable admits. It is safe for
 // concurrent use.
@@ -88,6 +90,43 @@ func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Pro
 	}
 	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: manifest.Origins, Client: client}}, &grant)
 	return grant, err
+}
+
+// Prepare loads the code of the plugin with digest in the background, unless
+// the Host holds it already, so the plugin's first call finds its module
+// compiled, with an instance ready.
+func (h *Host) Prepare(digest string) { h.done(h.use(digest)) }
+
+// PreparePinned prepares the confined plugins that providers' drafts or active
+// revisions pin, one at a time and the most recently approved first, as many
+// as the Host keeps. A process calls it as it starts, so no request waits for
+// a module to compile.
+func (h *Host) PreparePinned(ctx context.Context) error {
+	rows, err := h.db.Query(ctx, `SELECT pl.digest FROM olp.plugins pl
+		WHERE pl.module IS NOT NULL AND pl.approved_at IS NOT NULL AND EXISTS (
+			SELECT 1 FROM olp.providers p LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
+			WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=pl.digest
+			   OR r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=pl.digest)
+		ORDER BY pl.approved_at DESC LIMIT $1`, maxHosted)
+	if err != nil {
+		return err
+	}
+	digests, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, digest := range digests {
+		entry := h.use(digest)
+		_, err := entry.wait(ctx)
+		h.done(entry)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			h.runtime.log.Warn("plugin could not be prepared", "plugin_digest", digest, "error", err)
+		}
+	}
+	return nil
 }
 
 // Call serves call, of any ABI method, on the code of the plugin with digest

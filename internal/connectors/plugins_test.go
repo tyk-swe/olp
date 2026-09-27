@@ -367,6 +367,24 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 	}
 }
 
+// A plugin profile never takes a built-in profile's ID, on which OLP keys
+// behaviour, such as strict compilation leaving Gemini Interactions to its
+// own contract: install refuses it, and so does publishing a provider that
+// pins a plugin installed before.
+func TestPluginProfilesNeverTakeABuiltInProfileID(t *testing.T) {
+	for _, builtin := range Profiles() {
+		manifest := pluginManifest()
+		manifest.Profiles[0].ID = builtin.ID
+		if refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(manifest.Profiles[0])); !ok || refusal.Field != "id" {
+			t.Fatalf("%s: want a refusal of id, got %v", builtin.ID, refusal)
+		}
+		installed, _ := json.Marshal(InstalledPlugin{Manifest: manifest})
+		if _, err := DecodePluginProfile(pluginDigest, installed, builtin.ID); err == nil {
+			t.Fatalf("published a plugin profile identified as the built-in %s", builtin.ID)
+		}
+	}
+}
+
 func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
 	c := pluginConfig(t, optionsManifest())
 	c.PluginOptions = map[string]string{"account": "acme/prod", "region": "eu"}
@@ -614,6 +632,10 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 		"https://api.acme.example":           "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 		"https://eu.acme.example/regions/1/": "https://eu.acme.example/regions/1/v2/eu/chat/completions?placement=eu-acct&project=p",
 		"https://eu.acme.example/a%2Fb":      "https://eu.acme.example/a%2Fb/v2/eu/chat/completions?placement=eu-acct&project=p",
+		// Origins compare as manifests declare them: lowercase, without the
+		// scheme's default port.
+		"https://API.acme.example":      "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
+		"HTTPS://api.acme.example:443/": "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 	} {
 		for _, c := range []Config{c, published} {
 			endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
@@ -633,8 +655,8 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 
 	for base, reason := range map[string]string{
 		"https://evil.example/v2":          "grant fact api_base places requests at https://evil.example, which is not one of the plugin's approved origins",
-		"https://API.acme.example":         "grant fact api_base places requests at https://API.acme.example, which is not one of the plugin's approved origins",
-		"https://api.acme.example:443":     "grant fact api_base places requests at https://api.acme.example:443, which is not one of the plugin's approved origins",
+		"https://api.acme.example:8443":    "grant fact api_base places requests at https://api.acme.example:8443, which is not one of the plugin's approved origins",
+		"http://api.acme.example":          "grant fact api_base places requests at http://api.acme.example, which is not one of the plugin's approved origins",
 		"":                                 "grant fact api_base holds no base URL",
 		"api.acme.example/v2":              "grant fact api_base holds no base URL",
 		"https://user@api.acme.example/v2": "grant fact api_base holds no base URL",

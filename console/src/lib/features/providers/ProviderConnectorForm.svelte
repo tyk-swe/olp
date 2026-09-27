@@ -38,8 +38,8 @@
     lockKind?: boolean;
     /** Field issues the server reported for the last submission. */
     issues?: FieldIssue[];
-    /** Set once the draft holds a grant, so saving tests the connection
-     * rather than signing in upstream. */
+    /** Set while a live grant of the plugin build the form pins backs the
+     * draft, so saving tests the connection rather than signing in upstream. */
     grantEnrolled?: boolean;
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();

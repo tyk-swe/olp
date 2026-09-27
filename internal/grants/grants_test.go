@@ -46,6 +46,28 @@ func TestGrantsMustFitTheirProfile(t *testing.T) {
 	}
 }
 
+// A grant whose fact holds the base URL its profile's address begins with
+// must place requests at one of the plugin's approved origins, compared as
+// manifests declare them.
+func TestGrantBaseURLsMustBeAtApprovedOrigins(t *testing.T) {
+	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Grant: &abi.GrantAuthentication{Facts: []string{"api_base"}},
+		Hosting: abi.Hosting{Address: "{grant.api_base}/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}},
+	}}}
+	for base, placed := range map[string]bool{
+		"https://api.acme.example/eu":      true,
+		"https://API.acme.example:443/eu":  true,
+		"https://api.acme.example:8443/eu": false,
+		"https://evil.example":             false,
+		"api.acme.example":                 false,
+	} {
+		grant := abi.Grant{AccessToken: "at", Principal: "user@acme.example", Facts: map[string]string{"api_base": base}}
+		if err := fits(manifest, "acme-chat", &grant); (err == nil) != placed {
+			t.Errorf("a grant based at %q: %v", base, err)
+		}
+	}
+}
+
 // A device authorization a plugin starts must send the operator to one of the
 // plugin's approved origins with a user code OLP can show, and OLP polls it
 // within its bounds: every 5 seconds unless it says otherwise, for as long as

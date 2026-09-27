@@ -7,6 +7,7 @@ import {
   approvePlugin,
   installPlugin,
   listPlugins,
+  listUnconfinedExecutables,
   uninstallPlugin,
   type Plugin
 } from '$lib/features/plugins/api';
@@ -25,6 +26,7 @@ vi.mock('$lib/features/plugins/api', async (original) => ({
   approvePlugin: vi.fn(),
   installPlugin: vi.fn(),
   listPlugins: vi.fn(),
+  listUnconfinedExecutables: vi.fn(),
   uninstallPlugin: vi.fn()
 }));
 
@@ -226,6 +228,91 @@ it('explains an uninstall refused because providers pin the plugin', async () =>
     'Providers Reference upstream pin this plugin'
   );
   expect(host.querySelectorAll('article')).toHaveLength(1);
+});
+
+it('shows the current plugin after another owner changed it, so trying again sends its current ETag', async () => {
+  vi.mocked(listPlugins)
+    .mockResolvedValueOnce(listed([pending]))
+    .mockResolvedValueOnce(listed([approved]))
+    .mockResolvedValue(listed([]));
+  // Like OLP, which refuses an ETag other than the plugin's current one.
+  vi.mocked(uninstallPlugin).mockImplementation(async (plugin) => {
+    if (plugin.etag === approved.etag) return;
+    throw new ApiProblem({
+      type: 'https://openllmproxy.dev/problems/etag_mismatch',
+      title: 'Precondition Failed',
+      status: 412,
+      detail: 'This record changed. Reload it before saving.'
+    });
+  });
+  render();
+  await settle();
+
+  button('Uninstall').click();
+  await settle();
+  expect(uninstallPlugin).toHaveBeenLastCalledWith(pending);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'This plugin changed meanwhile'
+  );
+  expect(host.querySelector('.badge')?.textContent).toBe('Approved');
+
+  button('Uninstall').click();
+  await settle();
+  expect(uninstallPlugin).toHaveBeenLastCalledWith(approved);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).toContain('No plugins installed');
+});
+
+it('shows a plugin another owner approved meanwhile as approved', async () => {
+  vi.mocked(listPlugins)
+    .mockResolvedValueOnce(listed([pending]))
+    .mockResolvedValue(listed([approved]));
+  vi.mocked(approvePlugin).mockRejectedValue(
+    new ApiProblem({
+      type: 'https://openllmproxy.dev/problems/etag_mismatch',
+      title: 'Precondition Failed',
+      status: 412,
+      detail: 'This record changed. Reload it before saving.'
+    })
+  );
+  render();
+  await settle();
+
+  button('Review and approve').click();
+  flushSync();
+  button('Approve origins').click();
+  await settle();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'This plugin changed meanwhile'
+  );
+  expect(host.querySelector('.badge')?.textContent).toBe('Approved');
+  expect(host.querySelector('.approval')).toBeNull();
+});
+
+it('shows the executable of an uninstalled unconfined plugin as no longer permitted', async () => {
+  const unconfined: Plugin = { ...approved, executable: 'reference' };
+  const executable = {
+    name: 'reference',
+    digest: unconfined.digest,
+    size_bytes: unconfined.size_bytes
+  };
+  vi.mocked(listPlugins)
+    .mockResolvedValueOnce(listed([unconfined], true))
+    .mockResolvedValue(listed([], true));
+  vi.mocked(listUnconfinedExecutables)
+    .mockResolvedValueOnce([{ ...executable, permitted: true }])
+    .mockResolvedValue([{ ...executable, permitted: false }]);
+  vi.mocked(uninstallPlugin).mockResolvedValue();
+  render();
+  await settle();
+  const status = () =>
+    host.querySelector('.unconfined tbody .badge')?.textContent;
+  expect(status()).toBe('Permitted');
+
+  button('Uninstall').click();
+  await settle();
+  expect(uninstallPlugin).toHaveBeenCalledWith(unconfined);
+  expect(status()).toBe('Not permitted');
 });
 
 it('keeps an uninstall the owner cancels', async () => {

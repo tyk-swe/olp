@@ -238,6 +238,15 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			pluginHost = plugins.NewHost(refreshing, unconfined, pool)
 			defer pluginHost.Close(context.Background())
 		}
+		if pluginHost != nil {
+			// Plugins that providers pin are compiled now rather than by the
+			// first call that needs them.
+			go func() {
+				if err := pluginHost.PreparePinned(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("plugins could not be prepared", "error", err)
+				}
+			}()
+		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 			spoolDir := c.MediaSpoolDir
 			if spoolDir == "" {
