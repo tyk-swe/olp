@@ -233,7 +233,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	if p.slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
 	}
-	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), secret, body); err != nil {
+	if err := s.applyCredentials(ctx, x, req, p.provider.Connector(), secret, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -267,7 +267,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: bedrockErrorBody(raw), dispatched: true}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(bedrockErrorBody(raw)), dispatched: true}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		f.class = classCredential

@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"math"
 	"strconv"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -820,14 +819,4 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 		c.Usage = &openai.Usage{InputTokens: n, TotalTokens: n}
 	}
 	return c, nil
-}
-
-// Redact removes credential values from any upstream-owned diagnostic text.
-func Redact(message string, secrets []string) string {
-	for _, secret := range secrets {
-		if secret != "" {
-			message = strings.ReplaceAll(message, secret, "[REDACTED]")
-		}
-	}
-	return message
 }

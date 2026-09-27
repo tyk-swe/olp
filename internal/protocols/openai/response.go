@@ -64,6 +64,15 @@ type UpstreamError struct {
 
 func (e *UpstreamError) Error() string { return "upstream error: " + e.Message }
 
+// Redact passes every provider-supplied field through redact, because a
+// provider may echo request credentials in any of them. A nil error stays nil.
+func (e *UpstreamError) Redact(redact func(string) string) *UpstreamError {
+	if e != nil {
+		e.Type, e.Code, e.Message = redact(e.Type), redact(e.Code), redact(e.Message)
+	}
+	return e
+}
+
 // ParseErrorBody extracts an OpenAI error envelope, tolerating other shapes.
 func ParseErrorBody(body []byte) *UpstreamError {
 	var envelope struct {

@@ -347,8 +347,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	credentialValues, err := s.auth.Apply(ctx, req, cfg, s.pinSecret(x, p), body)
-	if err != nil {
+	if err := s.applyCredentials(ctx, x, req, cfg, s.pinSecret(x, p), body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -394,10 +393,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
-	if f.upstream != nil {
-		f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
-	}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		f.class = classCredential
@@ -1017,7 +1013,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
+	if err := s.applyCredentials(ctx, x, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}
@@ -1062,7 +1058,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		f.class = classCredential

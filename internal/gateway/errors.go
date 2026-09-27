@@ -1,14 +1,10 @@
 package gateway
 
 import (
-	"cmp"
 	"encoding/json"
 	"math"
 	"net/http"
-	"net/textproto"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -24,36 +20,6 @@ type Error struct {
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
-
-// redactCredentials removes attempted secrets, including header values quoted
-// inside a JSON diagnostic. Replace longer values first so overlapping header
-// credentials cannot leave part of the longer secret exposed.
-func redactCredentials(message string, values []string) string {
-	var secrets []string
-	for _, value := range values {
-		// HTTP strips surrounding spaces and tabs before sending header values.
-		value = textproto.TrimString(value)
-		if value == "" {
-			continue
-		}
-		secrets = append(secrets, value)
-		quoted, _ := json.Marshal(value)
-		secrets = append(secrets, string(quoted[1:len(quoted)-1]))
-		// Upstream JSON encoders may leave HTML characters unescaped.
-		var unescaped strings.Builder
-		encoder := json.NewEncoder(&unescaped)
-		encoder.SetEscapeHTML(false)
-		encoder.Encode(value)
-		encoded := unescaped.String()
-		secrets = append(secrets, encoded[1:len(encoded)-2]) // quotes and trailing newline
-	}
-	slices.SortStableFunc(secrets, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
-	pairs := make([]string, 0, 2*len(secrets))
-	for _, secret := range secrets {
-		pairs = append(pairs, secret, "[REDACTED]")
-	}
-	return strings.NewReplacer(pairs...).Replace(message)
-}
 
 // body renders the native OpenAI error envelope.
 func (e *Error) body() []byte {

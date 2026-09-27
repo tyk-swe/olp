@@ -759,7 +759,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	if p.slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
 	}
-	if _, err := s.auth.Apply(ctx, probe, p.provider.Connector(), secret, nil); err != nil {
+	if err := s.applyCredentials(ctx, x, probe, p.provider.Connector(), secret, nil); err != nil {
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	headers := http.Header{}
@@ -793,7 +793,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		case status != 0:
 			class = classUpstreamClient
 		}
-		return nil, finish(class, upstreamError(&attemptFailure{status: status, upstream: upstreamResponseError(resp)}))
+		return nil, finish(class, upstreamError(&attemptFailure{status: status, upstream: x.redacted(upstreamResponseError(resp))}))
 	}
 	fact.Class = "success"
 	if fact.Interaction != nil {

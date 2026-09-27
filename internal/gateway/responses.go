@@ -403,7 +403,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
 		if nativeStatus == "failed" {
-			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, s.responseCredentialValues(x, p, resp))
+			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, x.sensitive)
 			if err != nil {
 				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider failure contained unsafe native fields.")
 			}

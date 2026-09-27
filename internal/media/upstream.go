@@ -214,10 +214,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		failure := &Failure{
 			Status:     resp.StatusCode,
 			Dispatched: true,
-			Upstream:   openai.ParseErrorBody(raw),
-		}
-		if failure.Upstream != nil {
-			failure.Upstream.Message = redactCredentials(failure.Upstream.Message, credentialValues)
+			Upstream:   openai.ParseErrorBody(raw).Redact(credentialValues.Redact),
 		}
 		switch {
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
@@ -574,16 +571,4 @@ func retryAfterHeader(header string, now time.Time) time.Duration {
 		}
 	}
 	return 0
-}
-
-// redactCredentials removes known credential material from an upstream error
-// message before it reaches a client or log.
-func redactCredentials(message string, sensitive []string) string {
-	for _, value := range sensitive {
-		if value == "" {
-			continue
-		}
-		message = strings.ReplaceAll(message, value, "[redacted]")
-	}
-	return message
 }

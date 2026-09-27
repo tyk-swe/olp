@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,5 +101,28 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Every provider credential the gateway applies must be recorded for
+// redaction, so applyCredentials is the only caller of Auth.Apply.
+func TestGatewayAppliesCredentialsOnlyThroughTheRedactionSeam(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls += strings.Count(string(source), ".auth.Apply(")
+	}
+	if calls != 1 {
+		t.Fatalf("found %d Auth.Apply calls; apply provider credentials through applyCredentials", calls)
 	}
 }
