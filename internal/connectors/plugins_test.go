@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -314,6 +315,19 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 		"grant fact in address": {func(p *abi.Profile) {
 			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"account"}}, "https://api.acme.example/{grant.account}/v2"
 		}, "hosting.address"},
+		"undeclared base fact": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"account"}}, "{grant.api_base}/v2"
+		}, "hosting.address"},
+		"base fact without a grant": {func(p *abi.Profile) { p.Hosting.Address = "{grant.api_base}/v2" }, "hosting.address"},
+		"base fact before a name": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"api_base"}}, "{grant.api_base}v2"
+		}, "hosting.address"},
+		"base fact with a query": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"api_base"}}, "{grant.api_base}/v2?key=x"
+		}, "hosting.address"},
+		"second grant fact in address": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"api_base", "account"}}, "{grant.api_base}/{grant.account}"
+		}, "hosting.address"},
 		"grant fact in envelope": {func(p *abi.Profile) {
 			p.Grant = &abi.GrantAuthentication{Facts: []string{"account"}}
 			p.Hosting.Envelope = &abi.Envelope{Request: "request", Fields: map[string]string{"account": "{grant.account}"}}
@@ -542,5 +556,97 @@ func TestPluginGrantProfilePlacesTheAccessTokenAndGrantFacts(t *testing.T) {
 	static.AuthMode = AuthStaticCredential
 	if static.Validate(&egress.Policy{}) == nil {
 		t.Fatal("a grant profile accepted a static credential")
+	}
+}
+
+// baseManifest declares a grant profile whose address begins with the grant
+// fact that holds the upstream's base URL, at one of two approved origins.
+func baseManifest() abi.Manifest {
+	m := grantManifest()
+	m.Origins = []string{"https://api.acme.example", "https://eu.acme.example"}
+	m.Profiles[0].Grant.Facts = append(m.Profiles[0].Grant.Facts, "api_base")
+	m.Profiles[0].Hosting.Address = "{grant.api_base}/v2/{options.region}"
+	return m
+}
+
+// A grant fact that begins the address gives each credential version its own
+// base URL: the provider's endpoint stands for it, and placement moves every
+// request there, before any header or signature is made.
+func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
+	c := pluginConfig(t, baseManifest())
+	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+	c.Endpoint = c.Plugin.Address(c.PluginOptions)
+	if err := c.Validate(&egress.Policy{}); err != nil || c.Endpoint != "https://grant.invalid/v2/eu" {
+		t.Fatalf("endpoint %s: %v", c.Endpoint, err)
+	}
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published Config
+	if err = json.Unmarshal(encoded, &published); err != nil {
+		t.Fatal(err)
+	}
+	for base, want := range map[string]string{
+		"https://api.acme.example":           "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
+		"https://eu.acme.example/regions/1/": "https://eu.acme.example/regions/1/v2/eu/chat/completions?placement=eu-acct&project=p",
+		"https://eu.acme.example/a%2Fb":      "https://eu.acme.example/a%2Fb/v2/eu/chat/completions?placement=eu-acct&project=p",
+	} {
+		for _, c := range []Config{c, published} {
+			endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, _ := http.NewRequest(http.MethodPost, endpoint, nil)
+			secret := grantCredential(t, "at-123", map[string]string{"account": "acct", "project": "p", "api_base": base})
+			if _, err = NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); err != nil {
+				t.Fatal(err)
+			}
+			if req.URL.String() != want || req.Host != req.URL.Host || req.Header.Get("Authorization") != "Bearer at-123" {
+				t.Fatalf("placed at %s (host %s) with %v, want %s", req.URL, req.Host, req.Header, want)
+			}
+		}
+	}
+
+	for base, reason := range map[string]string{
+		"https://evil.example/v2":          "grant fact api_base places requests at https://evil.example, which is not one of the plugin's approved origins",
+		"https://API.acme.example":         "grant fact api_base places requests at https://API.acme.example, which is not one of the plugin's approved origins",
+		"https://api.acme.example:443":     "grant fact api_base places requests at https://api.acme.example:443, which is not one of the plugin's approved origins",
+		"":                                 "grant fact api_base holds no base URL",
+		"api.acme.example/v2":              "grant fact api_base holds no base URL",
+		"https://user@api.acme.example/v2": "grant fact api_base holds no base URL",
+		"https://api.acme.example/v2?x=1":  "grant fact api_base holds no base URL",
+		"https://api.acme.example/v2#x":    "grant fact api_base holds no base URL",
+	} {
+		req, _ := http.NewRequest(http.MethodPost, c.Endpoint+"/chat/completions", nil)
+		secret := grantCredential(t, "at-123", map[string]string{"account": "acct", "project": "p", "api_base": base})
+		_, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, published, secret, nil)
+		if !errors.Is(err, ErrCredentialRejected) || !strings.Contains(err.Error(), reason) || req.URL.Host != "grant.invalid" {
+			t.Errorf("%q: placed at %s with %v", base, req.URL, err)
+		}
+	}
+	// Only a request addressed from the provider's endpoint moves.
+	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/eu/chat/completions", nil)
+	secret := grantCredential(t, "at-123", map[string]string{"account": "acct", "project": "p", "api_base": "https://eu.acme.example"})
+	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); err == nil {
+		t.Fatalf("moved a request addressed elsewhere to %s", req.URL)
+	}
+
+	// The egress policy still applies to where the request goes.
+	local := baseManifest()
+	local.Origins = []string{"http://127.0.0.1:9"}
+	c = pluginConfig(t, local)
+	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+	req, _ = http.NewRequest(http.MethodPost, c.Plugin.Address(c.PluginOptions)+"/chat/completions", nil)
+	secret = grantCredential(t, "at-123", map[string]string{"account": "acct", "project": "p", "api_base": "http://127.0.0.1:9"})
+	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); err != nil {
+		t.Fatal(err)
+	}
+	client, err := egress.Policy{}.ConnectionClient(nil, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Do(req); err == nil || !strings.Contains(err.Error(), "endpoint must use https") {
+		t.Fatalf("sent to %s under a policy that refuses plain HTTP: %v", req.URL, err)
 	}
 }

@@ -6,8 +6,9 @@
 // upstream's own envelope; one serves Chat Completions signing each request
 // with the API key; one serves Chat Completions at a workspace the operator
 // names; one serves Chat Completions for accounts that sign in through the
-// upstream's authority, whose grants the plugin enrolls; and one serves OpenAI
-// Responses where the upstream serves only streaming requests.
+// upstream's authority, whose grants the plugin enrolls, at the API each
+// account's grant names; and one serves OpenAI Responses where the upstream
+// serves only streaming requests.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -104,10 +105,11 @@ func (reference) Manifest() plugin.Manifest {
 		}, {
 			ID: "reference-grant-chat", Label: "Reference Chat Completions with sign-in", Dialect: "openai-chat",
 			// An account that signs in sends the grant's access token and
-			// names the account the grant authorizes, a grant fact.
-			Grant: &plugin.GrantAuthentication{Facts: []string{"account"}},
+			// names the account the grant authorizes, a grant fact, to the
+			// API that serves the account, another.
+			Grant: &plugin.GrantAuthentication{Facts: []string{"account", "api_base"}},
 			Hosting: plugin.Hosting{
-				Address: upstream,
+				Address: "{grant.api_base}",
 				Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 			},
 		}, streamingProfile(api, headers)},

@@ -20,14 +20,19 @@ type OAuthIdentity struct {
 	Subject string
 	// Account is what the server's token response names, a grant fact.
 	Account string
+	// APIBase, when set, is the base URL of the upstream API that serves the
+	// account, which the server's token response names as api_base, another
+	// grant fact.
+	APIBase string
 }
 
 // OAuthServer is a fake OAuth 2.0 authorization server, the reference
 // plugin's authority in tests. It runs the authorization code flow with PKCE
 // (RFC 7636, S256 only): /authorize signs an account in at once and redirects
 // to the client's redirect URI with a code and the request's state; /token
-// exchanges each code once, for the verifier that matches its challenge;
-// /userinfo names the subject of an access token.
+// exchanges each code once, for the verifier that matches its challenge,
+// naming the account and any API base URL it has; /userinfo names the subject
+// of an access token.
 type OAuthServer struct {
 	*httptest.Server
 	mu sync.Mutex
@@ -122,8 +127,12 @@ func (s *OAuthServer) token(w http.ResponseWriter, r *http.Request) {
 	access, refresh := oauthToken(), oauthToken()
 	s.tokens[access] = code.identity
 	s.issued = append(s.issued, access, refresh)
+	issued := map[string]any{"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "account": code.identity.Account}
+	if code.identity.APIBase != "" {
+		issued["api_base"] = code.identity.APIBase
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "account": code.identity.Account})
+	json.NewEncoder(w).Encode(issued)
 }
 
 func (s *OAuthServer) userinfo(w http.ResponseWriter, r *http.Request) {

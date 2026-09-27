@@ -97,12 +97,25 @@ func TestManifestValidation(t *testing.T) {
 			m.Profiles[0].Hosting.Headers["X-Account"] = "{grant.account_id}"
 		}, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.X-Account"},
 		"stream without a reducer": {func(m *abi.Manifest) { m.Profiles[1].Hosting.ForceStreaming = true }, CodeManifestInvalid, "manifest.profiles[1].hosting.force_streaming"},
+		"undeclared base fact":     {func(m *abi.Manifest) { m.Profiles[2].Hosting.Address = "{grant.api_base}/v1" }, CodeManifestInvalid, "manifest.profiles[2].hosting.address"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
 			tc.mutate(&m)
 			wantError(t, validateManifest(m), tc.code, tc.field)
 		})
+	}
+}
+
+// A grant profile's address may begin with the grant fact that holds the
+// upstream's base URL, whose origin OLP checks per request rather than at
+// install.
+func TestManifestAcceptsAnAddressBeginningWithAGrantFact(t *testing.T) {
+	m := validManifest()
+	m.Profiles[2].Grant.Facts = append(m.Profiles[2].Grant.Facts, "api_base")
+	m.Profiles[2].Hosting.Address = "{grant.api_base}/v1"
+	if err := validateManifest(m); err != nil {
+		t.Fatalf("refused an address beginning with a grant fact: %v", err)
 	}
 }
 

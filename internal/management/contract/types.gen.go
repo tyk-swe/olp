@@ -2770,13 +2770,13 @@ type PluginFailureRuleClass string
 
 // PluginGrantAuthentication Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
 type PluginGrantAuthentication struct {
-	// Facts The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}.
+	// Facts The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}, and with which the address may begin when the fact holds the upstream's base URL.
 	Facts *[]string `json:"facts,omitempty"`
 }
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
 type PluginHosting struct {
-	// Address Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place.
+	// Address Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place. A grant profile's address may instead begin with the grant fact that holds the upstream's base URL, such as {grant.api_base}/v1: the endpoint's origin is then https://grant.invalid, and OLP sends each request to its grant's base URL, which must be at one of the plugin's approved origins.
 	Address string `json:"address"`
 
 	// Classification Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.
@@ -2859,7 +2859,7 @@ type PluginProfile struct {
 	// Grant Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
 	Grant *PluginGrantAuthentication `json:"grant,omitempty"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`

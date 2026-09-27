@@ -166,8 +166,10 @@ func TestReferencePluginEnrollsAGrant(t *testing.T) {
 	}
 	upstream := httptest.NewRequest("GET", "/", nil)
 	upstream.Header.Set("Authorization", "Bearer "+enrolled.AccessToken)
+	// The token response names no regional API, so the account uses the
+	// shared one.
 	if identity, ok := authority.Authorized(upstream); !ok || enrolled.Principal != identity.Subject || enrolled.Facts["account"] != identity.Account ||
-		enrolled.RefreshToken == "" || enrolled.ExpiresIn != 3600 {
+		enrolled.Facts["api_base"] != "https://api.example.com/v1" || enrolled.RefreshToken == "" || enrolled.ExpiresIn != 3600 {
 		t.Fatalf("enrolled %+v", enrolled)
 	}
 	// The authority spends a code once.

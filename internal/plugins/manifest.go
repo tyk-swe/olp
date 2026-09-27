@@ -88,7 +88,9 @@ func validateManifest(m abi.Manifest) error {
 			}
 			return invalidManifest(field, err.Error())
 		}
-		if address, _ := url.Parse(p.Hosting.Address); !slices.Contains(m.Origins, address.Scheme+"://"+address.Host) {
+		// An address that begins with a grant fact has no origin of its own:
+		// OLP checks each grant's against the origins as it places requests.
+		if address, _ := url.Parse(p.Hosting.Address); address.Host != "" && !slices.Contains(m.Origins, address.Scheme+"://"+address.Host) {
 			return invalidManifest(field+".hosting.address", "Declare the address at one of the plugin's origins, in the same form.")
 		}
 	}

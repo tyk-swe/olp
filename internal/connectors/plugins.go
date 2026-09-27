@@ -74,6 +74,9 @@ type PluginProfile struct {
 	profile  Profile
 	hosting  hosting
 	declared abi.Profile
+	// origins are the plugin's approved origins, where a grant's base URL
+	// must lie.
+	origins []string
 	// patterns are the compiled patterns of the options that declare one.
 	patterns map[string]*regexp.Regexp
 }
@@ -83,7 +86,7 @@ type PluginProfile struct {
 func NewPluginProfile(digest string, manifest abi.Manifest, id string) (*PluginProfile, error) {
 	for _, declared := range manifest.Profiles {
 		if declared.ID == id {
-			return newPluginProfile(Plugin{Digest: digest, Name: manifest.Name, Version: manifest.Version}, declared)
+			return newPluginProfile(Plugin{Digest: digest, Name: manifest.Name, Version: manifest.Version}, manifest.Origins, declared)
 		}
 	}
 	return nil, fmt.Errorf("plugin %s declares no profile %q", manifest.Name, id)
@@ -105,7 +108,7 @@ func DecodePluginProfile(digest string, manifest []byte, id string) (*PluginProf
 // ValidatePluginProfile reports what is wrong with a profile a plugin
 // declares, as a *ProfileError locating the offending value.
 func ValidatePluginProfile(declared abi.Profile) error {
-	_, err := newPluginProfile(Plugin{}, declared)
+	_, err := newPluginProfile(Plugin{}, nil, declared)
 	return err
 }
 
@@ -119,7 +122,7 @@ type ProfileError struct {
 
 func (e *ProfileError) Error() string { return e.Field + ": " + e.Message }
 
-func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, error) {
+func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*PluginProfile, error) {
 	base, ok := dialectProfile(declared.Dialect)
 	if !ok {
 		return nil, &ProfileError{Field: "dialect", Message: "Serve one of the dialects plugin profiles can serve: " + strings.Join(pluginDialects, ", ") + "."}
@@ -154,7 +157,7 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming,
 	}
 	completeProfileMetadata(&p)
-	return &PluginProfile{profile: p, hosting: placed, declared: declared, patterns: patterns}, nil
+	return &PluginProfile{profile: p, hosting: placed, declared: declared, origins: slices.Clone(origins), patterns: patterns}, nil
 }
 
 // dialectProfile returns the built-in profile that hosts a plugin dialect
@@ -179,7 +182,8 @@ func (p *PluginProfile) Profile() Profile { return cloneProfile(p.profile) }
 
 // Address is the upstream's base URL with a provider's options in its path,
 // which is the provider's endpoint. Each value fills one path segment or part
-// of one.
+// of one. An address that begins with a grant fact has grantBase as its
+// origin, which placement replaces with each grant's base URL.
 func (p *PluginProfile) Address(options map[string]string) string {
 	escaped := map[string]string{}
 	for name, value := range options {
@@ -230,11 +234,12 @@ func (p *PluginProfile) ValidateOptions(values map[string]string) error {
 // what the plugin declared, which OLP validates again when it reads it.
 type pluginProfileJSON struct {
 	Plugin  Plugin      `json:"plugin"`
+	Origins []string    `json:"origins"`
 	Profile abi.Profile `json:"profile"`
 }
 
 func (p *PluginProfile) MarshalJSON() ([]byte, error) {
-	return json.Marshal(pluginProfileJSON{Plugin: *p.profile.Plugin, Profile: p.declared})
+	return json.Marshal(pluginProfileJSON{Plugin: *p.profile.Plugin, Origins: p.origins, Profile: p.declared})
 }
 
 func (p *PluginProfile) UnmarshalJSON(data []byte) error {
@@ -242,7 +247,7 @@ func (p *PluginProfile) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &stored); err != nil {
 		return err
 	}
-	decoded, err := newPluginProfile(stored.Plugin, stored.Profile)
+	decoded, err := newPluginProfile(stored.Plugin, stored.Origins, stored.Profile)
 	if err != nil {
 		return err
 	}
@@ -259,6 +264,9 @@ type hosting struct {
 	rewrites       []rewrite
 	classification []upstream.Rule
 	forceStreaming bool
+	// base names the grant fact that holds the upstream's base URL, when the
+	// address begins with one.
+	base string
 }
 
 // Templates name a provider's values: credentialValue is its static
@@ -415,11 +423,11 @@ func placeholders(options []abi.Option, grant *abi.GrantAuthentication) func(nam
 func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	declaredHosting := declared.Hosting
 	known := placeholders(declared.Options, declared.Grant)
-	address, err := parseAddress(declaredHosting.Address, known)
+	address, baseFact, err := parseAddress(declaredHosting.Address, known)
 	if err != nil {
 		return hosting{}, err
 	}
-	placed := hosting{address: address, headers: map[string]template{}, query: map[string]template{}}
+	placed := hosting{address: address, base: baseFact, headers: map[string]template{}, query: map[string]template{}}
 	if len(declaredHosting.Headers) > 16 {
 		return hosting{}, &ProfileError{Field: "hosting.headers", Message: "Declare at most 16 headers."}
 	}
@@ -485,28 +493,48 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	return placed, nil
 }
 
+// grantBase is the origin of the endpoint of a provider whose address begins
+// with a grant fact, which stands for each grant's base URL. Its name is
+// reserved never to resolve (RFC 6761), so only placement, which moves each
+// request to its grant's base URL, sends a request there.
+const grantBase = "https://grant.invalid"
+
 // parseAddress reads the address template. Options may fill its path, so its
-// origin is fixed at install. The credential and grant facts, which belong to
-// a credential version rather than the provider, never appear in it.
-func parseAddress(text string, known func(name string) error) (template, error) {
-	address, err := parseTemplate(text, func(name string) error {
+// origin is fixed at install. A profile that authenticates with a grant may
+// instead begin it with the grant fact that holds the upstream's base URL,
+// named by base, which differs per credential version: placement checks its
+// origin on every request. The credential never appears in the address, nor
+// grant facts elsewhere in it.
+func parseAddress(text string, known func(name string) error) (address template, base string, err error) {
+	fixed := text
+	if at := placeholder.FindStringSubmatchIndex(text); at != nil && at[0] == 0 && strings.HasPrefix(text[at[2]:at[3]], grantPlaceholder) {
+		name, path := text[at[2]:at[3]], text[at[1]:]
+		if err := known(name); err != nil {
+			return template{}, "", &ProfileError{Field: "hosting.address", Message: err.Error()}
+		}
+		if path != "" && !strings.HasPrefix(path, "/") {
+			return template{}, "", &ProfileError{Field: "hosting.address", Message: "Follow the grant fact that begins the address with its path, such as {grant.api_base}/v1."}
+		}
+		base, fixed = strings.TrimPrefix(name, grantPlaceholder), grantBase+path
+	}
+	address, err = parseTemplate(fixed, func(name string) error {
 		switch {
 		case name == credentialValue:
 			return errors.New("The address can't carry the credential; place it with {credential} in a header or query parameter.")
 		case strings.HasPrefix(name, grantPlaceholder):
-			return errors.New("The address can't carry grant facts; place them in a header or query parameter.")
+			return errors.New("A grant fact may only begin the address, as the upstream's base URL, such as {grant.api_base}/v1; place other facts in a header or query parameter.")
 		}
 		return known(name)
 	})
 	if err != nil {
-		return template{}, &ProfileError{Field: "hosting.address", Message: err.Error()}
+		return template{}, "", &ProfileError{Field: "hosting.address", Message: err.Error()}
 	}
 	// Go's URL parser refuses braces everywhere but the path.
-	u, err := url.Parse(text)
-	if len(text) > 2048 || err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(text, "#") {
-		return template{}, &ProfileError{Field: "hosting.address", Message: "Declare the address as an http or https URL without credentials, query or fragment, such as https://api.example.com/v1. Options may appear in its path, such as {options.account}."}
+	u, err := url.Parse(fixed)
+	if len(text) > 2048 || err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(fixed, "#") {
+		return template{}, "", &ProfileError{Field: "hosting.address", Message: "Declare the address as an http or https URL without credentials, query or fragment, such as https://api.example.com/v1. Options may appear in its path, such as {options.account}."}
 	}
-	return address, nil
+	return address, base, nil
 }
 
 // parseValue reads a template whose placeholders each name a value that known
@@ -576,12 +604,18 @@ func (p *PluginProfile) credential(secret []byte) (token string, facts map[strin
 
 // place fills the declared headers and query parameters from the static
 // credential, or a grant's access token and grant facts, and the provider's
-// options. It returns the placed values that carry the credential, and a
-// grant's access token.
+// options, and moves a request to its grant's base URL when the address
+// begins with one. It returns the placed values that carry the credential,
+// and a grant's access token.
 func (p *PluginProfile) place(req *http.Request, secret []byte, options map[string]string) ([]string, error) {
 	token, facts, err := p.credential(secret)
 	if err != nil {
 		return nil, err
+	}
+	if p.hosting.base != "" {
+		if err := p.rebase(req, facts[p.hosting.base]); err != nil {
+			return nil, err
+		}
 	}
 	values := templateValues(token, options, facts)
 	var sensitive []string
@@ -615,6 +649,30 @@ func (p *PluginProfile) place(req *http.Request, secret []byte, options map[stri
 	}
 	req.URL.RawQuery = query.Encode()
 	return sensitive, nil
+}
+
+// rebase moves a request addressed from the provider's endpoint, at
+// grantBase, to the base URL a grant's fact holds: an http or https URL
+// without credentials, query or fragment, at one of the plugin's approved
+// origins, written the same way. A grant whose base URL is elsewhere can't
+// serve, so nothing is sent.
+func (p *PluginProfile) rebase(req *http.Request, value string) error {
+	base, err := url.Parse(value)
+	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+		return fmt.Errorf("%w: grant fact %s holds no base URL", ErrCredentialRejected, p.hosting.base)
+	}
+	if origin := base.Scheme + "://" + base.Host; !slices.Contains(p.origins, origin) {
+		return fmt.Errorf("%w: grant fact %s places requests at %s, which is not one of the plugin's approved origins", ErrCredentialRejected, p.hosting.base, origin)
+	}
+	if req.URL.Scheme+"://"+req.URL.Host != grantBase {
+		return errors.New("the request is not addressed from the provider's endpoint")
+	}
+	rebased := *req.URL
+	rebased.Scheme, rebased.Host = base.Scheme, base.Host
+	rebased.Path = strings.TrimSuffix(base.Path, "/") + req.URL.Path
+	rebased.RawPath = strings.TrimSuffix(base.EscapedPath(), "/") + req.URL.EscapedPath()
+	req.URL, req.Host = &rebased, base.Host
+	return nil
 }
 
 // A template is a hosting adaptation value with placeholders, such as

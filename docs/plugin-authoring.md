@@ -116,7 +116,7 @@ Providers using the profile authenticate with a static credential, or with a
 
 | Field | Rule |
 | --- | --- |
-| `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query or fragment. Required options may appear in its path, such as `https://api.acme.example/accounts/{options.account}/v1`, never in its origin, and each value fills its part of one path segment. It becomes the endpoint of every provider using the profile, with the provider's options in place. |
+| `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query or fragment. Required options may appear in its path, such as `https://api.acme.example/accounts/{options.account}/v1`, never in its origin, and each value fills its part of one path segment. It becomes the endpoint of every provider using the profile, with the provider's options in place. A [grant](#grants) profile may instead begin it with the grant fact that holds the upstream's base URL, such as `{grant.api_base}/v1`. |
 | `Headers` | At most 16 request headers by name. Hop-by-hop, framing, content negotiation, tracing and `X-OLP-` headers are OLP's, and the dialect's semantic headers, such as `Anthropic-Version` or `OpenAI-Beta`, are the provider's. |
 | `Query` | At most 16 query parameters of the address by name: 1–128 letters, digits, `.`, `_`, `~` and `-`, other than the dialect's semantic query settings and addressing, such as Gemini's `alt`. |
 | `Envelope` | Optional. The upstream's own JSON object around the dialect's bodies; see [Envelopes and rewrites](#envelopes-and-rewrites). |
@@ -131,11 +131,10 @@ such as `Token {credential}`, or a grant's current access token,
 `{options.<name>}` for the provider's value of a required option, such as
 `{options.region}`, and `{grant.<name>}` for a grant fact the profile declares;
 braces appear nowhere else. At least one value must place the credential,
-unless the profile signs requests, and the address never does, nor a grant
-fact. OLP refuses a credential it can't place in a
-header, such as one containing a line break, before sending anything, and
-redacts every value that carries the credential wherever it records upstream
-text.
+unless the profile signs requests, and the address never does. OLP refuses a
+credential it can't place in a header, such as one containing a line break,
+before sending anything, and redacts every value that carries the credential
+wherever it records upstream text.
 
 A profile whose adaptation changes only authorization, address and declared
 headers serves strict routes, whether or not it signs requests. An envelope or
@@ -347,8 +346,29 @@ plugin.Profile{
 every grant, such as the upstream account, that header and query parameter
 templates use as `{grant.<name>}`. Each is 1–64 lowercase letters, digits and
 underscores, starting with a letter. A template may use only the facts its
-profile declares; the address and envelope fields, which belong to the provider
-rather than to a credential version, use none.
+profile declares, and OLP refuses to install a plugin whose template names
+another. Envelope fields, which belong to the provider rather than to a
+credential version, use none.
+
+An upstream that names each account's API in its token response, such as a
+regional deployment, puts that base URL in a fact with which the address
+begins:
+
+```go
+Grant:   &plugin.GrantAuthentication{Facts: []string{"account", "api_base"}},
+Hosting: plugin.Hosting{Address: "{grant.api_base}/v1", Headers: headers},
+```
+
+Each credential version's requests then go to its own grant's base URL, with
+the rest of the address and the dialect's paths after it. The fact's value must
+be an `http` or `https` URL without credentials, query or fragment, at one of
+the manifest's `Origins`, written the same way, such as
+`https://eu.api.acme.example/accounts/7`; normalize what the upstream returns
+before reporting it. OLP checks it on every request, under the provider's
+network path and the egress policy as always, and sends nothing for a grant
+whose base URL is elsewhere: probing or certifying the provider reports why,
+and the gateway treats the attempt as a credential failure. Only one fact may
+appear in the address, and only at its start.
 
 A plugin with such a profile implements `plugin.GrantEnroller`; one that
 declares a grant profile without it reports no manifest, so OLP refuses to
@@ -382,7 +402,8 @@ as `internal`. OLP redacts the session and the pasted value from what the step
 logs; keep tokens the plugin receives out of its log.
 
 The reference plugin's `reference-grant-chat` profile implements this flow
-against a fictional authority with the authorization code flow and PKCE.
+against a fictional authority with the authorization code flow and PKCE, and
+sends each account's requests to the API base URL its token response names.
 
 ### Fetch
 
