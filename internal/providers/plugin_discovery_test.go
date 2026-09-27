@@ -183,7 +183,7 @@ func TestPluginProbesBlameTheCredentialOnlyForReportedSigningFailures(t *testing
 		t.Fatal(err)
 	}
 	for failure, want := range map[error]string{
-		&abi.Error{Code: "credential_expired", Message: "The key expired."}: "credential_invalid",
+		&abi.Error{Code: "credential_expired", Message: "The key expired."}:     "credential_invalid",
 		errors.New("plugin_timed_out: The plugin exceeded its 10s time limit."): "upstream_unavailable",
 	} {
 		_, _, err := New(nil, loopbackPolicy(), failingSigner{failure}).call(context.Background(), cfg, []byte("secret"), http.MethodGet, "/models", nil)
