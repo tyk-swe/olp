@@ -115,6 +115,9 @@ type Profile struct {
 // Header and query parameter values are templates. The placeholder
 // {credential} stands for the provider's static credential, such as
 // "Token {credential}"; braces appear nowhere else.
+//
+// A profile with an envelope or rewrites changes the dialect's bodies, so it
+// serves only transformed routes.
 type Hosting struct {
 	// Address is the upstream's base URL, which the dialect's paths extend,
 	// such as https://api.example.com/v1 for /chat/completions. Its origin is
@@ -124,11 +127,64 @@ type Hosting struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// Query holds the declared query parameters of the address, by name.
 	Query map[string]string `json:"query,omitempty"`
+	// Envelope, if the upstream wants one, wraps the dialect's request bodies
+	// in the upstream's own JSON object and unwraps its responses and stream
+	// events.
+	Envelope *Envelope `json:"envelope,omitempty"`
+	// Rewrites change the dialect's request body, in order, before the
+	// envelope wraps it.
+	Rewrites []Rewrite `json:"rewrites,omitempty"`
 }
+
+// Envelope is the upstream's own JSON object around the dialect's bodies, such
+// as {"model": ..., "request": {...}} around each request and
+// {"response": {...}} around each response and stream event. Members are named
+// with 1–128 letters, digits, underscores, hyphens and dots.
+type Envelope struct {
+	// Request names the member of the upstream's request object that carries
+	// the dialect's request body, such as "request". Without it, OLP sends the
+	// dialect's request body as it is.
+	Request string `json:"request,omitempty"`
+	// Fields are the request object's other members, by name. Values are
+	// templates, which become JSON strings. The placeholder {model} stands for
+	// the upstream model the request is for.
+	Fields map[string]string `json:"fields,omitempty"`
+	// Response names the member of the upstream's successful responses and
+	// stream events that carries the dialect's response or event, such as
+	// "response". A response or event without the member, such as an upstream
+	// error, reaches the dialect as it is. Without it, OLP reads responses as
+	// they are.
+	Response string `json:"response,omitempty"`
+}
+
+// Rewrite changes one member of the dialect's request body.
+type Rewrite struct {
+	// Op is RewriteSet, RewriteDefault or RewriteDelete.
+	Op string `json:"op"`
+	// Path is a JSON pointer to an object member, such as /store or
+	// /generationConfig/seed. Setting a member creates the objects above it.
+	Path string `json:"path"`
+	// Value is the JSON value to set or default to. Deleting takes none.
+	Value json.RawMessage `json:"value,omitempty"`
+}
+
+// Rewrite operations.
+const (
+	// RewriteSet sets the member to the value, replacing the request's.
+	RewriteSet = "set"
+	// RewriteDefault sets the member to the value unless the request has it.
+	RewriteDefault = "default"
+	// RewriteDelete removes the member if the request has it.
+	RewriteDelete = "delete"
+)
 
 // CredentialPlaceholder is the template placeholder for a provider's static
 // credential.
 const CredentialPlaceholder = "{credential}"
+
+// ModelPlaceholder is the template placeholder for the upstream model a
+// request is for.
+const ModelPlaceholder = "{model}"
 
 // LogRecord is the parameter of CapabilityLog.
 type LogRecord struct {

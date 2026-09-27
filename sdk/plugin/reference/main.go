@@ -1,11 +1,13 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares one profile that serves the OpenAI Chat Completions dialect at a
-// fictional upstream, and the origins that upstream uses.
+// declares two profiles at a fictional upstream, and the origins that upstream
+// uses: one serves the OpenAI Chat Completions dialect, and one serves Gemini
+// generateContent inside the upstream's own envelope.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
 
 import (
+	"encoding/json"
 	"net/url"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
@@ -27,18 +29,37 @@ func (reference) Manifest() plugin.Manifest {
 	if err != nil {
 		panic("reference: upstream is not a URL: " + err.Error())
 	}
+	origin := api.Scheme + "://" + api.Host
+	// The upstream takes its API key as a token in the Authorization header
+	// and asks clients to identify themselves.
+	headers := map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"}
 	return plugin.Manifest{
 		Name:        "reference",
 		Version:     version,
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
-		Origins:     []string{api.Scheme + "://" + api.Host, "https://login.example.com"},
+		Origins:     []string{origin, "https://login.example.com"},
 		Profiles: []plugin.Profile{{
 			ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat",
-			// The upstream takes its API key as a token in the Authorization
-			// header and asks clients to identify themselves.
+			Hosting: plugin.Hosting{Address: upstream, Headers: headers},
+		}, {
+			ID: "reference-gemini", Label: "Reference Gemini, enveloped", Dialect: "gemini-generate-content",
+			// The upstream also serves Gemini generateContent, wrapping each
+			// request as {"model": ..., "request": {...}} and each response
+			// and stream event as {"response": {...}}. It serves one
+			// candidate, wants a system instruction and refuses seeds.
 			Hosting: plugin.Hosting{
-				Address: upstream,
-				Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
+				Address: origin + "/enveloped/v1beta",
+				Headers: headers,
+				Envelope: &plugin.Envelope{
+					Request:  "request",
+					Fields:   map[string]string{"model": "{model}"},
+					Response: "response",
+				},
+				Rewrites: []plugin.Rewrite{
+					{Op: plugin.RewriteSet, Path: "/generationConfig/candidateCount", Value: json.RawMessage(`1`)},
+					{Op: plugin.RewriteDefault, Path: "/systemInstruction", Value: json.RawMessage(`{"parts":[{"text":"You are the reference assistant."}]}`)},
+					{Op: plugin.RewriteDelete, Path: "/generationConfig/seed"},
+				},
 			},
 		}},
 	}

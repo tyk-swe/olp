@@ -51,7 +51,8 @@ its manifest declares:
 
 - **profiles**, each naming the built-in dialect it serves and its hosting
   adaptation: the address its requests go to, at one of the plugin's origins,
-  and the headers and query parameters it declares;
+  the headers and query parameters it declares, and any envelope and rewrites
+  of the dialect's bodies;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -94,6 +95,17 @@ over OLP's own transport, with the provider's network options and the egress
 policy. The credential is stored like any credential version, and every value
 that carries it is redacted wherever upstream text is recorded.
 
+A profile may also declare an envelope and rewrites for an upstream that speaks
+the dialect inside a JSON object of its own, or needs request members set or
+removed. OLP applies exactly what the profile declares, around its built-in
+codecs: it rewrites the prepared dialect request, which the route inspector's
+effective request shows, wraps it in the envelope, such as
+`{"model": "…", "request": {…}}`, and unwraps each successful response and
+stream event, such as `{"response": {…}}`. Codecs, content policy and usage
+accounting see only plain dialect bodies. The
+[authoring guide](plugin-authoring.md#envelopes-and-rewrites) describes the
+declarations.
+
 No built-in kind's defaults apply to a plugin provider:
 
 - **Endpoint:** the profile's address.
@@ -106,8 +118,13 @@ No built-in kind's defaults apply to a plugin provider:
   that provider (`provider_kind: "plugin"` with its `provider_id`); a plugin
   price must name its provider.
 
-A plugin profile changes only authorization, address and declared headers, so
-its catalogue entry reports `strict: true` and it serves strict routes.
+A plugin profile that changes only authorization, address and declared headers
+reports `strict: true` in the catalogue and serves strict routes. An envelope or
+any rewrite changes the dialect's bodies, so such a profile reports
+`strict: false` and serves only
+[transformed routes](provider-routing.md#route-fidelity): validating or
+activating a strict route with a target using it fails with
+`422 target_capability`, telling you to declare the route transformed.
 
 Moving a provider to another installed build of its plugin is an ordinary draft
 change: choose the other digest, certify and activate. The new revision's diff

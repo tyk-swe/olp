@@ -60,3 +60,9 @@ func TestClosedObjectsNeedStrictHandlerDecoding(t *testing.T) {
 		t.Fatal("strict decoder accepted an unknown field")
 	}
 }
+
+func TestPluginRewriteKeepsAnExplicitNullValue(t *testing.T) {
+	for _, raw := range []string{`{"op":"set","path":"/store","value":null}`, `{"op":"delete","path":"/user"}`} {
+		roundTrip[contract.PluginRewrite](t, raw)
+	}
+}

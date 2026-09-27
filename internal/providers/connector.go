@@ -426,7 +426,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if err != nil {
 			return err
 		}
-		status, data, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, body)
+		status, data, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, transport.WrapRequest(body, model))
 		if err != nil {
 			return err
 		}
@@ -436,7 +436,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if tuple.Mode == ModeStreaming {
 			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
 		} else {
-			_, err = protocols.DecodeRequest(wire, family, data, "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
+			_, err = protocols.DecodeRequest(wire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
 		if err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}

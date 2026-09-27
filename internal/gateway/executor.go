@@ -530,6 +530,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
+	body = cfg.WrapRequest(body, a.UpstreamModel)
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
@@ -733,6 +734,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if readErr != nil {
 			err = readErr
 		} else {
+			raw = cfg.UnwrapResponse(raw)
 			if contract != nil {
 				var native *openai.Completion
 				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())

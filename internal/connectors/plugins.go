@@ -2,7 +2,6 @@ package connectors
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -117,9 +116,10 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		// provider configures them as it would for the dialect's direct hosting.
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
 		Plugin: &plugin,
-		// The adaptation changes only authorization, address and declared
-		// headers, so the profile serves strict routes.
-		Strict: true,
+		// An adaptation that changes only authorization, address and declared
+		// headers serves strict routes. An envelope or rewrite changes the
+		// dialect's bodies, so the profile serves transformed routes only.
+		Strict: placed.envelope == nil && len(placed.rewrites) == 0,
 	}
 	completeProfileMetadata(&p)
 	return &PluginProfile{profile: p, hosting: placed, declared: declared}, nil
@@ -174,8 +174,10 @@ func (p *PluginProfile) UnmarshalJSON(data []byte) error {
 
 // hosting is a parsed hosting adaptation.
 type hosting struct {
-	headers map[string]template
-	query   map[string]template
+	headers  map[string]template
+	query    map[string]template
+	envelope *envelope
+	rewrites []rewrite
 }
 
 // credentialValue names the static credential in templates.
@@ -204,7 +206,7 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		if _, duplicate := placed.headers[canonical]; duplicate {
 			return hosting{}, &ProfileError{Field: field, Message: "Declare each header once."}
 		}
-		value, err := parseValue(field, declaredHosting.Headers[name])
+		value, err := parseValue(field, declaredHosting.Headers[name], credentialValue)
 		if err != nil {
 			return hosting{}, err
 		}
@@ -224,7 +226,7 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 			// Gemini addresses streaming with alt=sse.
 			return hosting{}, &ProfileError{Field: field, Message: "The dialect addresses its operations with this query parameter."}
 		}
-		value, err := parseValue(field, declaredHosting.Query[name])
+		value, err := parseValue(field, declaredHosting.Query[name], credentialValue)
 		if err != nil {
 			return hosting{}, err
 		}
@@ -232,6 +234,13 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	}
 	if !placed.uses(credentialValue) {
 		return hosting{}, &ProfileError{Field: "hosting", Message: "Place the static credential with {credential} in a header or query parameter."}
+	}
+	var err error
+	if placed.envelope, err = parseEnvelope(declaredHosting.Envelope); err != nil {
+		return hosting{}, err
+	}
+	if placed.rewrites, err = parseRewrites(declaredHosting.Rewrites, declared.Dialect); err != nil {
+		return hosting{}, err
 	}
 	return placed, nil
 }
@@ -248,8 +257,9 @@ func validateAddress(address string) error {
 	return nil
 }
 
-func parseValue(field, text string) (template, error) {
-	value, err := parseTemplate(text, func(name string) bool { return name == credentialValue })
+// parseValue reads a template whose placeholders name only the given values.
+func parseValue(field, text string, placeholders ...string) (template, error) {
+	value, err := parseTemplate(text, placeholders)
 	if err != nil {
 		return template{}, &ProfileError{Field: field, Message: err.Error()}
 	}
@@ -317,19 +327,19 @@ type template struct {
 
 var placeholder = regexp.MustCompile(`\{([^{}]*)\}`)
 
-// parseTemplate reads a template whose placeholders name values known admits.
-func parseTemplate(text string, known func(name string) bool) (template, error) {
+// parseTemplate reads a template whose placeholders name known values.
+func parseTemplate(text string, known []string) (template, error) {
 	parsed := template{text: text}
 	literal := placeholder.ReplaceAllStringFunc(text, func(match string) string {
 		parsed.names = append(parsed.names, match[1:len(match)-1])
 		return ""
 	})
 	if strings.ContainsAny(literal, "{}") {
-		return template{}, errors.New("Use braces only around a placeholder, such as {credential}.")
+		return template{}, fmt.Errorf("Use braces only around a placeholder, such as {%s}.", known[0])
 	}
 	for _, name := range parsed.names {
-		if !known(name) {
-			return template{}, fmt.Errorf("OLP has no placeholder {%s}; use {credential}.", name)
+		if !slices.Contains(known, name) {
+			return template{}, fmt.Errorf("OLP has no placeholder {%s} here; use {%s}.", name, strings.Join(known, "}, {"))
 		}
 	}
 	return parsed, nil
