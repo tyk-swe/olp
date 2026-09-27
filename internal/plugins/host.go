@@ -99,9 +99,13 @@ func (h *Host) Close(ctx context.Context) {
 	h.hosted = map[string]*hosted{}
 	h.mu.Unlock()
 	for _, entry := range entries {
-		<-entry.loaded
-		if entry.code != nil {
-			entry.code.Close(ctx)
+		select {
+		case <-entry.loaded:
+			if entry.code != nil {
+				entry.code.Close(ctx)
+			}
+		default:
+			// Still loading, so nothing runs it yet.
 		}
 	}
 }

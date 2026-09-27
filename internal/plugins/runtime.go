@@ -4,7 +4,10 @@
 // stores it by the SHA-256 digest of the module, and it can't be used until an
 // owner approves the origins its manifest declares. Runtime runs plugin code on
 // wazero within memory and time limits and grants it only a clock, randomness
-// and redacted logging; Host runs installed plugins' code by digest.
+// and redacted logging. Where a deployment enables the unconfined tier, an
+// owner may also permit an executable in its image as an unconfined plugin,
+// which Unconfined runs as a subprocess speaking the ABI over stdio. Host runs
+// installed plugins' code by digest.
 package plugins
 
 import (
@@ -203,7 +206,7 @@ func (m *Module) checkABI(ctx context.Context) error {
 			return refuse(CodeModuleInvalid, fmt.Sprintf("The module imports %s.%s, which OLP does not provide.", module, name))
 		}
 	}
-	return m.run(ctx, abi.ExportVersion, nil, func(ctx context.Context, instance api.Module) error {
+	return m.run(ctx, Call{Method: abi.ExportVersion}, func(ctx context.Context, instance api.Module) error {
 		results, err := instance.ExportedFunction(abi.ExportVersion).Call(ctx)
 		if err != nil {
 			return err
@@ -249,7 +252,7 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 	if err != nil {
 		return err
 	}
-	return m.run(ctx, call.Method, call.Secrets, func(ctx context.Context, instance api.Module) error {
+	return m.run(ctx, call, func(ctx context.Context, instance api.Module) error {
 		ptr, err := lend(ctx, instance, request)
 		if err != nil {
 			return err
@@ -268,6 +271,13 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 		}
 		return decodeResult(callOutput(ctx), call.Method, response, result)
 	})
+}
+
+// context returns ctx granting the plugin code that serves the call its
+// capabilities, whatever runs the code: logging to out, and whatever else the
+// call grants.
+func (c Call) context(ctx context.Context, out *output) context.Context {
+	return context.WithValue(ctx, outputKey{}, out)
 }
 
 // request is the request the plugin serves for the call.
@@ -294,13 +304,13 @@ func decodeResult(out *output, method string, response abi.Response, result any)
 }
 
 // run serves one call on an instance within the runtime's limits.
-func (m *Module) run(ctx context.Context, method string, secrets []string, use func(context.Context, api.Module) error) error {
+func (m *Module) run(ctx context.Context, call Call, use func(context.Context, api.Module) error) error {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, m.runtime.limits.Time)
 	defer cancel()
-	out := newOutput(m.runtime.log.With("plugin_digest", m.Digest, "plugin_method", method), secrets)
+	out := newOutput(m.runtime.log.With("plugin_digest", m.Digest, "plugin_method", call.Method), call.Secrets)
 	defer out.close()
-	ctx = context.WithValue(ctx, outputKey{}, out)
+	ctx = call.context(ctx, out)
 	instance, err := m.acquire(ctx, out)
 	if err == nil {
 		err = use(ctx, instance.module)

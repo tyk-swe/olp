@@ -51,7 +51,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	p, err := e.process(ctx)
 	var response abi.Response
 	if err == nil {
-		response, err = p.call(context.WithValue(ctx, outputKey{}, out), request, call.Secrets)
+		response, err = p.call(call.context(ctx, out), request, call.Secrets)
 	}
 	switch {
 	case err == nil:

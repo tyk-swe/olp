@@ -92,7 +92,7 @@ func (s *Management) get(r *http.Request) (access.Reply, error) {
 // unconfined plugin only where the unconfined tier is enabled.
 func (s *Management) load(ctx context.Context, q access.Queryer, digest string) (contract.Plugin, error) {
 	plugin, err := loadPlugin(ctx, q, digest)
-	if err == nil && plugin.Executable.IsSpecified() && !plugin.Executable.IsNull() && s.Unconfined == nil {
+	if err == nil && !plugin.Executable.IsNull() && s.Unconfined == nil {
 		return contract.Plugin{}, pgx.ErrNoRows
 	}
 	return plugin, err
