@@ -70,14 +70,12 @@ func resourceCommitContext(ctx context.Context) (context.Context, context.Cancel
 const maxResourceList = 100
 
 type pin struct {
-	target    runtime.Target
-	provider  runtime.Provider
-	attempt   runtime.Attempt
-	slot      runtime.Slot
-	model     string
-	hold      *dispatchHold
-	secret    []byte
-	hasSecret bool
+	target   runtime.Target
+	provider runtime.Provider
+	attempt  runtime.Attempt
+	slot     runtime.Slot
+	model    string
+	hold     *dispatchHold
 }
 
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
@@ -165,7 +163,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	provider, route, slot, secret, err := s.Resolver.ResolveCurrent(ctx, res, operation)
+	provider, route, slot, err := s.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return nil, nil, pinUnavailable()
 	}
@@ -204,22 +202,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		Timeout:            time.Duration(target.Timeout) * time.Millisecond,
 		VendorID:           provider.VendorID,
 	}
-	p := &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
-	if secret != nil {
-		p.secret, p.hasSecret = secret, true
-	}
-	return p, route, nil
-}
-
-func (s *Server) pinSecret(x *execution, p *pin) []byte {
-	if p.hasSecret {
-		return p.secret
-	}
-	if p.slot.CredentialID != nil {
-		secret, _ := x.request.release.Credential(*p.slot.CredentialID)
-		return secret
-	}
-	return nil
+	return &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}, route, nil
 }
 
 func resourceModel(res *resources.Resource) string {
@@ -240,7 +223,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	snapshot := x.request.release.Snapshot
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, operation, surface, mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !qualified(&p, t.ProviderModel) {
 				return errors.New("provider capability unavailable")
@@ -347,7 +330,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	credentialValues, err := s.auth.Apply(ctx, req, cfg, s.pinSecret(x, p), body)
+	secret, err := s.slotSecret(ctx, x.request.release, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, nil)
+	}
+	credentialValues, err := s.auth.Apply(ctx, req, cfg, secret, body)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
@@ -1017,7 +1004,12 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
+	secret, err := s.slotSecret(ctx, x.request.release, p.slot)
+	if err != nil {
+		pipeR.CloseWithError(err)
+		return nil, finish(classCredential, nil)
+	}
+	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), secret, nil); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}

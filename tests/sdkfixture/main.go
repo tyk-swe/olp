@@ -59,7 +59,19 @@ func (s *staticRuntime) Authenticate(secret string) (access.Authority, error) {
 	return authority, nil
 }
 
-func (s *staticRuntime) Revoked(string) bool { return false }
+func (s *staticRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
+
+// Secret serves the credentials the pinned release installed.
+func (s *staticRuntime) Secret(_ context.Context, release *runtime.Release, credentialID string) ([]byte, error) {
+	if secret, ok := release.Credential(credentialID); ok {
+		return secret, nil
+	}
+	return nil, runtime.ErrCredentialUnavailable
+}
+
+func (s *staticRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, credentialID string) ([]byte, error) {
+	return s.Secret(ctx, release, credentialID)
+}
 
 func run() error {
 	path := os.Getenv("OLP_SDK_SMOKE_METADATA")

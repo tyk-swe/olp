@@ -47,7 +47,6 @@ type Release struct {
 	credentials map[string][]byte
 }
 
-// Credential returns the plaintext credential referenced by a slot.
 // NewRelease builds an installed release directly from a snapshot and its
 // credentials for fixtures and tests that bypass the database.
 func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[string][]byte) (*Release, error) {
@@ -61,7 +60,12 @@ func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[s
 	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: maps.Clone(credentials)}, nil
 }
 
+// Credential returns a plaintext credential the release installed; a nil
+// release installed none. Serving paths ask the credential source instead.
 func (r *Release) Credential(id string) ([]byte, bool) {
+	if r == nil {
+		return nil, false
+	}
 	secret, ok := r.credentials[id]
 	return secret, ok
 }
@@ -365,18 +369,6 @@ func (m *Manager) Authenticate(secret string) (access.Authority, error) {
 		return access.Authority{}, ErrInvalidKey
 	}
 	return record.authority, nil
-}
-
-// Revoked reports whether a credential version was revoked as of the last
-// authority read. A stale authority reports every credential revoked.
-func (m *Manager) Revoked(credentialID string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
-		return true
-	}
-	_, revoked := m.authority.revoked[credentialID]
-	return revoked
 }
 
 // Authority reports the last authority read for health output.

@@ -138,7 +138,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	revoked, err := routeRevocations(r.Context(), tx, snapshot, route)
+	eligibility, err := routeCredentialEligibility(r.Context(), tx, snapshot, route)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -170,7 +170,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if mediaRequest != nil {
 		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
 	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept, Effective: effective}
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialEligibility: eligibility, Accept: accept, Effective: effective}
 	if key.reason != "" {
 		options.Accept = nil
 		options.Effective = nil
@@ -290,11 +290,11 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	revoked, err := routeRevocations(r.Context(), tx, snapshot, snapshot.Routes[slug])
+	eligibility, err := routeCredentialEligibility(r.Context(), tx, snapshot, snapshot.Routes[slug])
 	if err != nil {
 		return access.Reply{}, err
 	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked}
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialEligibility: eligibility}
 	options.TokenDemand, err = tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
 		return access.Reply{}, err
@@ -376,7 +376,7 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.Routin
 
 // A credential revocation is authoritative without publishing a new route or
 // provider revision. Apply it to previews just as the executor does at dispatch.
-func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) bool, error) {
+func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) runtime.Eligibility, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
 		provider := snapshot.Providers[target.ProviderID]
@@ -389,7 +389,7 @@ func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.S
 			}
 		}
 	}
-	revoked := map[string]bool{}
+	eligibility := map[string]runtime.Eligibility{}
 	if len(ids) > 0 {
 		rows, err := q.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
 		if err != nil {
@@ -401,11 +401,11 @@ func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.S
 			if err = rows.Scan(&id); err != nil {
 				return nil, err
 			}
-			revoked[id] = true
+			eligibility[id] = runtime.Revoked
 		}
 		if err = rows.Err(); err != nil {
 			return nil, err
 		}
 	}
-	return func(id string) bool { return revoked[id] }, nil
+	return func(id string) runtime.Eligibility { return eligibility[id] }, nil
 }

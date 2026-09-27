@@ -21,7 +21,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Transformed provider preparation and wire defaults | `internal/providerinvoke/` |
 | OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
-| Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
+| Immutable runtime publication, activation, authority refresh, credential source, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
 | Playground execution state, request composition, routing inspection | `console/src/lib/features/inference/playground/` |
@@ -63,6 +63,13 @@ their transport deadlines, streaming commitment and delivery; adjacent resource,
 video, Bedrock, and realtime paths handle their specific lifecycles. Protocol
 codecs live in `internal/protocols/`. Independent key-authority refresh prevents
 a failed activation from retaining revoked access.
+
+`internal/runtime/credentials.go` is the one credential source. Planning, slot
+availability, dispatch, retained resources and continuations, and media
+reconciliation ask it whether a credential version is eligible and for its
+usable secret: from the pinned release, or from the secret authority for a
+historical revision's version. An ineligible version carries its reason into
+plan and attempt records.
 
 OIF is an in-process contract, not a public API or another request authority.
 `internal/oif` owns immutable JSON source spans, exact presence and numeric

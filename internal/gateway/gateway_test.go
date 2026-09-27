@@ -62,7 +62,36 @@ func (f *fakeRuntime) Authenticate(secret string) (access.Authority, error) {
 	return a, nil
 }
 
-func (f *fakeRuntime) Revoked(id string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.revoked[id] }
+func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case f.stale:
+		return runtime.StaleAuthority
+	case f.revoked[id]:
+		return runtime.Revoked
+	}
+	return runtime.Eligible
+}
+
+// Secret serves eligible credentials the pinned release installed. The fake's
+// secret authority, for callers that pin no release, is its current release.
+func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, error) {
+	if f.Eligibility(id) != runtime.Eligible {
+		return nil, runtime.ErrCredentialUnavailable
+	}
+	if release == nil {
+		release = f.Release()
+	}
+	if secret, ok := release.Credential(id); ok {
+		return secret, nil
+	}
+	return nil, runtime.ErrCredentialUnavailable
+}
+
+func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
+	return f.Secret(ctx, release, id)
+}
 
 type capture struct {
 	mu   sync.Mutex

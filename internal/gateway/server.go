@@ -53,12 +53,12 @@ type Config struct {
 	AdmissionPool *observability.Pool
 }
 
-// Runtime is the pinned authority and release source. *runtime.Manager
-// implements it; fixtures and tests supply static releases.
+// Runtime is the pinned authority, release and credential source.
+// *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	Release() *runtime.Release
 	Authenticate(secret string) (access.Authority, error)
-	Revoked(credentialID string) bool
+	runtime.Credentials
 }
 
 // Server serves the native OpenAI surface from pinned runtime releases.
@@ -690,7 +690,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
 	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
 				return source.parameters, source.demand
@@ -703,7 +703,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
-			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
+			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != runtime.Eligible {
 				return errors.New("provider network credential unavailable")
 			}
 			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {

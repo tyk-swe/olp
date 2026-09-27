@@ -173,7 +173,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			fail(pinUnavailable())
 			return
 		}
-		x.pinnedSlot, x.pinnedSecret = &p.slot, p.secret
+		x.pinnedSlot = &p.slot
 		deadline, _ := ctx.Deadline()
 		gate := s.gateSlot(ctx, &p.provider, &p.slot, x.estimate, deadline)
 		if gate.verdict != gateAdmitted {
@@ -452,7 +452,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		fail(pinUnavailable())
 		return
 	}
-	x.pinnedSlot, x.pinnedSecret = &p.slot, p.secret
+	x.pinnedSlot = &p.slot
 	deadline, _ := ctx.Deadline()
 	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, deadline)
 	if gate.verdict != gateAdmitted {

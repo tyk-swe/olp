@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -156,6 +157,59 @@ func TestPreviewEnumeratesCredentialAttemptsWithinOneBudget(t *testing.T) {
 		}
 		if i == 2 && (d.Eligible || d.Attempt != nil) {
 			t.Fatal("credential escaped route budget")
+		}
+	}
+}
+
+func TestPlanningExcludesIneligibleCredentialsWithTheirReason(t *testing.T) {
+	s, slug, ids := planningFixture()
+	route := s.Routes[slug]
+	route.Targets = route.Targets[:2]
+	s.Routes[slug] = route
+	network := uuid.NewString()
+	eligibility := map[string]Eligibility{}
+	for i, id := range ids[:2] {
+		p := s.Providers[id]
+		p.AuthMode = "api_key"
+		for range 2 {
+			credential := uuid.NewString()
+			p.Slots = append(p.Slots, Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential})
+		}
+		if i == 1 {
+			p.Network = &egress.ConnectionOptions{CredentialID: network}
+		}
+		s.Providers[id] = p
+	}
+	plan := func() Plan {
+		t.Helper()
+		plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{
+			CheckSlots: true, CredentialEligibility: func(id string) Eligibility { return eligibility[id] },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+	reasons := func(plan Plan) map[string]string {
+		out := map[string]string{}
+		for _, decision := range plan.Decisions {
+			if decision.Reason != nil {
+				out[decision.ProviderID] = *decision.Reason
+			}
+		}
+		return out
+	}
+	first := s.Providers[ids[0]]
+	eligibility[*first.Slots[0].CredentialID] = Revoked
+	if got := plan(); len(got.Decisions) != 3 || reasons(got)[ids[0]] != "" {
+		t.Fatalf("an ineligible slot was planned or spent the budget: %+v", got.Decisions)
+	}
+	for _, reason := range []Eligibility{Revoked, StaleAuthority} {
+		eligibility[network] = reason
+		eligibility[*first.Slots[1].CredentialID] = reason
+		got := reasons(plan())
+		if got[ids[0]] != "no_eligible_credentials" || got[ids[1]] != "network_credential_"+string(reason) {
+			t.Fatalf("%s reasons: %v", reason, got)
 		}
 	}
 }

@@ -266,7 +266,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	candidates := make(map[string][]string, len(route.Targets))
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !connectorsSupports(p, request.Op, x.mode) {
 				return errors.New("connector capability unavailable")
@@ -632,9 +632,9 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
 	defer cancel()
 
-	var secret []byte
-	if slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*slot.CredentialID)
+	secret, err := s.slotSecret(actx, x.request.release, slot)
+	if err != nil {
+		return fail(classCredential, nil)
 	}
 	if x.request.trace.PropagateUpstream() {
 		call.Inject = http.Header{}

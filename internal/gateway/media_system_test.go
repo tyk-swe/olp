@@ -368,8 +368,8 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 			Spool:            f.spool,
 			MaxResponseBytes: 16 << 20,
 		},
-		Revoked: f.rt.Revoked,
-		Log:     f.log,
+		Credentials: f.rt,
+		Log:         f.log,
 	}
 	gw := New(f.rt, policy, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096}, f.log)
 	gw.Media = &MediaDeps{Jobs: f.service, Admission: media.NewAdmissionState(media.MinCapacityBytes)}
@@ -895,9 +895,9 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	}
 	restarted := &media.Service{
 		Pool: f.pool, Keys: f.keys, Installation: f.installation,
-		Transport: f.service.Transport,
-		Revoked:   f.rt.Revoked,
-		Log:       f.log,
+		Transport:   f.service.Transport,
+		Credentials: f.rt,
+		Log:         f.log,
 	}
 	pass, err = restarted.ReconcileOnce(ctx, 8)
 	if err != nil {
@@ -991,6 +991,43 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 	}
 	if got := f.upstream.deleteCalls.Load() - before; got != 0 {
 		t.Fatalf("a revoked credential must never reach upstream: %d delete calls", got)
+	}
+
+	// A stale authority vouches for no credential version; the job records
+	// that reason rather than a revocation.
+	f.rt.mu.Lock()
+	f.rt.stale = true
+	f.rt.mu.Unlock()
+	reserved, err = media.ReserveJob(ctx, f.pool, media.Reservation{
+		ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
+		APIKeyID: f.apiKeyID, ProviderID: f.providerID, UpstreamModel: mediaVideoModel,
+		RouteSlug: "video-default", Operation: media.OpVideoCreate, Surface: "openai", SlotID: f.slotID,
+		CredentialVersionID: f.credentialID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleJob, err := media.AttachUpstream(ctx, f.pool, reserved.ID, "upstream-video-stale", media.JobUpdate{
+		State: media.StateQueued, ContentAvailable: false, LastPolledAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx,
+		"UPDATE olp.media_jobs SET lifecycle_state = 'delete_pending' WHERE id = $1", staleJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if pass, err = f.service.ReconcileOnce(ctx, 8); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, "SELECT reconciliation_error FROM olp.media_jobs WHERE id = $1", staleJob.ID).Scan(&reconErr); err != nil {
+		t.Fatal(err)
+	}
+	if reconErr == nil || *reconErr != "media_job_credential_stale_authority" {
+		t.Fatalf("stale authority must be recorded as the reason, got %v pass %+v", reconErr, pass)
+	}
+	if got := f.upstream.deleteCalls.Load() - before; got != 0 {
+		t.Fatalf("an unvouched credential must never reach upstream: %d delete calls", got)
 	}
 	_ = job
 }

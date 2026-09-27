@@ -229,9 +229,9 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	var secret []byte
-	if p.slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
+	secret, err := s.slotSecret(ctx, x.request.release, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, nil)
 	}
 	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), secret, body); err != nil {
 		if ctx.Err() != nil {

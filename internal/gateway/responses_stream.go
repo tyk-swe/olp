@@ -186,8 +186,9 @@ func redactFailedResponseFrame(frame []byte, credentials []string) ([]byte, erro
 	return out, nil
 }
 
-func (s *Server) responseCredentialValues(x *execution, p *pin, response *http.Response) []string {
-	values := []string{string(s.pinSecret(x, p))}
+func (s *Server) responseCredentialValues(ctx context.Context, x *execution, p *pin, response *http.Response) []string {
+	secret, _ := s.slotSecret(ctx, x.request.release, p.slot)
+	values := []string{string(secret)}
 	if response.Request != nil {
 		names := append([]string{"Authorization", "Api-Key", "X-Goog-Api-Key"}, p.provider.CredentialHeaders...)
 		for _, name := range names {
@@ -236,7 +237,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	nativeIncomplete := false
 	nativeTerminalFailure := false
 	fact := &x.facts[len(x.facts)-1]
-	credentialValues := s.responseCredentialValues(x, p, resp)
+	credentialValues := s.responseCredentialValues(ctx, x, p, resp)
 	emit := func(frame []byte) error {
 		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
 		if err != nil || len(projected) > limit {

@@ -33,9 +33,16 @@ const realtimeReauth = 5 * time.Second
 const realtimePing = 30 * time.Second
 
 var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
-var errRealtimeProviderCredentialRevoked = errors.New("realtime provider credential revoked")
 var errRealtimeClientClosed = errors.New("realtime client disconnected")
 var errRealtimeResponseIncomplete = errors.New("realtime response ended before its terminal event")
+
+// realtimeCredentialError ends a realtime session whose provider credential
+// is no longer eligible; the session's failure names why.
+type realtimeCredentialError struct{ eligibility runtime.Eligibility }
+
+func (e *realtimeCredentialError) Error() string {
+	return "realtime provider credential " + string(e.eligibility)
+}
 
 // The wire relay does not buffer native frames. This small state machine only
 // records whether a response is still owed when either peer closes normally.
@@ -623,9 +630,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	observedUsage, observed, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
 	class := classProtocol
 	cancelled := false
+	var ineligible *realtimeCredentialError
 	if relayErr != nil {
 		switch {
-		case errors.Is(relayErr, errRealtimeAuthorityRevoked), errors.Is(relayErr, errRealtimeProviderCredentialRevoked):
+		case errors.Is(relayErr, errRealtimeAuthorityRevoked), errors.As(relayErr, &ineligible):
 			class = classCredential
 		case errors.Is(relayErr, errRealtimeClientClosed):
 			class, cancelled = classCancelled, true
@@ -664,8 +672,8 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(relayErr, errRealtimeAuthorityRevoked):
 			x.failure = permissionError("key_revoked", "The realtime session no longer has route authority.")
-		case errors.Is(relayErr, errRealtimeProviderCredentialRevoked):
-			x.failure = permissionError("provider_credential_revoked", "The realtime provider credential was revoked.")
+		case errors.As(relayErr, &ineligible):
+			x.failure = permissionError("provider_credential_"+string(ineligible.eligibility), "The realtime provider credential is no longer eligible.")
 		case class == classCancelled:
 			x.failure = (&attemptFailure{class: classCancelled}).toError()
 		case class == classTimeout:
@@ -755,9 +763,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	if err != nil {
 		return nil, finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
-	var secret []byte
-	if p.slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
+	secret, err := s.slotSecret(ctx, x.request.release, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	if _, err := s.auth.Apply(ctx, probe, p.provider.Connector(), secret, nil); err != nil {
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
@@ -948,11 +956,10 @@ loop:
 				client.Close(websocket.StatusPolicyViolation, "key revoked")
 				break loop
 			}
-			if p.slot.CredentialID != nil && s.Runtime.Revoked(*p.slot.CredentialID) ||
-				p.provider.Network != nil && p.provider.Network.CredentialID != "" && s.Runtime.Revoked(p.provider.Network.CredentialID) {
-				first = errRealtimeProviderCredentialRevoked
+			if eligibility := s.pinEligibility(p); eligibility != runtime.Eligible {
+				first = &realtimeCredentialError{eligibility}
 				closeCode = websocket.StatusPolicyViolation
-				client.Close(websocket.StatusPolicyViolation, "provider credential revoked")
+				client.Close(websocket.StatusPolicyViolation, "provider credential "+string(eligibility))
 				break loop
 			}
 		case <-heartbeat.C:

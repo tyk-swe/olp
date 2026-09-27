@@ -100,7 +100,6 @@ type execution struct {
 	continuation       *continuationExecution
 	pin                *resources.Resource
 	pinnedSlot         *runtime.Slot
-	pinnedSecret       []byte
 	providerState      bool
 	responseMap        map[string]string
 
@@ -325,13 +324,7 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
-	if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
-		return false
-	}
-	if _, ok := x.request.release.Credential(*slot.CredentialID); ok {
-		return true
-	}
-	return x.pinnedSlot != nil && slot.ID == x.pinnedSlot.ID && x.pinnedSecret != nil
+	return slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) == runtime.Eligible
 }
 
 // attemptState tracks why an attempt context ended.
@@ -556,12 +549,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
 	}
-	var secret []byte
-	if slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*slot.CredentialID)
-		if secret == nil && x.pinnedSlot != nil && slot.ID == x.pinnedSlot.ID {
-			secret = x.pinnedSecret
-		}
+	secret, err := s.slotSecret(actx, x.request.release, slot)
+	if err != nil {
+		return fail(classCredential, nil)
 	}
 	credentialValues, err := s.auth.Apply(actx, req, cfg, secret, body)
 	if err != nil {

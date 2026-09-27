@@ -61,8 +61,11 @@ monotonic clock, is stale: new requests are rejected with
 already admitted keep the snapshot and policy they were pinned to. Ordinary
 streams may finish; realtime sessions recheck key authority every five seconds.
 Credential-version revocation applies to retained releases too: selection
-refuses a revoked version even when the request already pins it. See
-[authority and replica tests](../tests/integration/replica_fleet_test.go).
+refuses a revoked version even when the request already pins it. Records of a
+refused credential version name why, `revoked` or `stale_authority`:
+`network_credential_<reason>` in plan decisions, `provider_credential_<reason>`
+when a realtime session ends, and `media_job_credential_<reason>` on media jobs.
+See [authority and replica tests](../tests/integration/replica_fleet_test.go).
 
 ## Request path
 

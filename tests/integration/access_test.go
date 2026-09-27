@@ -146,15 +146,15 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 			Client: policy.Client(30 * time.Second), Auth: connectors.NewAuth(&policy), Egress: &policy,
 			Spool: spool, MaxResponseBytes: 1 << 20,
 		},
-		Revoked: rt.Revoked,
-		Log:     log,
+		Credentials: rt,
+		Log:         log,
 	}
 	gw.Media = &gateway.MediaDeps{
 		Jobs:      mediaJobs,
 		Admission: media.NewAdmissionState(media.MinCapacityBytes),
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
-	gw.Resolver = resources.NewResolver(pool, installation, ring)
+	gw.Resolver = resources.NewResolver(pool)
 	catalogue := providers.New(server, &policy)
 	mux := http.NewServeMux()
 	management.Register(mux)
