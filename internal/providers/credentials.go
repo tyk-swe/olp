@@ -39,7 +39,7 @@ func (s *Server) credentials(r *http.Request) (access.Reply, error) {
 		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
 		'created_at',c.created_at,'revoked_at',c.revoked_at,
 		'grant',CASE WHEN c.plugin_digest IS NOT NULL THEN jsonb_build_object(
-			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at) END)
+			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at,'lapsed_at',g.lapsed_at) END)
 		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
@@ -213,7 +213,7 @@ func (s *Server) revoke(r *http.Request) (access.Reply, error) {
 		if err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := access.AdvanceAuthority(r, tx)
+		generation, err := access.AdvanceAuthority(ctx, tx)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -293,7 +293,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	for _, row := range slots {
 		items = append(items, slotJSON(row))
 		validated := row.validationTime(&current.Configuration, models)
-		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
+		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "lapsed": row.CredentialLapsed, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
 	}
 	connection := s.quotas(ctx, current.ID, slots, activeCredentials, health)
 	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": connection}, current.SlotsETag), nil
@@ -511,8 +511,8 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		}
 		credentialID = &stored
 	case input.Slot.CredentialVersionID != nil:
-		var revoked bool
-		err = tx.QueryRow(r.Context(), "SELECT revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked)
+		var revoked, lapsed bool
+		err = tx.QueryRow(r.Context(), "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked, &lapsed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return access.Reply{}, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
 		}
@@ -521,6 +521,9 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		}
 		if revoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "That credential version is revoked.")
+		}
+		if lapsed {
+			return access.Reply{}, access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
 		}
 		credentialID = input.Slot.CredentialVersionID
 	case existing != nil:
@@ -611,6 +614,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		}
 		if slot.CredentialRevoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "This slot references a revoked credential.")
+		}
+		if slot.CredentialLapsed {
+			return access.Reply{}, access.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
 		}
 		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, "provider_credential"); err != nil {
 			return access.Reply{}, err

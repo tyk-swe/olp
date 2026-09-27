@@ -55,7 +55,7 @@ var errAnotherAccount = errors.New("the refresh authorizes another account than 
 // and a rotating refresh token is spent once. The new access token rewrites
 // the secret of the grant's credential version and advances the grant's
 // generation, which gateways poll; the refresh token stays under
-// RefreshPurpose.
+// RefreshPurpose. A refresh that fails permanently lapses the grant.
 type Refresher struct {
 	Pool         *pgxpool.Pool
 	Keys         *secrets.KeyRing
@@ -90,9 +90,9 @@ func (r *Refresher) Run(ctx context.Context) {
 
 // Pass refreshes the grants due a refresh now. A grant another worker is
 // refreshing is left to it. A refresh that fails is recorded on its grant and
-// retried with backoff, unless the failure is permanent; the pass fails only
-// when it can't read or record grants. It reports whether it refreshed a
-// grant or recorded a failure.
+// retried with backoff, unless the failure is permanent and lapses the grant;
+// the pass fails only when it can't read or record grants. It reports whether
+// it refreshed a grant or recorded a failure.
 func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 	due, err := r.due(ctx)
 	if err != nil {
@@ -294,9 +294,8 @@ func (r *Refresher) store(ctx context.Context, conn *pgx.Conn, g *dueGrant, gran
 }
 
 // fail records a failed refresh on its grant. A transient failure is retried
-// after a backoff that grows with each failure. After a permanent one the
-// grant can no longer be refreshed, so its refresh token is discarded and
-// nothing refreshes it again.
+// after a backoff that grows with each failure. A permanent one lapses the
+// grant.
 func (r *Refresher) fail(ctx context.Context, conn *pgx.Conn, g *dueGrant, failure error) error {
 	reason := clip(failure.Error(), maxRefreshFailure)
 	if !permanent(failure) {
@@ -306,26 +305,8 @@ func (r *Refresher) fail(ctx context.Context, conn *pgx.Conn, g *dueGrant, failu
 			g.credentialID, retry, reason)
 		return err
 	}
-	r.Log.Warn("grant can no longer be refreshed", "provider_id", g.providerID, "credential_id", g.credentialID, "reason", reason)
-	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE olp.provider_grants SET refresh_token_id=NULL,refresh_at=NULL,refresh_failures=refresh_failures+1,
-			refresh_failure=$2,updated_at=now() WHERE credential_id=$1`, g.credentialID, reason); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", g.refreshTokenID, RefreshPurpose)
-		return err
-	})
-}
-
-// permanent reports whether a refresh failure means the grant can no longer
-// be refreshed: the plugin reports that the upstream won't refresh it, or
-// that it refreshes no grants, or the refresh authorizes another account.
-// Every other failure is transient.
-func permanent(failure error) bool {
-	if reported, ok := errors.AsType[*abi.Error](failure); ok {
-		return reported.Code == abi.CodeInvalidGrant || reported.Code == abi.CodeUnknownMethod
-	}
-	return errors.Is(failure, errAnotherAccount)
+	r.Log.Warn("grant lapsed", "provider_id", g.providerID, "credential_id", g.credentialID, "reason", reason)
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error { return lapse(ctx, tx, g, reason) })
 }
 
 // backoff is how long a grant's refresh waits after its failures-th failure
@@ -358,7 +339,8 @@ func schedule(now time.Time, expiresIn int64, refreshable bool) (expires, refres
 // RequestRefresh asks workers to refresh the grant beneath a credential
 // version at once, because the upstream refused the access token of its
 // generation. It changes nothing once a refresh replaced that token, while a
-// failed refresh backs off, or when the grant can't be refreshed.
+// failed refresh backs off, or when the grant can't be refreshed, such as a
+// lapsed grant.
 func RequestRefresh(ctx context.Context, db *pgxpool.Pool, credentialID string, generation int64) error {
 	_, err := db.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=now()
 		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,

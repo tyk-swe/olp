@@ -76,6 +76,7 @@ type Plan struct {
 }
 type rankedCandidate struct {
 	slots      []Slot
+	skipped    []skippedSlot
 	attempt    Attempt
 	decision   Decision
 	order      int
@@ -161,14 +162,9 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			}
 		}
 		if reason == "" && options.CheckSlots {
-			row.slots = SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity)
-			if options.CredentialEligibility != nil {
-				row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool {
-					return slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != Eligible
-				})
-			}
+			row.slots, row.skipped = eligibleSlots(SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity), options.CredentialEligibility)
 			if len(row.slots) == 0 {
-				reason = "no_eligible_credentials"
+				reason = noSlotReason(row.skipped)
 			}
 		}
 
@@ -297,9 +293,52 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			}
 			plan.Decisions = append(plan.Decisions, decision)
 		}
+		for _, slot := range row.skipped {
+			decision := row.decision
+			decision.Eligible = false
+			decision.CredentialSlotID, decision.Reason = &slot.id, &slot.reason
+			plan.Decisions = append(plan.Decisions, decision)
+		}
 	}
 
 	return plan, nil
+}
+
+// skippedSlot is a credential slot planning skips because its credential
+// version may not serve, with the plan reason that names why.
+type skippedSlot struct {
+	id, reason string
+}
+
+// eligibleSlots keeps a target's selected slots whose credential versions may
+// serve and returns the rest as skipped, with their reasons. Skipped slots
+// never spend the attempt budget.
+func eligibleSlots(slots []Slot, eligibility func(string) Eligibility) ([]Slot, []skippedSlot) {
+	if eligibility == nil {
+		return slots, nil
+	}
+	var skipped []skippedSlot
+	slots = slices.DeleteFunc(slots, func(slot Slot) bool {
+		if slot.CredentialID == nil {
+			return false
+		}
+		if e := eligibility(*slot.CredentialID); e != Eligible {
+			skipped = append(skipped, skippedSlot{id: slot.ID, reason: "credential_" + string(e)})
+			return true
+		}
+		return false
+	})
+	return slots, skipped
+}
+
+// noSlotReason names why a target has no credential slot to try: the reason
+// every skipped slot shares, such as credential_lapsed, or
+// no_eligible_credentials.
+func noSlotReason(skipped []skippedSlot) string {
+	if len(skipped) == 0 || slices.ContainsFunc(skipped, func(slot skippedSlot) bool { return slot.reason != skipped[0].reason }) {
+		return "no_eligible_credentials"
+	}
+	return skipped[0].reason
 }
 
 func capacityReason(m ModelMetadata, demand *TokenDemand) string {

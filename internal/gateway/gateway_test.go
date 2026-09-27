@@ -46,6 +46,8 @@ type fakeRuntime struct {
 	keys    map[string]access.Authority
 	stale   bool
 	revoked map[string]bool
+	// lapsed holds the credential versions whose grants lapsed.
+	lapsed map[string]bool
 	// refused records the credential versions the upstream refused.
 	refused []string
 }
@@ -73,6 +75,8 @@ func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
 		return runtime.StaleAuthority
 	case f.revoked[id]:
 		return runtime.Revoked
+	case f.lapsed[id]:
+		return runtime.Lapsed
 	}
 	return runtime.Eligible
 }

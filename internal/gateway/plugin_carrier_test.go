@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -166,6 +167,29 @@ func TestOnlyCarriedFailuresReportedNotSentFailOver(t *testing.T) {
 		t.Fatalf("status %d b=%d", resp.StatusCode, h.mock.count("b"))
 	}
 	if env := h.sink.last(t); len(env.Attempts) != 2 || env.Attempts[0].Class != classRateLimit {
+		t.Fatalf("attempts %+v", env.Attempts)
+	}
+}
+
+// A carried target whose grant lapsed is skipped like any other target: its
+// plugin carries nothing, and the request fails over to the route's other
+// target.
+func TestACarriedTargetWhoseGrantLapsedCarriesNothing(t *testing.T) {
+	var carried atomic.Int32
+	h := newCarryingHarness(t, carrierFunc(func(ctx context.Context, _ abi.Provider, req *http.Request) (*http.Response, error) {
+		carried.Add(1)
+		return forward(ctx, req)
+	}))
+	h.rt.mu.Lock()
+	h.rt.lapsed = map[string]bool{h.credA: true}
+	h.rt.mu.Unlock()
+	if resp, body := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || !strings.Contains(fmt.Sprint(body), answerText) {
+		t.Fatalf("status %d body %v", resp.StatusCode, body)
+	}
+	if carried.Load() != 0 || h.mock.count("a") != 0 || h.mock.count("b") != 1 {
+		t.Fatalf("carried %d a=%d b=%d", carried.Load(), h.mock.count("a"), h.mock.count("b"))
+	}
+	if env := h.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].Ordinal != 1 || env.Attempts[0].UpstreamModel != modelB {
 		t.Fatalf("attempts %+v", env.Attempts)
 	}
 }

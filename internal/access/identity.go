@@ -308,7 +308,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	}
 	// Issuance is installation-scoped. Existing keys retain their issuer and
 	// policy across account role changes and disabling, as in the reference.
-	if _, err = AdvanceAuthority(r, tx); err != nil {
+	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.ID, "user.update", "user", id, "success"); err != nil {

@@ -274,6 +274,7 @@
     </p>{/if}
   <ul>
     {#each pool.data?.items ?? [] as slot (slot.id)}
+      {@const lapsed = Boolean(pool.data?.health?.[slot.id]?.lapsed)}
       <li>
         <div>
           <strong>{slot.name}</strong><span
@@ -281,17 +282,20 @@
             Weight {slot.weight}</span
           >{#if pool.data?.health?.[slot.id]}{@const health =
               pool.data.health[slot.id]}<small
-              ><span class:revoked={health.revoked}
+              ><span class:revoked={health.revoked || lapsed}
                 >{health.revoked
                   ? grant
                     ? 'Revoked — re-enroll its grant'
                     : 'Revoked — stage a replacement secret'
-                  : health.active_credential_version_id ===
-                        slot.credential_version_id && slot.credential_version_id
-                    ? 'Active'
-                    : health.active_credential_version_id
-                      ? 'Change staged'
-                      : 'Draft'}</span
+                  : lapsed
+                    ? 'Grant lapsed — re-enroll it'
+                    : health.active_credential_version_id ===
+                          slot.credential_version_id &&
+                        slot.credential_version_id
+                      ? 'Active'
+                      : health.active_credential_version_id
+                        ? 'Change staged'
+                        : 'Draft'}</span
               >
               · {health.cooling_down
                 ? 'Cooling down'
@@ -318,7 +322,9 @@
             onclick={() => edit(slot)}
             >{grant ? 'Edit' : 'Edit / rotate'}</button
           >{#if grant}<button
-              class="button button-secondary"
+              class="button"
+              class:button-primary={lapsed}
+              class:button-secondary={!lapsed}
               type="button"
               disabled={Boolean(busy) || Boolean(enrollment)}
               onclick={() => enroll(slot)}

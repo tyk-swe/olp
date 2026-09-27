@@ -2141,6 +2141,9 @@ type CredentialGrant struct {
 	// Facts The grant facts the plugin reported, which the profile's hosting templates use.
 	Facts map[string]string `json:"facts"`
 
+	// LapsedAt When the grant lapsed: it can no longer be refreshed, so the version's slots are ineligible until a new grant enrollment replaces it. Null while the grant lives.
+	LapsedAt nullable.Nullable[time.Time] `json:"lapsed_at"`
+
 	// PluginDigest Digest of the plugin whose grant enrollment created the version.
 	PluginDigest string `json:"plugin_digest"`
 
@@ -4454,6 +4457,11 @@ type SimulationSemanticHeaders map[string]string
 type SlotHealth struct {
 	ActiveCredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"active_credential_version_id,omitempty"`
 	CoolingDown               nullable.Nullable[bool]               `json:"cooling_down,omitempty"`
+
+	// Lapsed True when the grant beneath the credential version this slot would
+	// present lapsed. Selection refuses the version, so the slot cannot serve
+	// traffic until its grant is re-enrolled and the provider activated.
+	Lapsed bool `json:"lapsed"`
 
 	// Revoked True when the credential version this slot would present has been
 	// revoked. Selection refuses a revoked version, so the slot cannot serve

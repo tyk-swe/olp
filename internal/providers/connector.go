@@ -695,6 +695,9 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if state.Revoked {
 		return nil, state, access.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
 	}
+	if slot.CredentialLapsed {
+		return nil, state, access.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
+	}
 	if err := slot.credentialFits(&p.Configuration); err != nil {
 		return nil, state, err
 	}
@@ -708,7 +711,7 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 	var best *slotRow
 	usable := func(s *slotRow) bool {
-		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked
+		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked && !s.CredentialLapsed
 	}
 	for i := range slots {
 		row := &slots[i]

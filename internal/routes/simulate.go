@@ -374,8 +374,9 @@ func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.Routin
 	return usage.LoadRoutingInputs(r.Context(), q, time.Now())
 }
 
-// A credential revocation is authoritative without publishing a new route or
-// provider revision. Apply it to previews just as the executor does at dispatch.
+// Credential revocation and grant lapse are authoritative without publishing a
+// new route or provider revision. Apply them to previews just as the executor
+// does at dispatch.
 func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) runtime.Eligibility, error) {
 	ids := []string{}
 	for _, target := range route.Targets {
@@ -389,23 +390,9 @@ func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot 
 			}
 		}
 	}
-	eligibility := map[string]runtime.Eligibility{}
-	if len(ids) > 0 {
-		rows, err := q.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err = rows.Scan(&id); err != nil {
-				return nil, err
-			}
-			eligibility[id] = runtime.Revoked
-		}
-		if err = rows.Err(); err != nil {
-			return nil, err
-		}
+	ineligible, err := runtime.ReadIneligible(ctx, q, ids)
+	if err != nil {
+		return nil, err
 	}
-	return func(id string) runtime.Eligibility { return eligibility[id] }, nil
+	return func(id string) runtime.Eligibility { return ineligible[id] }, nil
 }

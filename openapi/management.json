@@ -2624,6 +2624,14 @@
             "description": "The grant facts the plugin reported, which the profile's hosting templates use.",
             "type": "object"
           },
+          "lapsed_at": {
+            "description": "When the grant lapsed: it can no longer be refreshed, so the version's slots are ineligible until a new grant enrollment replaces it. Null while the grant lives.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "plugin_digest": {
             "description": "Digest of the plugin whose grant enrollment created the version.",
             "pattern": "^[0-9a-f]{64}$",
@@ -2638,7 +2646,8 @@
           "plugin_digest",
           "principal",
           "facts",
-          "expires_at"
+          "expires_at",
+          "lapsed_at"
         ],
         "type": "object"
       },
@@ -9609,6 +9618,10 @@
               "null"
             ]
           },
+          "lapsed": {
+            "description": "True when the grant beneath the credential version this slot would\npresent lapsed. Selection refuses the version, so the slot cannot serve\ntraffic until its grant is re-enrolled and the provider activated.",
+            "type": "boolean"
+          },
           "revoked": {
             "description": "True when the credential version this slot would present has been\nrevoked. Selection refuses a revoked version, so the slot cannot serve\ntraffic until a replacement secret is staged and activated.",
             "type": "boolean"
@@ -9632,7 +9645,8 @@
           }
         },
         "required": [
-          "revoked"
+          "revoked",
+          "lapsed"
         ],
         "type": "object"
       },

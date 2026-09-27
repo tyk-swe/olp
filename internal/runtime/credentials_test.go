@@ -12,25 +12,29 @@ import (
 
 func credentialManager(t *testing.T, readAt time.Time, revoked ...string) *Manager {
 	t.Helper()
-	m := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	m.authority = authorityState{loaded: true, readAt: readAt, revoked: map[string]struct{}{}}
+	ineligible := map[string]Eligibility{}
 	for _, id := range revoked {
-		m.authority.revoked[id] = struct{}{}
+		ineligible[id] = Revoked
 	}
+	return authorityManager(readAt, ineligible)
+}
+
+func authorityManager(readAt time.Time, ineligible map[string]Eligibility) *Manager {
+	m := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m.authority = authorityState{loaded: true, readAt: readAt, ineligible: ineligible}
 	return m
 }
 
 func TestCredentialEligibilityNamesWhyAVersionCannotServe(t *testing.T) {
-	live, revoked := uuid.NewString(), uuid.NewString()
-	fresh := credentialManager(t, time.Now(), revoked)
-	if got := fresh.Eligibility(live); got != Eligible {
-		t.Fatalf("unrevoked credential: %q", got)
+	live, revoked, lapsed := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	fresh := authorityManager(time.Now(), map[string]Eligibility{revoked: Revoked, lapsed: Lapsed})
+	for id, want := range map[string]Eligibility{live: Eligible, revoked: Revoked, lapsed: Lapsed} {
+		if got := fresh.Eligibility(id); got != want {
+			t.Fatalf("credential eligibility %q, want %q", got, want)
+		}
 	}
-	if got := fresh.Eligibility(revoked); got != Revoked {
-		t.Fatalf("revoked credential: %q", got)
-	}
-	stale := credentialManager(t, time.Now().Add(-AuthorityStaleAfter-time.Second), revoked)
-	for _, id := range []string{live, revoked} {
+	stale := authorityManager(time.Now().Add(-AuthorityStaleAfter-time.Second), map[string]Eligibility{revoked: Revoked, lapsed: Lapsed})
+	for _, id := range []string{live, revoked, lapsed} {
 		if got := stale.Eligibility(id); got != StaleAuthority {
 			t.Fatalf("stale authority vouched for %s: %q", id, got)
 		}
@@ -63,13 +67,28 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 		}
 	}
 	revoked := credentialManager(t, time.Now(), slot, network)
+	lapsed := authorityManager(time.Now(), map[string]Eligibility{slot: Lapsed, network: Revoked})
 	stale := credentialManager(t, time.Now().Add(-AuthorityStaleAfter-time.Second))
-	for _, m := range []*Manager{revoked, stale} {
+	for _, m := range []*Manager{revoked, lapsed, stale} {
 		if secret, err := m.Secret(t.Context(), release, slot); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
 			t.Fatalf("served an ineligible slot credential: %q %v", secret, err)
 		}
 		if secret, err := m.NetworkSecret(t.Context(), release, provider, network); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
 			t.Fatalf("served an ineligible network credential: %q %v", secret, err)
 		}
+	}
+}
+
+// A gateway asks workers to refresh the grant of a credential version the
+// upstream refused, once per access token, but never a lapsed grant's: only a
+// new grant enrollment replaces it.
+func TestARefusedCredentialRequestsNoRefreshOfALapsedGrant(t *testing.T) {
+	lapsed, revoked := uuid.NewString(), uuid.NewString()
+	m := authorityManager(time.Now(), map[string]Eligibility{lapsed: Lapsed, revoked: Revoked})
+	m.grants = map[string]servedGrant{lapsed: {generation: 3}, revoked: {generation: 1}}
+	m.CredentialRefused(lapsed)
+	m.CredentialRefused(revoked)
+	if len(m.refreshRequested) != 0 {
+		t.Fatalf("refreshes requested for versions that may not serve: %v", m.refreshRequested)
 	}
 }

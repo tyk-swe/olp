@@ -90,7 +90,9 @@ type authorityState struct {
 	id       string
 	sequence int64
 	keys     map[string]keyRecord
-	revoked  map[string]struct{}
+	// ineligible holds the credential versions and network credentials that
+	// may not serve, with why.
+	ineligible map[string]Eligibility
 }
 
 // Manager installs releases and refreshes key authority for one gateway.
@@ -207,7 +209,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if unchanged {
 		return nil
 	}
-	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}, revoked: map[string]struct{}{}}
+	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}}
 	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
@@ -229,26 +231,13 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
-	rows, err = tx.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE revoked_at IS NOT NULL")
-	if err != nil {
-		return fmt.Errorf("authority: %w", err)
-	}
-	for rows.Next() {
-		var credential string
-		if err = rows.Scan(&credential); err != nil {
-			rows.Close()
-			return fmt.Errorf("authority: %w", err)
-		}
-		state.revoked[credential] = struct{}{}
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
+	if state.ineligible, err = ReadIneligible(ctx, tx, nil); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	m.mu.Lock()
 	m.authority = state
 	m.mu.Unlock()
-	m.log.Info("authority refreshed", "sequence", sequence, "keys", len(state.keys), "revoked_credentials", len(state.revoked))
+	m.log.Info("authority refreshed", "sequence", sequence, "keys", len(state.keys), "ineligible_credentials", len(state.ineligible))
 	return nil
 }
 

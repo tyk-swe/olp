@@ -192,7 +192,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now() WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id); err != nil {
 		return Reply{}, err
 	}
-	if _, err = AdvanceAuthority(r, tx); err != nil {
+	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.update", "budget_group", id, "success"); err != nil {

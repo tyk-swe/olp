@@ -117,8 +117,12 @@ func (m *Manager) grantSecret(credentialID string) ([]byte, bool) {
 // CredentialRefused tells the manager that the upstream refused a credential
 // version's secret. For a version with a grant, it asks workers to refresh the
 // grant early, once per access token it served; the request runs apart from
-// the caller.
+// the caller. A version that may no longer serve, such as one whose grant
+// lapsed, is not refreshed.
 func (m *Manager) CredentialRefused(credentialID string) {
+	if m.Eligibility(credentialID) != Eligible {
+		return
+	}
 	m.mu.Lock()
 	grant, ok := m.grants[credentialID]
 	requested := ok && m.refreshRequested[credentialID] == grant.generation

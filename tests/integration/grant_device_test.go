@@ -41,6 +41,28 @@ func pollDue(t *testing.T, h *accessHarness, enrollment map[string]any) {
 	}
 }
 
+// enrollByDevice approves a device authorization for a provider's credential
+// slot, or for its default slot when slot is empty, and returns the
+// completion.
+func enrollByDevice(t *testing.T, h *accessHarness, owner *browser, path, slot string) map[string]any {
+	t.Helper()
+	var body any
+	if slot != "" {
+		body = map[string]any{"slot_id": slot}
+	}
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	enrollment := h.want(owner, "POST", path+"/grant-enrollments", body, etagHeader(detail), 201)
+	device, _ := enrollment["device"].(map[string]any)
+	if device == nil || slot != "" && enrollment["slot_id"] != slot {
+		t.Fatalf("enrollment %v for slot %q", enrollment, slot)
+	}
+	testutil.DecideDevice(t, device["verification_url"].(string), device["user_code"].(string), "approve")
+	pollDue(t, h, enrollment)
+	status := pollGrantEnrollment(h, owner, path, enrollment, 200)
+	wantStatus(t, status, "completed")
+	return status["completion"].(map[string]any)
+}
+
 func wantStatus(t *testing.T, got map[string]any, status string) {
 	t.Helper()
 	if got["status"] != status {
@@ -228,26 +250,7 @@ func TestDeviceAuthorizationEnrollsAnySlotThroughAnUnconfinedPlugin(t *testing.T
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
 	h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/permit", map[string]any{"digest": digest, "acknowledge_risk": true}, nil, 201)
 	path := deviceProvider(t, h, owner, digest, "reference-device-chat")
-	// enroll approves a device authorization for a slot, or for the default
-	// slot when slot is empty, and returns the completion.
-	enroll := func(slot string) map[string]any {
-		t.Helper()
-		var body any
-		if slot != "" {
-			body = map[string]any{"slot_id": slot}
-		}
-		detail := h.want(owner, "GET", path, nil, nil, 200)
-		enrollment := h.want(owner, "POST", path+"/grant-enrollments", body, etagHeader(detail), 201)
-		device, _ := enrollment["device"].(map[string]any)
-		if device == nil || slot != "" && enrollment["slot_id"] != slot {
-			t.Fatalf("enrollment %v for slot %q", enrollment, slot)
-		}
-		testutil.DecideDevice(t, device["verification_url"].(string), device["user_code"].(string), "approve")
-		pollDue(t, h, enrollment)
-		status := pollGrantEnrollment(h, owner, path, enrollment, 200)
-		wantStatus(t, status, "completed")
-		return status["completion"].(map[string]any)
-	}
+	enroll := func(slot string) map[string]any { return enrollByDevice(t, h, owner, path, slot) }
 
 	first := enroll("")
 	certifyPluginProvider(t, h, owner, path)

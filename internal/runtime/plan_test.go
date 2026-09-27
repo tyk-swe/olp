@@ -164,13 +164,15 @@ func TestPreviewEnumeratesCredentialAttemptsWithinOneBudget(t *testing.T) {
 	}
 }
 
-func TestPlanningExcludesIneligibleCredentialsWithTheirReason(t *testing.T) {
+// Planning skips credential slots whose credential versions may not serve,
+// such as a lapsed grant's, naming why, and never spends the attempt budget
+// on them: the budget goes to the slots and targets that may serve.
+func TestPlanningSkipsIneligibleCredentialsWithTheirReason(t *testing.T) {
 	s, slug, ids := planningFixture()
 	route := s.Routes[slug]
 	route.Targets = route.Targets[:2]
 	s.Routes[slug] = route
 	network := uuid.NewString()
-	eligibility := map[string]Eligibility{}
 	for i, id := range ids[:2] {
 		p := s.Providers[id]
 		p.AuthMode = "api_key"
@@ -183,7 +185,10 @@ func TestPlanningExcludesIneligibleCredentialsWithTheirReason(t *testing.T) {
 		}
 		s.Providers[id] = p
 	}
-	plan := func() Plan {
+	first := s.Providers[ids[0]]
+	// plan answers each decision's outcome by credential slot, or by provider
+	// for a target with no slot to try: its attempt, or its reason.
+	plan := func(eligibility map[string]Eligibility) map[string]string {
 		t.Helper()
 		plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{
 			CheckSlots: true, CredentialEligibility: func(id string) Eligibility { return eligibility[id] },
@@ -191,28 +196,44 @@ func TestPlanningExcludesIneligibleCredentialsWithTheirReason(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return plan
-	}
-	reasons := func(plan Plan) map[string]string {
-		out := map[string]string{}
+		outcomes := map[string]string{}
 		for _, decision := range plan.Decisions {
-			if decision.Reason != nil {
-				out[decision.ProviderID] = *decision.Reason
+			key := decision.ProviderID
+			if decision.CredentialSlotID != nil {
+				key = *decision.CredentialSlotID
+			}
+			switch {
+			case decision.Eligible && decision.Attempt != nil && decision.Reason == nil:
+				outcomes[key] = "attempt"
+			case !decision.Eligible && decision.Attempt == nil && decision.Reason != nil:
+				outcomes[key] = *decision.Reason
+			default:
+				t.Fatalf("decision %+v", decision)
 			}
 		}
-		return out
+		return outcomes
 	}
-	first := s.Providers[ids[0]]
-	eligibility[*first.Slots[0].CredentialID] = Revoked
-	if got := plan(); len(got.Decisions) != 3 || reasons(got)[ids[0]] != "" {
-		t.Fatalf("an ineligible slot was planned or spent the budget: %+v", got.Decisions)
+	lapsed := plan(map[string]Eligibility{*first.Slots[0].CredentialID: Lapsed})
+	if len(lapsed) != 4 || lapsed[first.Slots[0].ID] != "credential_lapsed" || lapsed[first.Slots[1].ID] != "attempt" {
+		t.Fatalf("a lapsed slot was planned or spent the budget: %v", lapsed)
+	}
+	for _, slot := range s.Providers[ids[1]].Slots {
+		if lapsed[slot.ID] != "attempt" {
+			t.Fatalf("the budget skipped an eligible slot: %v", lapsed)
+		}
+	}
+	for want, eligibility := range map[string]map[string]Eligibility{
+		"credential_lapsed":       {*first.Slots[0].CredentialID: Lapsed, *first.Slots[1].CredentialID: Lapsed},
+		"credential_revoked":      {*first.Slots[0].CredentialID: Revoked, *first.Slots[1].CredentialID: Revoked},
+		"no_eligible_credentials": {*first.Slots[0].CredentialID: Revoked, *first.Slots[1].CredentialID: Lapsed},
+	} {
+		if got := plan(eligibility); len(got) != 3 || got[ids[0]] != want {
+			t.Fatalf("a target with no slot to try: %v, want %s", got, want)
+		}
 	}
 	for _, reason := range []Eligibility{Revoked, StaleAuthority} {
-		eligibility[network] = reason
-		eligibility[*first.Slots[1].CredentialID] = reason
-		got := reasons(plan())
-		if got[ids[0]] != "no_eligible_credentials" || got[ids[1]] != "network_credential_"+string(reason) {
-			t.Fatalf("%s reasons: %v", reason, got)
+		if got := plan(map[string]Eligibility{network: reason}); got[ids[1]] != "network_credential_"+string(reason) {
+			t.Fatalf("%s network credential: %v", reason, got)
 		}
 	}
 }

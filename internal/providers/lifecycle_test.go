@@ -51,7 +51,11 @@ func TestActivationPublishesTheOnePrincipalItsSlotsObserve(t *testing.T) {
 		return slotRow{ID: name, Name: name, Enabled: true, Weight: 1, CredentialID: new(name + "-credential"), CredentialVersion: new(1),
 			CredentialGrant: true, CredentialPrincipal: principal, CredentialRevoked: revoked}
 	}
-	pooled := []slotRow{slot("Default", "operator@example.com", false), slot("Backup", "operator@example.com", false), slot("Retired", "former@example.com", true), {ID: "Empty", Name: "Empty", Enabled: true, Weight: 1}}
+	// A revoked version, or one whose grant lapsed, serves no more and
+	// observes no principal; gateways skip a lapsed one as ineligible.
+	lapsed := slot("Lapsed", "former@example.com", false)
+	lapsed.CredentialLapsed = true
+	pooled := []slotRow{slot("Default", "operator@example.com", false), slot("Backup", "operator@example.com", false), slot("Retired", "former@example.com", true), {ID: "Empty", Name: "Empty", Enabled: true, Weight: 1}, lapsed}
 	if err := onePrincipal(pooled, grant); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +64,7 @@ func TestActivationPublishesTheOnePrincipalItsSlotsObserve(t *testing.T) {
 		published = append(published, pooled[i].published(grant.AuthMode))
 	}
 	if principal := runtime.ObservedPrincipal(published); principal != "operator@example.com" || published[1].ObservedPrincipal != principal ||
-		published[2].ObservedPrincipal != "" || published[2].Enabled || published[3].ObservedPrincipal != "" {
+		published[2].ObservedPrincipal != "" || published[2].Enabled || published[3].ObservedPrincipal != "" || published[4].ObservedPrincipal != "" {
 		t.Fatalf("published %+v", published)
 	}
 
