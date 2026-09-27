@@ -116,8 +116,9 @@ type Profile struct {
 // {credential} stands for the provider's static credential, such as
 // "Token {credential}"; braces appear nowhere else.
 //
-// A profile with an envelope or rewrites changes the dialect's bodies, so it
-// serves only transformed routes.
+// A profile with an envelope or rewrites changes the dialect's bodies, and one
+// that forces streaming changes how non-streaming requests reach the upstream,
+// so either serves only transformed routes.
 type Hosting struct {
 	// Address is the upstream's base URL, which the dialect's paths extend,
 	// such as https://api.example.com/v1 for /chat/completions. Its origin is
@@ -134,6 +135,11 @@ type Hosting struct {
 	// Rewrites change the dialect's request body, in order, before the
 	// envelope wraps it.
 	Rewrites []Rewrite `json:"rewrites,omitempty"`
+	// ForceStreaming declares an upstream that serves only streaming
+	// requests. OLP sends every request as a streaming one and aggregates the
+	// stream into the dialect's non-streaming result for a caller that did
+	// not ask to stream. OLP aggregates openai-responses streams.
+	ForceStreaming bool `json:"force_streaming,omitempty"`
 }
 
 // Envelope is the upstream's own JSON object around the dialect's bodies, such

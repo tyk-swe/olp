@@ -1,7 +1,8 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares two profiles at a fictional upstream, and the origins that upstream
-// uses: one serves the OpenAI Chat Completions dialect, and one serves Gemini
-// generateContent inside the upstream's own envelope.
+// declares profiles at a fictional upstream, and the origins that upstream
+// uses: one serves the OpenAI Chat Completions dialect, one serves Gemini
+// generateContent inside the upstream's own envelope, and one serves OpenAI
+// Responses where the upstream serves only streaming requests.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -61,7 +62,7 @@ func (reference) Manifest() plugin.Manifest {
 					{Op: plugin.RewriteDelete, Path: "/generationConfig/seed"},
 				},
 			},
-		}},
+		}, streamingProfile(origin, headers)},
 	}
 }
 

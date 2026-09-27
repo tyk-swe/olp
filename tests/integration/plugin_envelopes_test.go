@@ -114,7 +114,7 @@ func TestPluginProfileWithAnEnvelopeServesTransformedRoutes(t *testing.T) {
 	}
 	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
-		if p := profile.(map[string]any); p["kind"] == "plugin" && (p["id"] == "reference-gemini") == (p["strict"] == true) {
+		if p := profile.(map[string]any); p["id"] == "reference-gemini" && p["strict"] != false || p["id"] == "reference-chat" && p["strict"] != true {
 			t.Fatalf("catalogued %v", p)
 		}
 	}

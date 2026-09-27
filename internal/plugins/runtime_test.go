@@ -81,6 +81,8 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 				{Op: abi.RewriteDefault, Path: "/systemInstruction", Value: json.RawMessage(`{"parts":[{"text":"You are the reference assistant."}]}`)},
 				{Op: abi.RewriteDelete, Path: "/generationConfig/seed"},
 			},
+		}}, {ID: "reference-streaming", Label: "Reference Responses, streaming only", Dialect: "openai-responses", Hosting: abi.Hosting{
+			Address: "https://api.example.com/streaming/v1", Headers: headers, ForceStreaming: true,
 		}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {

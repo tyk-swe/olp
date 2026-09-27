@@ -2653,13 +2653,16 @@ type PluginEnvelope struct {
 	Response *string `json:"response,omitempty"`
 }
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
 type PluginHosting struct {
 	// Address Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.
 	Address string `json:"address"`
 
 	// Envelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
 	Envelope *PluginEnvelope `json:"envelope,omitempty"`
+
+	// ForceStreaming The upstream serves only streaming requests. OLP sends every request as a streaming one and aggregates the stream into the dialect's non-streaming result for a caller that did not ask to stream. Only openai-responses profiles may force streaming.
+	ForceStreaming *bool `json:"force_streaming,omitempty"`
 
 	// Headers Declared request headers by name, with value templates.
 	Headers *map[string]string `json:"headers,omitempty"`
@@ -2696,7 +2699,7 @@ type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`

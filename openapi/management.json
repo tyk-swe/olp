@@ -4299,7 +4299,7 @@
       },
       "PluginHosting": {
         "additionalProperties": false,
-        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.",
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.",
         "properties": {
           "address": {
             "description": "Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.",
@@ -4307,6 +4307,10 @@
           },
           "envelope": {
             "$ref": "#/components/schemas/PluginEnvelope"
+          },
+          "force_streaming": {
+            "description": "The upstream serves only streaming requests. OLP sends every request as a streaming one and aggregates the stream into the dialect's non-streaming result for a caller that did not ask to stream. Only openai-responses profiles may force streaming.",
+            "type": "boolean"
           },
           "headers": {
             "additionalProperties": {

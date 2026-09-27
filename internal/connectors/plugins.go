@@ -118,8 +118,9 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		Plugin: &plugin,
 		// An adaptation that changes only authorization, address and declared
 		// headers serves strict routes. An envelope or rewrite changes the
-		// dialect's bodies, so the profile serves transformed routes only.
-		Strict: placed.envelope == nil && len(placed.rewrites) == 0,
+		// dialect's bodies, and forced streaming how non-streaming requests
+		// reach the upstream, so the profile serves transformed routes only.
+		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming,
 	}
 	completeProfileMetadata(&p)
 	return &PluginProfile{profile: p, hosting: placed, declared: declared}, nil
@@ -174,10 +175,11 @@ func (p *PluginProfile) UnmarshalJSON(data []byte) error {
 
 // hosting is a parsed hosting adaptation.
 type hosting struct {
-	headers  map[string]template
-	query    map[string]template
-	envelope *envelope
-	rewrites []rewrite
+	headers        map[string]template
+	query          map[string]template
+	envelope       *envelope
+	rewrites       []rewrite
+	forceStreaming bool
 }
 
 // credentialValue names the static credential in templates.
@@ -240,6 +242,9 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		return hosting{}, err
 	}
 	if placed.rewrites, err = parseRewrites(declaredHosting.Rewrites, declared.Dialect); err != nil {
+		return hosting{}, err
+	}
+	if placed.forceStreaming, err = parseForceStreaming(declared); err != nil {
 		return hosting{}, err
 	}
 	return placed, nil

@@ -51,8 +51,9 @@ its manifest declares:
 
 - **profiles**, each naming the built-in dialect it serves and its hosting
   adaptation: the address its requests go to, at one of the plugin's origins,
-  the headers and query parameters it declares, and any envelope and rewrites
-  of the dialect's bodies;
+  the headers and query parameters it declares, any envelope and rewrites of
+  the dialect's bodies, and whether its upstream serves only streaming
+  requests;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -106,6 +107,13 @@ accounting see only plain dialect bodies. The
 [authoring guide](plugin-authoring.md#envelopes-and-rewrites) describes the
 declarations.
 
+A Responses profile may also force streaming, for an upstream that accepts only
+streaming requests. OLP sends every request as a streaming one and aggregates
+the stream into the non-streaming result for callers that did not ask to
+stream, within the gateway's response size limit; their usage and prices are
+those of the equivalent streaming request. See
+[Upstreams that serve only streams](plugin-authoring.md#upstreams-that-serve-only-streams).
+
 No built-in kind's defaults apply to a plugin provider:
 
 - **Endpoint:** the profile's address.
@@ -120,7 +128,8 @@ No built-in kind's defaults apply to a plugin provider:
 
 A plugin profile that changes only authorization, address and declared headers
 reports `strict: true` in the catalogue and serves strict routes. An envelope or
-any rewrite changes the dialect's bodies, so such a profile reports
+any rewrite changes the dialect's bodies, and forced streaming changes how
+non-streaming requests reach the upstream, so such a profile reports
 `strict: false` and serves only
 [transformed routes](provider-routing.md#route-fidelity): validating or
 activating a strict route with a target using it fails with

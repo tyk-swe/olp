@@ -174,6 +174,9 @@ type attemptFailure struct {
 	contractCode string // safe runtime interaction guard violation
 	policyCode   string // local output policy refusal after upstream completion
 	noRetry      bool   // strict outcome uncertainty must not suggest client retries
+	// aggregateTooLarge reports a forced stream whose non-streaming result
+	// exceeded the response size limit.
+	aggregateTooLarge bool
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -216,6 +219,9 @@ func (f *attemptFailure) toError() (result *Error) {
 			message = "The route's content policy cannot inspect this provider result."
 		}
 		return invalidRequest(f.policyCode, message, nil)
+	}
+	if f.aggregateTooLarge {
+		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The upstream streamed a result larger than the gateway's response size limit for a non-streaming request; request a streaming response instead.")
 	}
 	switch f.class {
 	case classLimitsUnavailable:
@@ -531,6 +537,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(classProtocol, nil)
 	}
 	body = cfg.WrapRequest(body, a.UpstreamModel)
+	// A profile that forces streaming streams every request, and the gateway
+	// aggregates the stream for a caller that did not ask for one.
+	aggregated := !x.parsed.Stream && cfg.ForcesStreaming()
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
@@ -543,7 +552,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.parsed.Stream)
+	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.parsed.Stream || aggregated)
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -555,7 +564,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if x.parsed.Stream {
+	if x.parsed.Stream || aggregated {
 		req.Header.Set("Accept", "text/event-stream")
 		if wire == "bedrock" || cfg.EventStream() {
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
@@ -729,12 +738,13 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			err = &openai.ProtocolError{Detail: "strict Responses stream ended incomplete"}
 		}
 	} else {
-		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
-		raw, readErr := io.ReadAll(limited)
-		if readErr != nil {
-			err = readErr
-		} else {
+		var raw []byte
+		if aggregated {
+			raw, err = s.aggregate(&fact, resp, cfg, wire)
+		} else if raw, err = io.ReadAll(&countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}); err == nil {
 			raw = cfg.UnwrapResponse(raw)
+		}
+		if err == nil {
 			if contract != nil {
 				var native *openai.Completion
 				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
@@ -795,6 +805,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			return fail(classProtocol, f)
 		case errors.Is(err, errResponseTooLarge):
 			return fail(classProtocol, f)
+		case errors.Is(err, openai.ErrAggregateTooLarge):
+			f.aggregateTooLarge = true
+			return fail(classProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = ue
 			ue.Message = redactCredentials(ue.Message, credentialValues)
@@ -818,6 +831,23 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.recordEvidence(true)
 	finishTrace()
 	return fact, completion, nil
+}
+
+// aggregate reads the stream that an upstream serving only streams answers a
+// non-streaming request with, and returns the dialect's non-streaming result.
+// The attempt records the usage the stream stated, also when it fails, as it
+// would for a streaming caller.
+func (s *Server) aggregate(fact *AttemptFact, resp *http.Response, cfg connectors.Config, wire openai.Family) ([]byte, error) {
+	if mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mediaType != "text/event-stream" {
+		return nil, &openai.ProtocolError{Detail: "the forced stream is not an event stream"}
+	}
+	limit := int(s.cfg.MaxEventBytes)
+	streamed, err := openai.Aggregate(wire, cfg.StreamPayload(resp.Body, limit), limit, int(s.cfg.MaxResponseBytes))
+	if streamed == nil {
+		return nil, err
+	}
+	fact.Usage = streamed.Usage
+	return streamed.Body, err
 }
 
 // countingReader enforces the buffered unary response byte limit.

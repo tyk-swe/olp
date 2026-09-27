@@ -73,6 +73,7 @@ func TestManifestValidation(t *testing.T) {
 		"bound rewrite": {func(m *abi.Manifest) {
 			m.Profiles[1].Hosting.Rewrites = []abi.Rewrite{{Op: "set", Path: "/metadata/user_id", Value: json.RawMessage(`"olp"`)}, {Op: "delete", Path: "/stream"}}
 		}, CodeManifestInvalid, "manifest.profiles[1].hosting.rewrites[1].path"},
+		"stream without a reducer": {func(m *abi.Manifest) { m.Profiles[1].Hosting.ForceStreaming = true }, CodeManifestInvalid, "manifest.profiles[1].hosting.force_streaming"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
