@@ -40,6 +40,11 @@ const (
 	refreshesPerPass = 100
 	// maxRefreshFailure bounds the reason a failed refresh records.
 	maxRefreshFailure = 1024
+	// Recording a refreshed grant is attempted up to storeAttempts times,
+	// each within storeTimeout, storeBackoff apart and doubling.
+	storeAttempts = 5
+	storeTimeout  = 10 * time.Second
+	storeBackoff  = 250 * time.Millisecond
 )
 
 // refreshLockSeed keys the advisory lock that one grant's refresh holds.
@@ -223,7 +228,7 @@ func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentia
 		}
 		return true, r.fail(ctx, conn, &g, err)
 	}
-	return true, r.store(ctx, conn, &g, grant)
+	return true, r.store(ctx, &g, grant)
 }
 
 // run runs the grant's refresh through its plugin, on behalf of the provider
@@ -286,14 +291,49 @@ func checkRefreshed(g *dueGrant, grant abi.Grant) error {
 // the spent one, and the grant's generation advances, so gateways reload it
 // on their next poll. A grant that ended during its refresh, such as one an
 // operator revoked, keeps nothing of it.
-func (r *Refresher) store(ctx context.Context, conn *pgx.Conn, g *dueGrant, grant abi.Grant) error {
+//
+// The upstream may have spent the grant's refresh token already, so a refresh
+// whose outcome is lost lapses the grant at the next one. Recording it
+// therefore outlasts the pass's cancellation, such as a worker's shutdown, and
+// is retried a few times over a new database connection each, should the
+// database or the pass's connection fail.
+func (r *Refresher) store(ctx context.Context, g *dueGrant, grant abi.Grant) error {
+	ctx = context.WithoutCancel(ctx)
 	served, err := json.Marshal(connectors.GrantCredential{AccessToken: grant.AccessToken, Facts: g.facts})
 	if err != nil {
 		return err
 	}
 	expires, refreshAt := schedule(time.Now(), grant.ExpiresIn, true)
 	var generation int64
-	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+	for attempt, wait := 1, storeBackoff; ; attempt, wait = attempt+1, 2*wait {
+		generation, err = r.write(ctx, g, served, grant.RefreshToken, expires, refreshAt)
+		if err == nil || errors.Is(err, pgx.ErrNoRows) || attempt == storeAttempts {
+			break
+		}
+		r.Log.Warn("refreshed grant not recorded yet", "provider_id", g.providerID, "credential_id", g.credentialID, "attempt", attempt, "error", err)
+		time.Sleep(wait)
+	}
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		r.Log.Info("grant ended during its refresh", "provider_id", g.providerID, "credential_id", g.credentialID)
+		return nil
+	case err != nil:
+		r.Log.Error("refreshed grant lost: the upstream's new tokens were not recorded, so the grant may lapse at its next refresh",
+			"provider_id", g.providerID, "credential_id", g.credentialID, "error", err)
+		return err
+	}
+	r.Log.Info("grant refreshed", "provider_id", g.providerID, "credential_id", g.credentialID, "generation", generation)
+	return nil
+}
+
+// write records a refreshed grant in one transaction, and returns the grant's
+// new generation. It fails with pgx.ErrNoRows when the grant no longer holds
+// the refresh token its refresh spent.
+func (r *Refresher) write(ctx context.Context, g *dueGrant, served []byte, refreshToken string, expires, refreshAt *time.Time) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, storeTimeout)
+	defer cancel()
+	var generation int64
+	err := pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
 		// Writing a secret holds the installation row, which transactions
 		// that end grants take before the grant's.
 		if err := r.Keys.Store(ctx, tx, r.Installation, g.credentialID, "provider_credential", served, nil); err != nil {
@@ -304,19 +344,12 @@ func (r *Refresher) store(ctx context.Context, conn *pgx.Conn, g *dueGrant, gran
 			g.credentialID, g.refreshTokenID, expires, refreshAt).Scan(&generation); err != nil {
 			return err
 		}
-		if grant.RefreshToken == "" {
+		if refreshToken == "" {
 			return nil
 		}
-		return r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, RefreshPurpose, []byte(grant.RefreshToken), nil)
+		return r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, RefreshPurpose, []byte(refreshToken), nil)
 	})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		r.Log.Info("grant ended during its refresh", "provider_id", g.providerID, "credential_id", g.credentialID)
-		return nil
-	case err == nil:
-		r.Log.Info("grant refreshed", "provider_id", g.providerID, "credential_id", g.credentialID, "generation", generation)
-	}
-	return err
+	return generation, err
 }
 
 // fail records a failed refresh on its grant. A transient failure is retried

@@ -71,7 +71,8 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   under its own advisory lock so a rotating refresh token is spent once. A
   refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant,
   and a grant that no provider configuration uses any more is
-  [retired](plugins.md#grant-refresh) instead of refreshed.
+  [retired](plugins.md#grant-refresh) instead of refreshed. A refresh the
+  upstream answered is recorded even when the worker is shutting down.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without
