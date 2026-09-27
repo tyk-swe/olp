@@ -23,25 +23,27 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, pluginHost *plugins.Host, log *slog.Logger) {
+func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, pluginHost *plugins.Host, unconfined *plugins.Unconfined, log *slog.Logger) {
 	control.Egress = policy
 	control.Register(mux)
 	catalogue := providers.New(control, policy, pluginHost)
+	catalogue.Unconfined = unconfined
 	catalogue.Log = log
-	catalogue.Plugins = pluginRuntime
+	catalogue.Plugins = pluginHost
 	if limiter != nil {
 		catalogue.Quotas = limiter
 	}
 	catalogue.Register(mux)
 	routeServer := routes.New(control)
 	routeServer.Inputs = rt.RoutingInputs
+	routeServer.UnconfinedPlugins = unconfined != nil
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: control, Gateway: gw}).Register(mux)
 	(&media.Management{Access: control, Pool: control.Pool, Jobs: mediaJobs, Log: log}).Register(mux)
 	(&resources.Management{Access: control, Pool: control.Pool}).Register(mux)
 	(&management.Overview{Access: control}).Register(mux)
 	(&observability.Management{Access: control, Cache: cache, Pool: control.Pool}).Register(mux)
-	(&plugins.Management{Access: control, Runtime: pluginRuntime}).Register(mux)
+	(&plugins.Management{Access: control, Runtime: pluginRuntime, Unconfined: unconfined}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
@@ -49,6 +51,7 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	(&configuration.Server{
 		Access:                 control,
 		Egress:                 policy,
+		Unconfined:             unconfined,
 		VendorKind:             providers.VendorKind,
 		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {

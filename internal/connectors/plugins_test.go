@@ -167,6 +167,29 @@ func TestPluginProfileSurvivesPublication(t *testing.T) {
 	}
 }
 
+// An unconfined plugin's profiles say so, from the installed plugin a
+// provider pins through publication, so gateways know which targets their
+// deployment may serve.
+func TestUnconfinedPluginProfileSurvivesPublication(t *testing.T) {
+	installed, _ := json.Marshal(InstalledPlugin{Manifest: pluginManifest(), Unconfined: true})
+	plugin, err := DecodePluginProfile(pluginDigest, installed, "acme-chat")
+	if err != nil || !plugin.Unconfined() || !plugin.Profile().Plugin.Unconfined {
+		t.Fatalf("decoded %+v: %v", plugin, err)
+	}
+	encoded, err := json.Marshal(plugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded PluginProfile
+	if err = json.Unmarshal(encoded, &decoded); err != nil || !decoded.Unconfined() {
+		t.Fatalf("published %s: %v", encoded, err)
+	}
+	confined, err := NewPluginProfile(pluginDigest, pluginManifest(), "acme-chat")
+	if err != nil || confined.Unconfined() {
+		t.Fatalf("a confined plugin's profile: %v", err)
+	}
+}
+
 // A profile's declared discovery and classification reach the provider
 // unchanged through publication, with the classes that govern failover.
 func TestPluginProfileDeclaresDiscoveryAndClassification(t *testing.T) {

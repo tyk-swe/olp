@@ -2693,27 +2693,30 @@ type PlaygroundUsage struct {
 	TotalTokens       int64                    `json:"total_tokens"`
 }
 
-// Plugin An installed provider plugin: its module digest and the manifest it declared at install.
+// Plugin An installed provider plugin: its digest and the manifest it declared. A confined plugin's WebAssembly module is stored with it; an unconfined plugin's executable lives in the deployment's image.
 type Plugin struct {
-	// AbiVersion Plugin ABI version the module was built for.
+	// AbiVersion Plugin ABI version the plugin was built for.
 	AbiVersion int32 `json:"abi_version"`
 
-	// ApprovedAt When an owner approved the declared origins; null while the plugin awaits approval and can't be used.
+	// ApprovedAt When an owner approved the declared origins, or permitted an unconfined plugin; null while the plugin awaits approval and can't be used.
 	ApprovedAt      nullable.Nullable[time.Time]          `json:"approved_at"`
 	ApprovedBy      nullable.Nullable[openapi_types.UUID] `json:"approved_by"`
 	ApprovedByEmail nullable.Nullable[string]             `json:"approved_by_email"`
 
-	// Digest Lowercase hexadecimal SHA-256 digest of the module, which identifies the plugin.
-	Digest           string             `json:"digest"`
-	Etag             openapi_types.UUID `json:"etag"`
-	InstalledAt      time.Time          `json:"installed_at"`
-	InstalledBy      openapi_types.UUID `json:"installed_by"`
-	InstalledByEmail string             `json:"installed_by_email"`
+	// Digest Lowercase hexadecimal SHA-256 digest of the module, or of an unconfined plugin's executable, which identifies the plugin.
+	Digest string             `json:"digest"`
+	Etag   openapi_types.UUID `json:"etag"`
+
+	// Executable For an unconfined plugin, the name of its executable in the deployment's unconfined plugin directory; null for a confined plugin. Unconfined plugins are listed only where the deployment enables them.
+	Executable       nullable.Nullable[string] `json:"executable"`
+	InstalledAt      time.Time                 `json:"installed_at"`
+	InstalledBy      openapi_types.UUID        `json:"installed_by"`
+	InstalledByEmail string                    `json:"installed_by_email"`
 
 	// Manifest What a plugin declared at install. It never changes for a digest.
 	Manifest PluginManifest `json:"manifest"`
 
-	// SizeBytes Size of the module.
+	// SizeBytes Size of the module or executable.
 	SizeBytes int64 `json:"size_bytes"`
 }
 
@@ -2804,6 +2807,9 @@ type PluginHosting struct {
 // PluginListResponse defines model for PluginListResponse.
 type PluginListResponse struct {
 	Items []Plugin `json:"items"`
+
+	// UnconfinedPluginsEnabled Whether this deployment enables the experimental unconfined plugin tier. Only a deployment setting enables it, never the management API.
+	UnconfinedPluginsEnabled bool `json:"unconfined_plugins_enabled"`
 }
 
 // PluginManifest What a plugin declared at install. It never changes for a digest.
@@ -3433,10 +3439,13 @@ type ProviderProfileListResponse struct {
 
 // ProviderProfilePlugin The installed provider plugin that supplies a profile.
 type ProviderProfilePlugin struct {
-	// Digest Lowercase hexadecimal SHA-256 digest of the plugin module, which is the profile revision.
-	Digest  string `json:"digest"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	// Digest Lowercase hexadecimal SHA-256 digest of the plugin module, or of an unconfined plugin's executable, which is the profile revision.
+	Digest string `json:"digest"`
+	Name   string `json:"name"`
+
+	// Unconfined Set for an unconfined plugin, which runs with native privileges.
+	Unconfined *bool  `json:"unconfined,omitempty"`
+	Version    string `json:"version"`
 }
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
@@ -3648,7 +3657,7 @@ type PutProjectMemberRequestRole string
 type RecentAuthenticationRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
-	// Purpose Exact security operation authorized by this one-time grant.
+	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
 }
@@ -4319,6 +4328,56 @@ type Surface string
 
 // TransportMode defines model for TransportMode.
 type TransportMode string
+
+// UnconfinedExecutable An executable in the deployment's unconfined plugin directory, which an owner may review and permit as an unconfined plugin.
+type UnconfinedExecutable struct {
+	// Digest Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.
+	Digest string `json:"digest"`
+
+	// Name The executable's file name in the unconfined plugin directory.
+	Name string `json:"name"`
+
+	// Permitted Whether an owner permitted this build of the executable, which is then an installed plugin.
+	Permitted bool `json:"permitted"`
+
+	// SizeBytes Size of the executable.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// UnconfinedExecutableListResponse defines model for UnconfinedExecutableListResponse.
+type UnconfinedExecutableListResponse struct {
+	Items []UnconfinedExecutable `json:"items"`
+}
+
+// UnconfinedExecutableReview An executable in the unconfined plugin directory with the manifest it declared when OLP ran it for review.
+type UnconfinedExecutableReview struct {
+	// AbiVersion Plugin ABI version the executable was built for.
+	AbiVersion int32 `json:"abi_version"`
+
+	// Digest Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.
+	Digest string `json:"digest"`
+
+	// Manifest What a plugin declared at install. It never changes for a digest.
+	Manifest PluginManifest `json:"manifest"`
+
+	// Name The executable's file name in the unconfined plugin directory.
+	Name string `json:"name"`
+
+	// Permitted Whether an owner permitted this build of the executable, which is then an installed plugin.
+	Permitted bool `json:"permitted"`
+
+	// SizeBytes Size of the executable.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// UnconfinedPluginPermitRequest defines model for UnconfinedPluginPermitRequest.
+type UnconfinedPluginPermitRequest struct {
+	// AcknowledgeRisk Must be true: the owner acknowledges that an unconfined plugin runs with the operating system privileges of OLP's processes, outside every confinement, and can reach anything they can.
+	AcknowledgeRisk bool `json:"acknowledge_risk"`
+
+	// Digest Digest of the executable the owner reviewed. OLP refuses the permission if the executable has changed since.
+	Digest string `json:"digest"`
+}
 
 // UpdateApiKeyRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit `null` clears one. Writing absent fields through
@@ -5490,6 +5549,9 @@ type UpdateSettingJSONRequestBody = UpdateSettingRequest
 
 // SetupJSONRequestBody defines body for Setup for application/json ContentType.
 type SetupJSONRequestBody = SetupRequest
+
+// PermitUnconfinedPluginJSONRequestBody defines body for PermitUnconfinedPlugin for application/json ContentType.
+type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
 
 // UpdateUserRoleJSONRequestBody defines body for UpdateUserRole for application/json ContentType.
 type UpdateUserRoleJSONRequestBody = UpdateUserRoleRequest

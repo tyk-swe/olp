@@ -64,7 +64,7 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	}
 	// The plugin may reach the upstream, so the step runs outside the
 	// installation mutation lock; saving rechecks the draft.
-	enrollment, err := grants.Start(r.Context(), s.Plugins, a.Pool, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
+	enrollment, err := grants.Start(r.Context(), s.Plugins, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -159,7 +159,7 @@ func (s *Server) exchangeGrant(r *http.Request, current *record, enrollment gran
 	if err != nil {
 		return access.Reply{}, err
 	}
-	grant, err := grants.Exchange(r.Context(), s.Plugins, s.Access.Pool, enrollment, input, cfg.Options.PluginOptions, client)
+	grant, err := grants.Exchange(r.Context(), s.Plugins, enrollment, input, cfg.Options.PluginOptions, client)
 	if err != nil {
 		return access.Reply{}, err
 	}

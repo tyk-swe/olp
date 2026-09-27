@@ -101,16 +101,17 @@ func (c *Configuration) Normalize() {
 }
 
 // Pin resolves the plugin profile a plugin provider's configuration pins,
-// which must belong to a usable plugin, and gives the provider its address,
-// with its options in place, as endpoint.
-func (c *Configuration) Pin(ctx context.Context, q access.Queryer) error {
+// which must belong to a plugin usable in the deployment's unconfined tier,
+// or nil, and gives the provider its address, with its options in place, as
+// endpoint.
+func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined) error {
 	if c.Kind != KindPlugin {
 		return nil
 	}
 	if c.ProfileID == "" || !pluginDigest.MatchString(c.ProfileRevision) {
 		return access.Invalid("configuration.profile_revision", "Choose a plugin profile: its ID, and the plugin's digest as the profile revision.")
 	}
-	plugin, err := plugins.Profile(ctx, q, c.ProfileRevision, c.ProfileID)
+	plugin, err := plugins.Profile(ctx, q, unconfined, c.ProfileRevision, c.ProfileID)
 	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
 		field := "configuration.profile_revision"
 		if refusal.Code == plugins.CodeProfileUnknown {
@@ -134,20 +135,20 @@ func (c *Configuration) pluginDigest() string {
 }
 
 // pinned attaches the plugin profile a stored plugin provider configuration
-// pins, from the manifest of its installed plugin. Uninstalling a plugin is
-// refused while a provider pins it.
-func (c *Configuration) pinned(manifest []byte) error {
-	if c.Kind != KindPlugin || manifest == nil {
+// pins, from its installed plugin, which pluginColumn selects. Uninstalling a
+// plugin is refused while a provider pins it.
+func (c *Configuration) pinned(installed []byte) error {
+	if c.Kind != KindPlugin || installed == nil {
 		return nil
 	}
-	plugin, err := connectors.DecodePluginProfile(c.ProfileRevision, manifest, c.ProfileID)
+	plugin, err := connectors.DecodePluginProfile(c.ProfileRevision, installed, c.ProfileID)
 	c.plugin = plugin
 	return err
 }
 
-// pluginManifestColumn selects the manifest of the plugin that the provider p
-// pins, or NULL.
-const pluginManifestColumn = "(SELECT pl.manifest FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
+// pluginColumn selects the plugin that the provider p pins, as a
+// connectors.InstalledPlugin, or NULL.
+const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
 
 var pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 

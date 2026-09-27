@@ -41,7 +41,7 @@ func (reference) StartGrant(context.Context, plugin.GrantStart) (plugin.GrantAut
 	return plugin.GrantAuthorization{URL: authority + "/authorize?" + query.Encode(), Session: string(data)}, err
 }
 
-func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange) (plugin.Grant, error) {
+func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchange) (plugin.Grant, error) {
 	var s session
 	if err := json.Unmarshal([]byte(exchange.Session), &s); err != nil {
 		return plugin.Grant{}, err
@@ -57,7 +57,7 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 		Account      string `json:"account"`
 	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}
-	if err = call("POST", authority+"/token", form, "", &issued); err != nil {
+	if err = call(ctx, "POST", authority+"/token", form, "", &issued); err != nil {
 		return plugin.Grant{}, err
 	}
 	// The token response names the account; who signed in is the
@@ -65,7 +65,7 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 	var user struct {
 		Subject string `json:"sub"`
 	}
-	if err = call("GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
+	if err = call(ctx, "GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
 		return plugin.Grant{}, err
 	}
 	return plugin.Grant{
@@ -99,7 +99,7 @@ func authorizationCode(input, state string) (string, error) {
 
 // call sends a request to the authority through OLP and decodes its JSON
 // reply. A refusal fails with the OAuth error code the authority reported.
-func call(method, address string, form url.Values, bearer string, reply any) error {
+func call(ctx context.Context, method, address string, form url.Values, bearer string, reply any) error {
 	request := plugin.HTTPRequest{Method: method, URL: address, Header: map[string][]string{"Accept": {"application/json"}}}
 	if form != nil {
 		request.Header["Content-Type"] = []string{"application/x-www-form-urlencoded"}
@@ -108,7 +108,7 @@ func call(method, address string, form url.Values, bearer string, reply any) err
 	if bearer != "" {
 		request.Header["Authorization"] = []string{"Bearer " + bearer}
 	}
-	response, err := plugin.Fetch(request)
+	response, err := plugin.Fetch(ctx, request)
 	if err != nil {
 		return err
 	}

@@ -10,9 +10,16 @@
 // to the host_call import. Every message is a JSON document; buffers are
 // passed as a pointer and a length, and returned packed into one i64.
 //
+// An unconfined plugin is a native executable that exchanges the same
+// messages over its standard input and output instead, wrapped in Frames, one
+// JSON document per line. It first writes a Frame holding its ABI version.
+// OLP then writes its calls, and cancellations of them, to the plugin's
+// standard input; the plugin writes their responses, and its capability
+// requests, to its standard output. Calls run concurrently, so every Frame
+// carries the ID of the request it belongs to.
+//
 // The ABI is versioned as a whole and, during 0.x, carries no compatibility
-// promise between versions: OLP refuses a module built for another version at
-// install.
+// promise between versions: OLP refuses a plugin built for another version.
 package abi
 
 import "encoding/json"
@@ -448,6 +455,28 @@ type HTTPResponse struct {
 	Status int                 `json:"status"`
 	Header map[string][]string `json:"header,omitempty"`
 	Body   []byte              `json:"body,omitempty"`
+}
+
+// Frame is one message of an unconfined plugin's standard input or output,
+// written as one line of JSON. A Frame the plugin writes is at most 1 MiB.
+type Frame struct {
+	// Version is set in the first Frame the plugin writes, and only there:
+	// the ABI version the plugin was built for.
+	Version int `json:"abi_version,omitempty"`
+	// ID identifies a request: OLP numbers its calls, and the plugin its
+	// capability requests, each from 1. A response carries the ID of the
+	// request it answers, and a cancellation the ID of the call it cancels.
+	ID uint64 `json:"id,omitempty"`
+	// Call, on a capability request, is the ID of the call the request
+	// serves, which grants its capabilities. A request that serves no call
+	// may only log.
+	Call     uint64    `json:"call,omitempty"`
+	Request  *Request  `json:"request,omitempty"`
+	Response *Response `json:"response,omitempty"`
+	// Cancel tells the plugin that OLP no longer waits for the response to
+	// call ID, such as when the request the call serves ended. The plugin
+	// still answers the call, promptly.
+	Cancel bool `json:"cancel,omitempty"`
 }
 
 // LogRecord is the parameter of CapabilityLog.

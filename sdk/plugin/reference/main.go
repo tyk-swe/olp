@@ -143,4 +143,4 @@ func origin(address string) string {
 
 func init() { plugin.Register(reference{}) }
 
-func main() {}
+func main() { plugin.Serve() }

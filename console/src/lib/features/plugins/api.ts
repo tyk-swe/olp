@@ -3,13 +3,19 @@ import { apiClient } from '$lib/api/client';
 import { ApiProblem, ensureSuccess, fieldIssues, result } from '$lib/api/http';
 
 export type Plugin = components['schemas']['Plugin'];
+export type PluginList = components['schemas']['PluginListResponse'];
 export type PluginProfile = components['schemas']['PluginProfile'];
+export type UnconfinedExecutable =
+  components['schemas']['UnconfinedExecutable'];
+export type UnconfinedExecutableReview =
+  components['schemas']['UnconfinedExecutableReview'];
 
-export async function listPlugins(signal?: AbortSignal): Promise<Plugin[]> {
+/** Installed plugins, and whether the deployment enables unconfined ones. */
+export async function listPlugins(signal?: AbortSignal): Promise<PluginList> {
   const { data, error, response } = await apiClient.GET('/api/v1/plugins', {
     signal
   });
-  return result(data, error, response).items;
+  return result(data, error, response);
 }
 
 /**
@@ -58,6 +64,50 @@ export async function uninstallPlugin(plugin: Plugin): Promise<void> {
     }
   );
   ensureSuccess(error, response);
+}
+
+/** The executables in the deployment's unconfined plugin directory. */
+export async function listUnconfinedExecutables(
+  signal?: AbortSignal
+): Promise<UnconfinedExecutable[]> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/unconfined-plugins',
+    { signal }
+  );
+  return result(data, error, response).items;
+}
+
+/** Runs an executable to read the manifest it declares, for review. */
+export async function reviewUnconfinedExecutable(
+  name: string
+): Promise<UnconfinedExecutableReview> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/unconfined-plugins/{executable}',
+    { params: { path: { executable: name } } }
+  );
+  return result(data, error, response);
+}
+
+/**
+ * Permits the reviewed build of an executable as an unconfined plugin. The
+ * owner acknowledged the risk and reauthenticated for plugin_permit.
+ */
+export async function permitUnconfinedPlugin(
+  review: UnconfinedExecutableReview
+): Promise<Plugin> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/v1/unconfined-plugins/{executable}/permit',
+    {
+      params: { path: { executable: review.name } },
+      body: { digest: review.digest, acknowledge_risk: true }
+    }
+  );
+  return result(data, error, response);
+}
+
+/** Whether a request needs the owner to reauthenticate first. */
+export function needsReauthentication(error: unknown): boolean {
+  return error instanceof ApiProblem && error.problem.status === 428;
 }
 
 /**

@@ -43,10 +43,10 @@ func TestForcedStreamingCertifiesNonStreamingTuplesFromTheStream(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	manifest, _ := json.Marshal(abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{upstream.URL}, Profiles: []abi.Profile{{
+	manifest, _ := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{upstream.URL}, Profiles: []abi.Profile{{
 		ID: "acme-responses", Label: "Acme Responses", Dialect: "openai-responses",
 		Hosting: abi.Hosting{Address: upstream.URL + "/v1", Headers: map[string]string{"Authorization": "Token {credential}"}, ForceStreaming: true},
-	}}})
+	}}}})
 	cfg := Configuration{ProviderID: "acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-responses", ProfileRevision: strings.Repeat("ab", 32)}
 	if err := cfg.pinned(manifest); err != nil {
 		t.Fatal(err)

@@ -23,11 +23,13 @@ import (
 )
 
 // pluginTable is an olp.plugins table holding at most one approved plugin,
-// which it serves to Usable whatever digest is asked for, counting the reads.
+// which it serves to Usable whatever digest is asked for, counting the reads:
+// a confined plugin's module or an unconfined plugin's executable.
 type pluginTable struct {
-	mu     sync.Mutex
-	module []byte
-	reads  int
+	mu         sync.Mutex
+	module     []byte
+	executable string
+	reads      int
 }
 
 func (p *pluginTable) install(module []byte) {
@@ -46,12 +48,17 @@ func (p *pluginTable) QueryRow(context.Context, string, ...any) pgx.Row {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.reads++
-	module := p.module
+	module, executable := p.module, p.executable
 	return scanner(func(dest ...any) error {
-		if module == nil {
+		switch {
+		case module != nil:
+			*dest[3].(*[]byte) = module
+		case executable != "":
+			*dest[2].(**string) = &executable
+		default:
 			return pgx.ErrNoRows
 		}
-		*dest[0].(*[]byte), *dest[1].(*bool), *dest[2].(*[]byte) = []byte(`{}`), true, module
+		*dest[0].(*[]byte), *dest[1].(*bool) = []byte(`{}`), true
 		return nil
 	})
 }
@@ -75,7 +82,7 @@ func newTestHost(t testing.TB, engine Engine, limits Limits, log *slog.Logger, m
 	}
 	t.Cleanup(func() { r.Close(context.Background()) })
 	table := &pluginTable{module: module}
-	return NewHost(r, table), table
+	return NewHost(r, nil, table), table
 }
 
 const fixtureDigest = "fixture"

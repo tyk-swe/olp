@@ -32,6 +32,7 @@ const pending: Plugin = {
   digest: 'a'.repeat(64),
   abi_version: 1,
   size_bytes: 4_738_008,
+  executable: null,
   manifest: {
     name: 'reference',
     version: '0.1.0',
@@ -64,6 +65,10 @@ const approved: Plugin = {
   approved_at: '2026-09-27T06:05:00Z',
   etag: '44444444-4444-4444-4444-444444444444'
 };
+
+function listed(items: Plugin[], unconfinedPluginsEnabled = false) {
+  return { items, unconfined_plugins_enabled: unconfinedPluginsEnabled };
+}
 
 let host: HTMLElement;
 let client: QueryClient;
@@ -119,7 +124,9 @@ function upload(file: File) {
 }
 
 it('installs an uploaded module and shows what it declares', async () => {
-  vi.mocked(listPlugins).mockResolvedValueOnce([]).mockResolvedValue([pending]);
+  vi.mocked(listPlugins)
+    .mockResolvedValueOnce(listed([]))
+    .mockResolvedValue(listed([pending]));
   vi.mocked(installPlugin).mockResolvedValue({
     plugin: pending,
     created: true
@@ -143,7 +150,7 @@ it('installs an uploaded module and shows what it declares', async () => {
 });
 
 it('explains a typed refusal with the manifest field it concerns', async () => {
-  vi.mocked(listPlugins).mockResolvedValue([]);
+  vi.mocked(listPlugins).mockResolvedValue(listed([]));
   vi.mocked(installPlugin).mockRejectedValue(
     new ApiProblem({
       type: 'https://openllmproxy.dev/problems/plugin_dialect_unknown',
@@ -168,9 +175,9 @@ it('explains a typed refusal with the manifest field it concerns', async () => {
 
 it('approves exactly the reviewed origins, then uninstalls', async () => {
   vi.mocked(listPlugins)
-    .mockResolvedValueOnce([pending])
-    .mockResolvedValueOnce([approved])
-    .mockResolvedValue([]);
+    .mockResolvedValueOnce(listed([pending]))
+    .mockResolvedValueOnce(listed([approved]))
+    .mockResolvedValue(listed([]));
   vi.mocked(approvePlugin).mockResolvedValue(approved);
   vi.mocked(uninstallPlugin).mockResolvedValue();
   render();
@@ -201,7 +208,7 @@ it('approves exactly the reviewed origins, then uninstalls', async () => {
 });
 
 it('explains an uninstall refused because providers pin the plugin', async () => {
-  vi.mocked(listPlugins).mockResolvedValue([approved]);
+  vi.mocked(listPlugins).mockResolvedValue(listed([approved]));
   vi.mocked(uninstallPlugin).mockRejectedValue(
     new ApiProblem({
       type: 'https://openllmproxy.dev/problems/plugin_pinned',
@@ -222,7 +229,7 @@ it('explains an uninstall refused because providers pin the plugin', async () =>
 });
 
 it('keeps an uninstall the owner cancels', async () => {
-  vi.mocked(listPlugins).mockResolvedValue([pending]);
+  vi.mocked(listPlugins).mockResolvedValue(listed([pending]));
   vi.mocked(confirm).mockReturnValue(false);
   render();
   await settle();
@@ -233,7 +240,7 @@ it('keeps an uninstall the owner cancels', async () => {
 
 it('shows plugins read-only to other roles', async () => {
   role.current = 'viewer';
-  vi.mocked(listPlugins).mockResolvedValue([pending]);
+  vi.mocked(listPlugins).mockResolvedValue(listed([pending]));
   render();
   await settle();
   expect(host.textContent).toContain(
@@ -243,4 +250,23 @@ it('shows plugins read-only to other roles', async () => {
   expect(host.textContent).toContain('https://api.example.com');
   expect(host.querySelector('form')).toBeNull();
   expect(host.querySelectorAll('button')).toHaveLength(0);
+});
+
+it('marks a permitted unconfined plugin and shows the tier enabled', async () => {
+  const unconfined: Plugin = { ...approved, executable: 'reference' };
+  vi.mocked(listPlugins).mockResolvedValue(listed([unconfined], true));
+  role.current = 'viewer';
+  render();
+  await settle();
+  const card = host.querySelector('article')!;
+  expect(
+    [...card.querySelectorAll('.badge')].map((badge) => badge.textContent)
+  ).toEqual(['Unconfined', 'Permitted']);
+  expect(card.textContent).toContain('Executable');
+  expect(card.textContent).toContain('reference');
+  const tier = host.querySelector('.unconfined')!;
+  expect(tier.querySelector('.badge')?.textContent).toBe('Enabled');
+  expect(tier.textContent).toContain(
+    'Only owners can review and permit unconfined plugins.'
+  );
 });

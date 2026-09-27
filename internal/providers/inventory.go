@@ -166,12 +166,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
 }
 
-// profiles lists the built-in profiles and those of approved plugins.
+// profiles lists the built-in profiles and those of usable plugins.
 func (s *Server) profiles(r *http.Request) (access.Reply, error) {
 	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
 		return access.Reply{}, err
 	}
-	pluginProfiles, err := plugins.Profiles(r.Context(), s.Access.Pool)
+	pluginProfiles, err := plugins.Profiles(r.Context(), s.Access.Pool, s.Unconfined)
 	if err != nil {
 		return access.Reply{}, err
 	}

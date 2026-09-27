@@ -4,12 +4,14 @@ A provider plugin is an operator-installed extension that supplies a provider
 profile's authentication and hosting around a built-in dialect. It never
 defines a dialect: codecs and interaction contracts stay first-party. Plugins
 are confined: OLP runs their code on [wazero](https://wazero.io) and grants
-every capability they have. [ADR 0005](adr/0005-confined-provider-plugins.md)
-records the design; the [authoring guide](plugin-authoring.md) covers writing
-one.
+every capability they have, unless a deployment enables the experimental
+[unconfined tier](#unconfined-plugins-experimental).
+[ADR 0005](adr/0005-confined-provider-plugins.md) records the design; the
+[authoring guide](plugin-authoring.md) covers writing one.
 
 This page covers installing, reviewing and approving plugins, creating
-providers from their profiles, enrolling grants, and uninstalling plugins.
+providers from their profiles, enrolling grants, permitting unconfined
+plugins, and uninstalling them.
 
 ## Upstream terms of use
 
@@ -282,7 +284,8 @@ match the provider's authentication.
 
 `DELETE /api/v1/plugins/{digest}`, with the current ETag in `If-Match`, deletes
 the module and its approval. Installing the same module again starts over, with
-approval pending.
+approval pending. Uninstalling an unconfined plugin withdraws its permission;
+its executable stays in the image.
 
 A plugin stays installed while a provider pins it: uninstalling is refused with
 `409 plugin_pinned`, naming the providers, while any provider's draft or any of
@@ -321,21 +324,135 @@ plugin logs, including its standard output and standard error, reaches OLP's
 log with the secret values of the call redacted, attributed by `plugin_digest`
 and `plugin_method`.
 
+## Unconfined plugins (experimental)
+
+Some plugins need what confinement withholds, such as a native library or an
+upstream's own client. A deployment may enable the experimental unconfined
+tier for them. An unconfined plugin is a native executable in the deployment's
+image, which OLP runs as a subprocess with the operating system privileges of
+its own processes, speaking the same ABI over standard input and output (see
+the [authoring guide](plugin-authoring.md#unconfined-plugins)). Nothing
+confines it: it receives the credentials and requests OLP hands it, can read
+whatever OLP's processes can, and reaches any network outside the egress
+policy. Enable the tier only for executables you trust as much as OLP itself.
+
+### Enabling the tier
+
+Only a deployment setting enables the tier, never the management API:
+`OLP_UNCONFINED_PLUGIN_DIR` (flag `--unconfined-plugin-dir`, Helm
+`config.unconfinedPluginDir`, Compose `OLP_UNCONFINED_PLUGIN_DIR`) names the
+absolute directory of the image that holds the executables. Set it for every
+process: control reviews and permits plugins and runs them for probes and
+certification, and gateways run them for traffic.
+
+The release image holds no plugins, so build an image that adds them. It is
+distroless, so build each plugin as a static executable:
+
+```dockerfile
+FROM ghcr.io/tyk-swe/olp:0.1.0
+COPY --chmod=0555 acme /opt/olp/plugins/acme
+```
+
+OLP lists the regular files in the directory that have an execute permission
+and a name of 1–128 letters, digits, dots, underscores and hyphens, starting
+with a letter or digit.
+
+### Reviewing and permitting
+
+The Plugins page's **Unconfined plugins** section shows whether the deployment
+enables the tier. Where it does, an owner sees each executable by name, digest
+and size, reviews one, which runs it to read the manifest it declares, and
+permits it after acknowledging the high-risk warning and confirming their
+identity.
+
+| Operation | Purpose |
+| --- | --- |
+| `GET /api/v1/unconfined-plugins` | Lists the executables, without running them, and whether each build is permitted; `503 unconfined_plugin_dir_unreadable` when OLP can't read the directory. |
+| `GET /api/v1/unconfined-plugins/{executable}` | Runs the executable and returns its digest and manifest. |
+| `POST /api/v1/unconfined-plugins/{executable}/permit` | Permits the build with the digest the owner reviewed: `{"digest": "…", "acknowledge_risk": true}`. |
+
+Reviewing refuses an executable as installing refuses a module, with a `422`
+problem: `plugin_executable_invalid` when it can't be started or doesn't speak
+the ABI over standard input and output, and otherwise the codes listed under
+[Installing](#installing). Permitting takes:
+
+- an owner with a user session, as every plugin change does;
+- `acknowledge_risk: true`, the owner's acknowledgement that the plugin runs
+  unconfined;
+- a recent authentication for the `plugin_permit` purpose, by password
+  (`POST /api/v1/profile/reauthenticate`) or linked OIDC identity, within the
+  last five minutes, which permitting spends; `428 reauthentication_required`
+  otherwise;
+- the reviewed build: OLP runs the executable again and refuses with
+  `409 plugin_executable_changed` if its digest differs from the one reviewed.
+
+A permitted build is an installed plugin, approved in the same step: it
+appears in `GET /api/v1/plugins` with its `executable`, its profiles appear in
+the catalogue with `plugin.unconfined: true`, and provider revisions pin its
+digest as they pin a module's. A new build of the executable has a new digest,
+which an owner permits again.
+
+### Running
+
+A process starts an unconfined plugin's executable for the plugin's first
+call, with no arguments and an empty environment, in the unconfined plugin
+directory, after checking that the executable still has the permitted digest
+(`plugin_executable_changed` otherwise). One subprocess then serves every call
+the process makes to the plugin, concurrently, and keeps running between them.
+Every call the confined runtime serves works through it, such as a profile's
+signing hook or a grant enrollment step.
+
+- A call is answered within 10 seconds, including starting the subprocess, or
+  fails with `plugin_timed_out`. A plugin that leaves a call unanswered that
+  long may be stuck, so OLP stops it, and the calls in flight on it fail with
+  `plugin_failed`. This holds for a call whose caller gave up, such as a
+  request that ended: OLP tells the plugin, which still answers it.
+- A subprocess that exits fails its calls in flight with `plugin_failed`,
+  naming its exit status, and so does one that writes a message over 1 MiB or
+  anything else the ABI doesn't allow.
+- OLP starts a stopped plugin again for its next call.
+- OLP bounds no unconfined plugin's memory.
+
+What the plugin logs for a call is attributed to it and redacted of the call's
+secret values, within the same bounds as a confined plugin's. Its standard
+error, and records it logs without a call, are logged a line at a time with
+the plugin's digest, redacted of the secret values of every call in flight.
+
+### Without the tier
+
+A deployment that doesn't enable the tier, including one whose setting was
+removed after plugins were permitted:
+
+- lists no unconfined plugin or executable: `GET /api/v1/unconfined-plugins`
+  and its paths answer `404 unconfined_plugins_disabled`, and the console shows
+  the tier disabled;
+- offers no unconfined plugin's profiles, and refuses to pin one with
+  `422 plugin_unconfined_disabled`;
+- refuses to activate a provider revision that pins one, with
+  `422 plugin_unconfined_disabled`;
+- serves none of their targets: a gateway plans them ineligible with reason
+  `plugin_unconfined_disabled`, and a route with no other eligible target
+  answers `503`.
+
+Permissions stay recorded, so enabling the tier again restores them.
+
 ## Permissions and audit
 
 | Operation | Who |
 | --- | --- |
 | List and read plugins | Any role, and management tokens with `read` |
 | Install, approve, uninstall | An owner with a user session |
+| List, review and permit unconfined plugins | An owner with a user session; permitting also takes a recent authentication |
 | Create and change plugin providers | The `configure` scope, as for any provider |
 | Enroll grants | The `configure` scope |
 
-Audit records `plugin.install`, `plugin.approve` and `plugin.uninstall` with the
-owner as actor and the digest as resource. A repeated upload of an installed
-digest records nothing. It records `provider.grant.enroll` for every
-continuation that reaches the plugin: a success with the new credential version
-as resource, a failure with the provider. Audit never records what was pasted
-back or obtained.
+Audit records `plugin.install`, `plugin.approve`, `plugin.permit` and
+`plugin.uninstall` with the owner as actor and the digest as resource. A
+repeated upload of an installed digest records nothing. It records
+`provider.grant.enroll` for every continuation that reaches the plugin: a
+success with the new credential version as resource, a failure with the
+provider. Audit never records what was pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
-[backups](operations.md#backup-and-restore) include them.
+[backups](operations.md#backup-and-restore) include them. Unconfined plugins'
+executables are not: they belong to the deployment's image.

@@ -110,12 +110,24 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newAccessHarnessAtInstallation(t, pool, dbURL, installation)
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, "")
+}
+
+// newUnconfinedHarness is newAccessHarnessOn for a deployment that enables
+// unconfined plugins, whose executables live in dir.
+func newUnconfinedHarness(t *testing.T, pool *pgxpool.Pool, dbURL, dir string) *accessHarness {
+	t.Helper()
+	installation, err := database.Installation(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, dir)
 }
 
 // newAccessHarnessAtInstallation composes the harness over an already migrated
-// database and its installation identity.
-func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation string) *accessHarness {
+// database and its installation identity. A deployment whose unconfinedDir
+// is set enables unconfined plugins.
+func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation, unconfinedDir string) *accessHarness {
 	t.Helper()
 	key := strings.Repeat("ab", 32)
 	ringJSON := `{"active_version":1,"keys":[{"version":1,"key":"` + key + `"}]}`
@@ -142,8 +154,13 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
-	pluginHost := plugins.NewHost(pluginRuntime, pool)
-	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost}, log)
+	var unconfined *plugins.Unconfined
+	if unconfinedDir != "" {
+		unconfined = plugins.NewUnconfined(unconfinedDir, plugins.DefaultLimits, log)
+	}
+	pluginHost := plugins.NewHost(pluginRuntime, unconfined, pool)
+	t.Cleanup(func() { pluginHost.Close(context.Background()) })
+	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost, UnconfinedPlugins: unconfined != nil}, log)
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +182,8 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool)
 	catalogue := providers.New(server, &policy, pluginHost)
-	catalogue.Plugins = pluginRuntime
+	catalogue.Unconfined = unconfined
+	catalogue.Plugins = pluginHost
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)
@@ -173,9 +191,9 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	(&management.Overview{Access: server}).Register(mux)
 	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
 	(&resources.Management{Access: server, Pool: pool}).Register(mux)
-	routes.New(server).Register(mux)
+	(&routes.Server{Access: server, UnconfinedPlugins: unconfined != nil}).Register(mux)
 	(&configuration.Server{
-		Access: server, Egress: &policy, VendorKind: providers.VendorKind,
+		Access: server, Egress: &policy, Unconfined: unconfined, VendorKind: providers.VendorKind,
 		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
@@ -183,7 +201,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		},
 	}).Register(mux)
 	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	(&plugins.Management{Access: server, Runtime: pluginRuntime}).Register(mux)
+	(&plugins.Management{Access: server, Runtime: pluginRuntime, Unconfined: unconfined}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
 	gw.Register(mux)

@@ -48,9 +48,9 @@ type Enrollment struct {
 // provider with its option values, and returns it ready to Save, with the
 // authorization URL the operator opens. The step reaches the plugin's approved
 // origins through client, the provider's network path.
-func Start(ctx context.Context, rt *plugins.Runtime, q access.Queryer, e Enrollment, options map[string]string, client *http.Client) (Enrollment, error) {
+func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[string]string, client *http.Client) (Enrollment, error) {
 	var authorization abi.GrantAuthorization
-	manifest, err := step(ctx, rt, q, e, options, client, plugins.Call{Method: abi.MethodGrantStart, Params: abi.GrantStart{Profile: e.ProfileID}}, &authorization)
+	manifest, err := step(ctx, host, e, options, client, plugins.Call{Method: abi.MethodGrantStart, Params: abi.GrantStart{Profile: e.ProfileID}}, &authorization)
 	if err != nil {
 		return e, failure(err)
 	}
@@ -133,14 +133,14 @@ func unavailable(ctx context.Context, q access.Queryer, providerID, id, principa
 // back for a grant, on behalf of the provider with its option values, and
 // checks that the grant is one the profile's hosting adaptation can place. The
 // step reaches the plugin's approved origins through client.
-func Exchange(ctx context.Context, rt *plugins.Runtime, q access.Queryer, e Enrollment, input string, options map[string]string, client *http.Client) (abi.Grant, error) {
+func Exchange(ctx context.Context, host *plugins.Host, e Enrollment, input string, options map[string]string, client *http.Client) (abi.Grant, error) {
 	var grant abi.Grant
 	call := plugins.Call{
 		Method:  abi.MethodGrantExchange,
 		Params:  abi.GrantExchange{Profile: e.ProfileID, Session: e.session, Input: input},
 		Secrets: []string{e.session, input},
 	}
-	manifest, err := step(ctx, rt, q, e, options, client, call, &grant)
+	manifest, err := step(ctx, host, e, options, client, call, &grant)
 	if err != nil {
 		return grant, failure(err)
 	}
@@ -154,22 +154,18 @@ func Exchange(ctx context.Context, rt *plugins.Runtime, q access.Queryer, e Enro
 	return grant, nil
 }
 
-// step runs one grant step of an enrollment on its usable plugin, on behalf of
-// the enrollment's provider with its option values, granting it HTTP to the
-// plugin's approved origins through client, and returns the plugin's manifest.
-func step(ctx context.Context, rt *plugins.Runtime, q access.Queryer, e Enrollment, options map[string]string, client *http.Client, call plugins.Call, result any) (abi.Manifest, error) {
-	manifest, module, err := plugins.Usable(ctx, q, e.PluginDigest)
+// step runs one grant step of an enrollment on its usable plugin, confined or
+// unconfined, on behalf of the enrollment's provider with its option values,
+// granting it HTTP to the plugin's approved origins through client, and
+// returns the plugin's manifest.
+func step(ctx context.Context, host *plugins.Host, e Enrollment, options map[string]string, client *http.Client, call plugins.Call, result any) (abi.Manifest, error) {
+	manifest, err := host.Manifest(ctx, e.PluginDigest)
 	if err != nil {
 		return manifest, err
 	}
-	loaded, err := rt.Load(ctx, module)
-	if err != nil {
-		return manifest, err
-	}
-	defer loaded.Close(context.WithoutCancel(ctx))
 	call.Provider = &abi.Provider{Profile: e.ProfileID, Options: options}
 	call.HTTP = &plugins.HTTP{Origins: manifest.Origins, Client: client}
-	return manifest, loaded.Call(ctx, call, result)
+	return manifest, host.Call(ctx, e.PluginDigest, call, result)
 }
 
 // failure is the problem the operator sees for a grant step that failed.

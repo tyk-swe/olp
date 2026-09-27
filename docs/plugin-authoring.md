@@ -387,9 +387,10 @@ against a fictional authority with the authorization code flow and PKCE.
 ### Fetch
 
 `plugin.Fetch` sends an HTTP request through OLP, the only way a plugin reaches
-the network. OLP grants it to grant enrollment steps, and sends a request only
-to one of the plugin's approved origins, over the provider's network path and
-egress policy. It sets the framing headers itself; a plugin may not set `Host`,
+the network. OLP grants it to grant enrollment steps, so pass it the step's
+context: `plugin.Fetch(ctx, request)`. OLP sends a request only to one of the
+plugin's approved origins, over the provider's network path and egress policy.
+It sets the framing headers itself; a plugin may not set `Host`,
 `Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect rather
 than following it, and any response the upstream sent, whatever its status.
 Request and response bodies are at most 512 KiB. A request OLP refuses or can't
@@ -434,11 +435,54 @@ directly; outside OLP, `plugin.Log` discards its records and `plugin.Fetch`
 fails as unavailable. Build the module for `wasip1` in your tests to check that
 it compiles as a reactor.
 
+## Unconfined plugins
+
+A deployment that enables the experimental
+[unconfined tier](plugins.md#unconfined-plugins-experimental) can run a plugin
+as a native executable in its image instead, with the operating system
+privileges of OLP's processes, once an owner permits it. The same source builds
+either way: call `plugin.Serve` from `main`, which a WASI reactor never runs.
+
+```go
+func main() { plugin.Serve() }
+```
+
+Build it as a static executable for the deployment's image, which has no C
+library of its own to link against:
+
+```sh
+CGO_ENABLED=0 GOOS=linux go build -o acme .
+```
+
+`Serve` serves OLP's calls over standard input and output until OLP closes
+standard input. OLP starts the executable with no arguments and an empty
+environment, and one process serves all its calls from one OLP process. So:
+
+- calls run concurrently, each on a goroutine of its own, so package-level
+  state needs synchronization;
+- a method's context is cancelled when OLP stops waiting for its call, such as
+  when the request it signs ends. Return promptly: a call left unanswered for
+  10 seconds, cancelled or not, makes OLP stop the process, failing every call
+  in flight, and start it again for the next call;
+- standard output carries the ABI, so `Serve` points `os.Stdout` at standard
+  error, which OLP logs a line at a time;
+- log with the call's context, such as `plugin.Log.InfoContext(ctx, …)`, so OLP
+  attributes the record to its call and redacts the call's secret values. OLP
+  redacts a record without one, like standard error, of the secret values of
+  every call in flight.
+
+Nothing confines the plugin, so it reaches the network and files itself. OLP's
+capabilities remain available to it and behave as they do for a confined
+plugin, granted by call, which is why `plugin.Fetch` takes the call's context.
+
 ## ABI reference
 
 The ABI is defined in package
 [`sdk/plugin/abi`](../sdk/plugin/abi/abi.go), which OLP and the SDK share. The
-SDK implements all of it; this section is for authors of other SDKs.
+SDK implements all of it; this section is for authors of other SDKs. A confined
+plugin exchanges its [messages](#messages) through a WebAssembly
+[module](#module)'s exports, and an unconfined plugin through the
+[stdio transport](#stdio-transport).
 
 ### Module
 
@@ -504,7 +548,7 @@ uses and its option values:
 
 ```go
 if provider, ok := plugin.ProviderOf(ctx); ok {
-	plugin.Log.Info("serving an account", "profile", provider.Profile, "account", provider.Options["account"])
+	plugin.Log.InfoContext(ctx, "serving an account", "profile", provider.Profile, "account", provider.Options["account"])
 }
 ```
 
@@ -535,3 +579,43 @@ The plugin calls, through `host_call`:
 
 A call may use only the capabilities OLP grants it; any other capability returns
 `unknown_method`. OLP grants `http` to `grant_start` and `grant_exchange`.
+
+### Stdio transport
+
+An unconfined plugin exchanges the same messages over its standard input and
+output, each wrapped in a frame: one JSON document per line, at most 1 MiB for
+a frame the plugin writes. Blank lines are ignored.
+
+The plugin first writes its ABI version, and OLP runs nothing else until it
+has, within the call's time limit:
+
+```json
+{"abi_version": 1}
+```
+
+OLP then writes each call it makes as a request with an ID, numbered from 1,
+and the plugin answers it with a response carrying the same ID, in any order:
+
+```json
+{"id": 7, "request": {"method": "sign", "params": {}, "provider": {"profile": "acme-chat", "options": {}}}}
+{"id": 7, "response": {"result": {"headers": {"X-Acme-Signature": "…"}}}}
+```
+
+The plugin numbers its capability requests from 1 in the same way and names,
+in `call`, the ID of the call each serves, whose capabilities it may use. OLP
+answers with the request's ID. A request that names no call may only log.
+
+```json
+{"id": 3, "call": 7, "request": {"method": "log", "params": {"level": "info", "message": "signing"}}}
+{"id": 3, "response": {}}
+```
+
+When OLP stops waiting for a call, it writes a cancellation, and the plugin
+still answers the call, promptly:
+
+```json
+{"id": 7, "cancel": true}
+```
+
+A plugin that writes a line that is not such a frame, or a frame over 1 MiB,
+is stopped. When OLP closes standard input, the plugin exits.

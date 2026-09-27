@@ -45,6 +45,7 @@ bind.
 | `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
 | `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
+| `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can. |
 | `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
 | `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
@@ -300,8 +301,9 @@ unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
 credential references), cross-project targets, bindings for refs the artifact
 does not declare, and secrets over 64 KiB. A plugin provider pins its plugin
-profile as a saved draft does: `plugin_not_installed`, `plugin_not_approved`
-and `plugin_profile_unknown` refuse the artifact, and its endpoint follows from
+profile as a saved draft does: `plugin_not_installed`, `plugin_not_approved`,
+`plugin_unconfined_disabled` and `plugin_profile_unknown` refuse the artifact,
+and its endpoint follows from
 the profile's address and the provider's plugin options. Plan reports
 `secret_binding_required` blockers for credential refs that do not already
 resolve to a current same-named slot credential on the destination.

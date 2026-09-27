@@ -14,9 +14,14 @@ for mode in gateway control worker; do
     --set "$mode.enabled=true" >/dev/null
 done
 helm template olp deploy/helm --set-string image.digest="sha256:$(printf '%064d' 0)" >/dev/null
+unconfined=$(helm template olp deploy/helm --set config.unconfinedPluginDir=/opt/olp/plugins | grep -c 'OLP_UNCONFINED_PLUGIN_DIR' || true)
+if [ "$unconfined" != 3 ] || helm template olp deploy/helm | grep -q OLP_UNCONFINED_PLUGIN_DIR; then
+  echo "Expected OLP_UNCONFINED_PLUGIN_DIR on every component only when config.unconfinedPluginDir is set" >&2
+  exit 1
+fi
 for invalid in 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
-  'networkPolicy.enabled=true'; do
+  'networkPolicy.enabled=true' 'config.unconfinedPluginDir=plugins'; do
   if helm template olp deploy/helm --set "$invalid" >/dev/null 2>&1; then
     echo "Expected invalid Helm configuration to fail: $invalid" >&2
     exit 1

@@ -54,6 +54,10 @@ type Config struct {
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
 	Signer connectors.Signer
+	// UnconfinedPlugins is set where the deployment enables unconfined
+	// plugins. Elsewhere, the gateway refuses targets of providers whose
+	// plugin is unconfined.
+	UnconfinedPlugins bool
 }
 
 // Runtime is the pinned authority, release and credential source.
@@ -695,7 +699,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
 	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
 				return source.parameters, source.demand

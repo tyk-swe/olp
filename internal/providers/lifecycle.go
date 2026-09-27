@@ -122,7 +122,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
-	if err = input.Configuration.Pin(r.Context(), tx); err != nil {
+	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
 		return access.Reply{}, err
 	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
@@ -261,7 +261,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
-	if err = input.Configuration.Pin(r.Context(), tx); err != nil {
+	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
 		return access.Reply{}, err
 	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
@@ -459,6 +459,11 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 
 func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		// The plugin a draft pinned may since have become unusable, such as
+		// an unconfined plugin in a deployment that no longer enables them.
+		if err := current.Configuration.Pin(ctx, tx, s.Unconfined); err != nil {
+			return access.Reply{}, err
+		}
 		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
 		}

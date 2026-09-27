@@ -41,10 +41,10 @@ func TestPluginProvidersTakeNoKindDefaults(t *testing.T) {
 	if problem, ok := errors.AsType[*access.Problem](cfg.Validate(&egress.Policy{})); !ok || problem.Field != "configuration.profile_revision" {
 		t.Fatal("an unresolved plugin profile passed validation")
 	}
-	manifest, _ := json.Marshal(abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+	manifest, _ := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
 		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
 		Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}},
-	}}})
+	}}}})
 	if err := cfg.pinned(manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -69,11 +69,11 @@ func TestPluginProvidersTakeNoKindDefaults(t *testing.T) {
 // part of what certification was gathered against.
 func TestPluginProviderOptionsFollowTheirProfile(t *testing.T) {
 	digest := strings.Repeat("ab", 32)
-	manifest, _ := json.Marshal(abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+	manifest, _ := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
 		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
 		Options: []abi.Option{{Name: "account", Label: "Account", Pattern: "^[a-z]+$"}, {Name: "region", Label: "Region", Optional: true, Enum: []string{"us", "eu"}}},
 		Hosting: abi.Hosting{Address: "https://api.acme.example/accounts/{options.account}/v1", Headers: map[string]string{"Authorization": "Token {credential}"}},
-	}}})
+	}}}})
 	configured := func(options map[string]string) Configuration {
 		cfg := Configuration{Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: digest, Options: Options{PluginOptions: options}}
 		cfg.Normalize()

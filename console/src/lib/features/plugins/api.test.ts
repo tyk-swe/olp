@@ -27,6 +27,7 @@ const plugin: Plugin = {
   digest: 'b'.repeat(64),
   abi_version: 1,
   size_bytes: 8,
+  executable: null,
   manifest: {
     name: 'acme',
     version: '1.0.0',
@@ -57,8 +58,9 @@ afterEach(async () => {
 
 describe('plugin management api', () => {
   it('lists installed plugins', async () => {
-    const requests = captureRequests(() => jsonResponse({ items: [plugin] }));
-    expect(await listPlugins()).toEqual([plugin]);
+    const listed = { items: [plugin], unconfined_plugins_enabled: false };
+    const requests = captureRequests(() => jsonResponse(listed));
+    expect(await listPlugins()).toEqual(listed);
     expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/plugins');
   });
 

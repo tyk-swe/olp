@@ -267,7 +267,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	candidates := make(map[string][]string, len(route.Targets))
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !connectorsSupports(p, request.Op, x.mode) {
 				return errors.New("connector capability unavailable")

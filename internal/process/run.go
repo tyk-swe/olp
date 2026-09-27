@@ -187,6 +187,10 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 		}
+		var unconfined *plugins.Unconfined
+		if c.UnconfinedPluginDir != "" {
+			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits, log)
+		}
 		var pluginHost *plugins.Host
 		if c.Mode.Management() || c.Mode.Inference() {
 			// Gateways and control's probes run signing hooks per upstream
@@ -196,7 +200,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			defer serving.Close(context.Background())
-			pluginHost = plugins.NewHost(serving, pool)
+			pluginHost = plugins.NewHost(serving, unconfined, pool)
+			defer pluginHost.Close(context.Background())
 			gw = gateway.New(rt, &policy, gateway.Config{
 				MaxInFlight:        c.MaxInFlightInference,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
@@ -208,6 +213,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				TrustedProxies:     c.TrustedProxyCIDRs,
 				AdmissionPool:      inferencePool,
 				Signer:             pluginHost,
+				UnconfinedPlugins:  unconfined != nil,
 			}, log)
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
@@ -281,7 +287,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			defer pluginRuntime.Close(context.Background())
-			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, pluginRuntime, pluginHost, log)
+			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, pluginRuntime, pluginHost, unconfined, log)
 		}
 	}
 	if err := startup.Err(); err != nil {

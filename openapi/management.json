@@ -4707,16 +4707,16 @@
       },
       "Plugin": {
         "additionalProperties": false,
-        "description": "An installed provider plugin: its module digest and the manifest it declared at install.",
+        "description": "An installed provider plugin: its digest and the manifest it declared. A confined plugin's WebAssembly module is stored with it; an unconfined plugin's executable lives in the deployment's image.",
         "properties": {
           "abi_version": {
-            "description": "Plugin ABI version the module was built for.",
+            "description": "Plugin ABI version the plugin was built for.",
             "format": "int32",
             "minimum": 1,
             "type": "integer"
           },
           "approved_at": {
-            "description": "When an owner approved the declared origins; null while the plugin awaits approval and can't be used.",
+            "description": "When an owner approved the declared origins, or permitted an unconfined plugin; null while the plugin awaits approval and can't be used.",
             "format": "date-time",
             "type": [
               "string",
@@ -4737,13 +4737,20 @@
             ]
           },
           "digest": {
-            "description": "Lowercase hexadecimal SHA-256 digest of the module, which identifies the plugin.",
+            "description": "Lowercase hexadecimal SHA-256 digest of the module, or of an unconfined plugin's executable, which identifies the plugin.",
             "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "etag": {
             "format": "uuid",
             "type": "string"
+          },
+          "executable": {
+            "description": "For an unconfined plugin, the name of its executable in the deployment's unconfined plugin directory; null for a confined plugin. Unconfined plugins are listed only where the deployment enables them.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "installed_at": {
             "format": "date-time",
@@ -4760,7 +4767,7 @@
             "$ref": "#/components/schemas/PluginManifest"
           },
           "size_bytes": {
-            "description": "Size of the module.",
+            "description": "Size of the module or executable.",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -4770,6 +4777,7 @@
           "digest",
           "abi_version",
           "size_bytes",
+          "executable",
           "manifest",
           "installed_by",
           "installed_by_email",
@@ -4806,10 +4814,15 @@
               "$ref": "#/components/schemas/Plugin"
             },
             "type": "array"
+          },
+          "unconfined_plugins_enabled": {
+            "description": "Whether this deployment enables the experimental unconfined plugin tier. Only a deployment setting enables it, never the management API.",
+            "type": "boolean"
           }
         },
         "required": [
-          "items"
+          "items",
+          "unconfined_plugins_enabled"
         ],
         "type": "object"
       },
@@ -6628,12 +6641,16 @@
         "description": "The installed provider plugin that supplies a profile.",
         "properties": {
           "digest": {
-            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module, which is the profile revision.",
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module, or of an unconfined plugin's executable, which is the profile revision.",
             "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "name": {
             "type": "string"
+          },
+          "unconfined": {
+            "description": "Set for an unconfined plugin, which runs with native privileges.",
+            "type": "boolean"
           },
           "version": {
             "type": "string"
@@ -7356,7 +7373,7 @@
             "writeOnly": true
           },
           "purpose": {
-            "description": "Exact security operation authorized by this one-time grant.",
+            "description": "Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.",
             "type": "string"
           },
           "resource_id": {
@@ -9607,6 +9624,117 @@
           "realtime"
         ],
         "type": "string"
+      },
+      "UnconfinedExecutable": {
+        "additionalProperties": false,
+        "description": "An executable in the deployment's unconfined plugin directory, which an owner may review and permit as an unconfined plugin.",
+        "properties": {
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnconfinedExecutable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableReview": {
+        "additionalProperties": false,
+        "description": "An executable in the unconfined plugin directory with the manifest it declared when OLP ran it for review.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the executable was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted",
+          "abi_version",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "UnconfinedPluginPermitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge_risk": {
+            "description": "Must be true: the owner acknowledges that an unconfined plugin runs with the operating system privileges of OLP's processes, outside every confinement, and can reach anything they can.",
+            "type": "boolean"
+          },
+          "digest": {
+            "description": "Digest of the executable the owner reviewed. OLP refuses the permission if the executable has changed since.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "acknowledge_risk"
+        ],
+        "type": "object"
       },
       "UpdateApiKeyRequest": {
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
@@ -14859,7 +14987,7 @@
     },
     "/api/v1/plugins": {
       "get": {
-        "description": "Lists installed provider plugins with the profiles and origins each declares. Any role with read access may list them.",
+        "description": "Lists installed provider plugins with the profiles and origins each declares: confined plugins and, where the deployment enables the unconfined tier, the unconfined plugins an owner permitted. Any role with read access may list them.",
         "operationId": "list_plugins",
         "responses": {
           "200": {
@@ -15027,7 +15155,7 @@
     },
     "/api/v1/plugins/{plugin_digest}": {
       "delete": {
-        "description": "Uninstalls a provider plugin and deletes its module. A plugin that a provider draft or published provider revision pins can't be uninstalled.",
+        "description": "Uninstalls a provider plugin: it deletes a confined plugin's module, or withdraws the permission of an unconfined plugin, whose executable stays in the image. A plugin that a provider draft or published provider revision pins can't be uninstalled.",
         "operationId": "uninstall_plugin",
         "parameters": [
           {
@@ -22297,6 +22425,285 @@
         "security": [],
         "tags": [
           "setup"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins": {
+      "get": {
+        "description": "Lists the executables in the deployment's unconfined plugin directory, without running them. Only an owner with a user session sees them, and only where a deployment setting enables the experimental unconfined tier.",
+        "operationId": "list_unconfined_executables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableListResponse"
+                }
+              }
+            },
+            "description": "Executables, by name"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}": {
+      "get": {
+        "description": "Runs an executable in the unconfined plugin directory to read the manifest it declares, for an owner to review before permitting it. OLP refuses an executable that doesn't speak the plugin ABI over standard input and output, was built for another ABI version, or declares an invalid manifest.",
+        "operationId": "review_unconfined_executable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableReview"
+                }
+              }
+            },
+            "description": "The executable and its manifest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/permit": {
+      "post": {
+        "description": "Permits an executable as an unconfined plugin, which providers may then pin by its digest. An unconfined plugin runs with native privileges, so permitting takes an owner who reauthenticated for plugin_permit within five minutes and acknowledges that risk. OLP runs the executable again and refuses the permission if it no longer has the reviewed digest.",
+        "operationId": "permit_unconfined_plugin",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnconfinedPluginPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Unconfined plugin permitted",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "The permitted plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
         ]
       }
     },

@@ -2,12 +2,15 @@ package runtime
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -210,6 +213,45 @@ func TestPlanningExcludesIneligibleCredentialsWithTheirReason(t *testing.T) {
 		got := reasons(plan())
 		if got[ids[0]] != "no_eligible_credentials" || got[ids[1]] != "network_credential_"+string(reason) {
 			t.Fatalf("%s reasons: %v", reason, got)
+		}
+	}
+}
+
+// Only a deployment that enables unconfined plugins serves targets of
+// providers whose plugin is unconfined; a confined plugin's are served
+// anywhere.
+func TestPlanningRefusesUnconfinedPluginTargetsWithoutTheTier(t *testing.T) {
+	s, slug, ids := planningFixture()
+	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
+		Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}},
+	}}}
+	confined, err := connectors.NewPluginProfile(strings.Repeat("ab", 32), manifest, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unconfined, err := connectors.NewUnconfinedPluginProfile(strings.Repeat("cd", 32), manifest, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, plugin := range map[string]*connectors.PluginProfile{ids[0]: confined, ids[1]: unconfined} {
+		p := s.Providers[id]
+		p.Kind, p.Plugin = connectors.KindPlugin, plugin
+		s.Providers[id] = p
+	}
+	for enabled, want := range map[bool]string{false: "plugin_unconfined_disabled", true: ""} {
+		plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{UnconfinedPlugins: enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reasons := map[string]string{}
+		for _, decision := range plan.Decisions {
+			if decision.Reason != nil {
+				reasons[decision.ProviderID] = *decision.Reason
+			}
+		}
+		if reasons[ids[0]] != "" || reasons[ids[1]] != want {
+			t.Fatalf("with the tier enabled %v, reasons %v", enabled, reasons)
 		}
 	}
 }

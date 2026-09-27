@@ -27,7 +27,7 @@ func digestOf(module []byte) string {
 
 func wantUsable(t *testing.T, h *accessHarness, digest, code string) {
 	t.Helper()
-	_, _, err := plugins.Usable(t.Context(), h.Pool, digest)
+	_, err := plugins.Usable(t.Context(), h.Pool, nil, digest)
 	if refusal, ok := errors.AsType[*plugins.Error](err); code == "" && err != nil || code != "" && (!ok || refusal.Code != code) {
 		t.Fatalf("want usability %q, got %v", code, err)
 	}
@@ -101,7 +101,7 @@ func TestOwnerInstallsApprovesAndUninstallsAPlugin(t *testing.T) {
 		t.Fatalf("approved twice: %s", code)
 	}
 	wantUsable(t, h, digest, "")
-	if _, stored, _ := plugins.Usable(t.Context(), h.Pool, digest); !bytes.Equal(stored, module) {
+	if stored, _ := plugins.Usable(t.Context(), h.Pool, nil, digest); !bytes.Equal(stored.Module, module) {
 		t.Fatal("the stored module differs from the upload")
 	}
 

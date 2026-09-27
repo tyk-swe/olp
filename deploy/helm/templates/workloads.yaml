@@ -170,6 +170,10 @@ spec:
             - name: OLP_CONNECTOR_CONFIG_FILE
               value: {{ $root.Values.config.connectorConfigFile | quote }}
             {{- end }}
+            {{- if $root.Values.config.unconfinedPluginDir }}
+            - name: OLP_UNCONFINED_PLUGIN_DIR
+              value: {{ $root.Values.config.unconfinedPluginDir | quote }}
+            {{- end }}
             {{- if $providerEgressAllowCidrs }}
             - name: OLP_PROVIDER_EGRESS_ALLOW_CIDRS
               value: {{ $providerEgressAllowCidrs | quote }}

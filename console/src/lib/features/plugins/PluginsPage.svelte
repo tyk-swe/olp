@@ -5,6 +5,7 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { pluginKeys } from '$lib/features/plugins/pluginKeys';
+  import UnconfinedPlugins from '$lib/features/plugins/UnconfinedPlugins.svelte';
   import {
     approvePlugin,
     installPlugin,
@@ -32,6 +33,11 @@
 
   function title(plugin: Plugin) {
     return `${plugin.manifest.name} ${plugin.manifest.version}`;
+  }
+
+  function status(plugin: Plugin) {
+    if (plugin.executable) return 'Permitted';
+    return plugin.approved_at ? 'Approved' : 'Pending approval';
   }
 
   async function run(label: string, action: () => Promise<void>) {
@@ -75,7 +81,10 @@
   }
 
   async function uninstall(plugin: Plugin) {
-    if (!confirm(`Uninstall ${title(plugin)} and delete its module?`)) return;
+    const consequence = plugin.executable
+      ? 'and withdraw its permission? Its executable stays in the image.'
+      : 'and delete its module?';
+    if (!confirm(`Uninstall ${title(plugin)} ${consequence}`)) return;
     await run(`uninstall-${plugin.digest}`, async () => {
       await uninstallPlugin(plugin);
       if (reviewing === plugin.digest) reviewing = '';
@@ -95,7 +104,8 @@
       Provider plugins supply authentication and hosting around built-in
       dialects. OpenLLMProxy runs them confined and stores each module by its
       digest. A plugin can't be used until an owner approves the origins it
-      declares.
+      declares. A deployment may also enable experimental unconfined plugins,
+      which an owner permits one by one.
     </p>
   </div>
 </div>
@@ -146,7 +156,7 @@
       >Retry</button
     >
   </div>
-{:else if !plugins.data?.length}
+{:else if !plugins.data?.items.length}
   <section class="card empty-state">
     <h2>No plugins installed</h2>
     <p>
@@ -155,7 +165,7 @@
   </section>
 {:else}
   <div class="plugin-list">
-    {#each plugins.data as plugin (plugin.digest)}
+    {#each plugins.data.items as plugin (plugin.digest)}
       {@const approved = Boolean(plugin.approved_at)}
       {@const headingId = `plugin-${plugin.digest}`}
       <article class="card plugin" aria-labelledby={headingId}>
@@ -166,9 +176,15 @@
                 {plugin.manifest.description}
               </p>{/if}
           </div>
-          <span class="badge" class:success={approved} class:warning={!approved}
-            >{approved ? 'Approved' : 'Pending approval'}</span
-          >
+          <div class="badges">
+            {#if plugin.executable}<span class="badge danger">Unconfined</span
+              >{/if}
+            <span
+              class="badge"
+              class:success={approved}
+              class:warning={!approved}>{status(plugin)}</span
+            >
+          </div>
         </header>
         <dl class="facts">
           <div>
@@ -184,6 +200,12 @@
               </details>
             </dd>
           </div>
+          {#if plugin.executable}
+            <div>
+              <dt>Executable</dt>
+              <dd><code>{plugin.executable}</code></dd>
+            </div>
+          {/if}
           <div>
             <dt>ABI</dt>
             <dd>{plugin.abi_version}</dd>
@@ -193,14 +215,14 @@
             <dd>{formatBytes(plugin.size_bytes)}</dd>
           </div>
           <div>
-            <dt>Installed</dt>
+            <dt>{plugin.executable ? 'Permitted' : 'Installed'}</dt>
             <dd>
               {formatDate(plugin.installed_at)}<br /><small
                 >by {plugin.installed_by_email}</small
               >
             </dd>
           </div>
-          {#if approved}
+          {#if approved && !plugin.executable}
             <div>
               <dt>Approved</dt>
               <dd>
@@ -313,6 +335,14 @@
   </div>
 {/if}
 
+{#if plugins.data}
+  <UnconfinedPlugins
+    enabled={plugins.data.unconfined_plugins_enabled}
+    {canManage}
+    onPermitted={() => plugins.refetch()}
+  />
+{/if}
+
 <style>
   h2 {
     margin: 0;
@@ -373,6 +403,12 @@
   .plugin header p {
     margin: 0.4rem 0 0;
     color: var(--foreground-muted);
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.4rem;
   }
   .facts {
     display: grid;

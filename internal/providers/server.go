@@ -44,10 +44,14 @@ type QuotaSource interface {
 
 // Server serves the provider management surface.
 type Server struct {
-	Access      *access.Server
-	Egress      *egress.Policy
-	Quotas      QuotaSource
-	Plugins     *plugins.Runtime
+	Access *access.Server
+	Egress *egress.Policy
+	// Unconfined is the deployment's unconfined plugin tier, or nil where it
+	// enables none: providers may pin unconfined plugins only where it does.
+	Unconfined *plugins.Unconfined
+	Quotas     QuotaSource
+	// Plugins runs plugins' grant enrollment steps.
+	Plugins     *plugins.Host
 	Log         *slog.Logger
 	client      *http.Client
 	connections *egress.ConnectionClientCache
@@ -84,30 +88,30 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginManifestColumn
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
-	var configuration, manifest []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &manifest)
+	var configuration, plugin []byte
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin)
 	if err != nil {
 		return nil, err
 	}
-	if err = p.decodeConfiguration(configuration, manifest); err != nil {
+	if err = p.decodeConfiguration(configuration, plugin); err != nil {
 		return nil, err
 	}
 	return &p, nil
 }
 
-// decodeConfiguration reads a stored draft configuration, with the manifest
-// of the plugin it pins, if any.
-func (p *record) decodeConfiguration(configuration, manifest []byte) error {
+// decodeConfiguration reads a stored draft configuration, with the plugin it
+// pins, if any.
+func (p *record) decodeConfiguration(configuration, plugin []byte) error {
 	if err := json.Unmarshal(configuration, &p.Configuration); err != nil {
 		return err
 	}
 	p.Configuration.Normalize()
 	p.Configuration.ProviderID = p.ID
-	return p.Configuration.pinned(manifest)
+	return p.Configuration.pinned(plugin)
 }
 
 // load reads one provider, locking the row inside a transaction when asked.
@@ -191,17 +195,17 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 
 func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
-	var configuration, manifest []byte
+	var configuration, plugin []byte
 	var d detail
 	var draft credentialState
 	var usableCredential bool
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &manifest,
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin,
 		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
 		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
-	if err = p.decodeConfiguration(configuration, manifest); err != nil {
+	if err = p.decodeConfiguration(configuration, plugin); err != nil {
 		return nil, err
 	}
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag

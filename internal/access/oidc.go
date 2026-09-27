@@ -336,7 +336,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.UserID = p.ID
 		flow.SessionID = p.SessionID
 		if kind == "link" {
-			if err = s.consumeRecent(r, tx, p, "oidc_link", ""); err != nil {
+			if err = s.ConsumeRecent(r, tx, p, "oidc_link", ""); err != nil {
 				return Reply{}, err
 			}
 		}
@@ -591,7 +591,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 				return Reply{}, err
 			}
 			response.Cookies = append(response.Cookies, grant.Cookies...)
-			response.Location = "/settings/profile?reauthenticated=" + url.QueryEscape(flow.Purpose)
+			response.Location = reauthenticatedAt(flow.Purpose) + "?reauthenticated=" + url.QueryEscape(flow.Purpose)
 			if flow.ResourceID != "" {
 				response.Location += "&resource_id=" + url.QueryEscape(flow.ResourceID)
 			}
@@ -787,7 +787,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	if owner != p.ID {
 		return Reply{}, Forbidden()
 	}
-	if err = s.consumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
+	if err = s.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
@@ -897,4 +897,13 @@ func oidcFailureRedirect(flow oidcFlow, err error) Reply {
 		reply.Cookies = []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}
 	}
 	return reply
+}
+
+// reauthenticatedAt is the console page that continues the operation a
+// recent authentication for purpose authorizes.
+func reauthenticatedAt(purpose string) string {
+	if purpose == "plugin_permit" {
+		return "/plugins"
+	}
+	return "/settings/profile"
 }
