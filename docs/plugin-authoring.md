@@ -555,15 +555,18 @@ environment, and one process serves all its calls from one OLP process. So:
 - calls run concurrently, each on a goroutine of its own, so package-level
   state needs synchronization;
 - a method's context is cancelled when OLP stops waiting for its call, such as
-  when the request it signs ends. Return promptly: a call left unanswered for
-  10 seconds, cancelled or not, makes OLP stop the process, failing every call
-  in flight, and start it again for the next call;
+  when the request it signs ends or its caller's deadline passes. Return
+  promptly: a call left unanswered for 10 seconds, cancelled or not, makes OLP
+  stop the process, failing every call in flight, and start it again for the
+  next call;
 - standard output carries the ABI, so `Serve` points `os.Stdout` at standard
   error, which OLP logs a line at a time;
 - log with the call's context, such as `plugin.Log.InfoContext(ctx, …)`, so OLP
   attributes the record to its call and redacts the call's secret values. OLP
   redacts a record without one, like standard error, of the secret values of
-  every call in flight.
+  every call in flight or recently answered;
+- OLP runs the executable in a process group of its own and kills the group
+  when it stops the plugin, so anything the plugin starts stops with it.
 
 Nothing confines the plugin, so it reaches the network and files itself. OLP's
 capabilities remain available to it and behave as they do for a confined

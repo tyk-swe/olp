@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,12 +20,13 @@ import (
 // Executable is an unconfined plugin, which OLP runs as a subprocess of its
 // executable speaking the plugin ABI over standard input and output. One
 // process serves all its calls, concurrently. OLP starts it for the first
-// call, after checking that the executable still has its digest, and starts
-// it again for the next call after it exits or is stopped. A plugin that
-// leaves a call unanswered past the time limit, cancelled or not, may be
-// stuck, so OLP stops it, which fails the calls in flight on it. A call whose
-// result streams instead lasts as long as its caller waits, and is given the
-// time limit to answer once its caller stops waiting.
+// call, from a sealed copy of the executable whose digest it checked, and
+// starts it again for the next call after it exits or is stopped. A caller
+// that stops waiting for a call cancels it. A plugin that leaves a call
+// unanswered past the time limit, cancelled or not, may be stuck, so OLP stops
+// it with whatever it started, which fails the calls in flight on it. A call
+// whose result streams instead lasts as long as its caller waits, and is given
+// the time limit to answer once its caller stops waiting.
 type Executable struct {
 	// Digest is the lowercase hexadecimal SHA-256 digest of the executable.
 	Digest  string
@@ -33,7 +34,18 @@ type Executable struct {
 	tier    *Unconfined
 	mu      sync.Mutex
 	running *process
-	closed  bool
+	// starting is the start of a process that calls are waiting for, if
+	// one is under way.
+	starting *launch
+	closed   bool
+}
+
+// A launch is one start of a plugin's process, which every call waiting for a
+// process shares.
+type launch struct {
+	done    chan struct{}
+	process *process
+	err     error
 }
 
 // Call serves call on the plugin's process and decodes its result into
@@ -107,27 +119,62 @@ func (e *Executable) Close(context.Context) error {
 	running := e.running
 	e.mu.Unlock()
 	if running != nil {
-		running.stop("OLP closed it")
+		running.stop(errClosed.Error())
 	}
 	return nil
 }
 
-// process returns the plugin's running process, starting one if none runs.
+// process returns the plugin's running process, starting one if none runs,
+// or waits for the start under way. A caller gives up waiting when ctx ends,
+// which leaves the start to the others.
 func (e *Executable) process(ctx context.Context) (*process, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return nil, errors.New("OLP closed it")
-	}
-	if e.running != nil && !e.running.stopped() {
+	switch {
+	case e.closed:
+		e.mu.Unlock()
+		return nil, errClosed
+	case e.running != nil && !e.running.stopped():
+		defer e.mu.Unlock()
 		return e.running, nil
+	case e.starting == nil:
+		e.starting = &launch{done: make(chan struct{})}
+		go e.launch(e.starting)
 	}
+	started := e.starting
+	e.mu.Unlock()
+	select {
+	case <-started.done:
+		return started.process, started.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// errClosed fails the calls of an Executable that OLP closed.
+var errClosed = errors.New("OLP closed it")
+
+// launch starts a process for the calls waiting for l, within the time limit
+// whether or not any still waits.
+func (e *Executable) launch(l *launch) {
+	ctx, cancel := context.WithTimeout(context.Background(), e.tier.limits.Time)
+	defer cancel()
 	p, err := e.tier.start(ctx, e.name, e.Digest)
-	if err != nil {
-		return nil, err
+	if err != nil && ctx.Err() != nil {
+		err = refuse(CodeTimedOut, fmt.Sprintf("The plugin did not start within its %s time limit.", e.tier.limits.Time))
 	}
-	e.running = p
-	return p, nil
+	e.mu.Lock()
+	e.starting = nil
+	switch {
+	case err != nil:
+	case e.closed:
+		p.stop(errClosed.Error())
+		p, err = nil, errClosed
+	default:
+		e.running = p
+	}
+	e.mu.Unlock()
+	l.process, l.err = p, err
+	close(l.done)
 }
 
 // process is one run of an unconfined plugin's executable.
@@ -137,14 +184,22 @@ type process struct {
 	log     *slog.Logger
 	limit   time.Duration
 	writing sync.Mutex
+	// reading counts the readers of the plugin's standard output and
+	// standard error.
+	reading sync.WaitGroup
 	mu      sync.Mutex
 	// calls are the calls awaiting the plugin's response, by ID.
 	calls map[uint64]*pending
 	next  uint64
+	// ended holds the secret values of calls that ended, until when OLP
+	// still redacts them from the plugin's standard error.
+	ended map[string]time.Time
 	// reason says why the process stopped; done is closed once it is set.
-	reason     string
-	done       chan struct{}
-	stderrDone chan struct{}
+	reason string
+	done   chan struct{}
+	// exited is set once the process exited, after which its ID no longer
+	// names its process group.
+	exited bool
 }
 
 // pending is a call awaiting the plugin's response.
@@ -163,40 +218,58 @@ type pending struct {
 
 // start starts the executable with name, which must have digest, with no
 // arguments and an empty environment in the unconfined plugin directory, and
-// waits for it to announce its ABI version.
+// waits for it to announce its ABI version. It runs a sealed copy of the
+// executable, whose digest it checks, in a process group of its own.
 func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, error) {
-	file, err := u.executable(name)
+	path, _, err := u.lookup(name)
 	if refusal, ok := errors.AsType[*Error](err); ok && refusal.Code == CodeExecutableUnknown {
 		return nil, refuse(CodeExecutableChanged, "The unconfined plugin directory no longer holds the plugin's executable.")
 	}
 	if err != nil {
 		return nil, err
 	}
-	if file.Digest != digest {
+	copied, copiedDigest, err := sealed(path)
+	if err != nil {
+		return nil, err
+	}
+	defer copied.Close()
+	if copiedDigest != digest {
 		return nil, refuse(CodeExecutableChanged, "The executable no longer has the plugin's digest. An owner permits each build of an unconfined plugin.")
 	}
-	cmd := exec.Command(filepath.Join(u.dir, name))
+	cmd := command(copied, name)
 	cmd.Dir, cmd.Env = u.dir, []string{}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// OLP owns the read ends of these pipes, so it reaps the process as soon
+	// as it exits, whoever else holds the write ends.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		stdout.Close()
+		stdoutWriter.Close()
 		return nil, err
 	}
-	if err = cmd.Start(); err != nil {
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+	err = cmd.Start()
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	if err != nil {
+		stdout.Close()
+		stderr.Close()
 		return nil, refuse(CodeExecutableInvalid, "OLP could not start the executable: "+err.Error())
 	}
 	p := &process{cmd: cmd, stdin: stdin, log: u.log.With("plugin_digest", digest), limit: u.limits.Time,
-		calls: map[uint64]*pending{}, done: make(chan struct{}), stderrDone: make(chan struct{})}
+		calls: map[uint64]*pending{}, ended: map[string]time.Time{}, done: make(chan struct{})}
+	p.reading.Add(2)
 	go p.logStderr(stderr)
 	hello := make(chan error, 1)
 	go p.read(bufio.NewReaderSize(stdout, 64<<10), hello)
+	go p.reap(stdout, stderr)
 	select {
 	case err = <-hello:
 	case <-ctx.Done():
@@ -210,10 +283,10 @@ func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, 
 }
 
 // call sends the plugin a call and waits for its response. The call's
-// context grants its capabilities; when it ends first, OLP cancels the call.
+// context grants its capabilities; when it ends first, whether its caller
+// cancelled it or its caller's deadline passed, OLP cancels the call.
 func (p *process) call(ctx context.Context, request abi.Request, secrets []string) (abi.Response, error) {
 	call := &pending{ctx: ctx, secrets: secrets, reply: make(chan abi.Response, 1)}
-	deadline, _ := ctx.Deadline()
 	p.mu.Lock()
 	if p.reason != "" {
 		p.mu.Unlock()
@@ -221,10 +294,12 @@ func (p *process) call(ctx context.Context, request abi.Request, secrets []strin
 	}
 	p.next++
 	id := p.next
-	// The plugin answers every call within the time limit, even a cancelled
-	// one; a plugin that doesn't may be stuck. The call's context has ended
-	// by the time it is stopped, so its caller reports the time limit.
-	call.watchdog = time.AfterFunc(time.Until(deadline), func() {
+	// The plugin answers every call within its time limit, even a cancelled
+	// one; a plugin that doesn't may be stuck. A caller's own deadline only
+	// cancels its call. The call's context, which lasts at most the time
+	// limit, has ended by the time the plugin is stopped, so its caller
+	// reports the time limit.
+	call.watchdog = time.AfterFunc(p.limit, func() {
 		<-ctx.Done()
 		if p.forget(id) != nil {
 			p.stop(fmt.Sprintf("it left a call unanswered past its %s time limit", p.limit))
@@ -241,9 +316,7 @@ func (p *process) call(ctx context.Context, request abi.Request, secrets []strin
 	case <-p.done:
 		return abi.Response{}, p.failure()
 	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.Canceled) {
-			_ = p.send(abi.Frame{ID: id, Cancel: true})
-		}
+		_ = p.send(abi.Frame{ID: id, Cancel: true})
 		return abi.Response{}, ctx.Err()
 	}
 }
@@ -296,8 +369,27 @@ func (p *process) forget(id uint64) *pending {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	call := p.calls[id]
-	delete(p.calls, id)
+	if call != nil {
+		delete(p.calls, id)
+		p.end(call)
+	}
 	return call
+}
+
+// end keeps the secret values of a call that ended for redaction, for the
+// time limit: the plugin writes its standard error on another pipe than its
+// responses, so what it wrote there while serving the call may reach OLP
+// after the response. It lets go of those kept longer. p.mu is held.
+func (p *process) end(call *pending) {
+	now := time.Now()
+	for secret, until := range p.ended {
+		if now.After(until) {
+			delete(p.ended, secret)
+		}
+	}
+	for _, secret := range call.secrets {
+		p.ended[secret] = now.Add(p.limit)
+	}
 }
 
 func (p *process) send(frame abi.Frame) error {
@@ -311,7 +403,8 @@ func (p *process) send(frame abi.Frame) error {
 	return err
 }
 
-// stop kills the process for reason and fails the calls awaiting it.
+// stop kills the process for reason, with whatever it started, and fails the
+// calls awaiting it.
 func (p *process) stop(reason string) {
 	p.mu.Lock()
 	if p.reason != "" {
@@ -321,6 +414,12 @@ func (p *process) stop(reason string) {
 	p.reason = reason
 	calls := p.calls
 	p.calls = nil
+	for _, call := range calls {
+		p.end(call)
+	}
+	if !p.exited {
+		kill(p.cmd.Process.Pid)
+	}
 	p.mu.Unlock()
 	for _, call := range calls {
 		if call.watchdog != nil {
@@ -331,7 +430,6 @@ func (p *process) stop(reason string) {
 		}
 	}
 	close(p.done)
-	_ = p.cmd.Process.Kill()
 }
 
 func (p *process) stopped() bool {
@@ -349,9 +447,10 @@ func (p *process) failure() error {
 
 // read reads what the plugin writes to standard output: first its ABI
 // version, which it reports to hello, then responses and capability
-// requests. Once the plugin closes standard output, it reaps the process.
+// requests, until the plugin and whatever it started close standard output,
+// or until reap stops waiting for them.
 func (p *process) read(frames *bufio.Reader, hello chan<- error) {
-	reason := "it exited"
+	defer p.reading.Done()
 	frame, err := readFrame(frames)
 	switch {
 	case err != nil:
@@ -361,13 +460,33 @@ func (p *process) read(frames *bufio.Reader, hello chan<- error) {
 	default:
 		hello <- nil
 		if violation := p.receive(frames); violation != "" {
-			reason = "it broke the stdio protocol: " + violation
-			p.stop(reason)
+			p.stop("it broke the stdio protocol: " + violation)
 		}
 	}
 	_, _ = io.Copy(io.Discard, frames)
-	<-p.stderrDone
-	if err = p.cmd.Wait(); err != nil {
+}
+
+// reap waits for the process to exit and reaps it. It kills the process group
+// first, so nothing the plugin started outlives it, and gives the readers of
+// its standard output and standard error the time limit to read what it
+// wrote, in case something that left the group still holds them. Then it
+// stops the process, which fails the calls it left unanswered.
+func (p *process) reap(stdout, stderr *os.File) {
+	if err := exited(p.cmd.Process.Pid); err != nil {
+		p.log.Warn("unconfined plugin could not be awaited", "error", err)
+	}
+	p.mu.Lock()
+	kill(p.cmd.Process.Pid)
+	p.exited = true
+	p.mu.Unlock()
+	grace := time.Now().Add(p.limit)
+	_ = stdout.SetReadDeadline(grace)
+	_ = stderr.SetReadDeadline(grace)
+	p.reading.Wait()
+	stdout.Close()
+	stderr.Close()
+	reason := "it exited"
+	if err := p.cmd.Wait(); err != nil {
 		reason += " (" + err.Error() + ")"
 	}
 	p.stop(reason)
@@ -473,12 +592,18 @@ func (p *process) grants(id uint64) context.Context {
 }
 
 // output is the process's own output, which redacts the secret values of
-// every call awaiting it.
+// every call awaiting it, and of calls that ended within the time limit.
 func (p *process) output() *output {
 	p.mu.Lock()
+	now := time.Now()
 	var secrets []string
 	for _, call := range p.calls {
 		secrets = append(secrets, call.secrets...)
+	}
+	for secret, until := range p.ended {
+		if !now.After(until) {
+			secrets = append(secrets, secret)
+		}
 	}
 	p.mu.Unlock()
 	return newOutput(p.log, secrets)
@@ -486,7 +611,7 @@ func (p *process) output() *output {
 
 // logStderr logs what the plugin writes to standard error, a line at a time.
 func (p *process) logStderr(stderr io.Reader) {
-	defer close(p.stderrDone)
+	defer p.reading.Done()
 	lines := bufio.NewReaderSize(stderr, maxCallLog)
 	dropping := false
 	for {

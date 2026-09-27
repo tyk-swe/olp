@@ -550,9 +550,13 @@ which an owner permits again.
 
 A process starts an unconfined plugin's executable for the plugin's first
 call, with no arguments and an empty environment, in the unconfined plugin
-directory, after checking that the executable still has the permitted digest
-(`plugin_executable_changed` otherwise). One subprocess then serves every call
-the process makes to the plugin, concurrently, and keeps running between them.
+directory, in a process group of its own. It copies the executable into a
+sealed memory file, checks that the copy has the permitted digest
+(`plugin_executable_changed` otherwise) and runs the copy, so what runs is
+what it checked, however the file changes meanwhile; Linux is required. Calls
+that arrive while the subprocess starts wait for that one start, each giving
+up when its caller does. One subprocess then serves every call the process
+makes to the plugin, concurrently, and keeps running between them.
 Every call the confined runtime serves works through it, such as a profile's
 signing hook, a grant enrollment step or a grant refresh.
 
@@ -560,19 +564,23 @@ signing hook, a grant enrollment step or a grant refresh.
   fails with `plugin_timed_out`. A plugin that leaves a call unanswered that
   long may be stuck, so OLP stops it, and the calls in flight on it fail with
   `plugin_failed`. This holds for a call whose caller gave up, such as a
-  request that ended: OLP tells the plugin, which still answers it. A request
+  request that ended or whose own deadline passed: OLP tells the plugin, which
+  still answers it, and only that call ends. A request
   the plugin [carries](#carrying-traffic) instead lasts as long as the request
   does, and the plugin answers it within 10 seconds once OLP cancels it.
 - A subprocess that exits fails its calls in flight with `plugin_failed`,
   naming its exit status, and so does one that writes a message over 1 MiB or
-  anything else the ABI doesn't allow.
+  anything else the ABI doesn't allow. Stopping or reaping the subprocess
+  kills its process group, so what the plugin started stops with it.
 - OLP starts a stopped plugin again for its next call.
 - OLP bounds no unconfined plugin's memory.
 
 What the plugin logs for a call is attributed to it and redacted of the call's
 secret values, within the same bounds as a confined plugin's. Its standard
 error, and records it logs without a call, are logged a line at a time with
-the plugin's digest, redacted of the secret values of every call in flight.
+the plugin's digest, redacted of the secret values of every call in flight or
+answered within the last 10 seconds, since standard error may reach OLP after
+the response it preceded.
 
 ### Carrying traffic
 

@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -257,5 +259,172 @@ func TestUnconfinedPluginRunsOnlyAsPermitted(t *testing.T) {
 	defer disabled.Close(context.Background())
 	if _, err = sign(t, disabled, file.Digest, "sk-fixture"); !isCode(err, CodeUnconfinedDisabled) {
 		t.Fatalf("an unconfined plugin ran without the tier: %v", err)
+	}
+}
+
+// script writes an executable shell script into the unconfined tier's
+// directory and returns it.
+func script(t *testing.T, u *Unconfined, name, body string) ExecutableFile {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(u.dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := u.executable(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// A caller whose own deadline passes before the plugin answers cancels its
+// call and nothing else: the plugin's other calls, and the process serving
+// them, carry on.
+func TestUnconfinedCallersDeadlineCancelsOnlyItsCall(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits
+	limits.Time = 2 * time.Second
+	u, file := unconfinedFixture(t, limits, nil)
+	host := newUnconfinedHost(t, u, file)
+	if _, err := sign(t, host, file.Digest, "sk-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	var waited error
+	wg.Go(func() {
+		_, waited = host.Sign(waiting, file.Digest, fixtureProvider, signRequest("wait", nil), nil)
+	})
+	hurried, stop := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer stop()
+	if _, err := host.Sign(hurried, file.Digest, fixtureProvider, signRequest("wait", nil), nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a call past its caller's deadline returned %v", err)
+	}
+	time.Sleep(time.Second)
+	cancel()
+	wg.Wait()
+	if !errors.Is(waited, context.Canceled) {
+		t.Fatalf("a call in flight returned %v", waited)
+	}
+	// The plugin answered the call its caller's deadline cancelled, so the
+	// call's time limit passes without OLP stopping the plugin.
+	time.Sleep(limits.Time - time.Second + 500*time.Millisecond)
+	if result, err := sign(t, host, file.Digest, "sk-fixture"); err != nil || result.Headers["X-Fixture-Calls"] != "4" {
+		t.Fatalf("the plugin was stopped: %+v %v", result, err)
+	}
+}
+
+// OLP runs a sealed copy of the executable whose digest it checked, never
+// the file by its path, so what runs is what it hashed.
+func TestUnconfinedPluginRunsTheCopyItHashed(t *testing.T) {
+	t.Parallel()
+	u, file := unconfinedFixture(t, DefaultLimits, nil)
+	executable := u.Load(file.Digest, file.Name)
+	defer executable.Close(context.Background())
+	if _, err := inspect(t.Context(), executable, true); err != nil {
+		t.Fatal(err)
+	}
+	executable.mu.Lock()
+	pid := executable.running.cmd.Process.Pid
+	executable.mu.Unlock()
+	image, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil || !strings.HasPrefix(image, "/memfd:olp-plugin") {
+		t.Fatalf("the plugin runs %q, not the sealed copy: %v", image, err)
+	}
+}
+
+// A plugin that exits fails its calls at once and is reaped, and what it
+// started is stopped with it, even while that still holds its output.
+func TestUnconfinedPluginIsReapedWithWhatItStarted(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits
+	limits.Time = 5 * time.Second
+	u := NewUnconfined(t.TempDir(), limits, slog.New(slog.DiscardHandler))
+	file := script(t, u, "forking", `sleep 60 &
+echo $! > sleeper
+echo '{"abi_version":1}'
+read request
+exit 3`)
+	host := newUnconfinedHost(t, u, file)
+	started := time.Now()
+	_, err := sign(t, host, file.Digest, "sk-fixture")
+	if !isCode(err, CodeFailed) || !strings.Contains(err.Error(), "exit status 3") || time.Since(started) > 2*time.Second {
+		t.Fatalf("a call on a plugin that exited returned %v after %s", err, time.Since(started))
+	}
+	pid, err := os.ReadFile(filepath.Join(u.dir, "sleeper"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat := fmt.Sprintf("/proc/%s/stat", strings.TrimSpace(string(pid)))
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		state, err := os.ReadFile(stat)
+		if errors.Is(err, os.ErrNotExist) || err == nil && strings.Contains(string(state), ") Z ") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("what the plugin started outlived it: %s", state)
+		}
+	}
+}
+
+// Calls waiting for the plugin to start share one start, and a caller that
+// stops waiting leaves it to the others.
+func TestUnconfinedCallsShareOneStart(t *testing.T) {
+	t.Parallel()
+	u, _ := unconfinedFixture(t, DefaultLimits, nil)
+	file := script(t, u, "slow", `echo started >> starts
+sleep 1
+exec ./fixture`)
+	host := newUnconfinedHost(t, u, file)
+	hurried, stop := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer stop()
+	started := time.Now()
+	if _, err := host.Sign(hurried, file.Digest, fixtureProvider, signRequest("sk-fixture", nil), nil); !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
+		t.Fatalf("a caller that stopped waiting returned %v after %s", err, time.Since(started))
+	}
+	var wg sync.WaitGroup
+	calls := make([]string, 3)
+	for i := range calls {
+		wg.Go(func() {
+			result, err := sign(t, host, file.Digest, "sk-fixture")
+			if err != nil {
+				t.Error(err)
+			}
+			calls[i] = result.Headers["X-Fixture-Calls"]
+		})
+	}
+	wg.Wait()
+	slices.Sort(calls)
+	starts, err := os.ReadFile(filepath.Join(u.dir, "starts"))
+	if err != nil || string(starts) != "started\n" || !slices.Equal(calls, []string{"1", "2", "3"}) {
+		t.Fatalf("the plugin started %q and served %v: %v", starts, calls, err)
+	}
+}
+
+// What an unconfined plugin writes to standard error while serving a call
+// reaches OLP on another pipe than its response, possibly after it, and is
+// redacted of the call's secrets all the same.
+func TestUnconfinedPluginStandardErrorIsRedactedAfterItsResponse(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	var mu sync.Mutex
+	log := slog.New(slog.NewJSONHandler(&lockedWriter{&mu, &output}, nil))
+	u, file := unconfinedFixture(t, DefaultLimits, log)
+	host := newUnconfinedHost(t, u, file)
+	if _, err := sign(t, host, file.Digest, "stderr:"+fixtureSecret); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		mu.Lock()
+		logged := output.String()
+		mu.Unlock()
+		if strings.Contains(logged, "signed with") {
+			if strings.Contains(logged, fixtureSecret) || !strings.Contains(logged, `"msg":"signed with [REDACTED]"`) {
+				t.Fatalf("plugin log:\n%s", logged)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the plugin's standard error was not logged:\n%s", logged)
+		}
 	}
 }

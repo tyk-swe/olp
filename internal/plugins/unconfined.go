@@ -72,20 +72,28 @@ func (u *Unconfined) Executables() ([]ExecutableFile, error) {
 // executable describes the executable with name, which it refuses with
 // CodeExecutableUnknown unless it is one Executables lists.
 func (u *Unconfined) executable(name string) (ExecutableFile, error) {
-	unknown := refuse(CodeExecutableUnknown, "The unconfined plugin directory holds no executable with this name.")
-	if !executableName.MatchString(name) {
-		return ExecutableFile{}, unknown
-	}
-	path := filepath.Join(u.dir, name)
-	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) || err == nil && (!info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0) {
-		return ExecutableFile{}, unknown
-	}
+	path, info, err := u.lookup(name)
 	if err != nil {
 		return ExecutableFile{}, err
 	}
 	digest, err := fileDigest(path)
 	return ExecutableFile{Name: name, Digest: digest, Size: info.Size()}, err
+}
+
+// lookup returns the path and file information of the executable with name,
+// which it refuses with CodeExecutableUnknown unless it is one Executables
+// lists.
+func (u *Unconfined) lookup(name string) (string, fs.FileInfo, error) {
+	unknown := refuse(CodeExecutableUnknown, "The unconfined plugin directory holds no executable with this name.")
+	if !executableName.MatchString(name) {
+		return "", nil, unknown
+	}
+	path := filepath.Join(u.dir, name)
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) || err == nil && (!info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0) {
+		return "", nil, unknown
+	}
+	return path, info, err
 }
 
 func fileDigest(path string) (string, error) {
