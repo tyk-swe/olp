@@ -19,7 +19,7 @@ func (o *Overview) Register(mux *http.ServeMux) {
 }
 
 func (o *Overview) summary(r *http.Request) (access.Reply, error) {
-	p, err := o.Access.Principal(r, o.Access.Pool, "read")
+	p, err := o.Access.Principal(r, o.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

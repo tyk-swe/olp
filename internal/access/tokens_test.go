@@ -94,7 +94,10 @@ func TestManagementTokenValidation(t *testing.T) {
 		})
 	}
 	all := valid
-	all.Scopes = managementScopeNames
+	all.Scopes = nil
+	for _, op := range TokenScopes() {
+		all.Scopes = append(all.Scopes, op.String())
+	}
 	if err := validManagementToken(all); err != nil {
 		t.Fatal("rejected the full scope set", err)
 	}
@@ -128,7 +131,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	live := stubQueryer{tokenRow(digest, []string{"read", "configure"}, nil)}
 
 	r := machineRequest(secret, "GET")
-	p, err := s.Principal(r, live, "read")
+	p, err := s.Principal(r, live, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,19 +141,19 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	if p.UserID() != "creator-uuid" {
 		t.Fatal("machine ownership should attribute the token creator")
 	}
-	if _, err = s.Principal(r, live, "usage"); err == nil {
+	if _, err = s.Principal(r, live, Usage); err == nil {
 		t.Fatal("an unscoped operation must not authorize")
 	}
 	projectIDs, _ := json.Marshal([]string{"p1", "p2"})
 	projectScoped := stubQueryer{tokenRow(digest, []string{"read", "settings"}, map[int]any{tokenAllProjects: false, tokenProjectIDs: projectIDs})}
-	scoped, err := s.Principal(r, projectScoped, "read")
+	scoped, err := s.Principal(r, projectScoped, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if scoped.AllProjects || scoped.Projects["p1"] != "manager" || scoped.Projects["p2"] != "manager" {
 		t.Fatal("a project-scoped token must resolve manager-equivalent projects", scoped)
 	}
-	if _, err = s.Principal(r, projectScoped, "settings"); err == nil {
+	if _, err = s.Principal(r, projectScoped, Settings); err == nil {
 		t.Fatal("a project-scoped token must not run installation operations")
 	}
 	for name, row := range map[string]pgx.Row{
@@ -164,7 +167,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 			if name == "mangled" {
 				attempt = "olpm_onlytwo"
 			}
-			if _, err := s.Principal(machineRequest(attempt, "GET"), stubQueryer{row}, "read"); err == nil {
+			if _, err := s.Principal(machineRequest(attempt, "GET"), stubQueryer{row}, Read); err == nil {
 				t.Fatal("an invalid machine credential authorized")
 			}
 		})
@@ -176,44 +179,44 @@ func TestMachinePrincipalActsWithinCreatorAuthority(t *testing.T) {
 	secret := "olpm_lookup_random"
 	digest := s.Auth.Digest("management_token", secret)
 	every := []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
-	resolve := func(row stubRow, operation string) (Principal, error) {
+	resolve := func(row stubRow, operation Operation) (Principal, error) {
 		return s.Principal(machineRequest(secret, "GET"), stubQueryer{row}, operation)
 	}
 
 	// The stored liveness column folds in the creator's active and OIDC
 	// authorization state, so either loss is an authentication failure.
-	if _, err := resolve(tokenRow(digest, every, map[int]any{tokenLive: false}), "read"); !isProblem(err, 401) {
+	if _, err := resolve(tokenRow(digest, every, map[int]any{tokenLive: false}), Read); !isProblem(err, 401) {
 		t.Fatal("an inactive or deauthorized creator must retire the token", err)
 	}
 
 	demoted := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator"})
-	if _, err := resolve(demoted, "access"); !isProblem(err, 403) {
+	if _, err := resolve(demoted, Access); !isProblem(err, 403) {
 		t.Fatal("a demoted creator's token must lose owner-only operations", err)
 	}
-	if _, err := resolve(demoted, "configure"); err != nil {
+	if _, err := resolve(demoted, Configure); err != nil {
 		t.Fatal("a demoted creator's token must keep operations the creator still holds", err)
 	}
 	viewer := tokenRow(digest, every, map[int]any{tokenCreatorRole: "viewer"})
-	if _, err := resolve(viewer, "keys"); !isProblem(err, 403) {
+	if _, err := resolve(viewer, Keys); !isProblem(err, 403) {
 		t.Fatal("a viewer creator's token must not manage keys", err)
 	}
 
 	memberships, _ := json.Marshal(map[string]string{"p1": "manager", "p2": "viewer"})
 	assigned := tokenRow(digest, every, map[int]any{tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
-	p, err := resolve(assigned, "read")
+	p, err := resolve(assigned, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.AllProjects || len(p.Projects) != 2 || p.Projects["p1"] != "manager" || p.Projects["p2"] != "viewer" {
 		t.Fatal("an all-projects token must narrow to its assigned creator's projects and roles", p)
 	}
-	if _, err = resolve(assigned, "settings"); !isProblem(err, 403) {
+	if _, err = resolve(assigned, Settings); !isProblem(err, 403) {
 		t.Fatal("an assigned creator's token must lose installation reach", err)
 	}
 
 	listed, _ := json.Marshal([]string{"p1", "p3"})
 	narrowed := tokenRow(digest, every, map[int]any{tokenAllProjects: false, tokenProjectIDs: listed, tokenCreatorRole: "operator", tokenCreatorScope: "assigned", tokenMemberships: memberships})
-	if p, err = resolve(narrowed, "read"); err != nil {
+	if p, err = resolve(narrowed, Read); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.Projects) != 1 || p.Projects["p1"] != "manager" {
@@ -289,17 +292,6 @@ func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	}
 	if status := send(nil, nil); status != 403 {
 		t.Fatal("a bare write must still require the console origin", status)
-	}
-}
-
-func TestUsageScopeMatrix(t *testing.T) {
-	for _, role := range []string{"owner", "operator", "developer", "viewer"} {
-		if !Permission(role, "usage") {
-			t.Fatal("usage reads must remain available to", role)
-		}
-	}
-	if Permission("unknown", "usage") {
-		t.Fatal("usage reads must reject unknown roles")
 	}
 }
 

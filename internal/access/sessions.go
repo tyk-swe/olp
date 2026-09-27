@@ -80,7 +80,7 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 		}
 	}
 	if !valid || !current || !local {
-		if err = Audit(r.Context(), tx, r, "", "session.login", "session", "", "failure"); err != nil {
+		if err = Audit(r.Context(), tx, r, System, "session.login", "session", "", "failure"); err != nil {
 			return Reply{}, err
 		}
 		if err = tx.Commit(r.Context()); err != nil {
@@ -92,13 +92,13 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, id, "session.login", "user", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(id), "session.login", "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
 }
 func (s *Server) currentSession(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -111,7 +111,7 @@ func (s *Server) currentSession(r *http.Request) (Reply, error) {
 	return OK(body), err
 }
 func (s *Server) sessions(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -123,8 +123,10 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if userID == "" {
 		userID = p.ID
 	}
-	if userID != p.ID && !manageOthersSessions(p) {
-		return Reply{}, Forbidden()
+	if userID != p.ID {
+		if err = p.Authorize(ManageSessions); err != nil {
+			return Reply{}, err
+		}
 	}
 	if _, err := ParseUUID(userID); err != nil {
 		return Reply{}, err
@@ -141,10 +143,6 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	return ListReply(items, pagination), err
 }
 
-// manageOthersSessions reports whether p administers installation membership,
-// which only an owner with a global access scope does.
-func manageOthersSessions(p Principal) bool { return p.Role == "owner" && p.AllProjects }
-
 func (s *Server) logout(r *http.Request) (Reply, error)        { return s.deleteSession(r, true) }
 func (s *Server) revokeSession(r *http.Request) (Reply, error) { return s.deleteSession(r, false) }
 func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
@@ -153,7 +151,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Principal(r, tx, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -173,13 +171,13 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 		return Reply{}, err
 	}
 	// Another member's session is invisible to a caller who cannot manage it.
-	if userID != p.ID && !manageOthersSessions(p) {
+	if userID != p.ID && p.Authorize(ManageSessions) != nil {
 		return Reply{}, pgx.ErrNoRows
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "session.revoke", "session", session, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "session.revoke", "session", session, "success"); err != nil {
 		return Reply{}, err
 	}
 	response := Reply{Status: 204}
@@ -190,7 +188,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 }
 
 func (s *Server) profile(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -244,7 +242,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Principal(r, tx, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -254,7 +252,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), NewID(), p.ID); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "profile.update", "user", p.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.update", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", p.ID))
@@ -281,7 +279,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 	if err := password(input.New); err != nil {
 		return Reply{}, err
 	}
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -318,7 +316,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.sessionPrincipal(r, tx, "read")
+	p, err = s.Principal(r, tx, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -347,7 +345,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 	response.Status = 200
 	response.Body = u
 	response.ETag = u.ETag
-	if err = Audit(r.Context(), tx, r, p.ID, "profile.password.update", "user", p.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.password.update", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -376,7 +374,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 	if err := validatePurpose(input.Purpose, input.Resource); err != nil {
 		return Reply{}, err
 	}
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -402,7 +400,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.sessionPrincipal(r, tx, "read")
+	p, err = s.Principal(r, tx, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -410,7 +408,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)

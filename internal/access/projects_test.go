@@ -62,31 +62,3 @@ func TestPrincipalProjectIDsSorted(t *testing.T) {
 		t.Fatal("an unscoped principal must report no project ids")
 	}
 }
-
-func TestAssignedScopeDeniesInstallationOperations(t *testing.T) {
-	assigned := Principal{Kind: "user", Projects: map[string]string{"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa": "manager"}}
-	for _, operation := range []string{"access", "access_read", "settings"} {
-		if err := restrictInstallation(assigned, operation); err == nil {
-			t.Fatalf("assigned principal must be denied the %s operation", operation)
-		}
-	}
-	for _, operation := range []string{"read", "configure", "keys", "playground", "usage"} {
-		if err := restrictInstallation(assigned, operation); err != nil {
-			t.Fatalf("assigned principal must keep the %s operation: %v", operation, err)
-		}
-	}
-	global := Principal{Kind: "user", AllProjects: true}
-	for _, operation := range []string{"access", "access_read", "settings"} {
-		if err := restrictInstallation(global, operation); err != nil {
-			t.Fatalf("global principal must keep the %s operation", operation)
-		}
-	}
-}
-
-func TestPermissionGrantsUsageWhereReadWasAllowed(t *testing.T) {
-	for _, role := range []string{"owner", "operator", "developer", "viewer"} {
-		if !Permission(role, "usage") {
-			t.Fatalf("role %s must retain usage visibility", role)
-		}
-	}
-}

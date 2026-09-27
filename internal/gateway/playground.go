@@ -257,7 +257,7 @@ func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) 
 }
 
 func (p *Playground) handle(r *http.Request) (access.Reply, error) {
-	principal, err := p.Access.Principal(r, p.Access.Pool, "playground")
+	principal, err := p.Access.Principal(r, p.Access.Pool, access.Playground)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -400,7 +400,7 @@ func attemptPriority(x *execution, targetID string) int {
 }
 
 func (p *Playground) stream(w http.ResponseWriter, r *http.Request) error {
-	principal, err := p.Access.Principal(r, p.Access.Pool, "playground")
+	principal, err := p.Access.Principal(r, p.Access.Pool, access.Playground)
 	if err != nil {
 		return err
 	}

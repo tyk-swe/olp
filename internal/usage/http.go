@@ -62,7 +62,7 @@ type list struct {
 // read authorises a console read. Operations reads are the lowest management
 // permission: every active role may see what the installation spent.
 func (s *Server) read(r *http.Request) (access.Principal, error) {
-	return s.Access.Principal(r, s.Access.Pool, "usage")
+	return s.Access.Principal(r, s.Access.Pool, access.Usage)
 }
 
 func (s *Server) usageSummary(r *http.Request) (access.Reply, error) {
@@ -217,8 +217,8 @@ func (s *Server) listPricingRevisions(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Usage); err != nil {
+		return access.Reply{}, err
 	}
 	query := r.URL.Query()
 	limit, err := limitParam(query)
@@ -262,7 +262,7 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Principal(r, tx, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -279,7 +279,7 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, Body: revision}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_revision.create",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_revision.create",
 		"pricing_revision", revision.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -294,8 +294,8 @@ func (s *Server) listGatewayEpochs(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Usage); err != nil {
+		return access.Reply{}, err
 	}
 	query := r.URL.Query()
 	limit, err := limitParam(query)
@@ -324,7 +324,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Principal(r, tx, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -338,7 +338,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) 
 	}
 	// Acknowledging is an operator statement about loss they have seen, so each
 	// acknowledgement is audited even when the epoch was already acknowledged.
-	if err = access.Audit(r.Context(), tx, r, principal.ID,
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(),
 		"request_metadata.gateway_epoch_acknowledge", "request_metadata_gateway_epoch",
 		epoch, "success"); err != nil {
 		return access.Reply{}, err

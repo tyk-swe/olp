@@ -61,7 +61,7 @@ func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	return c, err
 }
 func (s *Server) oidcConfiguration(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+	if _, err := s.Principal(r, s.Pool, AccessRead); err != nil {
 		return Reply{}, err
 	}
 	c, err := loadOIDC(r, s.Pool)
@@ -131,7 +131,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
-	if _, err := s.Principal(r, s.Pool, "access"); err != nil {
+	if _, err := s.Principal(r, s.Pool, Access); err != nil {
 		return Reply{}, err
 	}
 	c := oidcConfiguration{DiscoveryURL: input.DiscoveryURL, Issuer: input.Issuer, ClientID: input.ClientID, Enabled: true, Scopes: input.Scopes, EmailClaim: input.EmailClaim, GroupsClaim: input.GroupsClaim, DefaultRole: input.DefaultRole, EmailMappings: input.EmailMappings, GroupMappings: input.GroupMappings}
@@ -196,7 +196,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Principal(r, tx, Access)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -258,7 +258,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose='oidc_flow'"); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(c, c.ETag))
@@ -329,7 +329,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.ReturnTo = "/"
 	}
 	if kind != "login" {
-		p, err := s.sessionPrincipal(r, tx, "read")
+		p, err := s.Principal(r, tx, Self)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -531,7 +531,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	// reauthentication result. Ordinary login is never a recent-auth proof.
 	var p Principal
 	if flow.Kind != "login" {
-		p, err = s.sessionPrincipal(r, tx, "read")
+		p, err = s.Principal(r, tx, Self)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -644,7 +644,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		response.Cookies = append(response.Cookies, session.Cookies...)
 		response.CSRF = session.CSRF
 	}
-	if err = Audit(r.Context(), tx, r, userID, "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(userID), "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -734,7 +734,7 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 }
 
 func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -776,7 +776,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Principal(r, tx, Self)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -809,7 +809,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "oidc.unlink", "oidc_identity", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	rotated, err := s.changeSignInMethod(r, tx, p.ID)
@@ -827,7 +827,7 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return Reply{}, err
 	}
-	if err := Audit(r.Context(), tx, r, userID, "user.authentication_method_change", "user", userID, "success"); err != nil {
+	if err := Audit(r.Context(), tx, r, UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return s.newSession(r, tx, userID)
@@ -859,14 +859,14 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 		return false, false, err
 	}
 	if !allowed || mapped != "owner" {
-		if err = retireIssuedInvitations(r, tx, userID, "", ""); err != nil {
+		if err = retireIssuedInvitations(r, tx, userID, System, ""); err != nil {
 			return false, false, err
 		}
 	}
 	if _, err = AdvanceAuthority(r, tx); err != nil {
 		return false, false, err
 	}
-	err = Audit(r.Context(), tx, r, "", "user.role_sync_oidc", "user", userID, "success")
+	err = Audit(r.Context(), tx, r, System, "user.role_sync_oidc", "user", userID, "success")
 	return true, allowed, err
 }
 

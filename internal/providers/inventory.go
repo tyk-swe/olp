@@ -12,14 +12,14 @@ import (
 )
 
 func (s *Server) kinds(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	if _, err := s.Access.Principal(r, s.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	return access.OK(map[string]any{"items": kinds}), nil
 }
 
 func (s *Server) kindCapabilities(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	if _, err := s.Access.Principal(r, s.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	kind := r.PathValue("provider_kind")
@@ -30,14 +30,14 @@ func (s *Server) kindCapabilities(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) vendors(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	if _, err := s.Access.Principal(r, s.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	return access.OK(vendors), nil
 }
 
 func (s *Server) inventory(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -107,12 +107,12 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 // generations lists installation-wide runtime releases, which span every
 // project and name their publishers, so it requires installation reach.
 func (s *Server) generations(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !principal.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = principal.AuthorizeInstallation(access.Read); err != nil {
+		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
 	if err != nil {
@@ -171,7 +171,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 func (s *Server) profiles(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	if _, err := s.Access.Principal(r, s.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	return access.OK(map[string]any{"items": connectors.Profiles()}), nil

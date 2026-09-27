@@ -46,15 +46,18 @@ type ruleInput struct {
 	Enabled          *bool   `json:"enabled"`
 }
 
-func notificationPermission(projectID *string) string {
+// notificationOperation is what writing a notification destination or rule
+// requires: installation-wide ones are installation settings, and project
+// ones are managed with the project's keys.
+func notificationOperation(projectID *string) Operation {
 	if projectID == nil {
-		return "settings"
+		return Settings
 	}
-	return "keys"
+	return Keys
 }
 
 func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -74,7 +77,7 @@ func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) notificationDestination(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -148,7 +151,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(input.ProjectID))
+	p, err := s.Principal(r, tx, notificationOperation(input.ProjectID))
 	if err != nil {
 		return Reply{}, err
 	}
@@ -193,7 +196,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/destinations/" + id,
 		Body: json.RawMessage(data)}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.create",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_destination.create",
 		"notification_destination", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -220,18 +223,24 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	var projectID *string
-	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
-		return Reply{}, err
-	}
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(projectID))
+	p, err := s.Authenticate(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	var projectID *string
+	if err = tx.QueryRow(r.Context(),
+		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
+		return Reply{}, err
+	}
+	if err = ProjectAccess(p, projectID, false); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(projectID)); err != nil {
 		return Reply{}, err
 	}
 	if err = ProjectAccess(p, projectID, true); err != nil {
@@ -291,7 +300,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "notification_destination.update",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "notification_destination.update",
 		"notification_destination", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -299,7 +308,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) notificationRules(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -319,7 +328,7 @@ func (s *Server) notificationRules(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) notificationRule(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -417,7 +426,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(input.ProjectID))
+	p, err := s.Principal(r, tx, notificationOperation(input.ProjectID))
 	if err != nil {
 		return Reply{}, err
 	}
@@ -464,7 +473,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/rules/" + id,
 		Body: json.RawMessage(data)}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.create",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_alert_rule.create",
 		"budget_alert_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -493,18 +502,24 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	var projectID *string
-	if err = s.Pool.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
-		return Reply{}, err
-	}
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationPermission(projectID))
+	p, err := s.Authenticate(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	var projectID *string
+	if err = tx.QueryRow(r.Context(),
+		"SELECT project_id::text FROM olp.budget_alert_rules WHERE id=$1", id).Scan(&projectID); err != nil {
+		return Reply{}, err
+	}
+	if err = ProjectAccess(p, projectID, false); err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(projectID)); err != nil {
 		return Reply{}, err
 	}
 	if err = ProjectAccess(p, projectID, true); err != nil {
@@ -575,7 +590,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 		"SELECT jsonb_build_object("+ruleFields+")"+ruleFrom+" WHERE r.id=$1", id).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_alert_rule.update",
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_alert_rule.update",
 		"budget_alert_rule", id, "success"); err != nil {
 		return Reply{}, err
 	}
@@ -583,7 +598,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) notificationDeliveries(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}

@@ -26,12 +26,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 func (s *Server) principal(r *http.Request, q access.Queryer) (access.Principal, error) {
-	p, err := s.Access.Principal(r, q, "configure")
+	p, err := s.Access.Principal(r, q, access.Configure)
 	if err != nil {
 		return p, err
 	}
-	if !p.AllProjects {
-		return p, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Configure); err != nil {
+		return p, err
 	}
 	return p, nil
 }
@@ -129,7 +129,7 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 		if changed {
-			if _, err := s.Access.Principal(r, tx, "settings"); err != nil {
+			if _, err := s.Access.Principal(r, tx, access.Settings); err != nil {
 				return access.Reply{}, err
 			}
 		}
@@ -137,7 +137,7 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 	if err = s.applyDocument(r.Context(), tx, p, doc, input.SecretBindings); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "configuration.apply", "configuration", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.OK(result)

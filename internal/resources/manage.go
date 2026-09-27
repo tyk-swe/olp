@@ -77,7 +77,7 @@ type manageRecord struct {
 }
 
 func (m *Management) list(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "read")
+	p, err := m.Access.Principal(r, m.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

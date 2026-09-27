@@ -205,7 +205,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, id, "installation.setup", "installation", s.Installation, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(id), "installation.setup", "installation", s.Installation, "success"); err != nil {
 		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, id)
@@ -216,7 +216,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) users(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+	if _, err := s.Principal(r, s.Pool, AccessRead); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -231,7 +231,7 @@ func (s *Server) users(r *http.Request) (Reply, error) {
 	return ListReply(items, p), err
 }
 func (s *Server) user(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+	if _, err := s.Principal(r, s.Pool, AccessRead); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "user_id")
@@ -268,7 +268,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Principal(r, tx, Access)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -302,7 +302,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if !u.Active || u.Role != "owner" {
-		if err = retireIssuedInvitations(r, tx, id, p.ID, p.UserID()); err != nil {
+		if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -311,7 +311,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	if _, err = AdvanceAuthority(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "user.update", "user", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	u, err = scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
@@ -368,7 +368,7 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 
 // Invitations are outstanding access grants and cannot outlive the issuer's
 // membership-management authority. Call inside the authority change transaction.
-func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor, revokedBy string) error {
+func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor Actor, revokedBy string) error {
 	result, err := tx.Exec(r.Context(), `UPDATE olp.invitations
         SET revoked_at=now(),revoked_by=NULLIF($2::text,'')::uuid
         WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, revokedBy)
@@ -385,7 +385,7 @@ const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.ro
 const invitationFrom = ` FROM olp.invitations i LEFT JOIN olp.users inviter ON inviter.id=i.invited_by LEFT JOIN olp.users accepted ON accepted.id=i.accepted_by LEFT JOIN olp.users revoker ON revoker.id=i.revoked_by`
 
 func (s *Server) invitations(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+	if _, err := s.Principal(r, s.Pool, AccessRead); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -432,7 +432,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Principal(r, tx, Access)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -465,7 +465,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v1/invitations/" + id}
-	if err = Audit(r.Context(), tx, r, p.ID, "invitation.create", "invitation", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.create", "invitation", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -483,7 +483,7 @@ func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Principal(r, tx, Access)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -505,7 +505,7 @@ func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
 			return Reply{}, err
 		}
-		if err = Audit(r.Context(), tx, r, p.ID, "invitation.revoke", "invitation", id, "success"); err != nil {
+		if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.revoke", "invitation", id, "success"); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -564,7 +564,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, userID, "invitation.accept", "invitation", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, userID)

@@ -2,6 +2,7 @@ package access
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -9,8 +10,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/secrets"
 )
-
-var managementScopeNames = []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
 
 type managementTokenInput struct {
 	Name       string     `json:"name"`
@@ -23,12 +22,14 @@ func validManagementToken(input managementTokenInput) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if len(input.Scopes) < 1 || len(input.Scopes) > 8 {
-		return Invalid("scopes", "Select 1–8 unique scopes.")
+	delegable := TokenScopes()
+	if len(input.Scopes) < 1 || len(input.Scopes) > len(delegable) {
+		return Invalid("scopes", fmt.Sprintf("Select 1–%d unique scopes.", len(delegable)))
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
-		if seen[scope] || !slices.Contains(managementScopeNames, scope) {
+		op, ok := ParseOperation(scope)
+		if seen[scope] || !ok || !slices.Contains(delegable, op) {
 			return Invalid("scopes", "Use unique management operation scopes.")
 		}
 		seen[scope] = true
@@ -60,19 +61,8 @@ func validManagementToken(input managementTokenInput) error {
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
 const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
-func (s *Server) ownerPrincipal(r *http.Request, q Queryer) (Principal, error) {
-	p, err := s.Principal(r, q, "access")
-	if err != nil {
-		return p, err
-	}
-	if p.Kind != "user" || p.Role != "owner" {
-		return p, Forbidden()
-	}
-	return p, nil
-}
-
 func (s *Server) managementTokens(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.Principal(r, s.Pool, ManageTokens); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -88,7 +78,7 @@ func (s *Server) managementTokens(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) managementToken(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.Principal(r, s.Pool, ManageTokens); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "management_token_id")
@@ -111,7 +101,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.Principal(r, tx, ManageTokens)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -153,7 +143,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "name": strings.TrimSpace(input.Name), "scopes": input.Scopes, "all_projects": allProjects, "project_ids": projectIDs, "created_by": p.ID, "created_by_email": p.Email, "etag": etag, "expires_at": input.ExpiresAt, "revoked_at": nil, "created_at": createdAt, "secret": secret}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/management-tokens/" + id, Body: body}
-	if err = Audit(r.Context(), tx, r, p.ID, "management_token.create", "management_token", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "management_token.create", "management_token", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -172,7 +162,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.Principal(r, tx, ManageTokens)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -199,7 +189,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Detail(map[string]any{"id": id, "etag": etag}, etag)
-	if err = Audit(r.Context(), tx, r, p.ID, "management_token.revoke", "management_token", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "management_token.revoke", "management_token", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {

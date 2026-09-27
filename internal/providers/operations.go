@@ -63,7 +63,7 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 }
 
 func (s *Server) operationDialects(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	if _, err := s.Access.Principal(r, s.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	items := []map[string]any{}

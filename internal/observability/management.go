@@ -29,7 +29,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 }
 
 func (m *Management) ready(r *http.Request) (access.Reply, error) {
-	if _, err := m.Access.Principal(r, m.Access.Pool, "read"); err != nil {
+	if _, err := m.Access.Principal(r, m.Access.Pool, access.Read); err != nil {
 		return access.Reply{}, err
 	}
 	snapshot := m.Cache.Readiness()
@@ -43,7 +43,7 @@ func (m *Management) ready(r *http.Request) (access.Reply, error) {
 }
 
 func (m *Management) providerHealth(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Access.Pool, "read")
+	p, err := m.Access.Principal(r, m.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

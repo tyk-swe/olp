@@ -76,14 +76,14 @@ func (m *Management) audit(r *http.Request, p access.Principal, action, id strin
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	if err := access.Audit(r.Context(), tx, r, p.ID, action, "media_job", id, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, p.Actor(), action, "media_job", id, "success"); err != nil {
 		return err
 	}
 	return tx.Commit(r.Context())
 }
 
 func (m *Management) refresh(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
+	p, err := m.Access.Principal(r, m.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -105,7 +105,7 @@ func (m *Management) refresh(r *http.Request) (access.Reply, error) {
 }
 
 func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
+	p, err := m.Access.Principal(r, m.Pool, access.Configure)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (m *Management) delete(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "configure")
+	p, err := m.Access.Principal(r, m.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -201,7 +201,7 @@ func contentFilename(jobID, variant, contentType string) string {
 }
 
 func (m *Management) list(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "read")
+	p, err := m.Access.Principal(r, m.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -289,7 +289,7 @@ func (m *Management) list(r *http.Request) (access.Reply, error) {
 }
 
 func (m *Management) get(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, "read")
+	p, err := m.Access.Principal(r, m.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

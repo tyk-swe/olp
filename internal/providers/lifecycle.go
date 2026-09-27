@@ -50,7 +50,7 @@ func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, sec
 }
 
 func (s *Server) providers(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -82,7 +82,7 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) provider(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -107,7 +107,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -205,7 +205,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.create", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": input.Configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
@@ -238,7 +238,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -275,7 +275,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, input.Name, input.Configuration.Kind, configuration, etag); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.update", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -298,7 +298,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -323,7 +323,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, action, "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
@@ -597,7 +597,7 @@ func (v *revisionRow) detail() map[string]any {
 }
 
 func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -632,7 +632,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -651,7 +651,7 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -693,7 +693,7 @@ func capabilityKey(model string, c runtime.RevisionCapability) string {
 }
 
 func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

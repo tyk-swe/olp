@@ -119,8 +119,8 @@ func (s *Server) listPricingSources(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Usage); err != nil {
+		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
 	if err != nil {
@@ -151,8 +151,8 @@ func (s *Server) getPricingSource(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Usage); err != nil {
+		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
@@ -175,7 +175,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Principal(r, tx, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -204,7 +204,7 @@ func (s *Server) createPricingSource(r *http.Request) (access.Reply, error) {
 	}
 	result := access.Reply{Status: 201, ETag: source.ETag,
 		Location: "/api/v1/pricing/sources/" + source.ID, Body: source}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.create",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.create",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -253,7 +253,7 @@ func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Principal(r, tx, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -297,7 +297,7 @@ func (s *Server) updatePricingSource(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.update",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.update",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -385,7 +385,7 @@ func readBounded(body io.Reader, limit int64) ([]byte, error) {
 }
 
 func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "settings")
+	principal, err := s.Access.Principal(r, s.Access.Pool, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -421,7 +421,7 @@ func (s *Server) refreshPricingSource(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.refresh",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.refresh",
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -505,8 +505,8 @@ func (s *Server) listPricingSourceSnapshots(r *http.Request) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.AllProjects {
-		return access.Reply{}, access.Forbidden()
+	if err = p.AuthorizeInstallation(access.Usage); err != nil {
+		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
@@ -559,7 +559,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, er
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Principal(r, tx, "settings")
+	principal, err := s.Access.Principal(r, tx, access.Settings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -609,7 +609,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request) (access.Reply, er
 	}
 	revision.SourceSnapshotID = &snapshot.ID
 	result := access.Reply{Status: 201, Body: revision}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "pricing_source.publish",
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "pricing_source.publish",
 		"pricing_source_snapshot", snapshot.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}

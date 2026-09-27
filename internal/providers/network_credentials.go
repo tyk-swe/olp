@@ -32,7 +32,7 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 }
 
 func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	principal, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -72,7 +72,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Principal(r, tx, "configure")
+	principal, err := s.Access.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -101,7 +101,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.Audit(r.Context(), tx, r, principal.ID, "provider.network_credential.create", "provider", id, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "provider.network_credential.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: http.StatusCreated, ETag: etag, Body: map[string]any{"provider_id": id, "credential_id": credentialID, "etag": etag}}

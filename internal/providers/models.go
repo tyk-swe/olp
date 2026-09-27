@@ -79,7 +79,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 }
 
 func (s *Server) probe(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "configure")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -116,14 +116,14 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Principal(r, tx, "configure")
+	p, err := s.Access.Principal(r, tx, access.Configure)
 	if err != nil {
 		return err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
 		return err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, action, "provider", id, auditOutcome(succeeded)); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded)); err != nil {
 		return err
 	}
 	return tx.Commit(r.Context())
@@ -153,7 +153,7 @@ type discoverRequest struct {
 
 func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
+	p, err := a.Principal(r, a.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -213,7 +213,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -252,7 +252,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	if _, err = touch(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.discover", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -263,7 +263,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) models(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -373,7 +373,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -420,7 +420,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	if _, err = touch(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.model.update", "provider_model", modelID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -435,7 +435,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
+	p, err := a.Principal(r, a.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -499,7 +499,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -532,7 +532,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag)

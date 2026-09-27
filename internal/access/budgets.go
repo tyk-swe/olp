@@ -52,7 +52,7 @@ func (s *Server) budgetGroupJSON() string {
 }
 
 func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -69,7 +69,7 @@ func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) budgetGroup(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -99,7 +99,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Principal(r, tx, Keys)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -121,7 +121,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.create", "budget_group", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.create", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -156,7 +156,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Principal(r, tx, Keys)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -195,7 +195,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 	if _, err = AdvanceAuthority(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "budget_group.update", "budget_group", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.update", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(map[string]any{"etag": etag}, etag))

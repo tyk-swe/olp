@@ -14,7 +14,7 @@ const projectFields = `'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.crea
 const projectFrom = " FROM olp.projects p JOIN olp.users u ON u.id=p.created_by"
 
 func (s *Server) projects(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -30,7 +30,7 @@ func (s *Server) projects(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) project(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "project_id")
@@ -60,7 +60,7 @@ func (s *Server) createProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.Principal(r, tx, ManageProjects)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -85,7 +85,7 @@ func (s *Server) createProject(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,'manager',$3)", id, p.UserID(), p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "project.create", "project", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "project.create", "project", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -121,7 +121,7 @@ func (s *Server) updateProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.Principal(r, tx, ManageProjects)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -142,7 +142,7 @@ func (s *Server) updateProject(r *http.Request) (Reply, error) {
 	} else if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "project.update", "project", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "project.update", "project", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -156,7 +156,7 @@ const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u
 const projectMemberFrom = " FROM olp.project_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.users a ON a.id=m.added_by"
 
 func (s *Server) projectMembers(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "project_id")
@@ -186,28 +186,26 @@ func (s *Server) projectMembers(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) projectMemberships(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
-	var rows pgx.Rows
-	switch {
-	case p.AllProjects:
-		rows, err = s.Pool.Query(r.Context(), "SELECT id::text,name,'manager' FROM olp.projects ORDER BY lower(name),id")
-	case p.Kind == "machine":
-		rows, err = s.Pool.Query(r.Context(), "SELECT id::text,name,'manager' FROM olp.projects WHERE id=ANY($1::uuid[]) ORDER BY lower(name),id", p.ProjectIDs())
-	default:
-		rows, err = s.Pool.Query(r.Context(), "SELECT p.id::text,p.name,m.role FROM olp.project_members m JOIN olp.projects p ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY lower(p.name),p.id", p.ID)
-	}
+	// The principal already carries its project roles, whether a member's
+	// own or those a management token inherits from its creator.
+	rows, err := s.Pool.Query(r.Context(), "SELECT id::text,name FROM olp.projects WHERE $1 OR id=ANY($2::uuid[]) ORDER BY lower(name),id", p.AllProjects, p.ProjectIDs())
 	if err != nil {
 		return Reply{}, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, name, role string
-		if err = rows.Scan(&id, &name, &role); err != nil {
+		var id, name string
+		if err = rows.Scan(&id, &name); err != nil {
 			return Reply{}, err
+		}
+		role := "manager"
+		if !p.AllProjects {
+			role = p.Projects[id]
 		}
 		items = append(items, map[string]any{"id": id, "name": name, "role": role})
 	}
@@ -247,7 +245,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.Principal(r, tx, ManageProjects)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -307,7 +305,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 	if remove {
 		action = "project.member.remove"
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, action, "project", projectID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), action, "project", projectID, "success"); err != nil {
 		return Reply{}, err
 	}
 	if remove {

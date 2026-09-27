@@ -9,12 +9,12 @@ import (
 )
 
 func (s *Server) settings(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
-	if !p.AllProjects {
-		return Reply{}, Forbidden()
+	if err = p.AuthorizeInstallation(Read); err != nil {
+		return Reply{}, err
 	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(s) FROM olp.settings s ORDER BY key")
 	if err != nil {
@@ -24,12 +24,12 @@ func (s *Server) settings(r *http.Request) (Reply, error) {
 	return OK(map[string]any{"items": items}), err
 }
 func (s *Server) setting(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
-	if !p.AllProjects {
-		return Reply{}, Forbidden()
+	if err = p.AuthorizeInstallation(Read); err != nil {
+		return Reply{}, err
 	}
 	var data []byte
 	var etag string
@@ -66,12 +66,14 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "settings")
+	p, err := s.Principal(r, tx, Settings)
 	if err != nil {
 		return Reply{}, err
 	}
-	if key == "auth.local_login_enabled" && p.Role != "owner" {
-		return Reply{}, Forbidden()
+	if key == "auth.local_login_enabled" {
+		if err = p.Authorize(LocalLogin); err != nil {
+			return Reply{}, err
+		}
 	}
 	var etag string
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.settings WHERE key=$1", key).Scan(&etag); err != nil {
@@ -89,7 +91,7 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "setting.update", "setting", key, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "setting.update", "setting", key, "success"); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -99,12 +101,12 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 func (s *Server) auditEvents(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
-	if !p.AllProjects {
-		return Reply{}, Forbidden()
+	if err = p.AuthorizeInstallation(Read); err != nil {
+		return Reply{}, err
 	}
 	page, err := Page(r)
 	if err != nil {

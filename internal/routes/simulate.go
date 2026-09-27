@@ -69,7 +69,7 @@ func validTuple(operation, surface, mode string) error {
 }
 
 func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -220,7 +220,7 @@ type simulationRequest struct {
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
 func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}

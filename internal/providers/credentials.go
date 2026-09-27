@@ -18,7 +18,7 @@ import (
 const maxSlots = 64
 
 func (s *Server) credentials(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -76,7 +76,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -140,7 +140,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Principal(r, tx, "configure")
+	p, err = a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -174,7 +174,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, ETag: etag, Body: map[string]any{"provider_id": id, "etag": etag, "credential_id": credentialID, "credential_version": version, "runtime_generation": nil}}
@@ -354,7 +354,7 @@ func (s *Server) quotaUnavailable(err error) {
 }
 
 func (s *Server) slots(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -446,7 +446,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -535,7 +535,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	updated, err := load(r.Context(), tx, id, false)
@@ -554,7 +554,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 
 func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	a := s.Access
-	p, err := a.Principal(r, a.Pool, "configure")
+	p, err := a.Principal(r, a.Pool, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -621,7 +621,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if p, err = a.Principal(r, tx, "configure"); err != nil {
+	if p, err = a.Principal(r, tx, access.Configure); err != nil {
 		return access.Reply{}, err
 	}
 	locked, err := load(r.Context(), tx, id, true)
@@ -640,7 +640,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.slotList(r.Context(), tx, locked)

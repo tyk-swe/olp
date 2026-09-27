@@ -30,26 +30,30 @@ func normalizedPolicy(p *runtime.Policy) map[string]any {
 func samePolicy(a, b *runtime.Policy) bool {
 	return reflect.DeepEqual(normalizedPolicy(a), normalizedPolicy(b))
 }
-func policyScope(r *http.Request) (string, string, string, error) {
+
+// policyScope names the policy a request addresses and the operation writing
+// it requires: the installation policy is an installation setting, a route
+// draft's is configuration, and an API key's is key management.
+func policyScope(r *http.Request) (string, string, access.Operation, error) {
 	scope := r.PathValue("scope")
 	id, err := access.IDParam(r, "id")
 	if err != nil {
-		return "", "", "", err
+		return "", "", 0, err
 	}
-	permission := "configure"
+	operation := access.Configure
 	switch scope {
 	case "installation":
 		if id != uuid.Nil.String() {
-			return "", "", "", access.Invalid("id", "Installation policy uses the nil UUID")
+			return "", "", 0, access.Invalid("id", "Installation policy uses the nil UUID")
 		}
-		permission = "settings"
+		operation = access.Settings
 	case "route-draft":
 	case "api-key":
-		permission = "keys"
+		operation = access.Keys
 	default:
-		return "", "", "", access.Fail(404, "not_found", "Unknown policy scope")
+		return "", "", 0, access.Fail(404, "not_found", "Unknown policy scope")
 	}
-	return scope, id, permission, nil
+	return scope, id, operation, nil
 }
 func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*string, error) {
 	if scope == "installation" {
@@ -99,7 +103,7 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	return &p, etag, err
 }
 func (s *Server) policy(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -121,7 +125,7 @@ func (s *Server) policy(r *http.Request) (access.Reply, error) {
 	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag}, etag), nil
 }
 func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
-	scope, id, permission, err := policyScope(r)
+	scope, id, operation, err := policyScope(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -138,7 +142,7 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := a.Principal(r, tx, permission)
+	principal, err := a.Principal(r, tx, operation)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -182,7 +186,7 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.ID, "routing_policy.update", scope, id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "routing_policy.update", scope, id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.Detail(map[string]any{"policy": &policy, "etag": etag}, etag)

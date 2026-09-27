@@ -58,7 +58,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -95,7 +95,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.validate", "route_draft", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.validate", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	current.State, current.ETag = "validated", etag
@@ -113,7 +113,7 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -189,7 +189,7 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route.activate", "route", routeID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", routeID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"route_id": routeID, "revision_id": revisionID, "revision": revision, "draft_etag": etag, "runtime_generation": generation}, etag)
@@ -314,7 +314,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 }
 
 func (s *Server) routes(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -351,7 +351,7 @@ func (s *Server) routes(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) route(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -374,7 +374,7 @@ func (s *Server) route(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -424,7 +424,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -461,7 +461,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -494,7 +494,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route.retire", "route", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.retire", "route", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag)
@@ -505,7 +505,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	p, err := s.Access.Principal(r, s.Access.Pool, access.Read)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -589,7 +589,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Principal(r, tx, access.Configure)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -627,7 +627,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.restore", "route_draft", draftID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.restore", "route_draft", draftID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	d, err := loadDraft(r.Context(), tx, draftID, false)

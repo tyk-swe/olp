@@ -139,7 +139,7 @@ func (s *Server) keyJSON() string {
 }
 
 func (s *Server) apiKeys(r *http.Request) (Reply, error) {
-	principal, err := s.Principal(r, s.Pool, "read")
+	principal, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -162,7 +162,7 @@ func (s *Server) apiKeys(r *http.Request) (Reply, error) {
 	return ListReply(items, p), err
 }
 func (s *Server) apiKey(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.Principal(r, s.Pool, Read)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -191,7 +191,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Principal(r, tx, Keys)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -236,7 +236,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
-	if err = Audit(r.Context(), tx, r, p.ID, "api_key.create", "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.create", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -270,7 +270,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Principal(r, tx, Keys)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -338,7 +338,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "api_key.update", "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.update", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag))
@@ -366,7 +366,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Principal(r, tx, Keys)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -452,7 +452,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if rotate {
 		result.Body = map[string]any{"id": id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, action, "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), action, "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
