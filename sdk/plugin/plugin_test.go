@@ -18,10 +18,10 @@ func (m manifestOnly) Manifest() Manifest { return Manifest(m) }
 
 type signing struct {
 	manifestOnly
-	sign func(SignRequest) (SignResult, error)
+	sign func(context.Context, SignRequest) (SignResult, error)
 }
 
-func (s signing) Sign(r SignRequest) (SignResult, error) { return s.sign(r) }
+func (s signing) Sign(ctx context.Context, r SignRequest) (SignResult, error) { return s.sign(ctx, r) }
 
 type panicking struct{}
 
@@ -47,16 +47,24 @@ func TestServeAnswersTheManifestCall(t *testing.T) {
 	}
 }
 
+// A Signer signs with the request and the provider it is for, whose option
+// values ProviderOf returns.
 func TestServeAnswersTheSignCall(t *testing.T) {
 	var got SignRequest
-	p := signing{sign: func(r SignRequest) (SignResult, error) {
+	var provider Provider
+	var found bool
+	p := signing{sign: func(ctx context.Context, r SignRequest) (SignResult, error) {
 		got = r
+		provider, found = ProviderOf(ctx)
 		return SignResult{Headers: map[string]string{"X-Signature": "signed"}}, nil
 	}}
-	response := serveWith(t, p, `{"method":"sign","params":{"profile":"acme-chat","method":"POST","url":"https://api.acme.example/v1/chat/completions","header":{"Accept":["application/json"]},"body":"e30=","credential":"sk-acme"}}`)
+	response := serveWith(t, p, `{"method":"sign","params":{"profile":"acme-chat","method":"POST","url":"https://api.acme.example/v1/chat/completions","header":{"Accept":["application/json"]},"body":"e30=","credential":"sk-acme"},"provider":{"profile":"acme-chat","options":{"account":"acme"}}}`)
 	want := SignRequest{Profile: "acme-chat", Method: "POST", URL: "https://api.acme.example/v1/chat/completions", Header: map[string][]string{"Accept": {"application/json"}}, Body: []byte("{}"), Credential: "sk-acme"}
 	if response.Error != nil || string(response.Result) != `{"headers":{"X-Signature":"signed"}}` || !reflect.DeepEqual(got, want) {
 		t.Fatalf("sign response %+v for %+v", response, got)
+	}
+	if !found || !reflect.DeepEqual(provider, Provider{Profile: "acme-chat", Options: map[string]string{"account": "acme"}}) {
+		t.Fatalf("signed for provider %+v", provider)
 	}
 }
 
@@ -101,10 +109,10 @@ func TestServeReportsFailuresAsErrors(t *testing.T) {
 		"nothing registered": {nil, `{"method":"manifest"}`, abi.CodeInternal},
 		"panic":              {panicking{}, `{"method":"manifest"}`, abi.CodeInternal},
 		"malformed sign":     {signing{}, `{"method":"sign","params":[]}`, abi.CodeInvalidRequest},
-		"reported": {signing{sign: func(SignRequest) (SignResult, error) {
+		"reported": {signing{sign: func(context.Context, SignRequest) (SignResult, error) {
 			return SignResult{}, &Error{Code: "expired", Message: "The key expired."}
 		}}, `{"method":"sign","params":{}}`, "expired"},
-		"failed": {signing{sign: func(SignRequest) (SignResult, error) { return SignResult{}, errors.New("no clock") }}, `{"method":"sign","params":{}}`, abi.CodeInternal},
+		"failed": {signing{sign: func(context.Context, SignRequest) (SignResult, error) { return SignResult{}, errors.New("no clock") }}, `{"method":"sign","params":{}}`, abi.CodeInternal},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if response := serveWith(t, tc.plugin, tc.request); response.Error == nil || response.Error.Code != tc.code {

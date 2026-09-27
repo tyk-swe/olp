@@ -16,27 +16,29 @@ import (
 // A Signer runs the signing hooks of plugin profiles: plugin code, which it
 // finds by the digest of the plugin's module.
 type Signer interface {
-	// Sign runs the hook of the plugin with digest over request and returns
-	// the headers to add. The plugin's output never reveals secrets.
-	Sign(ctx context.Context, digest string, request abi.SignRequest, secrets []string) (abi.SignResult, error)
+	// Sign runs the hook of the plugin with digest over request for provider,
+	// which the plugin receives as its call's provider, and returns the
+	// headers to add. The plugin's output never reveals secrets.
+	Sign(ctx context.Context, digest string, provider abi.Provider, request abi.SignRequest, secrets []string) (abi.SignResult, error)
 }
 
 // maxSignedHeaders bounds the headers a signing hook adds to a request.
 const maxSignedHeaders = 16
 
 // sign runs the profile's signing hook, if it declares one, over a finished
-// request and adds the headers it returns. It returns their values, which it
-// treats like the credential: they are redacted wherever upstream text is
-// recorded, and the hook's own output never reveals secrets. The request is
-// not sent unless its hook succeeds.
-func (p *PluginProfile) sign(ctx context.Context, signer Signer, req *http.Request, credential, body []byte, secrets []string) ([]string, error) {
+// request of a provider with options and adds the headers it returns. It
+// returns their values, which it treats like the credential: they are
+// redacted wherever upstream text is recorded, and the hook's own output never
+// reveals secrets. The request is not sent unless its hook succeeds.
+func (p *PluginProfile) sign(ctx context.Context, signer Signer, options map[string]string, req *http.Request, credential, body []byte, secrets []string) ([]string, error) {
 	if !p.declared.Signing {
 		return nil, nil
 	}
 	if signer == nil {
 		return nil, fmt.Errorf("%w: this process runs no plugin signing hooks", ErrAuthentication)
 	}
-	result, err := signer.Sign(ctx, p.profile.Revision, abi.SignRequest{
+	provider := abi.Provider{Profile: p.profile.ID, Options: options}
+	result, err := signer.Sign(ctx, p.profile.Revision, provider, abi.SignRequest{
 		Profile: p.profile.ID, Method: req.Method, URL: req.URL.String(), Header: req.Header.Clone(), Body: body, Credential: string(credential),
 	}, secrets)
 	if err != nil {

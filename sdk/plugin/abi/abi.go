@@ -46,7 +46,8 @@ const (
 	// MethodManifest takes no parameters and returns the plugin's Manifest.
 	MethodManifest = "manifest"
 	// MethodSign takes a SignRequest and returns a SignResult. OLP calls it
-	// once per upstream request of a profile that declares Signing.
+	// once per upstream request of a profile that declares Signing, on behalf
+	// of the request's provider (Request.Provider).
 	MethodSign = "sign"
 )
 

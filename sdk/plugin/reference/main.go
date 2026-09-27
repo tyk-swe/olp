@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -105,7 +106,7 @@ func (reference) Manifest() plugin.Manifest {
 // hex HMAC-SHA256, keyed with the API key, of the X-Reference-Timestamp value
 // (Unix seconds), the method, the request URI and the body, each of the first
 // three followed by a line feed.
-func (reference) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+func (reference) Sign(_ context.Context, r plugin.SignRequest) (plugin.SignResult, error) {
 	target, err := url.Parse(r.URL)
 	if err != nil {
 		return plugin.SignResult{}, err

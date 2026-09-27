@@ -30,7 +30,7 @@ type hashSigner struct {
 	fail  error
 }
 
-func (s *hashSigner) Sign(_ context.Context, _ string, request abi.SignRequest, _ []string) (abi.SignResult, error) {
+func (s *hashSigner) Sign(_ context.Context, _ string, _ abi.Provider, request abi.SignRequest, _ []string) (abi.SignResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++

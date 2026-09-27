@@ -80,6 +80,13 @@ func newTestHost(t testing.TB, engine Engine, limits Limits, log *slog.Logger, m
 
 const fixtureDigest = "fixture"
 
+// The providers the fixture's and the reference plugin's signing profiles
+// sign for.
+var (
+	fixtureProvider   = abi.Provider{Profile: "fixture-chat"}
+	referenceProvider = abi.Provider{Profile: "reference-signed-chat"}
+)
+
 func signRequest(credential string, body []byte) abi.SignRequest {
 	return abi.SignRequest{
 		Profile: "fixture-chat", Method: "POST", URL: "https://api.example.com/v1/chat/completions?api-version=1",
@@ -89,7 +96,7 @@ func signRequest(credential string, body []byte) abi.SignRequest {
 
 func signedCalls(t *testing.T, host *Host) string {
 	t.Helper()
-	result, err := host.Sign(t.Context(), fixtureDigest, signRequest("sk-fixture", []byte("{}")), nil)
+	result, err := host.Sign(t.Context(), fixtureDigest, fixtureProvider, signRequest("sk-fixture", []byte("{}")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +110,7 @@ func TestReferencePluginSignsWithAnHMACOfItsCredential(t *testing.T) {
 	host, _ := newTestHost(t, Interpreted, DefaultLimits, nil, testutil.BuildPlugin(t, "./sdk/plugin/reference"))
 	body := []byte(`{"model":"reference","messages":[{"role":"user","content":"hi"}]}`)
 	request := abi.SignRequest{Profile: "reference-signed-chat", Method: "POST", URL: "https://api.example.com/v1/chat/completions", Body: body, Credential: "sk-reference"}
-	result, err := host.Sign(t.Context(), "reference", request, []string{"sk-reference"})
+	result, err := host.Sign(t.Context(), "reference", referenceProvider, request, []string{"sk-reference"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,6 +165,18 @@ func TestHostBoundsTheInstancesOfAModule(t *testing.T) {
 	}
 }
 
+// A signing hook receives the provider it signs for, with the provider's
+// option values, as its call's provider.
+func TestSigningHookSeesTheProviderItSignsFor(t *testing.T) {
+	t.Parallel()
+	host, _ := newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+	provider := abi.Provider{Profile: "fixture-chat", Options: map[string]string{"workspace": "acme"}}
+	result, err := host.Sign(t.Context(), fixtureDigest, provider, signRequest("option:workspace", nil), nil)
+	if err != nil || result.Headers["X-Fixture-Option"] != "fixture-chat acme" {
+		t.Fatalf("signed %v: %v", result.Headers, err)
+	}
+}
+
 // A signing hook past its limits fails with a typed error, and its instance is
 // discarded, so the next call starts on a fresh one. A failure the plugin
 // reports leaves its instance serving.
@@ -178,7 +197,7 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			host, _ := newTestHost(t, Interpreted, tc.limits, nil, fixture(t, "well-behaved"))
-			_, err := host.Sign(t.Context(), fixtureDigest, signRequest(tc.credential, nil), []string{tc.credential})
+			_, err := host.Sign(t.Context(), fixtureDigest, fixtureProvider, signRequest(tc.credential, nil), []string{tc.credential})
 			if reported, ok := errors.AsType[*abi.Error](err); ok {
 				if reported.Code != tc.code || reported.Message != "signing with [REDACTED] failed" {
 					t.Fatalf("the plugin reported %+v", reported)
@@ -202,7 +221,7 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 func TestHostLoadsAPluginOnceItIsUsable(t *testing.T) {
 	t.Parallel()
 	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, nil)
-	_, err := host.Sign(t.Context(), fixtureDigest, signRequest("sk-fixture", nil), nil)
+	_, err := host.Sign(t.Context(), fixtureDigest, fixtureProvider, signRequest("sk-fixture", nil), nil)
 	wantError(t, err, CodeNotInstalled, "")
 	table.install(fixture(t, "well-behaved"))
 	if calls := signedCalls(t, host); calls != "1" {
@@ -215,7 +234,7 @@ func TestSigningHookOutputReachesTheLogRedacted(t *testing.T) {
 	var logged bytes.Buffer
 	host, _ := newTestHost(t, Interpreted, DefaultLimits, slog.New(slog.NewJSONHandler(&logged, nil)), fixture(t, "well-behaved"))
 	credential := "log:" + fixtureSecret
-	if _, err := host.Sign(t.Context(), fixtureDigest, signRequest(credential, nil), []string{credential}); err != nil {
+	if _, err := host.Sign(t.Context(), fixtureDigest, fixtureProvider, signRequest(credential, nil), []string{credential}); err != nil {
 		t.Fatal(err)
 	}
 	output := logged.String()
@@ -249,7 +268,7 @@ func BenchmarkSign(b *testing.B) {
 	}{{"interpreted", Interpreted}, {"compiled", Compiled}} {
 		host, _ := newTestHost(b, engine.engine, DefaultLimits, nil, module)
 		start := time.Now()
-		if _, err := host.Sign(b.Context(), "reference", abi.SignRequest{Profile: "reference-signed-chat", URL: "https://api.example.com/v1"}, nil); err != nil {
+		if _, err := host.Sign(b.Context(), "reference", referenceProvider, abi.SignRequest{Profile: "reference-signed-chat", URL: "https://api.example.com/v1"}, nil); err != nil {
 			b.Fatal(err)
 		}
 		b.Logf("%s: loaded and signed first in %s", engine.name, time.Since(start))
@@ -262,7 +281,7 @@ func BenchmarkSign(b *testing.B) {
 			}
 			b.Run(fmt.Sprintf("%s/%dKiB", engine.name, size>>10), func(b *testing.B) {
 				for b.Loop() {
-					if _, err := host.Sign(b.Context(), "reference", request, []string{"sk-reference"}); err != nil {
+					if _, err := host.Sign(b.Context(), "reference", referenceProvider, request, []string{"sk-reference"}); err != nil {
 						b.Fatal(err)
 					}
 				}

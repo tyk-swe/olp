@@ -11,21 +11,23 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 // recordingSigner answers every signing hook with its headers or failure,
 // recording what it was asked to sign.
 type recordingSigner struct {
-	headers  map[string]string
-	err      error
-	digests  []string
-	requests []abi.SignRequest
-	secrets  [][]string
+	headers   map[string]string
+	err       error
+	digests   []string
+	providers []abi.Provider
+	requests  []abi.SignRequest
+	secrets   [][]string
 }
 
-func (s *recordingSigner) Sign(_ context.Context, digest string, request abi.SignRequest, secrets []string) (abi.SignResult, error) {
-	s.digests, s.requests, s.secrets = append(s.digests, digest), append(s.requests, request), append(s.secrets, secrets)
+func (s *recordingSigner) Sign(_ context.Context, digest string, provider abi.Provider, request abi.SignRequest, secrets []string) (abi.SignResult, error) {
+	s.digests, s.providers, s.requests, s.secrets = append(s.digests, digest), append(s.providers, provider), append(s.requests, request), append(s.secrets, secrets)
 	return abi.SignResult{Headers: s.headers}, s.err
 }
 
@@ -70,6 +72,29 @@ func TestPluginSigningHookSignsTheFinishedRequest(t *testing.T) {
 		if !slices.Contains(sensitive, signed) {
 			t.Errorf("%q is not redacted: %q", signed, sensitive)
 		}
+	}
+}
+
+// The signing hook signs for the provider the request is for: the plugin
+// receives its profile and option values as the call's provider.
+func TestPluginSigningHookReceivesTheProvidersOptions(t *testing.T) {
+	manifest := optionsManifest()
+	manifest.Profiles[0].Signing = true
+	c := pluginConfig(t, manifest)
+	c.PluginOptions = map[string]string{"account": "acme", "region": "eu", "team": "search"}
+	c.Endpoint = c.Plugin.Address(c.PluginOptions)
+	endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := &recordingSigner{}
+	req, _ := http.NewRequest(http.MethodPost, endpoint, nil)
+	if _, err = signingAuth(signer).Apply(context.Background(), req, c, []byte("secret"), nil); err != nil {
+		t.Fatal(err)
+	}
+	want := abi.Provider{Profile: "acme-chat", Options: map[string]string{"account": "acme", "region": "eu", "team": "search"}}
+	if len(signer.providers) != 1 || !reflect.DeepEqual(signer.providers[0], want) {
+		t.Fatalf("signed for %+v", signer.providers)
 	}
 }
 

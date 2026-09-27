@@ -54,11 +54,11 @@ func NewHost(runtime *Runtime, db access.Queryer) *Host {
 	return &Host{runtime: runtime, db: db, hosted: map[string]*hosted{}}
 }
 
-// Sign runs the signing hook of the plugin with digest over request,
-// redacting secrets from what the plugin logs and reports.
-func (h *Host) Sign(ctx context.Context, digest string, request abi.SignRequest, secrets []string) (abi.SignResult, error) {
+// Sign runs the signing hook of the plugin with digest over request for
+// provider, redacting secrets from what the plugin logs and reports.
+func (h *Host) Sign(ctx context.Context, digest string, provider abi.Provider, request abi.SignRequest, secrets []string) (abi.SignResult, error) {
 	var result abi.SignResult
-	err := h.call(ctx, digest, Call{Method: abi.MethodSign, Params: request, Secrets: secrets}, &result)
+	err := h.call(ctx, digest, Call{Method: abi.MethodSign, Params: request, Provider: &provider, Secrets: secrets}, &result)
 	return result, err
 }
 

@@ -231,7 +231,7 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 		sensitive = append(sensitive, signed...)
 	}
 	if c.Plugin != nil {
-		signed, err := c.Plugin.sign(ctx, a.Signer, req, secret, body, sensitive)
+		signed, err := c.Plugin.sign(ctx, a.Signer, c.PluginOptions, req, secret, body, sensitive)
 		if err != nil {
 			return nil, err
 		}

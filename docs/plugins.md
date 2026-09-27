@@ -186,9 +186,9 @@ carry them. They are not secret.
 A profile may declare a signing hook for an upstream whose keys must become
 signatures or timestamped tokens. The hook is the only plugin code that runs
 per request: once per upstream request, never per stream event, after hosting
-has placed the request and its body is final. It receives the finished request
-and the static credential, and returns headers to add, which OLP redacts like
-the credential. Gateways run it for traffic, and control for probes and
+has placed the request and its body is final. It receives the finished request,
+the static credential and the provider's [options](#options), and returns
+headers to add, which OLP redacts like the credential. Gateways run it for traffic, and control for probes and
 certification. A signing profile need not place the credential at all.
 
 A hook that fails, exceeds the plugin limits or returns a header OLP refuses

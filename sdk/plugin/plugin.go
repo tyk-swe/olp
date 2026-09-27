@@ -88,9 +88,10 @@ type Signer interface {
 	// Sign returns the headers to add to one upstream request of a profile
 	// that declares signing, such as a signature of the request made with
 	// its credential. OLP calls it once per request, never per stream event,
-	// after the profile's hosting adaptation placed the request. A failure
-	// fails the request before it is sent.
-	Sign(SignRequest) (SignResult, error)
+	// after the profile's hosting adaptation placed the request, and
+	// ProviderOf(ctx) returns the provider the request is for, with its
+	// option values. A failure fails the request before it is sent.
+	Sign(ctx context.Context, request SignRequest) (SignResult, error)
 }
 
 var registered Plugin
@@ -161,7 +162,7 @@ func manifest(context.Context, json.RawMessage) (any, error) {
 }
 
 // sign answers the sign call with the plugin's Signer.
-func sign(_ context.Context, params json.RawMessage) (any, error) {
+func sign(ctx context.Context, params json.RawMessage) (any, error) {
 	signer, ok := registered.(Signer)
 	if !ok {
 		return nil, unknownMethod(abi.MethodSign)
@@ -170,7 +171,7 @@ func sign(_ context.Context, params json.RawMessage) (any, error) {
 	if err := json.Unmarshal(params, &request); err != nil {
 		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."}
 	}
-	return signer.Sign(request)
+	return signer.Sign(ctx, request)
 }
 
 func unknownMethod(method string) *abi.Error {

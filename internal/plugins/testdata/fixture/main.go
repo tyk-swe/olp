@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -60,10 +61,11 @@ var calls int
 
 // Sign signs as the credential's prefix up to a colon says: "loop" never
 // returns, "allocate" exhausts memory, "fail" reports a failure holding the
-// credential, "log" logs the credential, and "header:Name" returns that
-// header. Anything else returns X-Fixture-Signature and X-Fixture-Calls, this
-// instance's count of signed requests.
-func (fixture) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+// credential, "log" logs the credential, "header:Name" returns that header,
+// and "option:name" returns X-Fixture-Option, the provider's profile and value
+// of that option. Anything else returns X-Fixture-Signature and
+// X-Fixture-Calls, this instance's count of signed requests.
+func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResult, error) {
 	calls++
 	behaviour, rest, _ := strings.Cut(r.Credential, ":")
 	switch behaviour {
@@ -81,6 +83,12 @@ func (fixture) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
 		plugin.Log.Info("signing with "+r.Credential, "url", r.URL)
 	case "header":
 		return plugin.SignResult{Headers: map[string]string{rest: "fixture"}}, nil
+	case "option":
+		provider, ok := plugin.ProviderOf(ctx)
+		if !ok {
+			return plugin.SignResult{}, &plugin.Error{Code: "fixture_failed", Message: "the call serves no provider"}
+		}
+		return plugin.SignResult{Headers: map[string]string{"X-Fixture-Option": provider.Profile + " " + provider.Options[rest]}}, nil
 	}
 	return plugin.SignResult{Headers: map[string]string{
 		"X-Fixture-Signature": r.Method + " " + r.URL + " " + strconv.Itoa(len(r.Body)),

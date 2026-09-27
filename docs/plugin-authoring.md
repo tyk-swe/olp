@@ -148,7 +148,7 @@ sets `Signing: true`, and the plugin implements `plugin.Signer`, as the
 reference plugin's `reference-signed-chat` profile does:
 
 ```go
-func (acme) Sign(r plugin.SignRequest) (plugin.SignResult, error) {
+func (acme) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResult, error) {
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	mac := hmac.New(sha256.New, []byte(r.Credential))
 	mac.Write([]byte(timestamp + "\n"))
@@ -165,6 +165,9 @@ stream event, once the hosting adaptation has placed the request and its body
 is final. That holds for gateway traffic and for the probes and certification
 control sends. The `SignRequest` carries the profile's ID, the method, the
 absolute URL with its query, the headers, the body and the static credential.
+The call is on behalf of the provider sending the request, so
+[`plugin.ProviderOf(ctx)`](#calls-for-a-provider) returns its option values,
+such as the account or region a signature covers.
 
 `Sign` returns the headers to add: at most 16, each one a profile could declare
 and the request doesn't already carry. OLP redacts their values wherever it
@@ -393,7 +396,8 @@ OLP calls, through `olp_call`:
 | `manifest` | none | The manifest, as described above. |
 | `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
 
-OLP calls `sign` only for profiles that declare `"signing": true`.
+OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
+the provider whose request it signs.
 
 ### Capabilities
 
