@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -363,6 +364,33 @@ exit 3`)
 		if time.Now().After(deadline) {
 			t.Fatalf("what the plugin started outlived it: %s", state)
 		}
+	}
+}
+
+// A plugin that exits is reaped at once, even while something it started
+// outside its process group holds its output open.
+func TestUnconfinedPluginIsReapedWhileItsOutputIsHeld(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits
+	limits.Time = 5 * time.Second
+	u := NewUnconfined(t.TempDir(), limits, slog.New(slog.DiscardHandler))
+	file := script(t, u, "escaping", `setsid sh -c 'echo $$ > escaped; exec sleep 60' &
+while [ ! -s escaped ]; do sleep 0.01; done
+echo '{"abi_version":1}'
+read request
+exit 3`)
+	t.Cleanup(func() {
+		if pid, err := os.ReadFile(filepath.Join(u.dir, "escaped")); err == nil {
+			if escaped, err := strconv.Atoi(strings.TrimSpace(string(pid))); err == nil {
+				syscall.Kill(escaped, syscall.SIGKILL)
+			}
+		}
+	})
+	host := newUnconfinedHost(t, u, file)
+	started := time.Now()
+	_, err := sign(t, host, file.Digest, "sk-fixture")
+	if !isCode(err, CodeFailed) || !strings.Contains(err.Error(), "exit status 3") || time.Since(started) > drainTime+time.Second {
+		t.Fatalf("a call on a plugin that exited returned %v after %s", err, time.Since(started))
 	}
 }
 

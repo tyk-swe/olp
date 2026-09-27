@@ -466,11 +466,15 @@ func (p *process) read(frames *bufio.Reader, hello chan<- error) {
 	_, _ = io.Copy(io.Discard, frames)
 }
 
+// drainTime bounds how long OLP reads what an exited plugin wrote, while
+// something it started outside its process group holds its output open.
+const drainTime = time.Second
+
 // reap waits for the process to exit and reaps it. It kills the process group
 // first, so nothing the plugin started outlives it, and gives the readers of
-// its standard output and standard error the time limit to read what it
-// wrote, in case something that left the group still holds them. Then it
-// stops the process, which fails the calls it left unanswered.
+// its standard output and standard error drainTime to read what it wrote, in
+// case something that left the group still holds them. Then it stops the
+// process, which fails the calls it left unanswered.
 func (p *process) reap(stdout, stderr *os.File) {
 	if err := exited(p.cmd.Process.Pid); err != nil {
 		p.log.Warn("unconfined plugin could not be awaited", "error", err)
@@ -479,9 +483,9 @@ func (p *process) reap(stdout, stderr *os.File) {
 	kill(p.cmd.Process.Pid)
 	p.exited = true
 	p.mu.Unlock()
-	grace := time.Now().Add(p.limit)
-	_ = stdout.SetReadDeadline(grace)
-	_ = stderr.SetReadDeadline(grace)
+	drained := time.Now().Add(drainTime)
+	_ = stdout.SetReadDeadline(drained)
+	_ = stderr.SetReadDeadline(drained)
 	p.reading.Wait()
 	stdout.Close()
 	stderr.Close()
@@ -498,7 +502,9 @@ func (p *process) receive(frames *bufio.Reader) string {
 	for {
 		frame, err := readFrame(frames)
 		switch {
-		case errors.Is(err, io.EOF):
+		case errors.Is(err, io.EOF) || errors.Is(err, os.ErrDeadlineExceeded):
+			// The plugin closed standard output, or reap stopped waiting
+			// for what it started to.
 			return ""
 		case err != nil:
 			return err.Error()
