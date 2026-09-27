@@ -1,0 +1,265 @@
+package providers
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
+)
+
+// grantStepTimeout bounds a grant enrollment request, which loads the plugin
+// and runs one of its steps within the plugin limits.
+const grantStepTimeout = time.Minute
+
+// maxGrantInput bounds what an operator pastes back to continue a grant
+// enrollment.
+const maxGrantInput = 8 << 10
+
+// grantEnrollmentOnly refuses a pasted credential for a provider that
+// authenticates with a grant.
+const grantEnrollmentOnly = "A grant authenticates this provider: its credential versions come from grant enrollment, not a pasted credential."
+
+// startGrantEnrollment runs the first step of grant enrollment for a draft
+// whose plugin profile authenticates with a grant: the plugin builds the
+// authorization request the operator opens to sign in upstream. The grant
+// will back the default credential slot.
+func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
+	a := s.Access
+	id, err := access.IDParam(r, "provider_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	p, err := a.Principal(r, a.Pool, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	current, err := checkProvider(r.Context(), a.Pool, p, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Match(r, current.ETag); err != nil {
+		return access.Reply{}, err
+	}
+	cfg := &current.Configuration
+	if !cfg.Grant() {
+		return access.Reply{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
+	}
+	slots, err := loadSlots(r.Context(), a.Pool, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var slotID string
+	for _, slot := range slots {
+		if slot.Default {
+			slotID = slot.ID
+		}
+	}
+	client, err := s.connectionClient(r.Context(), cfg, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	// The plugin may reach the upstream, so the step runs outside the
+	// installation mutation lock; saving rechecks the draft.
+	enrollment, err := grants.Start(r.Context(), s.Plugins, a.Pool, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	tx, err := a.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	if _, err = a.Principal(r, tx, "configure"); err != nil {
+		return access.Reply{}, err
+	}
+	locked, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if locked.ETag != current.ETag {
+		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed while its plugin started grant enrollment; reload and retry.")
+	}
+	if err = enrollment.Save(r.Context(), tx, a); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, access.Reply{Status: 201, Body: map[string]any{
+		"id": enrollment.ID, "provider_id": id, "slot_id": slotID, "authorization_url": enrollment.AuthorizationURL, "expires_at": enrollment.ExpiresAt,
+	}})
+}
+
+type grantContinuation struct {
+	Input string `json:"input"`
+}
+
+// continueGrantEnrollment exchanges what the operator pasted back, the
+// loopback callback URL or the code the upstream displayed, for a grant. The
+// grant becomes a new credential version of the provider, staged on the
+// enrollment's credential slot like a rotation.
+func (s *Server) continueGrantEnrollment(r *http.Request) (access.Reply, error) {
+	a := s.Access
+	providerID, err := access.IDParam(r, "provider_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	enrollmentID, err := access.IDParam(r, "enrollment_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var input grantContinuation
+	if err = access.DecodeUnique(r, &input, 2*maxGrantInput); err != nil {
+		return access.Reply{}, err
+	}
+	if input.Input == "" || len(input.Input) > maxGrantInput || strings.ContainsRune(input.Input, 0) {
+		return access.Reply{}, access.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
+	}
+	// The claim commits before the plugin reaches the upstream, so neither a
+	// repeated continuation nor another replica can exchange the same sign-in.
+	tx, err := a.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := a.Principal(r, tx, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	current, err := load(r.Context(), tx, providerID, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
+	enrollment, err := grants.Claim(r.Context(), tx, a, providerID, enrollmentID, p.ID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		return access.Reply{}, err
+	}
+	reply, err := s.exchangeGrant(r, current, enrollment, input.Input)
+	if err != nil {
+		if audited := s.auditFailedGrantEnrollment(r, p.ID, providerID); audited != nil {
+			return access.Reply{}, audited
+		}
+	}
+	return reply, err
+}
+
+// exchangeGrant runs the plugin's exchange of what was pasted back, for the
+// provider with its current options and over its network path, and stages the
+// grant it obtains.
+func (s *Server) exchangeGrant(r *http.Request, current *record, enrollment grants.Enrollment, input string) (access.Reply, error) {
+	cfg := &current.Configuration
+	client, err := s.connectionClient(r.Context(), cfg, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	grant, err := grants.Exchange(r.Context(), s.Plugins, s.Access.Pool, enrollment, input, cfg.Options.PluginOptions, client)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return s.stageGrant(r, current, enrollment, grant)
+}
+
+// stageGrant completes a grant enrollment under the mutation lock: it holds
+// the grant beneath a new credential version of the provider and binds that
+// version to the enrollment's credential slot, like a rotation.
+func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (access.Reply, error) {
+	a := s.Access
+	tx, err := a.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := a.Principal(r, tx, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	locked, err := load(r.Context(), tx, current.ID, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile or credential slot changed during grant enrollment. Start another.")
+	if cfg := locked.Configuration; !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID {
+		return access.Reply{}, stale
+	}
+	credentialID, version, err := grants.Store(r.Context(), tx, a, current.ID, enrollment.PluginDigest, grant)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	bound, err := tx.Exec(r.Context(), "UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL WHERE provider_id=$1 AND id=$2", current.ID, enrollment.SlotID, credentialID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if bound.RowsAffected() == 0 {
+		return access.Reply{}, stale
+	}
+	etag, err := touch(r.Context(), tx, current.ID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", current.ID, access.NewID()); err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.enroll", "provider_credential", credentialID, "success"); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: map[string]any{
+		"provider_id": current.ID, "etag": etag, "credential_id": credentialID, "credential_version": version, "principal": grant.Principal,
+	}})
+}
+
+// auditFailedGrantEnrollment records a continuation that failed, in its own
+// transaction once the completion's rolled back. Like every audit record, it
+// names the principal and the provider, never what was pasted back.
+func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor, providerID string) error {
+	ctx := context.WithoutCancel(r.Context())
+	tx, err := s.Access.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = access.Audit(ctx, tx, r, actor, "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// cancelGrantEnrollment ends a grant enrollment its principal started and has
+// not continued, deleting its session state.
+func (s *Server) cancelGrantEnrollment(r *http.Request) (access.Reply, error) {
+	a := s.Access
+	providerID, err := access.IDParam(r, "provider_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	enrollmentID, err := access.IDParam(r, "enrollment_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	tx, err := a.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := a.Principal(r, tx, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	current, err := load(r.Context(), tx, providerID, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
+	if err = grants.Cancel(r.Context(), tx, providerID, enrollmentID, p.ID); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, access.Reply{Status: 204})
+}

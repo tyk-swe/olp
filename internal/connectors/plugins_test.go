@@ -287,24 +287,37 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 		"credential not given": {func(p *abi.Profile) {
 			p.Hosting.Headers, p.Hosting.Query = map[string]string{"X-Acme-Client": "olp"}, nil
 		}, "hosting"},
-		"relative listing path":  {func(p *abi.Profile) { p.Hosting.Discovery.Path = "models" }, "hosting.discovery.path"},
-		"listing path query":     {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/models?limit=100" }, "hosting.discovery.path"},
-		"listing dot segment":    {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/v2/../admin" }, "hosting.discovery.path"},
-		"listing placeholder":    {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/{credential}/models" }, "hosting.discovery.path"},
-		"no model array":         {func(p *abi.Profile) { p.Hosting.Discovery.Models = "" }, "hosting.discovery.models"},
-		"no model ID field":      {func(p *abi.Profile) { p.Hosting.Discovery.ID = "" }, "hosting.discovery.id"},
-		"control in a field":     {func(p *abi.Profile) { p.Hosting.Discovery.ID = "id\n" }, "hosting.discovery.id"},
-		"malformed parameter":    {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "page token" }, "hosting.discovery.pagination.parameter"},
-		"placed parameter":       {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "key" }, "hosting.discovery.pagination.parameter"},
-		"no cursor field":        {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Cursor = "" }, "hosting.discovery.pagination.cursor"},
-		"long more field":        {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.More = strings.Repeat("m", 129) }, "hosting.discovery.pagination.more"},
-		"too many rules":         {func(p *abi.Profile) { p.Hosting.Classification = make([]abi.FailureRule, 33) }, "hosting.classification"},
-		"rule matching anything": {func(p *abi.Profile) { p.Hosting.Classification[1].Type = "" }, "hosting.classification[1]"},
-		"successful status":      {func(p *abi.Profile) { p.Hosting.Classification[0].Status = 200 }, "hosting.classification[0].status"},
-		"control in a code":      {func(p *abi.Profile) { p.Hosting.Classification[0].Code = "quota\n" }, "hosting.classification[0].code"},
-		"long type":              {func(p *abi.Profile) { p.Hosting.Classification[1].Type = strings.Repeat("t", 257) }, "hosting.classification[1].type"},
-		"unknown class":          {func(p *abi.Profile) { p.Hosting.Classification[0].Class = "fatal" }, "hosting.classification[0].class"},
-		"no class":               {func(p *abi.Profile) { p.Hosting.Classification[1].Class = "" }, "hosting.classification[1].class"},
+		"relative listing path":      {func(p *abi.Profile) { p.Hosting.Discovery.Path = "models" }, "hosting.discovery.path"},
+		"listing path query":         {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/models?limit=100" }, "hosting.discovery.path"},
+		"listing dot segment":        {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/v2/../admin" }, "hosting.discovery.path"},
+		"listing placeholder":        {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/{credential}/models" }, "hosting.discovery.path"},
+		"no model array":             {func(p *abi.Profile) { p.Hosting.Discovery.Models = "" }, "hosting.discovery.models"},
+		"no model ID field":          {func(p *abi.Profile) { p.Hosting.Discovery.ID = "" }, "hosting.discovery.id"},
+		"control in a field":         {func(p *abi.Profile) { p.Hosting.Discovery.ID = "id\n" }, "hosting.discovery.id"},
+		"malformed parameter":        {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "page token" }, "hosting.discovery.pagination.parameter"},
+		"placed parameter":           {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "key" }, "hosting.discovery.pagination.parameter"},
+		"no cursor field":            {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Cursor = "" }, "hosting.discovery.pagination.cursor"},
+		"long more field":            {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.More = strings.Repeat("m", 129) }, "hosting.discovery.pagination.more"},
+		"too many rules":             {func(p *abi.Profile) { p.Hosting.Classification = make([]abi.FailureRule, 33) }, "hosting.classification"},
+		"rule matching anything":     {func(p *abi.Profile) { p.Hosting.Classification[1].Type = "" }, "hosting.classification[1]"},
+		"successful status":          {func(p *abi.Profile) { p.Hosting.Classification[0].Status = 200 }, "hosting.classification[0].status"},
+		"control in a code":          {func(p *abi.Profile) { p.Hosting.Classification[0].Code = "quota\n" }, "hosting.classification[0].code"},
+		"long type":                  {func(p *abi.Profile) { p.Hosting.Classification[1].Type = strings.Repeat("t", 257) }, "hosting.classification[1].type"},
+		"unknown class":              {func(p *abi.Profile) { p.Hosting.Classification[0].Class = "fatal" }, "hosting.classification[0].class"},
+		"no class":                   {func(p *abi.Profile) { p.Hosting.Classification[1].Class = "" }, "hosting.classification[1].class"},
+		"grant fact without a grant": {func(p *abi.Profile) { p.Hosting.Headers["X-Acme-Account"] = "{grant.account}" }, "hosting.headers.X-Acme-Account"},
+		"undeclared grant fact": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Headers["X-Acme-Account"] = &abi.GrantAuthentication{Facts: []string{"project"}}, "{grant.account}"
+		}, "hosting.headers.X-Acme-Account"},
+		"grant fact name":      {func(p *abi.Profile) { p.Grant = &abi.GrantAuthentication{Facts: []string{"Account"}} }, "grant.facts[0]"},
+		"duplicate grant fact": {func(p *abi.Profile) { p.Grant = &abi.GrantAuthentication{Facts: []string{"account", "account"}} }, "grant.facts[1]"},
+		"grant fact in address": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Address = &abi.GrantAuthentication{Facts: []string{"account"}}, "https://api.acme.example/{grant.account}/v2"
+		}, "hosting.address"},
+		"grant fact in envelope": {func(p *abi.Profile) {
+			p.Grant = &abi.GrantAuthentication{Facts: []string{"account"}}
+			p.Hosting.Envelope = &abi.Envelope{Request: "request", Fields: map[string]string{"account": "{grant.account}"}}
+		}, "hosting.envelope.fields.account"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := pluginManifest().Profiles[0]
@@ -465,5 +478,69 @@ func TestPluginOptionDeclarationsAreValidated(t *testing.T) {
 				t.Fatalf("want a refusal of %s, got %v", tc.field, refusal)
 			}
 		})
+	}
+}
+
+// grantManifest declares a profile that authenticates with a grant, whose
+// hosting adaptation places grant facts beside an option.
+func grantManifest() abi.Manifest {
+	m := pluginManifest()
+	m.Profiles[0].Grant = &abi.GrantAuthentication{Facts: []string{"account", "project"}}
+	m.Profiles[0].Options = []abi.Option{{Name: "region", Label: "Region"}}
+	m.Profiles[0].Hosting = abi.Hosting{
+		Address: "https://api.acme.example/v2",
+		Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Acme-Account": "{grant.account}"},
+		Query:   map[string]string{"project": "{grant.project}", "placement": "{options.region}-{grant.account}"},
+	}
+	return m
+}
+
+func grantCredential(t *testing.T, token string, facts map[string]string) []byte {
+	t.Helper()
+	secret, err := json.Marshal(GrantCredential{AccessToken: token, Facts: facts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secret
+}
+
+// A profile that authenticates with a grant places the grant's current
+// access token where the static credential would go, and its grant facts
+// beside the provider's options.
+func TestPluginGrantProfilePlacesTheAccessTokenAndGrantFacts(t *testing.T) {
+	c := pluginConfig(t, grantManifest())
+	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+	if err := c.Validate(&egress.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := c.Profile(); !slices.Equal(p.Authentication, []string{AuthGrant}) || !SecretRequired(AuthGrant) {
+		t.Fatalf("a grant profile authenticates with %v", p.Authentication)
+	}
+	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, grantCredential(t, "at-123", map[string]string{"account": "acct 7", "project": "p/1"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("Authorization") != "Bearer at-123" || req.Header.Get("X-Acme-Account") != "acct 7" || req.URL.RawQuery != "placement=eu-acct+7&project=p%2F1" {
+		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
+	}
+	if !slices.Contains(sensitive, "at-123") || !slices.Contains(sensitive, "Bearer at-123") || slices.Contains(sensitive, "acct 7") {
+		t.Fatalf("redacts %q", sensitive)
+	}
+	for name, secret := range map[string][]byte{
+		"static credential":  []byte("at-123"),
+		"no access token":    grantCredential(t, "", map[string]string{"account": "a", "project": "p"}),
+		"unrecorded fact":    grantCredential(t, "at-123", map[string]string{"account": "a"}),
+		"fact out of header": grantCredential(t, "at-123", map[string]string{"account": "a\r\nX-Injected: 1", "project": "p"}),
+	} {
+		req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+		if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); !errors.Is(err, ErrCredentialRejected) {
+			t.Errorf("%s: placed with %v", name, err)
+		}
+	}
+	static := c
+	static.AuthMode = AuthStaticCredential
+	if static.Validate(&egress.Policy{}) == nil {
+		t.Fatal("a grant profile accepted a static credential")
 	}
 }

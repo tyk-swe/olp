@@ -89,7 +89,10 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		}, Signing: true}, {ID: "reference-workspace-chat", Label: "Reference workspace Chat Completions", Dialect: "openai-chat",
 			Options: []abi.Option{{Name: "workspace", Label: "Workspace", Description: "The upstream workspace that serves this provider.", Pattern: "^[a-z0-9][a-z0-9-]{0,39}$"}},
 			Hosting: abi.Hosting{Address: "https://api.example.com/v1/workspaces/{options.workspace}", Headers: headers},
-		}},
+		}, {ID: "reference-grant-chat", Label: "Reference Chat Completions with sign-in", Dialect: "openai-chat", Grant: &abi.GrantAuthentication{Facts: []string{"account"}}, Hosting: abi.Hosting{
+			Address: "https://api.example.com/v1",
+			Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
+		}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {
 		t.Fatalf("manifest %+v, want %+v", manifest, want)

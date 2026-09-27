@@ -42,19 +42,33 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     'Installed reference 0.1.0.'
   );
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
-  // One profile places the credential, one signs requests with it, and one
-  // places the provider's workspace option in its address.
-  for (const [id, address] of [
-    ['reference-chat', 'https://api.example.com/v1'],
-    ['reference-signed-chat', 'https://api.example.com/v1'],
+  // One profile places the credential, one signs requests with it, one
+  // places the provider's workspace option in its address, and one
+  // authenticates with a grant the plugin enrolls.
+  for (const [id, address, authentication] of [
+    ['reference-chat', 'https://api.example.com/v1', 'Static credential'],
+    [
+      'reference-signed-chat',
+      'https://api.example.com/v1',
+      'Static credential'
+    ],
     [
       'reference-workspace-chat',
-      'https://api.example.com/v1/workspaces/{options.workspace}'
+      'https://api.example.com/v1/workspaces/{options.workspace}',
+      'Static credential'
+    ],
+    [
+      'reference-grant-chat',
+      'https://api.example.com/v1',
+      'Grant, enrolled by the plugin'
     ]
   ] as const) {
-    const profile = plugin.getByRole('row', { name: id });
+    const profile = plugin.getByRole('row', { name: new RegExp(`^${id} `) });
     await expect(
       profile.getByRole('cell', { name: 'openai-chat', exact: true })
+    ).toBeVisible();
+    await expect(
+      profile.getByRole('cell', { name: authentication, exact: true })
     ).toBeVisible();
     await expect(
       profile.getByRole('cell', { name: address, exact: true })

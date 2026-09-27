@@ -3,8 +3,9 @@
 // A plugin is a WebAssembly module that speaks the ABI in sdk/plugin/abi. OLP
 // stores it by the SHA-256 digest of the module, and it can't be used until an
 // owner approves the origins its manifest declares. Runtime runs plugin code on
-// wazero within memory and time limits and grants it only a clock, randomness
-// and redacted logging; Host runs installed plugins' code by digest.
+// wazero within memory and time limits and grants it only a clock, randomness,
+// redacted logging and, to calls that are granted it, HTTP to its approved
+// origins; Host runs installed plugins' code by digest.
 package plugins
 
 import (
@@ -229,6 +230,8 @@ type Call struct {
 	// Secrets are values the call hands the plugin. OLP redacts them from
 	// everything the plugin logs and from failures it reports.
 	Secrets []string
+	// HTTP, when set, grants the call the http capability.
+	HTTP *HTTP
 }
 
 // Call serves call on an instance of the module and decodes its result into
@@ -240,6 +243,7 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 	if err != nil {
 		return err
 	}
+	ctx = context.WithValue(ctx, httpKey{}, call.HTTP)
 	return m.run(ctx, call.Method, call.Secrets, func(ctx context.Context, instance api.Module) error {
 		ptr, err := lend(ctx, instance, request)
 		if err != nil {
@@ -400,6 +404,8 @@ func hostCall(ctx context.Context, instance api.Module, stack []uint64) {
 			break
 		}
 		callOutput(ctx).record(record)
+	case request.Method == abi.CapabilityHTTP:
+		response.Result, response.Error = serveHTTP(ctx, request.Params)
 	default:
 		response.Error = &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + request.Method + "."}
 	}

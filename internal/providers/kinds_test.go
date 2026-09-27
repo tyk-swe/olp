@@ -15,7 +15,9 @@ import (
 func TestKindAuthModesAgreeWithTheirAuthenticators(t *testing.T) {
 	for _, kind := range kinds {
 		for _, mode := range kind.AuthModes {
-			if connectors.SecretRequired(mode.Mode) != (mode.Credential == "required") {
+			// A grant's credential versions come from grant enrollment rather
+			// than a pasted secret, but it authorizes with one all the same.
+			if connectors.SecretRequired(mode.Mode) != (mode.Credential != "forbidden") || (mode.Credential == "grant") != (mode.Mode == connectors.AuthGrant) {
 				t.Errorf("%s %s: catalog credential %q disagrees with its authenticator", kind.Kind, mode.Mode, mode.Credential)
 			}
 		}

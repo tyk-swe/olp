@@ -98,6 +98,69 @@ func TestServeHandsMethodsTheProviderTheyServe(t *testing.T) {
 	}
 }
 
+// enroller is a plugin whose profile authenticates with a grant.
+type enroller struct{ manifestOnly }
+
+// StartGrant signs in to the account the provider's option names.
+func (enroller) StartGrant(ctx context.Context, start GrantStart) (GrantAuthorization, error) {
+	provider, ok := ProviderOf(ctx)
+	if !ok {
+		return GrantAuthorization{}, errors.New("the call serves no provider")
+	}
+	return GrantAuthorization{URL: "https://login.acme.example/authorize?profile=" + start.Profile + "&account=" + provider.Options["account"], Session: "verifier"}, nil
+}
+
+func (enroller) ExchangeGrant(_ context.Context, exchange GrantExchange) (Grant, error) {
+	switch {
+	case exchange.Session != "verifier":
+		return Grant{}, errors.New("lost the session")
+	case exchange.Input != "code#state":
+		return Grant{}, &Error{Code: abi.CodeStateMismatch, Message: "another sign-in"}
+	}
+	return Grant{AccessToken: "at", Principal: "user@acme.example", Facts: map[string]string{"account": "7"}}, nil
+}
+
+// A GrantEnroller runs the enrollment steps for the provider they serve, whose
+// option values ProviderOf returns.
+func TestServeRunsGrantEnrollmentSteps(t *testing.T) {
+	response := serveWith(t, enroller{}, `{"method":"grant_start","params":{"profile":"acme-account"},"provider":{"profile":"acme-account","options":{"account":"acme"}}}`)
+	var authorization GrantAuthorization
+	if response.Error != nil || json.Unmarshal(response.Result, &authorization) != nil || authorization.URL != "https://login.acme.example/authorize?profile=acme-account&account=acme" || authorization.Session != "verifier" {
+		t.Fatalf("grant_start response %+v", response)
+	}
+	response = serveWith(t, enroller{}, `{"method":"grant_exchange","params":{"profile":"acme-account","session":"verifier","input":"code#state"}}`)
+	var grant Grant
+	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.AccessToken != "at" || grant.Facts["account"] != "7" {
+		t.Fatalf("grant_exchange response %+v", response)
+	}
+	for request, want := range map[string]abi.Error{
+		`{"method":"grant_exchange","params":{"session":"verifier","input":"other"}}`:   {Code: abi.CodeStateMismatch, Message: "another sign-in"},
+		`{"method":"grant_exchange","params":{"session":"other","input":"code#state"}}`: {Code: abi.CodeInternal, Message: "lost the session"},
+		`{"method":"grant_exchange","params":{"session":7}}`:                            {Code: abi.CodeInvalidRequest, Message: "The parameters do not match the method."},
+	} {
+		if response := serveWith(t, enroller{}, request); response.Error == nil || *response.Error != want {
+			t.Errorf("%s: %+v", request, response.Error)
+		}
+	}
+	// A plugin whose profiles authenticate with static credentials enrolls
+	// no grants.
+	if response := serveWith(t, manifestOnly{}, `{"method":"grant_start","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
+		t.Fatalf("a plugin without grant enrollment answered %+v", response)
+	}
+}
+
+// A plugin can't declare a profile that authenticates with a grant without a
+// GrantEnroller: it reports no manifest, so OLP never installs it.
+func TestServeRefusesAGrantProfileWithoutAGrantEnroller(t *testing.T) {
+	declared := Manifest{Name: "acme", Version: "1.0.0", Profiles: []Profile{{ID: "acme-account", Label: "Acme Account", Dialect: "openai-chat", Grant: &GrantAuthentication{}}}}
+	if response := serveWith(t, manifestOnly(declared), `{"method":"manifest"}`); response.Error == nil || response.Error.Code != abi.CodeInternal {
+		t.Fatalf("manifest response %+v", response)
+	}
+	if response := serveWith(t, enroller{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
+		t.Fatalf("manifest response %+v", response)
+	}
+}
+
 func TestServeReportsFailuresAsErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		plugin  Plugin

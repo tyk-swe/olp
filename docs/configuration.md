@@ -253,7 +253,9 @@ also select a probe `model`. Credential files must have restricted permissions;
 ADC and the AWS default chain reject stored credentials. A provider with a
 profile, including a [plugin provider](plugins.md#providers-from-plugin-profiles)
 and its static credential, mounts only secret material: its `configuration` must
-match the published revision.
+match the published revision. A provider that authenticates with a
+[grant](plugins.md#grant-enrollment) can't be mounted: its grant lives beneath a
+credential version in the database, which needs the master key.
 
 Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
 default credential slot and enforces its slot and connection limits. Releases

@@ -165,6 +165,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool)
 	catalogue := providers.New(server, &policy, pluginHost)
+	catalogue.Plugins = pluginRuntime
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)

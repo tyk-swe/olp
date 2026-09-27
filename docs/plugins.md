@@ -9,7 +9,7 @@ records the design; the [authoring guide](plugin-authoring.md) covers writing
 one.
 
 This page covers installing, reviewing and approving plugins, creating
-providers from their profiles, and uninstalling them.
+providers from their profiles, enrolling grants, and uninstalling plugins.
 
 ## Upstream terms of use
 
@@ -49,12 +49,14 @@ side, so a new build can be installed and reviewed before anything moves to it.
 `GET /api/v1/plugins` and the Plugins page show each installed digest with what
 its manifest declares:
 
-- **profiles**, each naming the built-in dialect it serves, the options its
-  providers set, and its hosting adaptation: the address its requests go to,
-  at one of the plugin's origins, the headers and query parameters it
-  declares, any model listing and failure classification, and any envelope and
-  rewrites of the dialect's bodies. A profile whose manifest entry has
-  `signing: true` also runs the plugin's signing hook on every request;
+- **profiles**, each naming the built-in dialect it serves, whether providers
+  using it authenticate with a static credential or a
+  [grant](#grant-enrollment), the options its providers set, and its hosting
+  adaptation: the address its requests go to, at one of the plugin's origins,
+  the headers and query parameters it declares, any model listing and failure
+  classification, and any envelope and rewrites of the dialect's bodies. A
+  profile whose manifest entry has `signing: true` also runs the plugin's
+  signing hook on every request;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -74,7 +76,8 @@ In the console's provider wizard, choose **Provider plugin**, then the profile
 and plugin build.
 
 A provider of the `plugin` kind pins the digest as its profile revision and
-authenticates with a static credential:
+authenticates as its profile declares: with a static credential, or with a
+[grant](#grant-enrollment) (`"auth_mode": "grant"`):
 
 ```json
 {
@@ -91,9 +94,10 @@ refuse the draft otherwise. The provider's endpoint is the profile's address,
 with the provider's options in place, which OLP sets.
 
 OLP runs the profile's hosting adaptation itself. It fills the declared headers
-and query parameters from the static credential and the provider's
-[options](#options), such as `Authorization: Token {credential}`, and sends the
-request over OLP's own transport, with the provider's network options and the
+and query parameters from the static credential, or from a grant's access token
+and grant facts, and the provider's [options](#options), such as
+`Authorization: Token {credential}`, and sends the request over OLP's own
+transport, with the provider's network options and the
 egress policy. The credential is stored like any credential version, and every
 value that carries it is redacted wherever upstream text is recorded.
 
@@ -148,7 +152,8 @@ carry over.
 A gateway serving from [mounted connectors](configuration.md#mounted-connectors)
 mounts a plugin provider's static credential with `credential_file`. The
 mounted `configuration` must match the published revision, including its
-`profile_revision`, endpoint and plugin options.
+`profile_revision`, endpoint and plugin options. A mounted gateway refuses a provider that
+authenticates with a grant.
 
 ### Options
 
@@ -174,7 +179,8 @@ enum or pattern with `validation_failed`, naming the option as
 `configuration.options.plugin_options.<name>`. An empty value leaves an option
 unset. The hosting adaptation places the values in the address, headers,
 query parameters and envelope fields it declares, and every call OLP makes to
-the plugin on behalf of the provider, such as its signing hook, carries them.
+the plugin on behalf of the provider, such as its signing hook or its
+[grant enrollment](#grant-enrollment) steps, carries them.
 
 Options are part of the provider's configuration like any other setting:
 changing them is a draft change whose certification starts over, the revision
@@ -187,8 +193,9 @@ A profile may declare a signing hook for an upstream whose keys must become
 signatures or timestamped tokens. The hook is the only plugin code that runs
 per request: once per upstream request, never per stream event, after hosting
 has placed the request and its body is final. It receives the finished request,
-the static credential and the provider's [options](#options), and returns
-headers to add, which OLP redacts like the credential. Gateways run it for traffic, and control for probes and
+the static credential or the grant's access token and the provider's
+[options](#options), and returns headers to add, which OLP redacts like the
+credential. Gateways run it for traffic, and control for probes and
 certification. A signing profile need not place the credential at all.
 
 A hook that fails, exceeds the plugin limits or returns a header OLP refuses
@@ -202,6 +209,65 @@ anything. The first request a process signs with a plugin build loads the
 module from the database and compiles it, which takes a few seconds for a
 typical Go plugin. After that, signing adds about a millisecond per request for
 a small body, growing with the body's size.
+
+## Grant enrollment
+
+Some upstreams, such as subscription backends, authorize an account rather than
+issue an API key, and rotate that authorization. A profile that declares a
+grant authenticates providers with one: rotating upstream authorization the
+plugin obtains when an operator signs in to the upstream account, which OLP
+holds beneath an ordinary, immutable credential version
+([ADR 0006](adr/0006-grants-beneath-immutable-credentials.md)).
+
+In the provider wizard's Connection stage, choosing such a profile replaces the
+credential field with grant enrollment. After saving the draft:
+
+1. OLP shows the authorization URL the plugin builds, with its state and PKCE
+   challenge, at one of the plugin's approved origins.
+2. The operator opens it, in any browser, and signs in upstream.
+3. The operator pastes back what the upstream returns: the whole callback URL
+   the browser was sent to (loopback paste-back), which may not load, or the
+   code the upstream displays (out-of-band code).
+4. The plugin exchanges it for a grant. OLP creates a credential version,
+   stages it on the draft's default credential slot like a rotated credential,
+   and the wizard tests the connection with it.
+
+Through the management API, which needs the `configure` scope:
+
+| Operation | Request |
+| --- | --- |
+| Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`; returns the enrollment's `id`, `authorization_url` and `expires_at`. |
+| Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL or code>"}`; returns the new `credential_id`, `credential_version` and observed `principal`. |
+| Cancel | `DELETE /api/v1/providers/{id}/grant-enrollments/{enrollment_id}` |
+
+A grant enrollment lasts 10 minutes. Its session state, such as the PKCE
+verifier, is stored encrypted in the database, so any control replica can
+continue it. Only the principal that started it continues or cancels it, and it
+is continued once, whatever the outcome. Continuing fails with:
+
+| Code | Reason |
+| --- | --- |
+| `grant_state_mismatch` | What was pasted back answers another sign-in than this enrollment's. |
+| `grant_enrollment_expired` (`410`) | The enrollment expired. |
+| `grant_enrollment_used` (`409`) | The enrollment was already continued. |
+| `grant_enrollment_stale` (`409`) | The provider's plugin profile or credential slot changed meanwhile. |
+| `grant_enrollment_failed` | The plugin or the upstream refused, such as an authorization code that expired; the detail carries the plugin's reason. |
+| `plugin_*` | The plugin is no longer usable, or exceeded its limits. |
+
+In each case, start another grant enrollment. The worker's maintenance purges
+expired enrollments: their session state as they expire, and their record an
+hour later.
+
+The credential version records the plugin digest, the observed principal (the
+upstream account the plugin reports) and the grant facts, which
+`GET /api/v1/providers/{id}/credentials` shows under `grant`, with the access
+token's expiry. The grant itself, its access token and refresh token, is
+encrypted beneath the version and never leaves OLP. Gateways receive only the
+access token, through the credential source; the refresh token is stored under
+a secret purpose that gateway code never reads. The access token serves until it
+expires. A pasted credential can't be staged for a provider that authenticates
+with a grant, and activation refuses a credential slot whose version doesn't
+match the provider's authentication.
 
 ## Uninstalling
 
@@ -237,11 +303,14 @@ soonest. Signing hooks run on modules compiled to machine code, which take
 longer to prepare but then sign about ten times faster; `BenchmarkSign` in
 `internal/plugins` measures both.
 
-The runtime currently grants a plugin a clock, randomness and logging, and
-nothing else: no filesystem, network, environment or arguments. What a plugin
-logs, including its standard output and standard error, reaches OLP's log with
-the secret values of the call redacted, attributed by `plugin_digest` and
-`plugin_method`.
+The runtime grants a plugin a clock, randomness and logging, and nothing else:
+no filesystem, environment or arguments. Grant enrollment steps are also granted
+HTTP, which reaches only the plugin's approved origins, over the provider's
+network path (its proxy, trust roots and network credential) and the egress
+policy; a redirect comes back to the plugin rather than being followed. What a
+plugin logs, including its standard output and standard error, reaches OLP's
+log with the secret values of the call redacted, attributed by `plugin_digest`
+and `plugin_method`.
 
 ## Permissions and audit
 
@@ -250,10 +319,14 @@ the secret values of the call redacted, attributed by `plugin_digest` and
 | List and read plugins | Any role, and management tokens with `read` |
 | Install, approve, uninstall | An owner with a user session |
 | Create and change plugin providers | The `configure` scope, as for any provider |
+| Enroll grants | The `configure` scope |
 
 Audit records `plugin.install`, `plugin.approve` and `plugin.uninstall` with the
 owner as actor and the digest as resource. A repeated upload of an installed
-digest records nothing.
+digest records nothing. It records `provider.grant.enroll` for every
+continuation that reaches the plugin: a success with the new credential version
+as resource, a failure with the provider. Audit never records what was pasted
+back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them.

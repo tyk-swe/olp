@@ -1,10 +1,12 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares four profiles at a fictional upstream, and the origins that
-// upstream uses: one serves the OpenAI Chat Completions dialect with the API
-// key in a header, the upstream's model listing and failure classification;
-// one serves Gemini generateContent inside the upstream's own envelope; one
-// serves Chat Completions signing each request with the API key; and one
-// serves Chat Completions at a workspace the operator names.
+// declares five profiles at a fictional upstream, and the origins that
+// upstream and its authority use: one serves the OpenAI Chat Completions
+// dialect with the API key in a header, the upstream's model listing and
+// failure classification; one serves Gemini generateContent inside the
+// upstream's own envelope; one serves Chat Completions signing each request
+// with the API key; one serves Chat Completions at a workspace the operator
+// names; and one serves Chat Completions for accounts that sign in through the
+// upstream's authority, whose grants the plugin enrolls.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -16,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
@@ -23,11 +26,14 @@ import (
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
-// upstream is the fictional upstream's API base URL. Tests link the plugin
-// against a fake upstream instead:
+// upstream is the fictional upstream's API base URL, and authority its OAuth
+// authorization server. Tests link the plugin against fakes instead:
 //
-//	-ldflags=-X=main.upstream=http://127.0.0.1:8080/v1
-var upstream = "https://api.example.com/v1"
+//	-ldflags='-X=main.upstream=http://127.0.0.1:8080/v1 -X=main.authority=http://127.0.0.1:8081'
+var (
+	upstream  = "https://api.example.com/v1"
+	authority = "https://login.example.com"
+)
 
 // version labels the build, so tests can link several digests of the plugin.
 var version = "0.1.0"
@@ -35,11 +41,7 @@ var version = "0.1.0"
 type reference struct{}
 
 func (reference) Manifest() plugin.Manifest {
-	api, err := url.Parse(upstream)
-	if err != nil {
-		panic("reference: upstream is not a URL: " + err.Error())
-	}
-	origin := api.Scheme + "://" + api.Host
+	api := origin(upstream)
 	// The upstream takes its API key as a token in the Authorization header
 	// and asks clients to identify themselves.
 	headers := map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"}
@@ -47,7 +49,7 @@ func (reference) Manifest() plugin.Manifest {
 		Name:        "reference",
 		Version:     version,
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
-		Origins:     []string{origin, "https://login.example.com"},
+		Origins:     slices.Compact([]string{api, origin(authority)}),
 		Profiles: []plugin.Profile{{
 			ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat",
 			Hosting: plugin.Hosting{
@@ -67,7 +69,7 @@ func (reference) Manifest() plugin.Manifest {
 			// and stream event as {"response": {...}}. It serves one
 			// candidate, wants a system instruction and refuses seeds.
 			Hosting: plugin.Hosting{
-				Address: origin + "/enveloped/v1beta",
+				Address: api + "/enveloped/v1beta",
 				Headers: headers,
 				Envelope: &plugin.Envelope{
 					Request:  "request",
@@ -98,6 +100,15 @@ func (reference) Manifest() plugin.Manifest {
 				Address: upstream + "/workspaces/{options.workspace}",
 				Headers: headers,
 			},
+		}, {
+			ID: "reference-grant-chat", Label: "Reference Chat Completions with sign-in", Dialect: "openai-chat",
+			// An account that signs in sends the grant's access token and
+			// names the account the grant authorizes, a grant fact.
+			Grant: &plugin.GrantAuthentication{Facts: []string{"account"}},
+			Hosting: plugin.Hosting{
+				Address: upstream,
+				Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
+			},
 		}},
 	}
 }
@@ -119,6 +130,14 @@ func (reference) Sign(_ context.Context, r plugin.SignRequest) (plugin.SignResul
 		"X-Reference-Timestamp": timestamp,
 		"X-Reference-Signature": hex.EncodeToString(mac.Sum(nil)),
 	}}, nil
+}
+
+func origin(address string) string {
+	u, err := url.Parse(address)
+	if err != nil {
+		panic("reference: " + address + " is not a URL: " + err.Error())
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func init() { plugin.Register(reference{}) }

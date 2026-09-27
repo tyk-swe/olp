@@ -30,6 +30,20 @@ const KindPlugin = "plugin"
 // credential, which its profile's hosting adaptation places.
 const AuthStaticCredential = "static_credential"
 
+// AuthGrant authenticates a plugin provider with a grant: rotating upstream
+// authorization that the plugin's grant enrollment obtains and OLP holds
+// beneath a credential version (ADR 0006). The hosting adaptation places the
+// grant's current access token and grant facts.
+const AuthGrant = "grant"
+
+// A GrantCredential is the secret of a credential version that has a grant:
+// what the credential source serves for it. It holds the grant's current
+// access token and its grant facts, never refresh material.
+type GrantCredential struct {
+	AccessToken string            `json:"access_token"`
+	Facts       map[string]string `json:"facts,omitempty"`
+}
+
 // pluginHosting is the hosting of every plugin profile: the plugin's declared
 // hosting adaptation, which OLP runs.
 const pluginHosting = "plugin"
@@ -114,14 +128,21 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 	if err != nil {
 		return nil, err
 	}
+	if err = parseGrant(declared.Grant); err != nil {
+		return nil, err
+	}
 	placed, err := parseHosting(declared, base)
 	if err != nil {
 		return nil, err
 	}
+	authentication := AuthStaticCredential
+	if declared.Grant != nil {
+		authentication = AuthGrant
+	}
 	p := Profile{
 		ID: declared.ID, Revision: plugin.Digest, Label: declared.Label, Kind: KindPlugin,
 		Dialect: declared.Dialect, DialectRevision: base.DialectRevision, Hosting: pluginHosting,
-		Authentication: []string{AuthStaticCredential}, Transport: "http", Operations: []string{"generation"},
+		Authentication: []string{authentication}, Transport: "http", Operations: []string{"generation"},
 		// Semantic headers and query settings belong to the dialect, so the
 		// provider configures them as it would for the dialect's direct hosting.
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
@@ -239,15 +260,19 @@ type hosting struct {
 }
 
 // Templates name a provider's values: credentialValue is its static
-// credential, and optionPlaceholder prefixes the name of one of its options.
+// credential or its grant's current access token, optionPlaceholder prefixes
+// the name of one of its options, and grantPlaceholder the name of one of its
+// grant's facts.
 const (
 	credentialValue   = "credential"
 	optionPlaceholder = "options."
+	grantPlaceholder  = "grant."
 )
 
 var (
-	queryName  = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
-	optionName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	queryName = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
+	// valueName is how options and grant facts are named.
+	valueName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 )
 
 // parseOptions checks the options a profile declares and compiles their
@@ -260,7 +285,7 @@ func parseOptions(declared []abi.Option) (map[string]*regexp.Regexp, error) {
 	for i, option := range declared {
 		field := fmt.Sprintf("options[%d]", i)
 		switch {
-		case !optionName.MatchString(option.Name):
+		case !valueName.MatchString(option.Name):
 			return nil, &ProfileError{Field: field + ".name", Message: "Name the option with 1–64 lowercase letters, digits and underscores, starting with a letter."}
 		case slices.ContainsFunc(declared[:i], func(prior abi.Option) bool { return prior.Name == option.Name }):
 			return nil, &ProfileError{Field: field + ".name", Message: "Declare each option once."}
@@ -332,17 +357,47 @@ func optionsSchema(declared []abi.Option) json.RawMessage {
 	return schema
 }
 
+// parseGrant checks the grant facts a profile that authenticates with a grant
+// declares.
+func parseGrant(grant *abi.GrantAuthentication) error {
+	if grant == nil {
+		return nil
+	}
+	if len(grant.Facts) > 16 {
+		return &ProfileError{Field: "grant.facts", Message: "Declare at most 16 grant facts."}
+	}
+	for i, fact := range grant.Facts {
+		field := fmt.Sprintf("grant.facts[%d]", i)
+		if !valueName.MatchString(fact) {
+			return &ProfileError{Field: field, Message: "Name the grant fact with 1–64 lowercase letters, digits and underscores, starting with a letter."}
+		}
+		if slices.Contains(grant.Facts[:i], fact) {
+			return &ProfileError{Field: field, Message: "Declare each grant fact once."}
+		}
+	}
+	return nil
+}
+
 // placeholders returns what a profile's templates may reference: the static
-// credential, and the options the profile requires, so that every placed
-// value is set.
-func placeholders(options []abi.Option) func(name string) error {
+// credential or a grant's access token, the options the profile requires and
+// the facts of its grant, so that every placed value is set.
+func placeholders(options []abi.Option, grant *abi.GrantAuthentication) func(name string) error {
 	return func(name string) error {
 		if name == credentialValue {
 			return nil
 		}
+		if fact, ok := strings.CutPrefix(name, grantPlaceholder); ok {
+			switch {
+			case grant == nil:
+				return errors.New("The profile authenticates without a grant, so it has no grant facts.")
+			case !slices.Contains(grant.Facts, fact):
+				return fmt.Errorf("The profile declares no grant fact %s.", fact)
+			}
+			return nil
+		}
 		option, ok := strings.CutPrefix(name, optionPlaceholder)
 		if !ok {
-			return fmt.Errorf("OLP has no placeholder {%s}; use {credential} or {options.<name>}.", name)
+			return fmt.Errorf("OLP has no placeholder {%s}; use {credential}, {options.<name>} or {grant.<name>}.", name)
 		}
 		i := slices.IndexFunc(options, func(declared abi.Option) bool { return declared.Name == option })
 		switch {
@@ -357,7 +412,7 @@ func placeholders(options []abi.Option) func(name string) error {
 
 func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	declaredHosting := declared.Hosting
-	known := placeholders(declared.Options)
+	known := placeholders(declared.Options, declared.Grant)
 	address, err := parseAddress(declaredHosting.Address, known)
 	if err != nil {
 		return hosting{}, err
@@ -405,6 +460,9 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		placed.query[name] = value
 	}
 	if !placed.uses(credentialValue) && !declared.Signing {
+		if declared.Grant != nil {
+			return hosting{}, &ProfileError{Field: "hosting", Message: "Place the grant's access token with {credential} in a header or query parameter, or sign requests with it."}
+		}
 		return hosting{}, &ProfileError{Field: "hosting", Message: "Place the static credential with {credential} in a header or query parameter, or sign requests with it."}
 	}
 	if err := validateDiscovery(declaredHosting); err != nil {
@@ -423,11 +481,15 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 }
 
 // parseAddress reads the address template. Options may fill its path, so its
-// origin is fixed at install; the credential never appears in it.
+// origin is fixed at install. The credential and grant facts, which belong to
+// a credential version rather than the provider, never appear in it.
 func parseAddress(text string, known func(name string) error) (template, error) {
 	address, err := parseTemplate(text, func(name string) error {
-		if name == credentialValue {
+		switch {
+		case name == credentialValue:
 			return errors.New("The address can't carry the credential; place it with {credential} in a header or query parameter.")
+		case strings.HasPrefix(name, grantPlaceholder):
+			return errors.New("The address can't carry grant facts; place them in a header or query parameter.")
 		}
 		return known(name)
 	})
@@ -470,24 +532,59 @@ func (h hosting) uses(name string) bool {
 }
 
 // templateValues are what a provider's hosting templates are filled from: its
-// static credential and its option values, by placeholder name.
-func templateValues(credential []byte, options map[string]string) map[string]string {
-	values := map[string]string{credentialValue: string(credential)}
+// static credential or its grant's access token, its option values and its
+// grant's facts, by placeholder name.
+func templateValues(credential string, options, facts map[string]string) map[string]string {
+	values := map[string]string{credentialValue: credential}
 	for name, value := range options {
 		values[optionPlaceholder+name] = value
+	}
+	for name, value := range facts {
+		values[grantPlaceholder+name] = value
 	}
 	return values
 }
 
-// place fills the declared headers and query parameters from the static
-// credential and the provider's options. It returns the placed values that
-// carry the credential.
-func (p *PluginProfile) place(req *http.Request, credential []byte, options map[string]string) ([]string, error) {
-	if len(credential) == 0 || strings.ContainsAny(string(credential), "\r\n\x00") {
-		return nil, ErrCredentialRejected
+// credential reads what a provider's credential secret holds for the
+// profile: the static credential, or the access token and facts of a grant's
+// GrantCredential. A secret whose token can't be sent in a header, or whose
+// grant lacks a fact the profile declares, rejects the request.
+func (p *PluginProfile) credential(secret []byte) (token string, facts map[string]string, err error) {
+	token = string(secret)
+	if p.declared.Grant != nil {
+		var grant GrantCredential
+		if json.Unmarshal(secret, &grant) != nil {
+			return "", nil, ErrCredentialRejected
+		}
+		for _, fact := range p.declared.Grant.Facts {
+			if _, recorded := grant.Facts[fact]; !recorded {
+				return "", nil, ErrCredentialRejected
+			}
+		}
+		token, facts = grant.AccessToken, grant.Facts
 	}
-	values := templateValues(credential, options)
+	if token == "" || strings.ContainsAny(token, "\r\n\x00") {
+		return "", nil, ErrCredentialRejected
+	}
+	return token, facts, nil
+}
+
+// place fills the declared headers and query parameters from the static
+// credential, or a grant's access token and grant facts, and the provider's
+// options. It returns the placed values that carry the credential, and a
+// grant's access token.
+func (p *PluginProfile) place(req *http.Request, secret []byte, options map[string]string) ([]string, error) {
+	token, facts, err := p.credential(secret)
+	if err != nil {
+		return nil, err
+	}
+	values := templateValues(token, options, facts)
 	var sensitive []string
+	if p.declared.Grant != nil {
+		// Apply redacts the secret as a whole; a grant's access token is
+		// only part of it.
+		sensitive = append(sensitive, token)
+	}
 	for name, value := range p.hosting.headers {
 		placed := value.render(values)
 		if !httpguts.ValidHeaderFieldValue(placed) {
@@ -508,7 +605,7 @@ func (p *PluginProfile) place(req *http.Request, credential []byte, options map[
 		}
 		query.Set(name, value.render(values))
 		if value.uses(credentialValue) {
-			sensitive = append(sensitive, url.QueryEscape(string(credential)))
+			sensitive = append(sensitive, url.QueryEscape(token))
 		}
 	}
 	req.URL.RawQuery = query.Encode()
@@ -516,7 +613,8 @@ func (p *PluginProfile) place(req *http.Request, credential []byte, options map[
 }
 
 // A template is a hosting adaptation value with placeholders, such as
-// "Token {credential}". Braces appear only around a placeholder.
+// "Token {credential}" or "{grant.account}". Braces appear only around a
+// placeholder.
 type template struct {
 	text  string
 	names []string

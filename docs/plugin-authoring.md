@@ -67,7 +67,7 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation and, optionally, `Signing`. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation, optionally `Signing` and, if providers using it authenticate with a grant, its `Grant`. |
 
 A profile serves one of OLP's built-in dialects whose requests and events are
 plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
@@ -111,8 +111,8 @@ A profile's `Hosting` declares where and how the dialect's requests reach the
 upstream, how the upstream lists its models and how its failures are
 classified. OLP runs it for every request of a provider using the profile; the
 only plugin code that runs per request is a [signing hook](#signing-hook).
-Providers using the profile authenticate with a static credential, which the
-adaptation places or the signing hook signs with.
+Providers using the profile authenticate with a static credential, or with a
+[grant](#grants), which the adaptation places or the signing hook signs with.
 
 | Field | Rule |
 | --- | --- |
@@ -126,10 +126,12 @@ adaptation places or the signing hook signs with.
 
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
-such as `Token {credential}`, `{options.<name>}` for the provider's value of a
-required option, such as `{options.region}`, and braces appear nowhere else. At
-least one value must place the credential, unless the profile signs requests,
-and the address never does. OLP refuses a credential it can't place in a
+such as `Token {credential}`, or a grant's current access token,
+`{options.<name>}` for the provider's value of a required option, such as
+`{options.region}`, and `{grant.<name>}` for a grant fact the profile declares;
+braces appear nowhere else. At least one value must place the credential,
+unless the profile signs requests, and the address never does, nor a grant
+fact. OLP refuses a credential it can't place in a
 header, such as one containing a line break, before sending anything, and
 redacts every value that carries the credential wherever it records upstream
 text.
@@ -164,7 +166,8 @@ OLP calls `Sign` once per upstream request of a signing profile, never per
 stream event, once the hosting adaptation has placed the request and its body
 is final. That holds for gateway traffic and for the probes and certification
 control sends. The `SignRequest` carries the profile's ID, the method, the
-absolute URL with its query, the headers, the body and the static credential.
+absolute URL with its query, the headers, the body and the static credential,
+or a grant's current access token.
 The call is on behalf of the provider sending the request, so
 [`plugin.ProviderOf(ctx)`](#calls-for-a-provider) returns its option values,
 such as the account or region a signature covers.
@@ -280,6 +283,78 @@ a `400` with its own code declares:
 Classification: []plugin.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
 ```
 
+## Grants
+
+Some upstreams authorize an account, often with a refresh token that rotates,
+rather than issue an API key. A profile that declares `Grant` authenticates
+providers with a grant: upstream authorization the plugin obtains when an
+operator signs in, which OLP holds beneath a credential version and places
+with the profile's hosting adaptation.
+
+```go
+plugin.Profile{
+	ID: "acme-account", Label: "Acme with sign-in", Dialect: "openai-chat",
+	Grant: &plugin.GrantAuthentication{Facts: []string{"account"}},
+	Hosting: plugin.Hosting{
+		Address: "https://api.acme.example/v1",
+		Headers: map[string]string{"Authorization": "Bearer {credential}", "Acme-Account": "{grant.account}"},
+	},
+}
+```
+
+`Facts` names up to 16 grant facts: non-secret values the plugin reports with
+every grant, such as the upstream account, that header and query parameter
+templates use as `{grant.<name>}`. Each is 1–64 lowercase letters, digits and
+underscores, starting with a letter. A template may use only the facts its
+profile declares; the address and envelope fields, which belong to the provider
+rather than to a credential version, use none.
+
+A plugin with such a profile implements `plugin.GrantEnroller`; one that
+declares a grant profile without it reports no manifest, so OLP refuses to
+install it. OLP runs its steps in control when an operator enrolls a grant from
+the provider wizard, on behalf of the enrolling provider, so
+[`plugin.ProviderOf(ctx)`](#calls-for-a-provider) returns its option values,
+such as the tenant whose authority the operator signs in to:
+
+```go
+func (acme) StartGrant(ctx context.Context, start plugin.GrantStart) (plugin.GrantAuthorization, error)
+func (acme) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchange) (plugin.Grant, error)
+```
+
+- `StartGrant` builds the authorization request the operator opens: its `URL`,
+  at one of the plugin's origins, with a fresh `state` and PKCE challenge, and a
+  `Session` of at most 16 KiB holding what `ExchangeGrant` needs, such as the
+  state and the PKCE verifier. OLP stores the session encrypted and hands it
+  back once.
+- `ExchangeGrant` receives the session and what the operator pasted back: the
+  whole callback URL the upstream redirected the browser to, typically a
+  loopback address where nothing listens, or the code the upstream displayed.
+  It checks the state, reporting a mismatch as an `*plugin.Error` with code
+  `abi.CodeStateMismatch`, exchanges the code with `plugin.Fetch`, and returns
+  the `Grant`: its `AccessToken` (at most 16 KiB, sendable in a header), any
+  `RefreshToken`, `ExpiresIn` seconds, the observed `Principal` (the upstream
+  account, 1–256 characters) and a value for every declared fact.
+
+Report a failure the operator should see, such as the upstream refusing the
+code, as an `*plugin.Error` with a code of your own; any other error is reported
+as `internal`. OLP redacts the session and the pasted value from what the step
+logs; keep tokens the plugin receives out of its log.
+
+The reference plugin's `reference-grant-chat` profile implements this flow
+against a fictional authority with the authorization code flow and PKCE.
+
+### Fetch
+
+`plugin.Fetch` sends an HTTP request through OLP, the only way a plugin reaches
+the network. OLP grants it to grant enrollment steps, and sends a request only
+to one of the plugin's approved origins, over the provider's network path and
+egress policy. It sets the framing headers itself; a plugin may not set `Host`,
+`Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect rather
+than following it, and any response the upstream sent, whatever its status.
+Request and response bodies are at most 512 KiB. A request OLP refuses or can't
+complete fails with an `*plugin.Error`: `origin_not_approved`, `http_failed` or
+`invalid_request`.
+
 ## What a plugin can reach
 
 OLP runs a plugin confined, within 64 MiB of memory and 10 seconds per call. It
@@ -287,10 +362,13 @@ grants only:
 
 - a clock: `time.Now` reads the host's wall and monotonic clocks;
 - randomness: `crypto/rand` reads the host's cryptographic source;
-- logging, through `plugin.Log`.
+- logging, through `plugin.Log`;
+- to grant enrollment steps, HTTP to the plugin's approved origins, through
+  `plugin.Fetch`.
 
-There is no filesystem, network, environment or argument list. Sleeping spends
-the call's time limit, so avoid it.
+There is no filesystem, other network access, environment or argument list.
+Sleeping spends the call's time limit, including the time `Fetch` waits, so
+avoid it.
 
 OLP keeps up to four instances of a module and serves each call on an idle one,
 so package-level state may survive from one call to the next. Never rely on it:
@@ -311,8 +389,9 @@ without leaking what OLP gave it or flooding the log.
 ## Testing
 
 The SDK builds natively too, so ordinary Go tests can call a plugin's methods
-directly; outside OLP, `plugin.Log` discards its records. Build the module for
-`wasip1` in your tests to check that it compiles as a reactor.
+directly; outside OLP, `plugin.Log` discards its records and `plugin.Fetch`
+fails as unavailable. Build the module for `wasip1` in your tests to check that
+it compiles as a reactor.
 
 ## ABI reference
 
@@ -372,8 +451,9 @@ A response carries either a result or an error:
 {"error": {"code": "unknown_method", "message": "The plugin does not implement sign."}}
 ```
 
-Error codes `invalid_request`, `unknown_method` and `internal` are shared; a
-plugin may report codes of its own.
+Error codes `invalid_request`, `unknown_method`, `internal`, `state_mismatch`,
+`origin_not_approved` and `http_failed` are shared; a plugin may report codes of
+its own.
 
 ### Calls for a provider
 
@@ -395,9 +475,13 @@ OLP calls, through `olp_call`:
 | --- | --- | --- |
 | `manifest` | none | The manifest, as described above. |
 | `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
+| `grant_start` | `{"profile": "…"}` | `{"url": "…", "session": "…"}` |
+| `grant_exchange` | `{"profile": "…", "session": "…", "input": "…"}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600, "principal": "…", "facts": {"name": "value"}}` |
 
 OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
-the provider whose request it signs.
+the provider whose request it signs, and the grant steps only for profiles that
+declare `"grant": {"facts": ["name"]}`, on behalf of the provider enrolling a
+grant.
 
 ### Capabilities
 
@@ -406,6 +490,7 @@ The plugin calls, through `host_call`:
 | Capability | Parameters | Result |
 | --- | --- | --- |
 | `log` | `{"level": "debug" \| "info" \| "warn" \| "error", "message": "…", "attrs": {"key": "value"}}` | none |
+| `http` | `{"method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>"}` | `{"status": 200, "header": {"Name": ["value"]}, "body": "<base64>"}` |
 
 A call may use only the capabilities OLP grants it; any other capability returns
-`unknown_method`.
+`unknown_method`. OLP grants `http` to `grant_start` and `grant_exchange`.

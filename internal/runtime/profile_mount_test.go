@@ -78,3 +78,24 @@ func TestMountedPluginProviderMountsItsStaticCredential(t *testing.T) {
 		t.Fatal("a mounted file set plugin options the revision does not publish")
 	}
 }
+
+// A published provider whose credential slots hold grants can't be served by
+// a mounted gateway, which has no master key to read their access tokens.
+func TestMountedGatewayRefusesProvidersWithGrants(t *testing.T) {
+	digest := strings.Repeat("ab", 32)
+	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+		ID: "acme-account", Label: "Acme Account", Dialect: "openai-chat", Grant: &abi.GrantAuthentication{},
+		Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}},
+	}}}
+	plugin, err := connectors.NewPluginProfile(digest, manifest, "acme-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, slotID, credentialID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	provider := Provider{ID: id, Enabled: true, Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, Plugin: plugin, ProfileID: "acme-account", ProfileRevision: digest, Endpoint: plugin.Address(nil), DefaultSlotID: slotID, Slots: []Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}}
+	cfg := Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: digest, Endpoint: provider.Endpoint}
+	snapshot := Snapshot{Providers: map[string]Provider{id: provider}}
+	if _, err := installMounted(&snapshot, map[string]MountedProvider{id: {Configuration: cfg, Credential: []byte(`{"access_token":"at"}`)}}); err == nil || !strings.Contains(err.Error(), "grants") {
+		t.Fatalf("a mounted gateway installed a provider with grants: %v", err)
+	}
+}

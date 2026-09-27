@@ -22,6 +22,9 @@ func validManifest() abi.Manifest {
 				Classification: []abi.FailureRule{{Status: 400, Code: "insufficient_quota", Class: abi.ClassRateLimited}},
 			}},
 			{ID: "acme-messages", Label: "Acme Messages", Dialect: "anthropic-messages", Hosting: abi.Hosting{Address: "http://127.0.0.1:8080", Query: map[string]string{"key": "{credential}"}}},
+			{ID: "acme-account", Label: "Acme Account", Dialect: "openai-responses", Grant: &abi.GrantAuthentication{Facts: []string{"account_id"}}, Hosting: abi.Hosting{
+				Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Account": "{grant.account_id}"},
+			}},
 		},
 	}
 }
@@ -84,6 +87,15 @@ func TestManifestValidation(t *testing.T) {
 		"option name":       {func(m *abi.Manifest) { m.Profiles[0].Options[0].Name = "Account" }, CodeManifestInvalid, "manifest.profiles[0].options[0].name"},
 		"undeclared option": {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query["account"] = "{options.account}" }, CodeManifestInvalid, "manifest.profiles[1].hosting.query.account"},
 		"option origin":     {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://{options.account}.acme.example/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
+		"access token not given": {func(m *abi.Manifest) {
+			m.Profiles[2].Hosting.Headers["Authorization"] = "Bearer {grant.account_id}"
+		}, CodeManifestInvalid, "manifest.profiles[2].hosting"},
+		"grant fact name":       {func(m *abi.Manifest) { m.Profiles[2].Grant.Facts[0] = "Account" }, CodeManifestInvalid, "manifest.profiles[2].grant.facts[0]"},
+		"duplicate grant fact":  {func(m *abi.Manifest) { m.Profiles[2].Grant.Facts = []string{"account_id", "account_id"} }, CodeManifestInvalid, "manifest.profiles[2].grant.facts[1]"},
+		"undeclared grant fact": {func(m *abi.Manifest) { m.Profiles[2].Grant.Facts = []string{"project"} }, CodeManifestInvalid, "manifest.profiles[2].hosting.headers.X-Account"},
+		"grant fact without a grant": {func(m *abi.Manifest) {
+			m.Profiles[0].Hosting.Headers["X-Account"] = "{grant.account_id}"
+		}, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.X-Account"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()

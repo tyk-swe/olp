@@ -188,7 +188,7 @@ func (c Config) envelope() *envelope {
 // model: the model and the provider's options. The credential is empty, as
 // no envelope template places it.
 func (c Config) envelopeValues(model string) map[string]string {
-	values := templateValues(nil, c.PluginOptions)
+	values := templateValues("", c.PluginOptions, nil)
 	values[modelValue] = c.Model(model)
 	return values
 }

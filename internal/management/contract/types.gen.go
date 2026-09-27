@@ -314,16 +314,19 @@ func (e CreateManagementTokenRequestScopes) Valid() bool {
 
 // Defines values for CredentialRequirement.
 const (
-	Forbidden CredentialRequirement = "forbidden"
-	Required  CredentialRequirement = "required"
+	CredentialRequirementForbidden CredentialRequirement = "forbidden"
+	CredentialRequirementGrant     CredentialRequirement = "grant"
+	CredentialRequirementRequired  CredentialRequirement = "required"
 )
 
 // Valid indicates whether the value is a known member of the CredentialRequirement enum.
 func (e CredentialRequirement) Valid() bool {
 	switch e {
-	case Forbidden:
+	case CredentialRequirementForbidden:
 		return true
-	case Required:
+	case CredentialRequirementGrant:
+		return true
+	case CredentialRequirementRequired:
 		return true
 	default:
 		return false
@@ -706,6 +709,7 @@ const (
 	ProviderAuthModeAzureClientSecret ProviderAuthMode = "azure_client_secret"
 	ProviderAuthModeAzureDefault      ProviderAuthMode = "azure_default"
 	ProviderAuthModeDefaultChain      ProviderAuthMode = "default_chain"
+	ProviderAuthModeGrant             ProviderAuthMode = "grant"
 	ProviderAuthModeHeaders           ProviderAuthMode = "headers"
 	ProviderAuthModeNone              ProviderAuthMode = "none"
 	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
@@ -725,6 +729,8 @@ func (e ProviderAuthMode) Valid() bool {
 	case ProviderAuthModeAzureDefault:
 		return true
 	case ProviderAuthModeDefaultChain:
+		return true
+	case ProviderAuthModeGrant:
 		return true
 	case ProviderAuthModeHeaders:
 		return true
@@ -1819,6 +1825,12 @@ type ContentPolicyRuleAction string
 // ContentPolicyRulePhase defines model for ContentPolicyRule.Phase.
 type ContentPolicyRulePhase string
 
+// ContinueGrantEnrollmentRequest defines model for ContinueGrantEnrollmentRequest.
+type ContinueGrantEnrollmentRequest struct {
+	// Input What the upstream returned after the operator signed in: the whole loopback callback URL it redirected the browser to, or the code it displayed.
+	Input string `json:"input"`
+}
+
 // CreateApiKeyRequest defines model for CreateApiKeyRequest.
 type CreateApiKeyRequest struct {
 	// AllowProviderState Permits stateful provider resources under this key. Provider state
@@ -2011,13 +2023,28 @@ type CreateRouteDraftRequest struct {
 	Targets   []RouteTargetRequest                  `json:"targets"`
 }
 
+// CredentialGrant What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.
+type CredentialGrant struct {
+	// ExpiresAt When the grant's current access token expires, if the upstream said.
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at"`
+
+	// Facts The grant facts the plugin reported, which the profile's hosting templates use.
+	Facts map[string]string `json:"facts"`
+
+	// PluginDigest Digest of the plugin whose grant enrollment created the version.
+	PluginDigest string `json:"plugin_digest"`
+
+	// Principal The observed principal: the upstream account the grant authorizes.
+	Principal string `json:"principal"`
+}
+
 // CredentialListResponse defines model for CredentialListResponse.
 type CredentialListResponse struct {
 	Items      []CredentialResponse      `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// CredentialRequirement defines model for CredentialRequirement.
+// CredentialRequirement Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.
 type CredentialRequirement string
 
 // CredentialResponse defines model for CredentialResponse.
@@ -2027,10 +2054,13 @@ type CredentialResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// DraftSelected True when this credential is selected only by the mutable draft.
-	DraftSelected bool                         `json:"draft_selected"`
-	Id            openapi_types.UUID           `json:"id"`
-	RevokedAt     nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
-	Version       int32                        `json:"version"`
+	DraftSelected bool `json:"draft_selected"`
+
+	// Grant What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.
+	Grant     nullable.Nullable[CredentialGrant] `json:"grant,omitempty"`
+	Id        openapi_types.UUID                 `json:"id"`
+	RevokedAt nullable.Nullable[time.Time]       `json:"revoked_at,omitempty"`
+	Version   int32                              `json:"version"`
 }
 
 // CredentialSlot defines model for CredentialSlot.
@@ -2068,6 +2098,31 @@ type DiscoveredModelRequest struct {
 // EnrollPasswordRequest defines model for EnrollPasswordRequest.
 type EnrollPasswordRequest struct {
 	NewPassword *string `json:"new_password,omitempty"`
+}
+
+// GrantEnrollment A grant enrollment in progress. The operator opens the authorization URL, signs in upstream, and continues the enrollment with what the upstream returns before it expires. It is continued once, from any control replica.
+type GrantEnrollment struct {
+	// AuthorizationUrl The plugin's authorization request, at one of its approved origins.
+	AuthorizationUrl string             `json:"authorization_url"`
+	ExpiresAt        time.Time          `json:"expires_at"`
+	Id               openapi_types.UUID `json:"id"`
+	ProviderId       openapi_types.UUID `json:"provider_id"`
+
+	// SlotId The credential slot the grant will back: the provider's default slot.
+	SlotId openapi_types.UUID `json:"slot_id"`
+}
+
+// GrantEnrollmentCompletion The credential version grant enrollment created, with the grant beneath it, staged on the enrollment's credential slot of the provider draft like a rotated credential.
+type GrantEnrollmentCompletion struct {
+	CredentialId      openapi_types.UUID `json:"credential_id"`
+	CredentialVersion int32              `json:"credential_version"`
+
+	// Etag The provider draft's new ETag.
+	Etag openapi_types.UUID `json:"etag"`
+
+	// Principal The observed principal: the upstream account the grant authorizes.
+	Principal  string             `json:"principal"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
 }
 
 // HealthResponse defines model for HealthResponse.
@@ -2713,7 +2768,13 @@ type PluginFailureRule struct {
 // PluginFailureRuleClass credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
 type PluginFailureRuleClass string
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential and {options.<name>} for its value of one of the profile's required options. A profile with an envelope or rewrites serves transformed routes only.
+// PluginGrantAuthentication Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
+type PluginGrantAuthentication struct {
+	// Facts The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}.
+	Facts *[]string `json:"facts,omitempty"`
+}
+
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares. A profile with an envelope or rewrites serves transformed routes only.
 type PluginHosting struct {
 	// Address Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place.
 	Address string `json:"address"`
@@ -2792,7 +2853,10 @@ type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential and {options.<name>} for its value of one of the profile's required options. A profile with an envelope or rewrites serves transformed routes only.
+	// Grant Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
+	Grant *PluginGrantAuthentication `json:"grant,omitempty"`
+
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares. A profile with an envelope or rewrites serves transformed routes only.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
@@ -3083,14 +3147,15 @@ type ProviderActivationResponse struct {
 
 // ProviderAuthCapabilityResponse defines model for ProviderAuthCapabilityResponse.
 type ProviderAuthCapabilityResponse struct {
+	// Credential Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.
 	Credential CredentialRequirement `json:"credential"`
 	Label      string                `json:"label"`
 
-	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	Mode ProviderAuthMode `json:"mode"`
 }
 
-// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 type ProviderAuthMode string
 
 // ProviderCapabilityOptionsResponse defines model for ProviderCapabilityOptionsResponse.
@@ -3107,7 +3172,7 @@ type ProviderCapabilityOptionsResponse struct {
 type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
 
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
@@ -3209,7 +3274,7 @@ type ProviderKindCapabilityListResponse struct {
 type ProviderKindCapabilityResponse struct {
 	AuthModes []ProviderAuthCapabilityResponse `json:"auth_modes"`
 
-	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	DefaultAuthMode ProviderAuthMode                  `json:"default_auth_mode"`
 	Description     string                            `json:"description"`
 	Fields          []ProviderFieldCapabilityResponse `json:"fields"`
@@ -3306,7 +3371,7 @@ type ProviderOperationDefaults struct {
 
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode           ProviderAuthMode `json:"auth_mode"`
 	Description        string           `json:"description"`
 	DocumentationLabel string           `json:"documentation_label"`
@@ -4962,6 +5027,12 @@ type DiscoverProviderModelsParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// StartGrantEnrollmentParams defines parameters for StartGrantEnrollment.
+type StartGrantEnrollmentParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // ListProviderModelsParams defines parameters for ListProviderModels.
 type ListProviderModelsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -5380,6 +5451,9 @@ type RotateProviderCredentialJSONRequestBody = RotateCredentialRequest
 
 // DiscoverProviderModelsJSONRequestBody defines body for DiscoverProviderModels for application/json ContentType.
 type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
+
+// ContinueGrantEnrollmentJSONRequestBody defines body for ContinueGrantEnrollment for application/json ContentType.
+type ContinueGrantEnrollmentJSONRequestBody = ContinueGrantEnrollmentRequest
 
 // SetProviderModelJSONRequestBody defines body for SetProviderModel for application/json ContentType.
 type SetProviderModelJSONRequestBody = SetModelRequest

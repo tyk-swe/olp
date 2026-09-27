@@ -168,7 +168,7 @@
       const identities = await listOidcIdentities();
       if (!identities.has_local_password) {
         // The profile callback requires explicit confirmation before consuming
-        // the one-time OIDC grant.
+        // the one-time OIDC reauthentication.
         window.location.assign(await beginOidcReauthentication('oidc_link'));
         return;
       }

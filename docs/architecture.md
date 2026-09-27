@@ -9,6 +9,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
 | Provider plugin install, approval, confined runtime, hosted plugin code and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
+| Grants beneath credential versions and grant enrollment sessions | `internal/grants/`, with its API in `internal/providers/grants.go` |
 | Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |

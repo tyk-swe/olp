@@ -48,6 +48,9 @@ type MaintenanceReport struct {
 	ReplayRows     int64
 	OIDCFlowRows   int64
 	ResourceRows   int64
+	// GrantEnrollmentRows counts grant enrollments purged an hour after they
+	// expired; their session state expires with them, among the secrets.
+	GrantEnrollmentRows int64
 }
 
 type cutoffs struct{ request, usage, audit time.Time }
@@ -412,6 +415,9 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 		// deleting the secret would cascade the replay away uncounted.
 		{&report.ReplayRows, "DELETE FROM olp.replays WHERE expires_at <= $1", []any{now}},
 		{&report.OIDCFlowRows, "DELETE FROM olp.oidc_flows WHERE expires_at <= $1", []any{now}},
+		// An expired grant enrollment's row outlives its session state for an
+		// hour, so a late continuation learns that it expired.
+		{&report.GrantEnrollmentRows, "DELETE FROM olp.grant_enrollments WHERE expires_at <= $1", []any{now.Add(-time.Hour)}},
 	}
 	for _, statement := range deletes {
 		tag, execErr := tx.Exec(ctx, statement.sql, statement.args...)

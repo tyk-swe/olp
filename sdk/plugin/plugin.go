@@ -12,10 +12,11 @@
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
 //
 // The SDK implements the ABI in package abi, so a plugin only implements
-// Plugin, and Signer if a profile declares signing. OLP runs the module
-// confined: it reaches nothing but the capabilities OLP grants, which are a
-// clock, randomness and Log. See docs/plugin-authoring.md in the OpenLLMProxy
-// repository.
+// Plugin, Signer if a profile declares signing, and GrantEnroller if its
+// profiles authenticate with a grant. OLP runs the module confined: it reaches
+// nothing but the capabilities OLP grants, which are a clock, randomness, Log
+// and, for grant enrollment steps, Fetch. See docs/plugin-authoring.md in the
+// OpenLLMProxy repository.
 package plugin
 
 import (
@@ -67,6 +68,17 @@ type Option = abi.Option
 // values.
 type Provider = abi.Provider
 
+// GrantAuthentication declares that a profile authenticates with a grant.
+type GrantAuthentication = abi.GrantAuthentication
+
+// Grant enrollment steps' parameters and results.
+type (
+	GrantStart         = abi.GrantStart
+	GrantAuthorization = abi.GrantAuthorization
+	GrantExchange      = abi.GrantExchange
+	Grant              = abi.Grant
+)
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 
@@ -94,14 +106,30 @@ type Signer interface {
 	Sign(ctx context.Context, request SignRequest) (SignResult, error)
 }
 
+// GrantEnroller is implemented by a plugin whose profiles authenticate with a
+// grant. OLP runs its steps when an operator enrolls a grant for a provider,
+// ProviderOf(ctx) returns that provider, with its option values, and OLP
+// grants the steps Fetch.
+type GrantEnroller interface {
+	// StartGrant builds the authorization request the operator opens to sign
+	// in upstream, including its state and PKCE challenge.
+	StartGrant(ctx context.Context, start GrantStart) (GrantAuthorization, error)
+	// ExchangeGrant exchanges what the operator pasted back for a grant. It
+	// reports a value carrying another request's state as an *Error with
+	// code abi.CodeStateMismatch.
+	ExchangeGrant(ctx context.Context, exchange GrantExchange) (Grant, error)
+}
+
 var registered Plugin
 
 // methods serve the methods OLP calls, each given the call's context and
 // parameters. A method whose optional interface the plugin lacks reports
 // abi.CodeUnknownMethod.
 var methods = map[string]func(ctx context.Context, params json.RawMessage) (any, error){
-	abi.MethodManifest: manifest,
-	abi.MethodSign:     sign,
+	abi.MethodManifest:      manifest,
+	abi.MethodSign:          sign,
+	abi.MethodGrantStart:    enrollment(abi.MethodGrantStart, GrantEnroller.StartGrant),
+	abi.MethodGrantExchange: enrollment(abi.MethodGrantExchange, GrantEnroller.ExchangeGrant),
 }
 
 type providerKey struct{}
@@ -151,12 +179,16 @@ func serve(message []byte) (response []byte) {
 }
 
 // manifest answers the manifest call. A profile that declares signing needs a
-// Signer, so a plugin that declares one without implementing it reports no
-// manifest, and OLP refuses to install it.
+// Signer, and one that authenticates with a grant a GrantEnroller, so a plugin
+// that declares one without implementing it reports no manifest, and OLP
+// refuses to install it.
 func manifest(context.Context, json.RawMessage) (any, error) {
 	m := registered.Manifest()
 	if _, signs := registered.(Signer); !signs && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.Signing }) {
 		return nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile declares signing, but the plugin does not implement Signer."}
+	}
+	if _, enrolls := registered.(GrantEnroller); !enrolls && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.Grant != nil }) {
+		return nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile authenticates with a grant, but the plugin does not implement GrantEnroller."}
 	}
 	return m, nil
 }
@@ -172,6 +204,21 @@ func sign(ctx context.Context, params json.RawMessage) (any, error) {
 		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."}
 	}
 	return signer.Sign(ctx, request)
+}
+
+// enrollment serves a grant enrollment step with the plugin's GrantEnroller.
+func enrollment[P, R any](method string, step func(GrantEnroller, context.Context, P) (R, error)) func(context.Context, json.RawMessage) (any, error) {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		enroller, ok := registered.(GrantEnroller)
+		if !ok {
+			return nil, unknownMethod(method)
+		}
+		var p P
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The parameters do not match the method."}
+		}
+		return step(enroller, ctx, p)
+	}
 }
 
 func unknownMethod(method string) *abi.Error {

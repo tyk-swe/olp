@@ -37,9 +37,12 @@ func (s *Server) credentials(r *http.Request) (access.Reply, error) {
 		'id',c.id,'version',c.version,
 		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
 		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
-		'created_at',c.created_at,'revoked_at',c.revoked_at)
+		'created_at',c.created_at,'revoked_at',c.revoked_at,
+		'grant',CASE WHEN c.plugin_digest IS NOT NULL THEN jsonb_build_object(
+			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at) END)
 		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
+		LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
 		WHERE c.provider_id=$1 AND c.id<$2 ORDER BY c.id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
@@ -99,6 +102,9 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	}
 	if !current.Configuration.CredentialRequired() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+	}
+	if current.Configuration.Grant() {
+		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
 	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
@@ -495,6 +501,9 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	case input.Credential != nil:
 		if !current.Configuration.CredentialRequired() {
 			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+		}
+		if current.Configuration.Grant() {
+			return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
 		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
 		if err != nil {

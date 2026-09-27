@@ -70,3 +70,28 @@ func TestMountedPluginProviderSuppliesItsCredential(t *testing.T) {
 		})
 	}
 }
+
+// A grant is refreshed beneath its credential version in the database, so a
+// gateway without the master key refuses to mount a provider that
+// authenticates with one, with or without a credential file.
+func TestMountedConnectorsRefuseGrants(t *testing.T) {
+	directory := t.TempDir()
+	secretFile := filepath.Join(directory, "credential")
+	if err := os.WriteFile(secretFile, []byte(`{"access_token":"at"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "endpoint": "https://api.acme.example/v1", "profile_id": "acme-account", "profile_revision": strings.Repeat("ab", 32)}
+	for _, entry := range []map[string]any{
+		{"provider_id": uuid.NewString(), "configuration": configuration, "credential_file": secretFile},
+		{"provider_id": uuid.NewString(), "configuration": configuration},
+	} {
+		data, _ := json.Marshal(map[string]any{"providers": []any{entry}})
+		file := filepath.Join(directory, "connectors.json")
+		if err := os.WriteFile(file, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadMounted(file, &egress.Policy{}); err == nil || !strings.Contains(err.Error(), "grant") {
+			t.Fatalf("mounted a provider that authenticates with a grant: %v", err)
+		}
+	}
+}

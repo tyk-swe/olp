@@ -58,6 +58,11 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 				return nil, err
 			}
 		}
+		// A grant is refreshed beneath its credential version in the database,
+		// which a gateway without the master key can't read.
+		if entry.Configuration.Grant() {
+			return nil, errors.New("mounted connectors can't serve a provider that authenticates with a grant; run the gateway with the master key")
+		}
 		required := entry.Configuration.CredentialRequired()
 		if required != (entry.CredentialFile != nil) {
 			return nil, errors.New("mounted credential file does not match authentication mode")

@@ -117,6 +117,23 @@ func TestASigningProfileNeedNotPlaceTheCredential(t *testing.T) {
 	}
 }
 
+// A profile that authenticates with a grant signs with the grant's access
+// token, never the credential version's secret that holds it.
+func TestAGrantProfileSignsWithTheAccessToken(t *testing.T) {
+	manifest := grantManifest()
+	manifest.Profiles[0].Signing = true
+	c := pluginConfig(t, manifest)
+	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+	signer := &recordingSigner{headers: map[string]string{"X-Acme-Signature": "hmac-of-request"}}
+	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+	if _, err := signingAuth(signer).Apply(context.Background(), req, c, grantCredential(t, "at-123", map[string]string{"account": "a", "project": "p"}), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(signer.requests) != 1 || signer.requests[0].Credential != "at-123" || !slices.Contains(signer.secrets[0], "at-123") {
+		t.Fatalf("signed %+v redacting %q", signer.requests, signer.secrets)
+	}
+}
+
 func TestPluginProfilesWithoutSigningRunNoPluginCode(t *testing.T) {
 	signer := &recordingSigner{}
 	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)

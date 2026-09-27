@@ -26,7 +26,8 @@ type Signer interface {
 const maxSignedHeaders = 16
 
 // sign runs the profile's signing hook, if it declares one, over a finished
-// request of a provider with options and adds the headers it returns. It
+// request of a provider with options, handing it the static credential or the
+// grant's access token, and adds the headers it returns. It
 // returns their values, which it treats like the credential: they are
 // redacted wherever upstream text is recorded, and the hook's own output never
 // reveals secrets. The request is not sent unless its hook succeeds.
@@ -37,9 +38,13 @@ func (p *PluginProfile) sign(ctx context.Context, signer Signer, options map[str
 	if signer == nil {
 		return nil, fmt.Errorf("%w: this process runs no plugin signing hooks", ErrAuthentication)
 	}
+	token, _, err := p.credential(credential)
+	if err != nil {
+		return nil, err
+	}
 	provider := abi.Provider{Profile: p.profile.ID, Options: options}
 	result, err := signer.Sign(ctx, p.profile.Revision, provider, abi.SignRequest{
-		Profile: p.profile.ID, Method: req.Method, URL: req.URL.String(), Header: req.Header.Clone(), Body: body, Credential: string(credential),
+		Profile: p.profile.ID, Method: req.Method, URL: req.URL.String(), Header: req.Header.Clone(), Body: body, Credential: token,
 	}, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("%w: the plugin's signing hook failed: %w", ErrAuthentication, err)

@@ -249,6 +249,18 @@ export function requiresCredential(
   );
 }
 
+/** Whether the provider authenticates with a grant, whose credential versions
+ * come from grant enrollment rather than a pasted credential. */
+export function requiresGrant(
+  spec: ProviderKindCapability,
+  authMode: ProviderAuthMode
+): boolean {
+  return (
+    spec.auth_modes.find((auth) => auth.mode === authMode)?.credential ===
+    'grant'
+  );
+}
+
 function hasField(spec: ProviderKindCapability, field: string): boolean {
   return spec.fields.some((candidate) => candidate.field === field);
 }
@@ -294,18 +306,25 @@ export function requiresProbeModel(
 
 /**
  * Pins a plugin profile: its identity and the digest of the plugin build that
- * supplies it. A plugin provider's endpoint is that profile's address, which
- * the server sets, so any address of a previous pin is cleared. Option values
+ * supplies it, and the authentication it declares, a static credential or a
+ * grant. A plugin provider's endpoint is that profile's address, which the
+ * server sets, so any address of a previous pin is cleared. Option values
  * carry over to the options the new profile also declares.
  */
 export function selectPluginProfile(
   values: ProviderEditValues,
   profile:
-    Pick<ProviderProfile, 'id' | 'revision' | 'options_schema'> | undefined
+    | Pick<
+        ProviderProfile,
+        'id' | 'revision' | 'options_schema' | 'authentication'
+      >
+    | undefined
 ): void {
   values.profileId = profile?.id ?? '';
   values.profileRevision = profile?.revision ?? '';
   values.endpoint = '';
+  const authentication = profile?.authentication[0];
+  if (authentication) values.authMode = authentication as ProviderAuthMode;
   const options = values.document?.at(['options', 'plugin_options']);
   if (!nativeObject(options)) return;
   const declared = pluginOptionFields(profile).map((option) => option.name);
