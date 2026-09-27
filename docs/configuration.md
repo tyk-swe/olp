@@ -101,8 +101,8 @@ provider quotas.
 Use regular files with mode `0400`, `0440`, `0600`, or `0640`; group-write and
 world permissions are rejected. A configured bootstrap file may be absent after
 setup. Workers require both the HMAC and master keys, including with mounted
-connectors. Inline `OLP_AUTH_HMAC_KEY`, `OLP_MASTER_KEY`, and
-`OLP_BOOTSTRAP_TOKEN` values are rejected.
+connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
+`OLP_MASTER_KEY`, or `OLP_BOOTSTRAP_TOKEN` is set inline.
 
 | Variable | Required by | File contents |
 | --- | --- | --- |
@@ -213,8 +213,9 @@ behavior.
 
 A plain-HTTP endpoint on a private literal address needs both lists: the host in
 the HTTP allowlist and the address inside an allowed CIDR. The `all`, `gateway`,
-`control`, and `doctor` commands accept the settings; startup logs a warning
-whenever either list is non-empty. Transports refuse redirects, use TLS 1.2 or
+`control`, and `doctor` commands accept the settings; `all`, `gateway`, and
+`control` log a warning naming both lists at startup whenever either is
+non-empty. Transports refuse redirects, use TLS 1.2 or
 newer, bound dial and handshake timeouts, and cap response headers at 32 KiB.
 Probes and inference use the same normalized endpoint and egress policy. The
 allowlists never relax OIDC issuer or Vertex token endpoint checks.

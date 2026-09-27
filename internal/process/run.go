@@ -54,6 +54,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	warnEgressExceptions(log, c)
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
 	traces, err := telemetry.Install(telemetry.Config{
@@ -453,6 +454,21 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 		}
 	}
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
+}
+
+// warnEgressExceptions announces operator exceptions to the provider egress
+// denylist. They are installation-wide trust decisions that let every
+// provider reach the listed networks, so each process says so at startup.
+func warnEgressExceptions(log *slog.Logger, c config.Config) {
+	if len(c.ProviderEgressAllowCIDRs) == 0 && len(c.ProviderEgressAllowHTTPHosts) == 0 {
+		return
+	}
+	cidrs := make([]string, len(c.ProviderEgressAllowCIDRs))
+	for i, prefix := range c.ProviderEgressAllowCIDRs {
+		cidrs[i] = prefix.String()
+	}
+	log.Warn("provider egress exceptions widen what providers may reach",
+		"allowed_cidrs", cidrs, "plain_http_hosts", c.ProviderEgressAllowHTTPHosts)
 }
 
 // rejectPublic answers a public request its surface's pool could not admit.
