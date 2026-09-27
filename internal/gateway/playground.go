@@ -27,8 +27,8 @@ type Playground struct {
 }
 
 func (p *Playground) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/playground", p.Access.HandleTimeout(1<<20, playgroundTimeout, p.handle))
-	mux.HandleFunc("POST /api/v1/playground/stream", p.Access.HandleStream(1<<20, playgroundTimeout, p.stream))
+	p.Access.Route(mux, "POST /api/v1/playground", p.handle, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
+	p.Access.Stream(mux, "POST /api/v1/playground/stream", p.stream, access.MaxBody(1<<20), access.Deadline(playgroundTimeout))
 }
 
 type playgroundTool struct {
@@ -256,11 +256,7 @@ func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) 
 	}
 }
 
-func (p *Playground) handle(r *http.Request) (access.Reply, error) {
-	principal, err := p.Access.Principal(r, p.Access.Pool, access.Playground)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (p *Playground) handle(r *http.Request, principal access.Principal) (access.Reply, error) {
 	var in playgroundRequest
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
@@ -399,11 +395,7 @@ func attemptPriority(x *execution, targetID string) int {
 	return 0
 }
 
-func (p *Playground) stream(w http.ResponseWriter, r *http.Request) error {
-	principal, err := p.Access.Principal(r, p.Access.Pool, access.Playground)
-	if err != nil {
-		return err
-	}
+func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal access.Principal) error {
 	var in playgroundRequest
 	if err := access.Decode(r, &in); err != nil {
 		return err

@@ -31,11 +31,11 @@ const operatorJobTimeout = 5 * time.Minute
 
 // Register mounts the media-job routes on the management surface.
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/media-jobs", m.Access.Handle(m.list))
-	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}", m.Access.Handle(m.get))
-	mux.HandleFunc("POST /api/v1/media-jobs/{job_id}/refresh", m.Access.HandleTimeout(1024, operatorJobTimeout, m.refresh))
-	mux.HandleFunc("GET /api/v1/media-jobs/{job_id}/content", m.Access.HandleStream(1024, operatorJobTimeout, m.content))
-	mux.HandleFunc("DELETE /api/v1/media-jobs/{job_id}", m.Access.HandleTimeout(1024, operatorJobTimeout, m.delete))
+	m.Access.Route(mux, "GET /api/v1/media-jobs", m.list)
+	m.Access.Route(mux, "GET /api/v1/media-jobs/{job_id}", m.get)
+	m.Access.Route(mux, "POST /api/v1/media-jobs/{job_id}/refresh", m.refresh, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
+	m.Access.Stream(mux, "GET /api/v1/media-jobs/{job_id}/content", m.content, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
+	m.Access.Route(mux, "DELETE /api/v1/media-jobs/{job_id}", m.delete, access.MaxBody(1024), access.Deadline(operatorJobTimeout))
 }
 
 func (m *Management) log() *slog.Logger {
@@ -82,11 +82,7 @@ func (m *Management) audit(r *http.Request, p access.Principal, action, id strin
 	return tx.Commit(r.Context())
 }
 
-func (m *Management) refresh(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) refresh(r *http.Request, p access.Principal) (access.Reply, error) {
 	record, err := m.scopedJob(r, p, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -104,11 +100,7 @@ func (m *Management) refresh(r *http.Request) (access.Reply, error) {
 	return access.Detail(jobItem(updated), updated.ETag), nil
 }
 
-func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
-	p, err := m.Access.Principal(r, m.Pool, access.Configure)
-	if err != nil {
-		return err
-	}
+func (m *Management) content(w http.ResponseWriter, r *http.Request, p access.Principal) error {
 	record, err := m.scopedJob(r, p, true)
 	if err != nil {
 		return err
@@ -151,11 +143,7 @@ func (m *Management) content(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (m *Management) delete(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, access.Configure)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) delete(r *http.Request, p access.Principal) (access.Reply, error) {
 	record, err := m.scopedJob(r, p, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -200,11 +188,7 @@ func contentFilename(jobID, variant, contentType string) string {
 	return "olp-media-" + jobID + "-" + variant + ext
 }
 
-func (m *Management) list(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {
 	query := r.URL.Query()
 	filters := Filters{AllProjects: p.AllProjects, AllowedProjects: p.ProjectIDs()}
 	if raw := query.Get("api_key_id"); raw != "" {
@@ -288,11 +272,7 @@ func (m *Management) list(r *http.Request) (access.Reply, error) {
 	return access.OK(response), nil
 }
 
-func (m *Management) get(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) get(r *http.Request, p access.Principal) (access.Reply, error) {
 	record, err := m.scopedJob(r, p, false)
 	if err != nil {
 		return access.Reply{}, err

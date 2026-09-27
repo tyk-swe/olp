@@ -23,7 +23,7 @@ type Management struct {
 }
 
 func (m *Management) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/provider-resources", m.Access.Handle(m.list))
+	m.Access.Route(mux, "GET /api/v1/provider-resources", m.list)
 }
 
 type manageFilters struct {
@@ -76,11 +76,7 @@ type manageRecord struct {
 	updatedAt     time.Time
 }
 
-func (m *Management) list(r *http.Request) (access.Reply, error) {
-	p, err := m.Access.Principal(r, m.Pool, access.Read)
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {
 	query := r.URL.Query()
 	filters := manageFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {
