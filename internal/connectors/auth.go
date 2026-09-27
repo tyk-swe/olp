@@ -262,6 +262,7 @@ var authenticators = map[string]authenticator{
 	"default_chain":       {authenticate: (*Auth).authenticateAWS},
 	"static":              {credential: true, authenticate: (*Auth).authenticateAWS},
 	AuthStaticCredential:  {credential: true, authenticate: (*Auth).authenticatePlaced},
+	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
 }
 
 // SecretRequired reports whether an auth mode authorizes with a stored
@@ -277,7 +278,7 @@ func (*Auth) authenticateNone(context.Context, *http.Request, Config, []byte) (a
 }
 
 // authenticatePlaced adds no authorization of its own: the plugin profile's
-// hosting adaptation placed the static credential.
+// hosting adaptation placed the static credential or the grant's access token.
 func (*Auth) authenticatePlaced(context.Context, *http.Request, Config, []byte) (authorization, error) {
 	return authorization{}, nil
 }

@@ -5,7 +5,7 @@
     identitiesPending: boolean;
     identitiesError: boolean;
     enrollmentNeeded: boolean;
-    enrollmentGrantReady: boolean;
+    enrollmentVerified: boolean;
     currentPassword: string;
     newPassword: string;
     confirmPassword: string;
@@ -20,7 +20,7 @@
     identitiesPending,
     identitiesError,
     enrollmentNeeded,
-    enrollmentGrantReady,
+    enrollmentVerified,
     currentPassword = $bindable(),
     newPassword = $bindable(),
     confirmPassword = $bindable(),
@@ -52,7 +52,7 @@
         >Try again</button
       >
     </p>
-  {:else if enrollmentNeeded && !enrollmentGrantReady}
+  {:else if enrollmentNeeded && !enrollmentVerified}
     <p class="security-note">
       A fresh identity-provider sign-in is required before adding a durable
       local credential.

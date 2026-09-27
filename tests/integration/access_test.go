@@ -156,7 +156,13 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
 	gw.Resolver = resources.NewResolver(pool)
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.DefaultLimits, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	catalogue := providers.New(server, &policy)
+	catalogue.Plugins = pluginRuntime
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)
@@ -174,11 +180,6 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		},
 	}).Register(mux)
 	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.DefaultLimits, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	(&plugins.Management{Access: server, Runtime: pluginRuntime}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)

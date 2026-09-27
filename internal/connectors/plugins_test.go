@@ -204,6 +204,12 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 		"credential not given": {func(p *abi.Profile) {
 			p.Hosting.Headers, p.Hosting.Query = map[string]string{"X-Acme-Client": "olp"}, nil
 		}, "hosting"},
+		"grant fact without a grant": {func(p *abi.Profile) { p.Hosting.Headers["X-Acme-Account"] = "{grant.account}" }, "hosting.headers.X-Acme-Account"},
+		"undeclared grant fact": {func(p *abi.Profile) {
+			p.Grant, p.Hosting.Headers["X-Acme-Account"] = &abi.GrantAuthentication{Facts: []string{"project"}}, "{grant.account}"
+		}, "hosting.headers.X-Acme-Account"},
+		"grant fact name":      {func(p *abi.Profile) { p.Grant = &abi.GrantAuthentication{Facts: []string{"Account"}} }, "grant.facts[0]"},
+		"duplicate grant fact": {func(p *abi.Profile) { p.Grant = &abi.GrantAuthentication{Facts: []string{"account", "account"}} }, "grant.facts[1]"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := pluginManifest().Profiles[0]
@@ -213,5 +219,65 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 				t.Fatalf("want a refusal of %s, got %v", tc.field, refusal)
 			}
 		})
+	}
+}
+
+func grantManifest() abi.Manifest {
+	m := pluginManifest()
+	m.Profiles[0].Grant = &abi.GrantAuthentication{Facts: []string{"account", "project"}}
+	m.Profiles[0].Hosting = abi.Hosting{
+		Address: "https://api.acme.example/v2",
+		Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Acme-Account": "{grant.account}"},
+		Query:   map[string]string{"project": "{grant.project}"},
+	}
+	return m
+}
+
+func grantCredential(t *testing.T, token string, facts map[string]string) []byte {
+	t.Helper()
+	secret, err := json.Marshal(GrantCredential{AccessToken: token, Facts: facts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secret
+}
+
+// A profile that authenticates with a grant places the grant's current
+// access token where the static credential would go, and its grant facts.
+func TestPluginGrantProfilePlacesTheAccessTokenAndGrantFacts(t *testing.T) {
+	c := pluginConfig(t, grantManifest())
+	c.AuthMode = AuthGrant
+	if err := c.Validate(&egress.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := c.Profile(); !slices.Equal(p.Authentication, []string{AuthGrant}) || !SecretRequired(AuthGrant) {
+		t.Fatalf("a grant profile authenticates with %v", p.Authentication)
+	}
+	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, grantCredential(t, "at-123", map[string]string{"account": "acct 7", "project": "p/1"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("Authorization") != "Bearer at-123" || req.Header.Get("X-Acme-Account") != "acct 7" || req.URL.RawQuery != "project=p%2F1" {
+		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
+	}
+	if !slices.Contains(sensitive, "at-123") || !slices.Contains(sensitive, "Bearer at-123") || slices.Contains(sensitive, "acct 7") {
+		t.Fatalf("redacts %q", sensitive)
+	}
+	for name, secret := range map[string][]byte{
+		"static credential":  []byte("at-123"),
+		"no access token":    grantCredential(t, "", map[string]string{"account": "a", "project": "p"}),
+		"unrecorded fact":    grantCredential(t, "at-123", map[string]string{"account": "a"}),
+		"fact out of header": grantCredential(t, "at-123", map[string]string{"account": "a\r\nX-Injected: 1", "project": "p"}),
+	} {
+		req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+		if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, secret, nil); !errors.Is(err, ErrCredentialRejected) {
+			t.Errorf("%s: placed with %v", name, err)
+		}
+	}
+	static := c
+	static.AuthMode = AuthStaticCredential
+	if static.Validate(&egress.Policy{}) == nil {
+		t.Fatal("a grant profile accepted a static credential")
 	}
 }

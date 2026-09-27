@@ -128,10 +128,12 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
-	if input.Configuration.CredentialRequired() && input.Credential == nil {
+	switch cfg := &input.Configuration; {
+	case cfg.Grant() && input.Credential != nil:
+		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
+	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	}
-	if !input.Configuration.CredentialRequired() && input.Credential != nil {
+	case !cfg.CredentialRequired() && input.Credential != nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	if input.Credential != nil {
@@ -391,6 +393,7 @@ type slotRow struct {
 	CredentialID         *string
 	CredentialVersion    *int
 	CredentialRevoked    bool
+	CredentialGrant      bool
 	Restrictions         slotRestrictions
 	Limits               Limits
 	ValidatedAt          *time.Time
@@ -404,7 +407,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,c.plugin_digest IS NOT NULL,s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -413,11 +416,12 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 	for rows.Next() {
 		var row slotRow
 		var restrictions, limits []byte
-		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		var revoked, grant *bool
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &grant, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
+		row.CredentialGrant = grant != nil && *grant
 		if err = json.Unmarshal(restrictions, &row.Restrictions); err == nil {
 			err = json.Unmarshal(limits, &row.Limits)
 		}
@@ -427,6 +431,20 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 		slots = append(slots, row)
 	}
 	return slots, rows.Err()
+}
+
+// credentialFits refuses a slot whose credential version the provider can't
+// authenticate with: a version with a grant beneath it (CredentialGrant) for a
+// provider that takes a static credential, or a pasted one for a provider
+// that authenticates with a grant.
+func (row *slotRow) credentialFits(cfg *Configuration) error {
+	switch {
+	case row.CredentialID == nil || !cfg.CredentialRequired() || row.CredentialGrant == cfg.Grant():
+		return nil
+	case row.CredentialGrant:
+		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
+	}
+	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
 }
 
 func (row *slotRow) published(authMode string) runtime.RevisionSlot {
@@ -479,6 +497,9 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 		revisionSlots := make([]runtime.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			slot := slots[i].published(current.Configuration.AuthMode)
+			if err := slots[i].credentialFits(&current.Configuration); err != nil {
+				return access.Reply{}, err
+			}
 			if slot.Enabled && current.Configuration.CredentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
 				if slot.CredentialID == nil {
 					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")

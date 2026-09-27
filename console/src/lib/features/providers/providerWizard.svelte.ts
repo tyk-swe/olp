@@ -16,6 +16,7 @@ import {
   createProvider,
   probeProvider,
   updateProvider,
+  type Provider,
   type ProviderProbe
 } from '$lib/features/providers/api';
 import {
@@ -31,6 +32,12 @@ import {
 } from '$lib/features/providers/models';
 import { rotateProviderCredential } from '$lib/features/providers/credentials';
 import {
+  cancelGrantEnrollment,
+  continueGrantEnrollment,
+  startGrantEnrollment,
+  type GrantEnrollment
+} from '$lib/features/providers/grants';
+import {
   authOptionsFor,
   buildCreateProviderInput,
   certificationPrerequisiteReady,
@@ -38,6 +45,7 @@ import {
   parseManualModelNames,
   probeSummary,
   requiresCredential,
+  requiresGrant,
   validateProviderDraft,
   type ProviderDraft
 } from '$lib/features/providers/providerEditor';
@@ -58,6 +66,10 @@ export class ProviderWizardState {
   wizardModels;
   capabilityOptions;
   probe = $state<ProviderProbe | null>(null);
+  /** The grant enrollment the operator is signing in through, if any. */
+  grantEnrollment = $state<GrantEnrollment | null>(null);
+  /** What the operator pastes back from the upstream's sign-in. */
+  grantInput = $state('');
   manualModelNames = $state('');
   busy = $state('');
   errorMessage = $state('');
@@ -79,6 +91,13 @@ export class ProviderWizardState {
       this.draft &&
       this.selectedSpec &&
       requiresCredential(this.selectedSpec, this.draft.authMode)
+    )
+  );
+  grantRequired = $derived(
+    Boolean(
+      this.draft &&
+      this.selectedSpec &&
+      requiresGrant(this.selectedSpec, this.draft.authMode)
     )
   );
   run = async (
@@ -142,6 +161,8 @@ export class ProviderWizardState {
     this.draft = null;
     this.wizardStep = 1;
     this.probe = null;
+    this.grantEnrollment = null;
+    this.grantInput = '';
     this.manualModelNames = '';
     this.busy = '';
     this.errorMessage = '';
@@ -195,9 +216,50 @@ export class ProviderWizardState {
           queryKey: providerKeys.modelCatalog
         })
       ]);
-      this.probe = await probeProvider(snapshot.provider);
-      if (!this.probe.succeeded) throw new Error(this.probe.detail);
-      this.wizardStep = 2;
+      // A grant comes from the operator's sign-in upstream, which the grant
+      // enrollment panel collects before the connection is tested.
+      if (this.grantRequired && !snapshot.provider.draft_credential_id) {
+        this.grantEnrollment = await startGrantEnrollment(snapshot.provider);
+        return;
+      }
+      await this.testConnection(snapshot.provider);
+    });
+  };
+  private testConnection = async (provider: Provider) => {
+    this.probe = await probeProvider(provider);
+    if (!this.probe.succeeded) throw new Error(this.probe.detail);
+    this.wizardStep = 2;
+  };
+  /** Exchanges what the operator pasted back for a grant, which becomes the
+   * draft's credential version, then tests the connection with it. */
+  continueGrantEnrollment = async () => {
+    const enrollment = this.grantEnrollment;
+    const input = this.grantInput.trim();
+    if (!enrollment) return;
+    if (!input) {
+      this.errorMessage =
+        'Paste the callback URL, or the code the upstream displayed.';
+      this.validationIssues = [];
+      return;
+    }
+    await this.run('grant', async () => {
+      try {
+        await continueGrantEnrollment(enrollment, input);
+      } finally {
+        // A grant enrollment is continued once, whether or not it succeeds.
+        this.grantEnrollment = null;
+        this.grantInput = '';
+      }
+      await this.testConnection((await this.refetchWizardModels()).provider);
+    });
+  };
+  cancelGrantEnrollment = async () => {
+    const enrollment = this.grantEnrollment;
+    if (!enrollment) return;
+    await this.run('grant-cancel', async () => {
+      await cancelGrantEnrollment(enrollment);
+      this.grantEnrollment = null;
+      this.grantInput = '';
     });
   };
   discoverWizardProvider = async () => {
@@ -392,6 +454,7 @@ export class ProviderWizardState {
         queryKey: providerKeys.modelsOf(this.providerId)
       });
       if (this.draft) this.draft.credential = '';
+      this.grantInput = '';
     });
   }
 }

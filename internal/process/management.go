@@ -28,6 +28,7 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	control.Register(mux)
 	catalogue := providers.New(control, policy)
 	catalogue.Log = log
+	catalogue.Plugins = pluginRuntime
 	if limiter != nil {
 		catalogue.Quotas = limiter
 	}

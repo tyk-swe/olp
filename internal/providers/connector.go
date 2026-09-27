@@ -622,11 +622,17 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if !p.Configuration.CredentialRequired() {
 		return nil, state, nil
 	}
+	if state.ID == nil && p.Configuration.Grant() {
+		return nil, state, access.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
+	}
 	if state.ID == nil {
 		return nil, state, access.Fail(422, "credential_required", "Add a credential before probing this connection.")
 	}
 	if state.Revoked {
 		return nil, state, access.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
+	}
+	if err := slot.credentialFits(&p.Configuration); err != nil {
+		return nil, state, err
 	}
 	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, "provider_credential")
 	if err != nil {

@@ -33,26 +33,46 @@ import (
 
 const pluginCredential = "reference-static-secret"
 
-// pluginUpstream is the fictional upstream the reference plugin's profile
-// places requests at: an OpenAI Chat Completions server that takes its key as
-// a token in the Authorization header and wants clients to identify
+// pluginUpstream is the fictional upstream the reference plugin's profiles
+// place requests at: an OpenAI Chat Completions server that takes its key as
+// a token in the Authorization header, or an access token its authority
+// issued with the account it authorizes, and wants clients to identify
 // themselves. It records the headers of every request.
 type pluginUpstream struct {
 	*httptest.Server
 	mu          sync.Mutex
 	credentials []string
+	authority   *testutil.OAuthServer
 	requests    []http.Header
 }
 
 func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	t.Helper()
-	u := &pluginUpstream{credentials: credentials}
+	return startPluginUpstream(t, &pluginUpstream{credentials: credentials})
+}
+
+// newGrantUpstream is a plugin upstream that accepts the access tokens its
+// authority issues.
+func newGrantUpstream(t *testing.T, authority *testutil.OAuthServer) *pluginUpstream {
+	t.Helper()
+	return startPluginUpstream(t, &pluginUpstream{authority: authority})
+}
+
+func (u *pluginUpstream) authorized(r *http.Request) bool {
+	if u.authority != nil {
+		identity, ok := u.authority.Authorized(r)
+		return ok && r.Header.Get("X-Reference-Account") == identity.Account
+	}
+	token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Token ")
+	return found && slices.Contains(u.credentials, token)
+}
+
+func startPluginUpstream(t *testing.T, u *pluginUpstream) *pluginUpstream {
 	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		u.requests = append(u.requests, r.Header.Clone())
 		u.mu.Unlock()
-		token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Token ")
-		if !found || !slices.Contains(u.credentials, token) || r.Header.Get("X-Reference-Client") != "olp" {
+		if !u.authorized(r) || r.Header.Get("X-Reference-Client") != "olp" {
 			w.WriteHeader(http.StatusUnauthorized)
 			writeJSON(w, map[string]any{"error": map[string]any{"message": "Unknown token " + r.Header.Get("Authorization"), "type": "invalid_request_error", "code": "invalid_api_key"}})
 			return
@@ -94,10 +114,11 @@ func (u *pluginUpstream) received() []http.Header {
 }
 
 // installReferencePlugin builds the reference plugin against the upstream,
-// installs it and approves the origins it declares.
-func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string) string {
+// with any further linker flags, installs it and approves the origins it
+// declares.
+func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string, ldflags ...string) string {
 	t.Helper()
-	module := testutil.BuildPlugin(t, "./sdk/plugin/reference", "-X=main.upstream="+upstream.URL+"/v1", "-X=main.version="+version)
+	module := testutil.BuildPlugin(t, "./sdk/plugin/reference", append([]string{"-X=main.upstream=" + upstream.URL + "/v1", "-X=main.version=" + version}, ldflags...)...)
 	installed := h.want(owner, "POST", "/api/v1/plugins", module, wasm, 201)
 	origins := installed["manifest"].(map[string]any)["origins"]
 	h.want(owner, "POST", "/api/v1/plugins/"+digestOf(module)+"/approve", map[string]any{"origins": origins}, etagHeader(installed), 200)
@@ -157,11 +178,12 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
 	var catalogued map[string]any
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
-		if profile.(map[string]any)["kind"] == "plugin" {
+		if profile.(map[string]any)["kind"] == "plugin" && profile.(map[string]any)["id"] == "reference-chat" {
 			catalogued = profile.(map[string]any)
 		}
 	}
-	if catalogued["id"] != "reference-chat" || catalogued["revision"] != digest || catalogued["dialect"] != "openai-chat" || catalogued["strict"] != true ||
+	if catalogued["revision"] != digest || catalogued["dialect"] != "openai-chat" || catalogued["strict"] != true ||
+		fmt.Sprint(catalogued["authentication"]) != "[static_credential]" ||
 		catalogued["plugin"].(map[string]any)["digest"] != digest || catalogued["plugin"].(map[string]any)["version"] != "0.1.0" {
 		t.Fatalf("catalogued %v", catalogued)
 	}

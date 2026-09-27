@@ -42,12 +42,20 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     'Installed reference 0.1.0.'
   );
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
+  const staticProfile = plugin.getByRole('row', { name: /^reference-chat / });
   await expect(
-    plugin.getByRole('cell', { name: 'reference-chat' })
+    staticProfile.getByRole('cell', { name: 'openai-chat' })
   ).toBeVisible();
-  await expect(plugin.getByRole('cell', { name: 'openai-chat' })).toBeVisible();
   await expect(
-    plugin.getByRole('cell', { name: 'https://api.example.com/v1' })
+    staticProfile.getByRole('cell', { name: 'Static credential' })
+  ).toBeVisible();
+  await expect(
+    staticProfile.getByRole('cell', { name: 'https://api.example.com/v1' })
+  ).toBeVisible();
+  await expect(
+    plugin
+      .getByRole('row', { name: /^reference-grant-chat / })
+      .getByRole('cell', { name: 'Grant, enrolled by the plugin' })
   ).toBeVisible();
   await expect(
     plugin

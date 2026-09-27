@@ -25,6 +25,9 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 		if !p.Enabled {
 			continue
 		}
+		if p.AuthMode == connectors.AuthGrant {
+			return nil, errors.New("a mounted gateway can't serve provider " + id + ": its credential slots hold grants, which need the master key")
+		}
 		mounted, ok := entries[id]
 		if !ok {
 			return nil, errors.New("enabled provider has no mounted connector")

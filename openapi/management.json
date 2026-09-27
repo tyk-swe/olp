@@ -1988,6 +1988,21 @@
         ],
         "type": "object"
       },
+      "ContinueGrantEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "description": "What the upstream returned after the operator signed in: the whole loopback callback URL it redirected the browser to, or the code it displayed.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "type": "object"
+      },
       "CreateApiKeyRequest": {
         "properties": {
           "allow_provider_state": {
@@ -2557,6 +2572,43 @@
         ],
         "type": "object"
       },
+      "CredentialGrant": {
+        "additionalProperties": false,
+        "description": "What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.",
+        "properties": {
+          "expires_at": {
+            "description": "When the grant's current access token expires, if the upstream said.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "facts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The grant facts the plugin reported, which the profile's hosting templates use.",
+            "type": "object"
+          },
+          "plugin_digest": {
+            "description": "Digest of the plugin whose grant enrollment created the version.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "principal": {
+            "description": "The observed principal: the upstream account the grant authorizes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_digest",
+          "principal",
+          "facts",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "CredentialListResponse": {
         "properties": {
           "items": {
@@ -2578,9 +2630,11 @@
         "type": "object"
       },
       "CredentialRequirement": {
+        "description": "Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.",
         "enum": [
           "required",
-          "forbidden"
+          "forbidden",
+          "grant"
         ],
         "type": "string"
       },
@@ -2597,6 +2651,17 @@
           "draft_selected": {
             "description": "True when this credential is selected only by the mutable draft.",
             "type": "boolean"
+          },
+          "grant": {
+            "description": "What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CredentialGrant"
+              }
+            ]
           },
           "id": {
             "format": "uuid",
@@ -2749,6 +2814,77 @@
         },
         "required": [
           "new_password"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollment": {
+        "additionalProperties": false,
+        "description": "A grant enrollment in progress. The operator opens the authorization URL, signs in upstream, and continues the enrollment with what the upstream returns before it expires. It is continued once, from any control replica.",
+        "properties": {
+          "authorization_url": {
+            "description": "The plugin's authorization request, at one of its approved origins.",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "slot_id": {
+            "description": "The credential slot the grant will back: the provider's default slot.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_id",
+          "slot_id",
+          "authorization_url",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollmentCompletion": {
+        "additionalProperties": false,
+        "description": "The credential version grant enrollment created, with the grant beneath it, staged on the enrollment's credential slot of the provider draft like a rotated credential.",
+        "properties": {
+          "credential_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "credential_version": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "etag": {
+            "description": "The provider draft's new ETag.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "principal": {
+            "description": "The observed principal: the upstream account the grant authorizes.",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "etag",
+          "credential_id",
+          "credential_version",
+          "principal"
         ],
         "type": "object"
       },
@@ -4297,9 +4433,24 @@
         ],
         "type": "object"
       },
+      "PluginGrantAuthentication": {
+        "additionalProperties": false,
+        "description": "Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.",
+        "properties": {
+          "facts": {
+            "description": "The grant facts the plugin reports for every grant it enrolls, which hosting templates use as {grant.<name>}.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "PluginHosting": {
         "additionalProperties": false,
-        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.",
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential or its grant's current access token, and {grant.<name>} for a grant fact the profile declares.",
         "properties": {
           "address": {
             "description": "Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.",
@@ -4522,6 +4673,9 @@
           "dialect": {
             "description": "The built-in dialect the profile serves.",
             "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/PluginGrantAuthentication"
           },
           "hosting": {
             "$ref": "#/components/schemas/PluginHosting"
@@ -5354,10 +5508,11 @@
           "static",
           "azure_default",
           "azure_client_secret",
-          "static_credential"
+          "static_credential",
+          "grant"
         ],
         "type": "string",
-        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places."
+        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
       },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
@@ -18239,6 +18394,250 @@
               }
             },
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments": {
+      "post": {
+        "description": "Starts grant enrollment for a provider draft whose plugin profile authenticates with a grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy.",
+        "operationId": "start_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollment"
+                }
+              }
+            },
+            "description": "Grant enrollment started"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}": {
+      "delete": {
+        "description": "Cancels a grant enrollment its principal started and has not continued, deleting its session state.",
+        "operationId": "cancel_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Grant enrollment cancelled"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment was already continued (grant_enrollment_used)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue": {
+      "post": {
+        "description": "Continues a grant enrollment with what the upstream returned: the plugin exchanges the pasted callback URL or code for a grant. OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. A grant enrollment is continued once, by the principal that started it, before it expires.",
+        "operationId": "continue_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueGrantEnrollmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Credential version created"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment was already continued (grant_enrollment_used), or the provider's plugin profile or credential slot changed meanwhile (grant_enrollment_stale)"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment expired (grant_enrollment_expired)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "What was pasted back answers another authorization request (grant_state_mismatch), the plugin could not enroll a grant (grant_enrollment_failed), or its plugin is unusable (plugin_*)"
           }
         },
         "security": [

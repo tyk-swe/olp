@@ -45,6 +45,14 @@ const HostCall = "host_call"
 const (
 	// MethodManifest takes no parameters and returns the plugin's Manifest.
 	MethodManifest = "manifest"
+	// MethodGrantStart takes a GrantStart and returns a GrantAuthorization.
+	// It begins grant enrollment for a profile that authenticates with a
+	// grant, and may use CapabilityHTTP.
+	MethodGrantStart = "grant_start"
+	// MethodGrantExchange takes a GrantExchange and returns the Grant that
+	// what the operator pasted back is exchanged for. It may use
+	// CapabilityHTTP.
+	MethodGrantExchange = "grant_exchange"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -52,6 +60,10 @@ const (
 const (
 	// CapabilityLog takes a LogRecord and returns no result.
 	CapabilityLog = "log"
+	// CapabilityHTTP takes an HTTPRequest and returns its HTTPResponse. OLP
+	// grants it to grant enrollment steps, and sends the request only to the
+	// plugin's approved origins, over the provider's network path.
+	CapabilityHTTP = "http"
 )
 
 // Error codes shared by plugins and OLP. A plugin may report codes of its own.
@@ -59,6 +71,15 @@ const (
 	CodeInvalidRequest = "invalid_request"
 	CodeUnknownMethod  = "unknown_method"
 	CodeInternal       = "internal"
+	// CodeStateMismatch: what the operator pasted back belongs to another
+	// authorization request than the grant enrollment's own.
+	CodeStateMismatch = "state_mismatch"
+	// CodeOriginNotApproved: an HTTP request is not to one of the plugin's
+	// approved origins.
+	CodeOriginNotApproved = "origin_not_approved"
+	// CodeHTTPFailed: OLP could not complete an HTTP request, such as one
+	// the egress policy refuses or one that timed out.
+	CodeHTTPFailed = "http_failed"
 )
 
 // Request is one call, from OLP to a plugin or from a plugin to OLP.
@@ -96,8 +117,8 @@ type Manifest struct {
 }
 
 // Profile is a provider profile the plugin supplies around a built-in dialect.
-// Providers using it authenticate with a static credential, which its hosting
-// adaptation places.
+// Providers using it authenticate with a static credential or, when it
+// declares Grant, with a grant; its hosting adaptation places either.
 type Profile struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -106,6 +127,21 @@ type Profile struct {
 	Dialect string `json:"dialect"`
 	// Hosting places the dialect's requests at the upstream.
 	Hosting Hosting `json:"hosting"`
+	// Grant, when set, makes providers using the profile authenticate with a
+	// grant that the plugin's grant enrollment obtains, instead of a static
+	// credential.
+	Grant *GrantAuthentication `json:"grant,omitempty"`
+}
+
+// GrantAuthentication declares that a profile authenticates with a grant:
+// rotating upstream authorization that OLP holds beneath a credential
+// version. In the profile's hosting templates, {credential} then stands for
+// the grant's current access token.
+type GrantAuthentication struct {
+	// Facts names the grant facts the plugin reports for every grant it
+	// enrolls: non-secret values, such as the upstream account, that the
+	// profile's hosting templates use as {grant.<name>}.
+	Facts []string `json:"facts,omitempty"`
 }
 
 // Hosting is a profile's hosting adaptation: where and how the dialect's
@@ -114,7 +150,9 @@ type Profile struct {
 //
 // Header and query parameter values are templates. The placeholder
 // {credential} stands for the provider's static credential, such as
-// "Token {credential}"; braces appear nowhere else.
+// "Token {credential}", or a grant's current access token; a profile that
+// authenticates with a grant may also use {grant.<name>} for its declared
+// grant facts. Braces appear nowhere else.
 type Hosting struct {
 	// Address is the upstream's base URL, which the dialect's paths extend,
 	// such as https://api.example.com/v1 for /chat/completions. Its origin is
@@ -127,8 +165,73 @@ type Hosting struct {
 }
 
 // CredentialPlaceholder is the template placeholder for a provider's static
-// credential.
+// credential or its grant's current access token.
 const CredentialPlaceholder = "{credential}"
+
+// GrantStart is the parameter of MethodGrantStart.
+type GrantStart struct {
+	// Profile is the ID of the profile a grant is enrolled for.
+	Profile string `json:"profile"`
+}
+
+// GrantAuthorization is the result of MethodGrantStart: the authorization
+// request the operator opens to sign in upstream.
+type GrantAuthorization struct {
+	// URL is the authorization request, at one of the plugin's origins, with
+	// its state and PKCE challenge. After signing in, the operator pastes
+	// back the loopback callback URL the upstream redirects to, or the code
+	// it displays.
+	URL string `json:"url"`
+	// Session is the plugin's state for exchanging what is pasted back, such
+	// as the PKCE verifier and the request's state: at most 16 KiB, which
+	// OLP stores encrypted and hands to MethodGrantExchange.
+	Session string `json:"session"`
+}
+
+// GrantExchange is the parameter of MethodGrantExchange.
+type GrantExchange struct {
+	Profile string `json:"profile"`
+	// Session is the GrantAuthorization's session.
+	Session string `json:"session"`
+	// Input is what the operator pasted back: the whole callback URL, or the
+	// code the upstream displayed.
+	Input string `json:"input"`
+}
+
+// Grant is rotating upstream authorization a plugin obtained, which OLP holds
+// beneath a new credential version.
+type Grant struct {
+	// AccessToken is what OLP's gateways authenticate requests with.
+	AccessToken string `json:"access_token"`
+	// RefreshToken, if the upstream issued one, renews the access token.
+	// Gateways never receive it.
+	RefreshToken string `json:"refresh_token,omitempty"`
+	// ExpiresIn is how many seconds the access token lasts, or 0 when the
+	// upstream did not say.
+	ExpiresIn int64 `json:"expires_in,omitempty"`
+	// Principal identifies the upstream account the grant authorizes, such as
+	// its user ID: the observed principal.
+	Principal string `json:"principal"`
+	// Facts holds a value for each grant fact the profile declares.
+	Facts map[string]string `json:"facts,omitempty"`
+}
+
+// HTTPRequest is the parameter of CapabilityHTTP. OLP sets the framing
+// headers itself and follows no redirect.
+type HTTPRequest struct {
+	Method string              `json:"method"`
+	URL    string              `json:"url"`
+	Header map[string][]string `json:"header,omitempty"`
+	// Body travels as base64 in JSON, like every []byte.
+	Body []byte `json:"body,omitempty"`
+}
+
+// HTTPResponse is the result of CapabilityHTTP.
+type HTTPResponse struct {
+	Status int                 `json:"status"`
+	Header map[string][]string `json:"header,omitempty"`
+	Body   []byte              `json:"body,omitempty"`
+}
 
 // LogRecord is the parameter of CapabilityLog.
 type LogRecord struct {

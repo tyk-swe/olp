@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/plugins"
 )
 
 // HealthStats summarises gateway attempts against one provider.
@@ -46,6 +47,7 @@ type Server struct {
 	Access      *access.Server
 	Egress      *egress.Policy
 	Quotas      QuotaSource
+	Plugins     *plugins.Runtime
 	Log         *slog.Logger
 	client      *http.Client
 	connections *egress.ConnectionClientCache

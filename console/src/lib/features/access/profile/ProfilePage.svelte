@@ -37,8 +37,8 @@
   import OidcIdentitiesPanel from '$lib/features/access/profile/OidcIdentitiesPanel.svelte';
   import ProfileDetailsPanel from '$lib/features/access/profile/ProfileDetailsPanel.svelte';
   import {
-    ENROLLMENT_GRANT_READY_MESSAGE,
-    ENROLLMENT_GRANT_TTL_MS,
+    ENROLLMENT_VERIFIED_MESSAGE,
+    ENROLLMENT_VERIFICATION_TTL_MS,
     parseRecentAuthenticationCallback,
     type PendingIdentityAction
   } from '$lib/features/access/profile/recentAuthentication';
@@ -75,8 +75,8 @@
   let reauthenticationRequest = $state<ReauthenticationRequest | null>(null);
   let reauthenticationBusy = $state(false);
   let reauthenticationError = $state('');
-  let enrollmentGrantReady = $state(false);
-  let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
+  let enrollmentVerified = $state(false);
+  let enrollmentVerificationExpiry: ReturnType<typeof setTimeout> | undefined;
   let profileEditVersion = 0;
   let profileSync = $state(initialConcurrentEdit());
   const profileConcurrentNotice = $derived(conflictNotice(profileSync));
@@ -116,30 +116,30 @@
       // navigate a signed-in browser to this URL.
       void resumeSecurityOperation(callback.purpose, callback.resourceId);
     }
-    return cancelEnrollmentGrantExpiry;
+    return cancelEnrollmentVerificationExpiry;
   });
 
-  function cancelEnrollmentGrantExpiry() {
-    if (enrollmentGrantExpiry === undefined) return;
-    clearTimeout(enrollmentGrantExpiry);
-    enrollmentGrantExpiry = undefined;
+  function cancelEnrollmentVerificationExpiry() {
+    if (enrollmentVerificationExpiry === undefined) return;
+    clearTimeout(enrollmentVerificationExpiry);
+    enrollmentVerificationExpiry = undefined;
   }
 
-  function clearEnrollmentGrant() {
-    cancelEnrollmentGrantExpiry();
-    enrollmentGrantReady = false;
+  function clearEnrollmentVerification() {
+    cancelEnrollmentVerificationExpiry();
+    enrollmentVerified = false;
   }
 
-  function markEnrollmentGrantReady() {
-    clearEnrollmentGrant();
-    enrollmentGrantReady = true;
-    enrollmentGrantExpiry = setTimeout(() => {
-      enrollmentGrantExpiry = undefined;
-      enrollmentGrantReady = false;
-      if (message === ENROLLMENT_GRANT_READY_MESSAGE) message = '';
+  function markEnrollmentVerified() {
+    clearEnrollmentVerification();
+    enrollmentVerified = true;
+    enrollmentVerificationExpiry = setTimeout(() => {
+      enrollmentVerificationExpiry = undefined;
+      enrollmentVerified = false;
+      if (message === ENROLLMENT_VERIFIED_MESSAGE) message = '';
       passwordError =
         'Identity verification expired. Verify your identity with OIDC again.';
-    }, ENROLLMENT_GRANT_TTL_MS);
+    }, ENROLLMENT_VERIFICATION_TTL_MS);
   }
 
   async function resumeSecurityOperation(
@@ -150,8 +150,8 @@
     try {
       if (purpose === 'password_enrollment') {
         pendingIdentityAction = undefined;
-        markEnrollmentGrantReady();
-        message = ENROLLMENT_GRANT_READY_MESSAGE;
+        markEnrollmentVerified();
+        message = ENROLLMENT_VERIFIED_MESSAGE;
         return;
       }
       if (purpose === 'oidc_link') {
@@ -336,7 +336,7 @@
     if (!profile.data) return;
     passwordError = message = '';
     savingPassword = true;
-    if (passwordEnrollmentNeeded && !enrollmentGrantReady) {
+    if (passwordEnrollmentNeeded && !enrollmentVerified) {
       passwordError =
         'Verify your identity with OIDC before adding a local password.';
       savingPassword = false;
@@ -363,13 +363,13 @@
       profileSync = acceptRemote(profileSync, updated.etag);
       queryClient.setQueryData(profileKeys.current(), updated);
       currentPassword = newPassword = confirmPassword = '';
-      clearEnrollmentGrant();
+      clearEnrollmentVerification();
       message = passwordEnrollmentNeeded
         ? 'Local password added. All previous sessions were revoked and this browser was rotated.'
         : 'Password changed. All previous sessions were revoked and this browser was rotated.';
       await refreshSecurityData();
     } catch (cause) {
-      if (enrollmentSubmitted) clearEnrollmentGrant();
+      if (enrollmentSubmitted) clearEnrollmentVerification();
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
       else {
         passwordError = errorMessage(
@@ -503,7 +503,7 @@
       identitiesPending={identities.isPending}
       identitiesError={identities.isError}
       enrollmentNeeded={passwordEnrollmentNeeded}
-      {enrollmentGrantReady}
+      {enrollmentVerified}
       bind:currentPassword
       bind:newPassword
       bind:confirmPassword

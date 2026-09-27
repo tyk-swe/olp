@@ -1,7 +1,7 @@
 import type { RecentAuthenticationPurpose } from '$lib/features/access/profile/api';
 
-export const ENROLLMENT_GRANT_TTL_MS = 5 * 60 * 1000;
-export const ENROLLMENT_GRANT_READY_MESSAGE =
+export const ENROLLMENT_VERIFICATION_TTL_MS = 5 * 60 * 1000;
+export const ENROLLMENT_VERIFIED_MESSAGE =
   'Identity verified. Add your local password within five minutes.';
 
 export type PendingIdentityAction =

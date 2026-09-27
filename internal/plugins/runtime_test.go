@@ -72,6 +72,9 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		Profiles: []abi.Profile{{ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
 			Address: "https://api.example.com/v1",
 			Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
+		}}, {ID: "reference-grant-chat", Label: "Reference Chat Completions with sign-in", Dialect: "openai-chat", Grant: &abi.GrantAuthentication{Facts: []string{"account"}}, Hosting: abi.Hosting{
+			Address: "https://api.example.com/v1",
+			Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 		}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {

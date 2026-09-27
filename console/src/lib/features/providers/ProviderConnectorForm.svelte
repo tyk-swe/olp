@@ -11,6 +11,7 @@
   import {
     emptyProviderOptions,
     requiresCredential,
+    requiresGrant,
     requiresProbeModel,
     selectProviderPreset,
     setProviderDraftKind,
@@ -23,6 +24,7 @@
     selectedSpec,
     busy,
     lockKind = false,
+    grantEnrolled = false,
     onSubmit
   }: {
     draft: ProviderDraft;
@@ -31,6 +33,9 @@
     busy: string;
     /** Set once the draft provider exists; its connector kind is immutable. */
     lockKind?: boolean;
+    /** Set once the draft holds a grant, so saving tests the connection
+     * rather than signing in upstream. */
+    grantEnrolled?: boolean;
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
@@ -68,6 +73,8 @@
   const credentialRequired = $derived(
     requiresCredential(selectedSpec, draft.authMode)
   );
+  const grantRequired = $derived(requiresGrant(selectedSpec, draft.authMode));
+  const signInNext = $derived(grantRequired && !grantEnrolled);
   const seedModelRequired = $derived(requiresProbeModel(draft, selectedSpec));
   const plugin = $derived(draft.kind === 'plugin');
   const selectedPreset = $derived(
@@ -238,7 +245,15 @@
           Credential.</small
         ></label
       >{/if}
-    {#if credentialRequired}<div class="form-field full">
+    {#if grantRequired}<div class="identity-note full">
+        <strong>Grant enrollment</strong><span
+          >This profile authenticates with a grant instead of a pasted
+          credential. {signInNext
+            ? 'After saving, sign in to the upstream account on the authorization page the plugin builds, and paste back what it returns.'
+            : 'The draft holds a grant from an earlier sign-in.'} OLP keeps the grant
+          encrypted; the console never sees it.</span
+        >
+      </div>{:else if credentialRequired}<div class="form-field full">
         <label for="provider-secret">Credential</label><input
           id="provider-secret"
           aria-describedby="credential-help"
@@ -268,7 +283,13 @@
   />
   <div class="form-actions">
     <button class="button button-primary" type="submit" disabled={Boolean(busy)}
-      >{busy === 'create' ? 'Saving and testing…' : 'Save and test connection'}
+      >{busy === 'create'
+        ? signInNext
+          ? 'Saving…'
+          : 'Saving and testing…'
+        : signInNext
+          ? 'Save and sign in upstream'
+          : 'Save and test connection'}
       <NavIcon name="arrow" /></button
     >
   </div>

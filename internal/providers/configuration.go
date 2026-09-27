@@ -254,6 +254,10 @@ func ValidQuota(q Limits) bool {
 // credentialRequired reports whether the auth mode needs a secret.
 func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
 
+// Grant reports whether the provider authenticates with a grant, whose
+// credential versions only grant enrollment creates, never a pasted secret.
+func (c *Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant }
+
 // transportFingerprint identifies everything that affects how the gateway
 // reaches the upstream. Certification evidence is retained only while it is
 // unchanged.

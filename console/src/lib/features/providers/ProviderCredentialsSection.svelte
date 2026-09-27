@@ -16,7 +16,8 @@
   import {
     DISABLED_EDIT_NOTE,
     providerDisabled,
-    requiresCredential
+    requiresCredential,
+    requiresGrant
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
 
@@ -95,7 +96,15 @@
     runtime credential remains live until activation. Rotation keeps certified
     capabilities; test with the new credential before activation.
   </p>
-  {#if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
+  {#if providerSpec && requiresGrant(providerSpec, current.configuration.auth_mode)}<div
+      class="identity-note"
+    >
+      <strong>Grant</strong><span
+        >Credential versions come from grant enrollment: an operator signs in to
+        the upstream account through the provider plugin. There is no credential
+        to paste.</span
+      >
+    </div>{:else if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
       class="identity-note"
     >
       <strong

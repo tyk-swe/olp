@@ -219,8 +219,8 @@
                 <thead
                   ><tr
                     ><th>Profile</th><th>Label</th><th>Dialect</th><th
-                      >Address</th
-                    ></tr
+                      >Authentication</th
+                    ><th>Address</th></tr
                   ></thead
                 >
                 <tbody>
@@ -228,6 +228,10 @@
                     <tr
                       ><td><code>{profile.id}</code></td><td>{profile.label}</td
                       ><td><code>{profile.dialect}</code></td><td
+                        >{profile.grant
+                          ? 'Grant, enrolled by the plugin'
+                          : 'Static credential'}</td
+                      ><td
                         ><code class="address">{profile.hosting.address}</code
                         ></td
                       ></tr

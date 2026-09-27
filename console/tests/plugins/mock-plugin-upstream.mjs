@@ -1,21 +1,32 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
-// The upstream the reference plugin's profile places requests at when a
+// The upstream the reference plugin's profiles place requests at when a
 // journey links it against this server. It speaks OpenAI Chat Completions but
 // authenticates the way the reference plugin declares: a token in the
-// Authorization header and a client header. It records every request so the
-// journey can prove the hosting adaptation placed both.
+// Authorization header, or an access token its authority issued with the
+// account it authorizes, and a client header. It records every request so
+// the journey can prove the hosting adaptation placed them.
+//
+// Under /oauth it is also the reference plugin's authority, a fake OAuth 2.0
+// server running the authorization code flow with PKCE (S256): /authorize
+// signs the operator in at once and redirects to the loopback callback with a
+// code, /token exchanges each code once for the verifier that matches its
+// challenge, and /userinfo names the account's subject.
 const host = '127.0.0.1';
 const port = 4190;
 const origin = `http://${host}:${port}`;
 const model = 'reference-e2e-model';
 const credential = 'reference-plugin-secret';
+const identity = { subject: 'operator@reference.example', account: 'acct-e2e' };
 const reply = 'Hello from the plugin upstream';
 const maxBodyBytes = 1 << 20;
 const usage = { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 };
 
 const recorded = [];
 const unexpected = [];
+const codes = new Map();
+const accessTokens = new Set();
 
 function json(response, status, value) {
   const body = JSON.stringify(value);
@@ -33,7 +44,7 @@ function openaiError(response, status, code, message) {
   });
 }
 
-async function readJson(request) {
+async function readText(request) {
   const chunks = [];
   let bytes = 0;
   for await (const chunk of request) {
@@ -45,8 +56,96 @@ async function readJson(request) {
     }
     chunks.push(chunk);
   }
-  const body = Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson(request) {
+  const body = await readText(request);
   return body ? JSON.parse(body) : null;
+}
+
+function oauthError(response, status, code, description) {
+  return json(response, status, {
+    error: code,
+    error_description: description
+  });
+}
+
+function secret() {
+  return randomBytes(24).toString('base64url');
+}
+
+async function authority(request, response, url) {
+  const method = request.method ?? 'GET';
+  if (method === 'GET' && url.pathname === '/oauth/authorize') {
+    const query = url.searchParams;
+    const redirect = query.get('redirect_uri');
+    if (
+      !redirect ||
+      query.get('response_type') !== 'code' ||
+      !query.get('client_id') ||
+      query.get('code_challenge_method') !== 'S256' ||
+      !query.get('code_challenge')
+    )
+      return oauthError(response, 400, 'invalid_request', 'bad request');
+    const code = secret();
+    codes.set(code, {
+      clientId: query.get('client_id'),
+      redirect,
+      challenge: query.get('code_challenge')
+    });
+    const callback = new URL(redirect);
+    callback.searchParams.set('code', code);
+    callback.searchParams.set('state', query.get('state') ?? '');
+    response.writeHead(302, {
+      location: callback.toString(),
+      'cache-control': 'no-store'
+    });
+    response.end();
+    return;
+  }
+  if (method === 'POST' && url.pathname === '/oauth/token') {
+    const form = new URLSearchParams(await readText(request));
+    const code = codes.get(form.get('code') ?? '');
+    codes.delete(form.get('code') ?? '');
+    const verified = createHash('sha256')
+      .update(form.get('code_verifier') ?? '')
+      .digest('base64url');
+    if (
+      form.get('grant_type') !== 'authorization_code' ||
+      !code ||
+      code.clientId !== form.get('client_id') ||
+      code.redirect !== form.get('redirect_uri') ||
+      code.challenge !== verified
+    )
+      return oauthError(response, 400, 'invalid_grant', 'code refused');
+    const accessToken = secret();
+    accessTokens.add(accessToken);
+    return json(response, 200, {
+      access_token: accessToken,
+      refresh_token: secret(),
+      token_type: 'Bearer',
+      expires_in: 3600,
+      account: identity.account
+    });
+  }
+  if (method === 'GET' && url.pathname === '/oauth/userinfo') {
+    const token = (request.headers.authorization ?? '').replace(/^Bearer /, '');
+    if (!accessTokens.has(token))
+      return oauthError(response, 401, 'invalid_token', 'unknown token');
+    return json(response, 200, { sub: identity.subject });
+  }
+  return oauthError(response, 404, 'not_found', 'unknown endpoint');
+}
+
+function authorized(headers) {
+  const bearer = (headers.authorization ?? '').replace(/^Bearer /, '');
+  return (
+    headers['x-reference-client'] === 'olp' &&
+    (headers.authorization === `Token ${credential}` ||
+      (accessTokens.has(bearer) &&
+        headers['x-reference-account'] === identity.account))
+  );
 }
 
 function chunk(delta, finish, withUsage) {
@@ -80,6 +179,8 @@ const server = createServer(async (request, response) => {
   if (method === 'GET' && url.pathname === '/health') {
     return json(response, 200, { status: 'ok' });
   }
+  if (url.pathname.startsWith('/oauth/'))
+    return authority(request, response, url);
   let body;
   try {
     body = await readJson(request);
@@ -90,6 +191,8 @@ const server = createServer(async (request, response) => {
   if (method === 'POST' && url.pathname === '/__test__/reset') {
     recorded.length = 0;
     unexpected.length = 0;
+    codes.clear();
+    accessTokens.clear();
     response.writeHead(204, { 'cache-control': 'no-store' });
     response.end();
     return;
@@ -104,10 +207,7 @@ const server = createServer(async (request, response) => {
     headers: request.headers,
     body
   });
-  if (
-    request.headers.authorization !== `Token ${credential}` ||
-    request.headers['x-reference-client'] !== 'olp'
-  ) {
+  if (!authorized(request.headers)) {
     unexpected.push(`${method} ${url.pathname}: incorrect credential`);
     return openaiError(
       response,
