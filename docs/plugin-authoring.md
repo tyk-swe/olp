@@ -178,9 +178,12 @@ such as the account or region a signature covers.
 `Sign` returns the headers to add: at most 16, each one a profile could declare
 and the request doesn't already carry. OLP redacts their values wherever it
 records upstream text, as it does the credential. If `Sign` fails, exceeds the
-plugin limits or returns a header OLP refuses, the request is not sent: the
-attempt fails as a credential failure before reaching the upstream, and the
-route fails over. A plugin that declares a signing profile without
+plugin limits or returns a header OLP refuses, the request is not sent and the
+route fails over. Report a credential you can't sign with as a `*plugin.Error`
+with a code of your own, such as `credential_expired`: that alone makes the
+attempt a credential failure, which cools the credential's slot down. A plain
+error, a panic or anything past the limits reports the `internal` code or
+none, and blames nothing on the credential. A plugin that declares a signing profile without
 implementing `Signer` reports no manifest, so OLP refuses to install it.
 
 Signing adds plugin code to every request. It runs in about a millisecond for a

@@ -158,3 +158,37 @@ func TestPluginProbesClassifyAsDeclared(t *testing.T) {
 		}
 	}
 }
+
+// failingSigner is a signing hook that fails as told.
+type failingSigner struct{ err error }
+
+func (s failingSigner) Sign(context.Context, string, abi.Provider, abi.SignRequest, []string) (abi.SignResult, error) {
+	return abi.SignResult{}, s.err
+}
+
+// A probe blames the credential for a signing failure only when the plugin
+// reports one; a hook that can't run leaves the upstream out of reach.
+func TestPluginProbesBlameTheCredentialOnlyForReportedSigningFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("a request whose signing failed was sent") }))
+	defer server.Close()
+	manifest, err := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{server.URL}, Profiles: []abi.Profile{{
+		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{Address: server.URL + "/v1"}, Signing: true,
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Endpoint: new(server.URL + "/v1")}
+	cfg.Normalize()
+	if err = cfg.pinned(manifest); err != nil {
+		t.Fatal(err)
+	}
+	for failure, want := range map[error]string{
+		&abi.Error{Code: "credential_expired", Message: "The key expired."}: "credential_invalid",
+		errors.New("plugin_timed_out: The plugin exceeded its 10s time limit."): "upstream_unavailable",
+	} {
+		_, _, err := New(nil, loopbackPolicy(), failingSigner{failure}).call(context.Background(), cfg, []byte("secret"), http.MethodGet, "/models", nil)
+		if probe, ok := errors.AsType[*probeError](err); !ok || probe.Code != want {
+			t.Errorf("signing failure %v probed as %v, want %s", failure, err, want)
+		}
+	}
+}

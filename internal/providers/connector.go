@@ -103,7 +103,10 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	}
 	transport := cfg.transport()
 	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
-	if err != nil {
+	switch {
+	case errors.Is(err, connectors.ErrSigningUnavailable):
+		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
+	case err != nil:
 		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
 	var client *http.Client

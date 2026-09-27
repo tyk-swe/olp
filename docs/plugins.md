@@ -215,10 +215,15 @@ the static credential or the grant's access token and the provider's
 credential. Gateways run it for traffic, and control for probes and
 certification. A signing profile need not place the credential at all.
 
-A hook that fails, exceeds the plugin limits or returns a header OLP refuses
-fails the attempt before anything is sent: the attempt records a credential
-failure, the slot cools down, and the route fails over. A probe reports
-`credential_invalid` with the reason.
+A hook that fails fails the attempt before anything is sent, and the route
+fails over. Only a failure the plugin reports with a code of its own blames the
+credential: the attempt records a credential failure, the slot cools down, and
+a probe reports `credential_invalid` with the reason. A hook that can't run,
+because it exceeds the plugin limits, crashes, can't be loaded or returns a
+header OLP refuses, blames nothing on the credential: the attempt records a
+`connect` failure, as for an upstream the gateway can't reach, which skips the
+provider's other slots for that request and counts towards its circuit, and a
+probe reports `upstream_unavailable`.
 
 Each process keeps the modules of the plugins it signs with compiled, by digest,
 with a bounded pool of instances, so no request compiles or instantiates

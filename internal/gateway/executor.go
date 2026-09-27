@@ -574,8 +574,14 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	credentialValues, err := s.applySlotCredential(actx, req, cfg, x.request.release, slot, body)
 	if err != nil {
-		if actx.Err() != nil {
+		switch {
+		case actx.Err() != nil:
 			return fail(st.classify(err, false), nil)
+		case errors.Is(err, connectors.ErrSigningUnavailable):
+			// The plugin couldn't sign the request, which says nothing
+			// about the credential: the upstream is out of reach from
+			// here, like one the gateway can't connect to.
+			return fail(classConnect, nil)
 		}
 		return fail(classCredential, nil)
 	}
