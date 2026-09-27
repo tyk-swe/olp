@@ -543,8 +543,11 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		if e := s.prepare(r.Context(), x, func(slug string) bool {
-			return authority.Allows("inference", slug, x.request.release.Snapshot.Routes[slug].ProjectID, s.now())
+		if e := s.prepare(r.Context(), x, func(route *runtime.Route) *Error {
+			if !authority.Allows("inference", route.Slug, x.request.release.Snapshot.Routes[route.Slug].ProjectID, s.now()) {
+				return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+			}
+			return nil
 		}); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -642,9 +645,10 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 	}
 }
 
-// prepare resolves the route, checks the caller's route permission, and
-// ranks the eligible attempts against the pinned snapshot.
-func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug string) bool) *Error {
+// prepare resolves the route, lets authorize refuse the caller's use of it in
+// the caller's own terms, and ranks the eligible attempts against the pinned
+// snapshot.
+func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runtime.Route) *Error) *Error {
 	x.mode = "unary"
 	if x.parsed.Stream {
 		x.mode = "streaming"
@@ -655,8 +659,8 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		return modelNotFound(x.parsed.Route)
 	}
 	x.route = &route
-	if !permitted(route.Slug) {
-		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	if e := authorize(&route); e != nil {
+		return e
 	}
 	if x.pin != nil {
 		if e := s.pinAttempts(ctx, x); e != nil {

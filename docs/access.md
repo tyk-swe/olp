@@ -91,6 +91,8 @@ Manage projects and membership through `/api/v1/projects` and
 `/api/v1/projects/{id}/members`. Providers, routes, and gateway keys carry a
 project boundary; a key can use only routes in its own project, including the
 unassigned boundary. Management tokens can also be limited to named projects.
+A project, or a resource in one, outside the caller's scope answers 404 exactly
+as if it did not exist; a visible project the caller cannot change answers 403.
 
 `GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
 manage shared accrued-cost budgets. A group requires a positive daily or monthly

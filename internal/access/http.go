@@ -505,6 +505,11 @@ func (p Principal) ProjectIDs() []string {
 	slices.Sort(ids)
 	return ids
 }
+
+// RequireProject checks that p may place a resource in projectID. A project
+// outside p's scope answers exactly like one that does not exist, so the
+// response never reveals another project; a visible project p cannot change
+// is refused.
 func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, projectID *string, write bool) error {
 	if projectID == nil {
 		if p.AllProjects {
@@ -512,15 +517,19 @@ func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, pro
 		}
 		return Forbidden()
 	}
+	notFound := Fail(404, "not_found", "The resource was not found.")
+	if !p.CanProject(projectID, false) {
+		return notFound
+	}
 	var exists bool
 	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
-		return Fail(404, "not_found", "The resource was not found.")
+		return notFound
 	}
 	if !p.CanProject(projectID, write) {
-		return Fail(403, "project_scope_denied", "This project is outside the caller's scope.")
+		return Forbidden()
 	}
 	return nil
 }

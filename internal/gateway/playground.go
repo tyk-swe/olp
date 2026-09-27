@@ -245,6 +245,17 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 	}
 }
 
+// authorize admits routes in the member's projects. A route outside them is
+// answered as missing, exactly like a route that does not exist.
+func (p *Playground) authorize(principal access.Principal) func(*runtime.Route) *Error {
+	return func(route *runtime.Route) *Error {
+		if !principal.CanProject(route.ProjectID, false) {
+			return modelNotFound(route.Slug)
+		}
+		return nil
+	}
+}
+
 func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 	principal, err := p.Access.Principal(r, p.Access.Pool, "playground")
 	if err != nil {
@@ -263,7 +274,7 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 	}
 	s := p.Gateway
 	x := p.execution(r, principal, parsed, family, in.Routing)
-	if e := s.prepare(r.Context(), x, func(string) bool { return principal.CanProject(x.route.ProjectID, false) }); e != nil {
+	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
@@ -406,7 +417,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request) error {
 	}
 	s := p.Gateway
 	x := p.execution(r, principal, parsed, family, in.Routing)
-	if e := s.prepare(r.Context(), x, func(string) bool { return principal.CanProject(x.route.ProjectID, false) }); e != nil {
+	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Fail(e.Status, e.Code, e.Message)
