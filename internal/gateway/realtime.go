@@ -813,11 +813,13 @@ func upstreamResponseError(resp *http.Response) *openai.UpstreamError {
 
 // redactRealtimeError scrubs applied credential values from a provider error
 // frame before it reaches the client. Any other frame returns unchanged, so
-// the relay stays byte-for-byte for everything it does not recognize.
+// the relay stays byte-for-byte for everything it does not recognize. A frame
+// that does not parse at all still gets a raw byte-level scrub: an error
+// document too malformed to decode must not carry a credential through.
 func redactRealtimeError(data []byte, credentials egress.Sensitive) ([]byte, error) {
 	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: len(data) + 2048})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return data, nil
+		return []byte(credentials.Redact(string(data))), nil
 	}
 	isError := false
 	if _, ok := doc.Root().Lookup("error"); ok {
@@ -932,9 +934,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				responses.clientFrame(typ, data)
 				usageMu.Unlock()
 			}
-			if inspect && typ == websocket.MessageText && bytes.Contains(data, []byte(`"error"`)) {
+			if inspect && typ == websocket.MessageText &&
+				(bytes.Contains(data, []byte(`"error"`)) || bytes.Contains(data, []byte(`\`))) {
 				// An in-band provider error can echo an applied credential;
-				// scrub it before the frame reaches the client.
+				// scrub it before the frame reaches the client. The gate also
+				// admits any frame carrying a JSON escape, since a member or
+				// value spelled like "err\u006fr" hides the marker.
 				scrubbed, err := redactRealtimeError(data, x.sensitive)
 				if err != nil {
 					return relayEnd{err: err}

@@ -66,7 +66,12 @@ func TestRealtimeProviderErrorFramesAreRedacted(t *testing.T) {
 			`{"type":"response.audio.delta","delta":"provider-secret"}`},
 		{`{"type":"session.updated","event_id":"error is only text"}`,
 			`{"type":"session.updated","event_id":"error is only text"}`},
+		{`{"err\u006fr":{"message":"denied by provider-secret"}}`,
+			`{"error":{"message":"denied by [REDACTED]"}}`},
+		{`{"type":"err\u006fr","error":{"code":"provider-secret"}}`,
+			`{"type":"err\u006fr","error":{"code":"[REDACTED]"}}`},
 		{`not json`, `not json`},
+		{`not json provider-secret`, `not json [REDACTED]`},
 	}
 	for _, tc := range tests {
 		got, err := redactRealtimeError([]byte(tc.frame), credentials)
