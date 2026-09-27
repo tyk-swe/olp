@@ -340,6 +340,11 @@ const server = createServer(async (request, response) => {
     usage
   });
 });
+// The journey's request context and the gateway pool their connections. A
+// keep-alive timeout would close an idle one just as a client may reuse it,
+// failing that call with "socket hang up", so idle connections stay open
+// until their client closes them.
+server.keepAliveTimeout = 0;
 
 function shutdown() {
   server.close(() => process.exit(0));
