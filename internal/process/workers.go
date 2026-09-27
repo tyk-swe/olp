@@ -52,7 +52,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
 		limits.RunCostReconciliation(ctx, pool, connect, costCheckpoint(pool), log)
 	})
-	wg.Go(func() { usage.RunBudgetAlertDelivery(ctx, pool, keys, installation, policy, log) })
+	wg.Go(func() { usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log) })
 	return wg.Wait
 }
 

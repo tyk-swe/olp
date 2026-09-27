@@ -3,8 +3,8 @@ import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { clearCsrfToken } from '$lib/features/access/session/api';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import {
-  createBudgetAlertRule,
   createNotificationDestination,
+  createNotificationRule,
   listNotificationDeliveries,
   updateNotificationDestination,
   type NotificationDestination
@@ -77,15 +77,16 @@ describe('notification destinations', () => {
   });
 });
 
-describe('budget alert rules', () => {
-  it('creates a rule with subject, window, and threshold', async () => {
+describe('notification rules', () => {
+  it('creates a budget threshold rule with subject, window, and threshold', async () => {
     authLifecycle.establishSession(session);
     const requests = captureRequests(() =>
       jsonResponse({ id: '01980000-0000-7000-8000-000000000701' })
     );
 
-    await createBudgetAlertRule({
+    await createNotificationRule({
       name: 'monthly 80',
+      event: 'budget.threshold',
       subject_kind: 'api_key',
       subject_id: '01980000-0000-7000-8000-000000000801',
       window_kind: 'month',
@@ -98,6 +99,7 @@ describe('budget alert rules', () => {
     expect(new URL(request.url).pathname).toBe('/api/v1/notifications/rules');
     expect(request.headers.get('idempotency-key')).toMatch(uuid);
     expect(await request.json()).toMatchObject({
+      event: 'budget.threshold',
       subject_kind: 'api_key',
       window_kind: 'month',
       threshold_percent: 80

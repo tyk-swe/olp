@@ -114,57 +114,51 @@ func (e AuditEventResponseActorType) Valid() bool {
 	}
 }
 
-// Defines values for BudgetAlertDeliveryStatus.
+// Defines values for BudgetSubjectKind.
 const (
-	BudgetAlertDeliveryStatusDelivered BudgetAlertDeliveryStatus = "delivered"
-	BudgetAlertDeliveryStatusFailed    BudgetAlertDeliveryStatus = "failed"
-	BudgetAlertDeliveryStatusPending   BudgetAlertDeliveryStatus = "pending"
+	BudgetSubjectKindApiKey      BudgetSubjectKind = "api_key"
+	BudgetSubjectKindBudgetGroup BudgetSubjectKind = "budget_group"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertDeliveryStatus enum.
-func (e BudgetAlertDeliveryStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetSubjectKind enum.
+func (e BudgetSubjectKind) Valid() bool {
 	switch e {
-	case BudgetAlertDeliveryStatusDelivered:
+	case BudgetSubjectKindApiKey:
 		return true
-	case BudgetAlertDeliveryStatusFailed:
-		return true
-	case BudgetAlertDeliveryStatusPending:
+	case BudgetSubjectKindBudgetGroup:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for BudgetAlertRuleSubjectKind.
+// Defines values for BudgetThresholdEventEvent.
 const (
-	BudgetAlertRuleSubjectKindApiKey      BudgetAlertRuleSubjectKind = "api_key"
-	BudgetAlertRuleSubjectKindBudgetGroup BudgetAlertRuleSubjectKind = "budget_group"
+	BudgetThresholdEventEventBudgetThreshold BudgetThresholdEventEvent = "budget.threshold"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertRuleSubjectKind enum.
-func (e BudgetAlertRuleSubjectKind) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetThresholdEventEvent enum.
+func (e BudgetThresholdEventEvent) Valid() bool {
 	switch e {
-	case BudgetAlertRuleSubjectKindApiKey:
-		return true
-	case BudgetAlertRuleSubjectKindBudgetGroup:
+	case BudgetThresholdEventEventBudgetThreshold:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for BudgetAlertRuleWindowKind.
+// Defines values for BudgetWindowKind.
 const (
-	BudgetAlertRuleWindowKindDay   BudgetAlertRuleWindowKind = "day"
-	BudgetAlertRuleWindowKindMonth BudgetAlertRuleWindowKind = "month"
+	Day   BudgetWindowKind = "day"
+	Month BudgetWindowKind = "month"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertRuleWindowKind enum.
-func (e BudgetAlertRuleWindowKind) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetWindowKind enum.
+func (e BudgetWindowKind) Valid() bool {
 	switch e {
-	case BudgetAlertRuleWindowKindDay:
+	case Day:
 		return true
-	case BudgetAlertRuleWindowKindMonth:
+	case Month:
 		return true
 	default:
 		return false
@@ -309,42 +303,6 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	case ContentPolicyRulePhaseInput:
 		return true
 	case ContentPolicyRulePhaseOutput:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CreateBudgetAlertRuleRequestSubjectKind.
-const (
-	CreateBudgetAlertRuleRequestSubjectKindApiKey      CreateBudgetAlertRuleRequestSubjectKind = "api_key"
-	CreateBudgetAlertRuleRequestSubjectKindBudgetGroup CreateBudgetAlertRuleRequestSubjectKind = "budget_group"
-)
-
-// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestSubjectKind enum.
-func (e CreateBudgetAlertRuleRequestSubjectKind) Valid() bool {
-	switch e {
-	case CreateBudgetAlertRuleRequestSubjectKindApiKey:
-		return true
-	case CreateBudgetAlertRuleRequestSubjectKindBudgetGroup:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CreateBudgetAlertRuleRequestWindowKind.
-const (
-	CreateBudgetAlertRuleRequestWindowKindDay   CreateBudgetAlertRuleRequestWindowKind = "day"
-	CreateBudgetAlertRuleRequestWindowKindMonth CreateBudgetAlertRuleRequestWindowKind = "month"
-)
-
-// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestWindowKind enum.
-func (e CreateBudgetAlertRuleRequestWindowKind) Valid() bool {
-	switch e {
-	case CreateBudgetAlertRuleRequestWindowKindDay:
-		return true
-	case CreateBudgetAlertRuleRequestWindowKindMonth:
 		return true
 	default:
 		return false
@@ -648,6 +606,45 @@ func (e InteractionInspectionStatus) Valid() bool {
 	}
 }
 
+// Defines values for NotificationDeliveryStatus.
+const (
+	NotificationDeliveryStatusDelivered NotificationDeliveryStatus = "delivered"
+	NotificationDeliveryStatusFailed    NotificationDeliveryStatus = "failed"
+	NotificationDeliveryStatusPending   NotificationDeliveryStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the NotificationDeliveryStatus enum.
+func (e NotificationDeliveryStatus) Valid() bool {
+	switch e {
+	case NotificationDeliveryStatusDelivered:
+		return true
+	case NotificationDeliveryStatusFailed:
+		return true
+	case NotificationDeliveryStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationEvent.
+const (
+	NotificationEventBudgetThreshold     NotificationEvent = "budget.threshold"
+	NotificationEventProviderGrantLapsed NotificationEvent = "provider.grant.lapsed"
+)
+
+// Valid indicates whether the value is a known member of the NotificationEvent enum.
+func (e NotificationEvent) Valid() bool {
+	switch e {
+	case NotificationEventBudgetThreshold:
+		return true
+	case NotificationEventProviderGrantLapsed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlaygroundRequestOperation.
 const (
 	PlaygroundRequestOperationEmbeddings PlaygroundRequestOperation = "embeddings"
@@ -870,6 +867,21 @@ func (e ProviderConfigurationField) Valid() bool {
 	case ProviderConfigurationFieldEndpoint:
 		return true
 	case ProviderConfigurationFieldModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderGrantLapsedEventEvent.
+const (
+	ProviderGrantLapsedEventEventProviderGrantLapsed ProviderGrantLapsedEventEvent = "provider.grant.lapsed"
+)
+
+// Valid indicates whether the value is a known member of the ProviderGrantLapsedEventEvent enum.
+func (e ProviderGrantLapsedEventEvent) Valid() bool {
+	switch e {
+	case ProviderGrantLapsedEventEventProviderGrantLapsed:
 		return true
 	default:
 		return false
@@ -1176,42 +1188,6 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
-// Defines values for UpdateBudgetAlertRuleRequestSubjectKind.
-const (
-	UpdateBudgetAlertRuleRequestSubjectKindApiKey      UpdateBudgetAlertRuleRequestSubjectKind = "api_key"
-	UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup UpdateBudgetAlertRuleRequestSubjectKind = "budget_group"
-)
-
-// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestSubjectKind enum.
-func (e UpdateBudgetAlertRuleRequestSubjectKind) Valid() bool {
-	switch e {
-	case UpdateBudgetAlertRuleRequestSubjectKindApiKey:
-		return true
-	case UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for UpdateBudgetAlertRuleRequestWindowKind.
-const (
-	UpdateBudgetAlertRuleRequestWindowKindDay   UpdateBudgetAlertRuleRequestWindowKind = "day"
-	UpdateBudgetAlertRuleRequestWindowKindMonth UpdateBudgetAlertRuleRequestWindowKind = "month"
-)
-
-// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestWindowKind enum.
-func (e UpdateBudgetAlertRuleRequestWindowKind) Valid() bool {
-	switch e {
-	case UpdateBudgetAlertRuleRequestWindowKindDay:
-		return true
-	case UpdateBudgetAlertRuleRequestWindowKindMonth:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for UpdateUserRoleRequestAccessScope.
 const (
 	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
@@ -1287,21 +1263,21 @@ func (e DownloadMediaJobContentParamsVariant) Valid() bool {
 	}
 }
 
-// Defines values for ListBudgetAlertDeliveriesParamsStatus.
+// Defines values for ListNotificationDeliveriesParamsStatus.
 const (
-	ListBudgetAlertDeliveriesParamsStatusDelivered ListBudgetAlertDeliveriesParamsStatus = "delivered"
-	ListBudgetAlertDeliveriesParamsStatusFailed    ListBudgetAlertDeliveriesParamsStatus = "failed"
-	ListBudgetAlertDeliveriesParamsStatusPending   ListBudgetAlertDeliveriesParamsStatus = "pending"
+	ListNotificationDeliveriesParamsStatusDelivered ListNotificationDeliveriesParamsStatus = "delivered"
+	ListNotificationDeliveriesParamsStatusFailed    ListNotificationDeliveriesParamsStatus = "failed"
+	ListNotificationDeliveriesParamsStatusPending   ListNotificationDeliveriesParamsStatus = "pending"
 )
 
-// Valid indicates whether the value is a known member of the ListBudgetAlertDeliveriesParamsStatus enum.
-func (e ListBudgetAlertDeliveriesParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListNotificationDeliveriesParamsStatus enum.
+func (e ListNotificationDeliveriesParamsStatus) Valid() bool {
 	switch e {
-	case ListBudgetAlertDeliveriesParamsStatusDelivered:
+	case ListNotificationDeliveriesParamsStatusDelivered:
 		return true
-	case ListBudgetAlertDeliveriesParamsStatusFailed:
+	case ListNotificationDeliveriesParamsStatusFailed:
 		return true
-	case ListBudgetAlertDeliveriesParamsStatusPending:
+	case ListNotificationDeliveriesParamsStatusPending:
 		return true
 	default:
 		return false
@@ -1523,7 +1499,7 @@ type AuthenticationCapabilities struct {
 	LimitsEnforced    *bool `json:"limits_enforced,omitempty"`
 	LocalLoginEnabled bool  `json:"local_login_enabled"`
 
-	// NotificationsActive Whether the installation runs the budget alert delivery worker, so stored rules actually notify.
+	// NotificationsActive Whether the installation runs the notification delivery worker, so stored rules actually notify.
 	NotificationsActive bool `json:"notifications_active"`
 	OidcLoginEnabled    bool `json:"oidc_login_enabled"`
 
@@ -1535,72 +1511,6 @@ type AuthenticationCapabilities struct {
 type BTreeMap map[string][]struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-}
-
-// BudgetAlertDelivery defines model for BudgetAlertDelivery.
-type BudgetAlertDelivery struct {
-	// Accrued The exact accrual that crossed the threshold, preserved from claim time.
-	Accrued       string                       `json:"accrued"`
-	Attempts      int32                        `json:"attempts"`
-	CreatedAt     time.Time                    `json:"created_at"`
-	Currency      nullable.Nullable[string]    `json:"currency"`
-	DeliveredAt   nullable.Nullable[time.Time] `json:"delivered_at"`
-	Id            openapi_types.UUID           `json:"id"`
-	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
-
-	// LastErrorCode Safe failure category only; raw errors are never stored.
-	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
-
-	// Limit The subject limit evaluated at claim time.
-	Limit            string                                `json:"limit"`
-	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	RuleId           openapi_types.UUID                    `json:"rule_id"`
-	RuleName         string                                `json:"rule_name"`
-	Status           BudgetAlertDeliveryStatus             `json:"status"`
-	ThresholdPercent int32                                 `json:"threshold_percent"`
-	WindowId         int64                                 `json:"window_id"`
-}
-
-// BudgetAlertDeliveryStatus defines model for BudgetAlertDelivery.Status.
-type BudgetAlertDeliveryStatus string
-
-// BudgetAlertDeliveryListResponse defines model for BudgetAlertDeliveryListResponse.
-type BudgetAlertDeliveryListResponse struct {
-	Items      []BudgetAlertDelivery     `json:"items"`
-	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
-}
-
-// BudgetAlertRule defines model for BudgetAlertRule.
-type BudgetAlertRule struct {
-	CreatedAt        time.Time                             `json:"created_at"`
-	CreatedBy        openapi_types.UUID                    `json:"created_by"`
-	CreatedByEmail   string                                `json:"created_by_email"`
-	DestinationId    openapi_types.UUID                    `json:"destination_id"`
-	DestinationName  string                                `json:"destination_name"`
-	Enabled          bool                                  `json:"enabled"`
-	Etag             openapi_types.UUID                    `json:"etag"`
-	Id               openapi_types.UUID                    `json:"id"`
-	Name             string                                `json:"name"`
-	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName      nullable.Nullable[string]             `json:"project_name"`
-	SubjectId        openapi_types.UUID                    `json:"subject_id"`
-	SubjectKind      BudgetAlertRuleSubjectKind            `json:"subject_kind"`
-	SubjectName      nullable.Nullable[string]             `json:"subject_name"`
-	ThresholdPercent int32                                 `json:"threshold_percent"`
-	UpdatedAt        time.Time                             `json:"updated_at"`
-	WindowKind       BudgetAlertRuleWindowKind             `json:"window_kind"`
-}
-
-// BudgetAlertRuleSubjectKind defines model for BudgetAlertRule.SubjectKind.
-type BudgetAlertRuleSubjectKind string
-
-// BudgetAlertRuleWindowKind defines model for BudgetAlertRule.WindowKind.
-type BudgetAlertRuleWindowKind string
-
-// BudgetAlertRuleListResponse defines model for BudgetAlertRuleListResponse.
-type BudgetAlertRuleListResponse struct {
-	Items      []BudgetAlertRule         `json:"items"`
-	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
@@ -1649,6 +1559,39 @@ type BudgetGroupListResponse struct {
 type BudgetGroupMutationResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
 }
+
+// BudgetSubjectKind Whose spend a budget.threshold rule watches.
+type BudgetSubjectKind string
+
+// BudgetThresholdEvent The webhook body of a budget.threshold event: the subject of a budget threshold rule accrued at least its threshold of its limit in the current UTC window. Metadata only: it never carries prompts, outputs or attribution labels.
+type BudgetThresholdEvent struct {
+	// Accrued The exact accrual that crossed the threshold, as claimed.
+	Accrued string `json:"accrued"`
+
+	// Currency The pricing currency, or empty when none is set.
+	Currency string                    `json:"currency"`
+	Event    BudgetThresholdEventEvent `json:"event"`
+
+	// Limit The subject's limit for the window, as claimed.
+	Limit     string             `json:"limit"`
+	RuleId    openapi_types.UUID `json:"rule_id"`
+	RuleName  string             `json:"rule_name"`
+	SubjectId openapi_types.UUID `json:"subject_id"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      BudgetSubjectKind `json:"subject_kind"`
+	ThresholdPercent int32             `json:"threshold_percent"`
+	WindowId         int64             `json:"window_id"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind BudgetWindowKind `json:"window_kind"`
+}
+
+// BudgetThresholdEventEvent defines model for BudgetThresholdEvent.Event.
+type BudgetThresholdEventEvent string
+
+// BudgetWindowKind The UTC window a budget.threshold rule watches.
+type BudgetWindowKind string
 
 // CapabilityCertificationItemResponse defines model for CapabilityCertificationItemResponse.
 type CapabilityCertificationItemResponse struct {
@@ -1976,28 +1919,6 @@ type CreateApiKeyResponse struct {
 	Secret string `json:"secret"`
 }
 
-// CreateBudgetAlertRuleRequest defines model for CreateBudgetAlertRuleRequest.
-type CreateBudgetAlertRuleRequest struct {
-	DestinationId openapi_types.UUID `json:"destination_id"`
-
-	// Enabled Defaults to true.
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
-
-	// ProjectId Owning project; subject and destination must belong to the same project.
-	ProjectId        nullable.Nullable[openapi_types.UUID]   `json:"project_id,omitempty"`
-	SubjectId        openapi_types.UUID                      `json:"subject_id"`
-	SubjectKind      CreateBudgetAlertRuleRequestSubjectKind `json:"subject_kind"`
-	ThresholdPercent int32                                   `json:"threshold_percent"`
-	WindowKind       CreateBudgetAlertRuleRequestWindowKind  `json:"window_kind"`
-}
-
-// CreateBudgetAlertRuleRequestSubjectKind defines model for CreateBudgetAlertRuleRequest.SubjectKind.
-type CreateBudgetAlertRuleRequestSubjectKind string
-
-// CreateBudgetAlertRuleRequestWindowKind defines model for CreateBudgetAlertRuleRequest.WindowKind.
-type CreateBudgetAlertRuleRequestWindowKind string
-
 // CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
 type CreateBudgetGroupRequest struct {
 	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
@@ -2084,6 +2005,29 @@ type CreateNotificationDestinationRequest struct {
 
 	// Url Webhook URL validated by the installation egress policy.
 	Url string `json:"url"`
+}
+
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide.
+type CreateNotificationRuleRequest struct {
+	DestinationId openapi_types.UUID `json:"destination_id"`
+
+	// Enabled Defaults to true.
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event NotificationEvent `json:"event"`
+	Name  string            `json:"name"`
+
+	// ProjectId Owning project; subject and destination must belong to the same project.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	SubjectId *openapi_types.UUID                   `json:"subject_id,omitempty"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
+	ThresholdPercent *int32             `json:"threshold_percent,omitempty"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind *BudgetWindowKind `json:"window_kind,omitempty"`
 }
 
 // CreatePricingSourceRequest defines model for CreatePricingSourceRequest.
@@ -2600,6 +2544,58 @@ type NetworkCredentialResponse struct {
 	Version   int32                        `json:"version"`
 }
 
+// NotificationDelivery Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.
+type NotificationDelivery struct {
+	// Accrued The exact accrual that crossed the threshold, preserved from claim time. Set for budget.threshold deliveries only; null for other events.
+	Accrued   nullable.Nullable[string] `json:"accrued"`
+	Attempts  int32                     `json:"attempts"`
+	CreatedAt time.Time                 `json:"created_at"`
+
+	// CredentialVersion The number of the credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	CredentialVersion nullable.Nullable[int32] `json:"credential_version"`
+
+	// CredentialVersionId The credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id"`
+	Currency            nullable.Nullable[string]             `json:"currency"`
+	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event         NotificationEvent            `json:"event"`
+	Id            openapi_types.UUID           `json:"id"`
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastErrorCode Safe failure category only; raw errors are never stored.
+	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
+
+	// Limit The subject limit evaluated at claim time. Set for budget.threshold deliveries only; null for other events.
+	Limit     nullable.Nullable[string]             `json:"limit"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+
+	// ProviderId The provider whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id"`
+
+	// ProviderName The provider's name when its grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	ProviderName nullable.Nullable[string]  `json:"provider_name"`
+	RuleId       openapi_types.UUID         `json:"rule_id"`
+	RuleName     string                     `json:"rule_name"`
+	Status       NotificationDeliveryStatus `json:"status"`
+
+	// ThresholdPercent Set for budget.threshold deliveries only; null for other events.
+	ThresholdPercent nullable.Nullable[int32] `json:"threshold_percent"`
+
+	// WindowId Set for budget.threshold deliveries only; null for other events.
+	WindowId nullable.Nullable[int64] `json:"window_id"`
+}
+
+// NotificationDeliveryStatus defines model for NotificationDelivery.Status.
+type NotificationDeliveryStatus string
+
+// NotificationDeliveryListResponse defines model for NotificationDeliveryListResponse.
+type NotificationDeliveryListResponse struct {
+	Items      []NotificationDelivery    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
 // NotificationDestination defines model for NotificationDestination.
 type NotificationDestination struct {
 	CreatedAt      time.Time                             `json:"created_at"`
@@ -2618,6 +2614,49 @@ type NotificationDestination struct {
 // NotificationDestinationListResponse defines model for NotificationDestinationListResponse.
 type NotificationDestinationListResponse struct {
 	Items      []NotificationDestination `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+type NotificationEvent string
+
+// NotificationRule A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.
+type NotificationRule struct {
+	CreatedAt       time.Time          `json:"created_at"`
+	CreatedBy       openapi_types.UUID `json:"created_by"`
+	CreatedByEmail  string             `json:"created_by_email"`
+	DestinationId   openapi_types.UUID `json:"destination_id"`
+	DestinationName string             `json:"destination_name"`
+	Enabled         bool               `json:"enabled"`
+	Etag            openapi_types.UUID `json:"etag"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event NotificationEvent  `json:"event"`
+	Id    openapi_types.UUID `json:"id"`
+	Name  string             `json:"name"`
+
+	// ProjectId Owning project; null for an installation-wide rule, as every provider event rule is.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+
+	// SubjectId Set for budget.threshold rules only; null for other events.
+	SubjectId nullable.Nullable[openapi_types.UUID] `json:"subject_id"`
+
+	// SubjectKind Set for budget.threshold rules only; null for other events.
+	SubjectKind nullable.Nullable[BudgetSubjectKind] `json:"subject_kind"`
+	SubjectName nullable.Nullable[string]            `json:"subject_name"`
+
+	// ThresholdPercent Set for budget.threshold rules only; null for other events.
+	ThresholdPercent nullable.Nullable[int32] `json:"threshold_percent"`
+	UpdatedAt        time.Time                `json:"updated_at"`
+
+	// WindowKind Set for budget.threshold rules only; null for other events.
+	WindowKind nullable.Nullable[BudgetWindowKind] `json:"window_kind"`
+}
+
+// NotificationRuleListResponse defines model for NotificationRuleListResponse.
+type NotificationRuleListResponse struct {
+	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
@@ -3395,6 +3434,29 @@ type ProviderFieldCapabilityResponse struct {
 	Label    string                     `json:"label"`
 	Required bool                       `json:"required"`
 }
+
+// ProviderGrantLapsedEvent The webhook body of a provider.grant.lapsed event: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment replaces it. It reports the provider, credential version, credential slots and observed principal as they were when the grant lapsed, and never carries secret material: no access or refresh token, grant facts or refresh failure.
+type ProviderGrantLapsedEvent struct {
+	// CredentialSlots The provider's credential slots bound to the credential version, in its draft or its active revision: usually one.
+	CredentialSlots []struct {
+		Id   openapi_types.UUID `json:"id"`
+		Name string             `json:"name"`
+	} `json:"credential_slots"`
+	CredentialVersion   int32                         `json:"credential_version"`
+	CredentialVersionId openapi_types.UUID            `json:"credential_version_id"`
+	Event               ProviderGrantLapsedEventEvent `json:"event"`
+	LapsedAt            time.Time                     `json:"lapsed_at"`
+
+	// ObservedPrincipal The upstream principal the grant's enrollment observed.
+	ObservedPrincipal string             `json:"observed_principal"`
+	ProviderId        openapi_types.UUID `json:"provider_id"`
+	ProviderName      string             `json:"provider_name"`
+	RuleId            openapi_types.UUID `json:"rule_id"`
+	RuleName          string             `json:"rule_name"`
+}
+
+// ProviderGrantLapsedEventEvent defines model for ProviderGrantLapsedEvent.Event.
+type ProviderGrantLapsedEventEvent string
 
 // ProviderHealthItem defines model for ProviderHealthItem.
 type ProviderHealthItem struct {
@@ -4575,23 +4637,6 @@ type UpdateApiKeyRequest struct {
 	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
 }
 
-// UpdateBudgetAlertRuleRequest defines model for UpdateBudgetAlertRuleRequest.
-type UpdateBudgetAlertRuleRequest struct {
-	DestinationId    *openapi_types.UUID                      `json:"destination_id,omitempty"`
-	Enabled          *bool                                    `json:"enabled,omitempty"`
-	Name             *string                                  `json:"name,omitempty"`
-	SubjectId        *openapi_types.UUID                      `json:"subject_id,omitempty"`
-	SubjectKind      *UpdateBudgetAlertRuleRequestSubjectKind `json:"subject_kind,omitempty"`
-	ThresholdPercent *int32                                   `json:"threshold_percent,omitempty"`
-	WindowKind       *UpdateBudgetAlertRuleRequestWindowKind  `json:"window_kind,omitempty"`
-}
-
-// UpdateBudgetAlertRuleRequestSubjectKind defines model for UpdateBudgetAlertRuleRequest.SubjectKind.
-type UpdateBudgetAlertRuleRequestSubjectKind string
-
-// UpdateBudgetAlertRuleRequestWindowKind defines model for UpdateBudgetAlertRuleRequest.WindowKind.
-type UpdateBudgetAlertRuleRequestWindowKind string
-
 // UpdateBudgetGroupRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit null clears a cost limit. project_id is immutable.
 type UpdateBudgetGroupRequest struct {
@@ -4608,6 +4653,21 @@ type UpdateNotificationDestinationRequest struct {
 	// Secret A string replaces the signing secret, null removes it, absent keeps it.
 	Secret nullable.Nullable[string] `json:"secret,omitempty"`
 	Url    *string                   `json:"url,omitempty"`
+}
+
+// UpdateNotificationRuleRequest A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.
+type UpdateNotificationRuleRequest struct {
+	DestinationId *openapi_types.UUID `json:"destination_id,omitempty"`
+	Enabled       *bool               `json:"enabled,omitempty"`
+	Name          *string             `json:"name,omitempty"`
+	SubjectId     *openapi_types.UUID `json:"subject_id,omitempty"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
+	ThresholdPercent *int32             `json:"threshold_percent,omitempty"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind *BudgetWindowKind `json:"window_kind,omitempty"`
 }
 
 // UpdatePricingSourceRequest defines model for UpdatePricingSourceRequest.
@@ -4958,8 +5018,8 @@ type DownloadMediaJobContentParams struct {
 // DownloadMediaJobContentParamsVariant defines parameters for DownloadMediaJobContent.
 type DownloadMediaJobContentParamsVariant string
 
-// ListBudgetAlertDeliveriesParams defines parameters for ListBudgetAlertDeliveries.
-type ListBudgetAlertDeliveriesParams struct {
+// ListNotificationDeliveriesParams defines parameters for ListNotificationDeliveries.
+type ListNotificationDeliveriesParams struct {
 	// Cursor Opaque cursor returned by the previous page.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
@@ -4970,11 +5030,11 @@ type ListBudgetAlertDeliveriesParams struct {
 	RuleId *openapi_types.UUID `form:"rule_id,omitempty" json:"rule_id,omitempty"`
 
 	// Status Only deliveries in this status.
-	Status *ListBudgetAlertDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status *ListNotificationDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
-// ListBudgetAlertDeliveriesParamsStatus defines parameters for ListBudgetAlertDeliveries.
-type ListBudgetAlertDeliveriesParamsStatus string
+// ListNotificationDeliveriesParamsStatus defines parameters for ListNotificationDeliveries.
+type ListNotificationDeliveriesParamsStatus string
 
 // ListNotificationDestinationsParams defines parameters for ListNotificationDestinations.
 type ListNotificationDestinationsParams struct {
@@ -4997,8 +5057,8 @@ type UpdateNotificationDestinationParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
-// ListBudgetAlertRulesParams defines parameters for ListBudgetAlertRules.
-type ListBudgetAlertRulesParams struct {
+// ListNotificationRulesParams defines parameters for ListNotificationRules.
+type ListNotificationRulesParams struct {
 	// Cursor Opaque cursor returned by the previous page.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
@@ -5006,14 +5066,14 @@ type ListBudgetAlertRulesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
-// CreateBudgetAlertRuleParams defines parameters for CreateBudgetAlertRule.
-type CreateBudgetAlertRuleParams struct {
+// CreateNotificationRuleParams defines parameters for CreateNotificationRule.
+type CreateNotificationRuleParams struct {
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
-// UpdateBudgetAlertRuleParams defines parameters for UpdateBudgetAlertRule.
-type UpdateBudgetAlertRuleParams struct {
+// UpdateNotificationRuleParams defines parameters for UpdateNotificationRule.
+type UpdateNotificationRuleParams struct {
 	// IfMatch Concurrency token returned with the resource
 	IfMatch string `json:"If-Match"`
 }
@@ -5574,6 +5634,18 @@ type UpdateUserRoleParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// BudgetThresholdWebhookParams defines parameters for BudgetThresholdWebhook.
+type BudgetThresholdWebhookParams struct {
+	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
+	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
+}
+
+// ProviderGrantLapsedWebhookParams defines parameters for ProviderGrantLapsedWebhook.
+type ProviderGrantLapsedWebhookParams struct {
+	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
+	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
+}
+
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody = CreateApiKeyRequest
 
@@ -5610,11 +5682,11 @@ type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinatio
 // UpdateNotificationDestinationJSONRequestBody defines body for UpdateNotificationDestination for application/json ContentType.
 type UpdateNotificationDestinationJSONRequestBody = UpdateNotificationDestinationRequest
 
-// CreateBudgetAlertRuleJSONRequestBody defines body for CreateBudgetAlertRule for application/json ContentType.
-type CreateBudgetAlertRuleJSONRequestBody = CreateBudgetAlertRuleRequest
+// CreateNotificationRuleJSONRequestBody defines body for CreateNotificationRule for application/json ContentType.
+type CreateNotificationRuleJSONRequestBody = CreateNotificationRuleRequest
 
-// UpdateBudgetAlertRuleJSONRequestBody defines body for UpdateBudgetAlertRule for application/json ContentType.
-type UpdateBudgetAlertRuleJSONRequestBody = UpdateBudgetAlertRuleRequest
+// UpdateNotificationRuleJSONRequestBody defines body for UpdateNotificationRule for application/json ContentType.
+type UpdateNotificationRuleJSONRequestBody = UpdateNotificationRuleRequest
 
 // PutConfigurationJSONRequestBody defines body for PutConfiguration for application/json ContentType.
 type PutConfigurationJSONRequestBody = OidcConfigurationRequest
@@ -5726,6 +5798,12 @@ type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
 
 // UpdateUserRoleJSONRequestBody defines body for UpdateUserRole for application/json ContentType.
 type UpdateUserRoleJSONRequestBody = UpdateUserRoleRequest
+
+// BudgetThresholdWebhookJSONRequestBody defines body for BudgetThresholdWebhook for application/json ContentType.
+type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
+
+// ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
+type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent
 
 // AsPlaygroundResponseFormat0 returns the union data inside the PlaygroundResponseFormat as a PlaygroundResponseFormat0
 func (t PlaygroundResponseFormat) AsPlaygroundResponseFormat0() (PlaygroundResponseFormat0, error) {

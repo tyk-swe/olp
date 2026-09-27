@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -102,5 +103,30 @@ func validateManagementResponse(t *testing.T, method, path string, status int, b
 			}
 			return
 		}
+	}
+}
+
+// validateWebhookBody validates a body OLP posted to a notification
+// destination against the management contract's webhook for event.
+func validateWebhookBody(t *testing.T, event string, body []byte) {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal(openapi.Document, &document); err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("https://contract.test/management.json", document); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := c.Compile("https://contract.test/management.json#/webhooks/" + event + "/post/requestBody/content/application~1json/schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Validate(value); err != nil {
+		t.Fatalf("the %s webhook body violates the contract: %v", event, err)
 	}
 }

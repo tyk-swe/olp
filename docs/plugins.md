@@ -363,6 +363,10 @@ even while its last access token would still work upstream:
 - A credential failure on a lapsed grant requests no refresh.
 - Audit records `provider.grant.lapse` with the credential version as
   resource and the worker as actor: no user, user agent `olp-worker`.
+- Each enabled [notification rule](operations.md#notifications) subscribed to
+  `provider.grant.lapsed` is sent one signed webhook naming the provider, the
+  credential slots, the credential version and its observed principal, never
+  a token or grant fact.
 - `GET /api/v1/providers/{id}/credentials` shows `grant.lapsed_at`, and the
   credential slot list's health shows `lapsed`. The console marks the version
   **grant lapsed** and the slot **Grant lapsed**, with **Re-enroll grant** as

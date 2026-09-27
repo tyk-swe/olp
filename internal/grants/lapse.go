@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -27,7 +28,8 @@ func permanent(failure error) bool {
 
 // lapse records, in tx, that a grant lapsed for reason: it can no longer be
 // refreshed (ADR 0006). The grant's refresh token is discarded and nothing
-// refreshes it again, the lapse is audited with the worker as the actor, and
+// refreshes it again, the lapse is audited with the worker as the actor, each
+// notification rule subscribed to grant lapses is sent one delivery of it, and
 // key authority advances, so gateways stop serving the grant's credential
 // version within one authority poll. Lapse is terminal: only a new grant
 // enrollment, which creates another credential version, replaces the grant.
@@ -41,6 +43,9 @@ func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) error {
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family)
 		VALUES($1,'provider.grant.lapse','provider_credential',$2,'success',$3)`, access.NewID(), g.credentialID, workerAgent); err != nil {
+		return err
+	}
+	if err := usage.NotifyGrantLapsed(ctx, tx, g.credentialID); err != nil {
 		return err
 	}
 	_, err := access.AdvanceAuthority(ctx, tx)
