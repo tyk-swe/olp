@@ -78,7 +78,11 @@ and cloud identity variables. Live calls consume provider quota.
 ## Contract and browser coverage
 
 The release contract test, run inside the process suite, checks that every
-operation in the embedded OpenAPI contract reaches a handler. A test's existence
+operation in the embedded OpenAPI contract reaches a handler. The
+authorization sweep calls every secured management operation as every caller
+in `internal/access/testdata/authorization.golden.json` and holds each
+outcome to that file, and the isolation sweep reads every operation as members
+of another project and fails on any disclosure of a canary project. A test's existence
 does not prove it ran; use CI results for the commit you are checking. Browser
 journeys cover accounting, cloud configuration, bulk certification, grouped
 routes, pools, policy exclusions, preview, publication, playground, and
