@@ -468,7 +468,10 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if err != nil {
 			return err
 		}
-		endpoint, err := transport.URL(wire, model, tuple.Mode == ModeStreaming)
+		// A profile that forces streaming serves a non-streaming tuple through
+		// the stream the gateway aggregates.
+		aggregated := tuple.Mode != ModeStreaming && transport.ForcesStreaming()
+		endpoint, err := transport.URL(wire, model, tuple.Mode == ModeStreaming || aggregated)
 		if err != nil {
 			return err
 		}
@@ -479,9 +482,15 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if status != http.StatusOK {
 			return statusError(cfg, status, data)
 		}
-		if tuple.Mode == ModeStreaming {
+		switch {
+		case tuple.Mode == ModeStreaming:
 			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
-		} else {
+		case aggregated:
+			var streamed *openai.Completion
+			if streamed, err = openai.Aggregate(wire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, probeBodyLimit); err == nil {
+				_, err = protocols.DecodeRequest(wire, family, streamed.Body, "certification", "", parsed)
+			}
+		default:
 			_, err = protocols.DecodeRequest(wire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
 		if err != nil {

@@ -96,6 +96,7 @@ func TestManifestValidation(t *testing.T) {
 		"grant fact without a grant": {func(m *abi.Manifest) {
 			m.Profiles[0].Hosting.Headers["X-Account"] = "{grant.account_id}"
 		}, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.X-Account"},
+		"stream without a reducer": {func(m *abi.Manifest) { m.Profiles[1].Hosting.ForceStreaming = true }, CodeManifestInvalid, "manifest.profiles[1].hosting.force_streaming"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()

@@ -123,6 +123,7 @@ Providers using the profile authenticate with a static credential, or with a
 | `Rewrites` | Optional. At most 16 declared changes to the dialect's request body; see [Envelopes and rewrites](#envelopes-and-rewrites). |
 | `Discovery` | Optional: the upstream's [model listing](#model-discovery). |
 | `Classification` | Optional: at most 32 [failure classification](#failure-classification) rules. |
+| `ForceStreaming` | Optional. The upstream serves only streaming requests; see [Upstreams that serve only streams](#upstreams-that-serve-only-streams). |
 
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
@@ -138,7 +139,8 @@ text.
 
 A profile whose adaptation changes only authorization, address and declared
 headers serves strict routes, whether or not it signs requests. An envelope or
-any rewrite changes the dialect's bodies, so the profile serves only
+any rewrite changes the dialect's bodies, and forced streaming changes how
+non-streaming requests reach the upstream, so such a profile serves only
 [transformed routes](provider-routing.md#route-fidelity), and strict activation
 of a target using it tells the route author to declare the route transformed.
 
@@ -282,6 +284,45 @@ a `400` with its own code declares:
 ```go
 Classification: []plugin.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
 ```
+
+### Upstreams that serve only streams
+
+Some upstreams, such as subscription backends, accept only streaming requests.
+A profile declares one with `ForceStreaming`, as the reference plugin's
+`reference-streaming` profile does:
+
+```go
+Hosting: plugin.Hosting{
+	Address:        "https://api.example.com/streaming/v1",
+	Headers:        map[string]string{"Authorization": "Token {credential}"},
+	ForceStreaming: true,
+},
+```
+
+OLP then sends every request of the profile as a streaming one, with
+`"stream": true`, which the route inspector's effective request shows. A caller
+that streams receives the upstream's events as usual. For a caller that did not
+ask to stream, OLP reads the stream to its end and aggregates it into the
+dialect's non-streaming result, which the caller, content policy and usage
+accounting see as an ordinary response:
+
+- The result is the response the terminal event carries. An upstream may leave
+  that response's output empty and deliver each item only in
+  `response.output_item.done`; OLP then fills the output with those items, in
+  order.
+- OLP validates the stream as it does for a streaming caller. A stream that
+  fails or ends before its terminal event yields no partial result. The
+  upstream had accepted the request, so its outcome is unknown and its cost
+  uncertain, unless the stream reported usage, which is accounted as it would
+  be for a streaming caller.
+- Aggregation is bounded by the gateway's response size limit
+  (`OLP_PROVIDER_MAX_RESPONSE_BYTES`). A larger result fails the request with
+  `502 upstream_response_too_large`, without failing over, and the caller can
+  stream instead.
+
+OLP aggregates the `openai-responses` dialect only, and refuses a manifest that
+forces streaming in another dialect with the field
+`manifest.profiles[i].hosting.force_streaming`.
 
 ## Grants
 

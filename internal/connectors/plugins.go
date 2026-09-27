@@ -149,8 +149,9 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil, OptionsSchema: optionsSchema(declared.Options),
 		// An adaptation that changes only authorization, address and declared
 		// headers serves strict routes. An envelope or rewrite changes the
-		// dialect's bodies, so the profile serves transformed routes only.
-		Strict: placed.envelope == nil && len(placed.rewrites) == 0,
+		// dialect's bodies, and forced streaming how non-streaming requests
+		// reach the upstream, so the profile serves transformed routes only.
+		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming,
 	}
 	completeProfileMetadata(&p)
 	return &PluginProfile{profile: p, hosting: placed, declared: declared, patterns: patterns}, nil
@@ -257,6 +258,7 @@ type hosting struct {
 	envelope       *envelope
 	rewrites       []rewrite
 	classification []upstream.Rule
+	forceStreaming bool
 }
 
 // Templates name a provider's values: credentialValue is its static
@@ -475,6 +477,9 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		return hosting{}, err
 	}
 	if placed.rewrites, err = parseRewrites(declaredHosting.Rewrites, declared.Dialect); err != nil {
+		return hosting{}, err
+	}
+	if placed.forceStreaming, err = parseForceStreaming(declared); err != nil {
 		return hosting{}, err
 	}
 	return placed, nil

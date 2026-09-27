@@ -258,8 +258,8 @@ catalogue entry is not `strict`, or one that needs translation fails with
 transformed. A [plugin profile](plugins.md#providers-from-plugin-profiles) that
 changes only authorization, address and declared headers is strict, including
 one whose signing hook adds headers; one whose envelope or rewrites change the
-dialect's bodies is not. Strict routes also refuse `redact` content-policy
-rules.
+dialect's bodies, or that forces upstream streaming, is not. Strict routes also
+refuse `redact` content-policy rules.
 
 Declare a route transformed to translate between dialects, redact content, use
 Automatic providers, use the console playground, or serve Bedrock InvokeModel.

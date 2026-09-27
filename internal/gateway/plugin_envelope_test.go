@@ -17,13 +17,17 @@ import (
 )
 
 // servePluginProfile moves the harness's first provider onto a plugin
-// profile at its upstream.
+// profile of the Chat Completions dialect at its upstream.
 func (h *harness) servePluginProfile(hosting abi.Hosting) {
 	h.t.Helper()
+	h.servePlugin(abi.Profile{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: hosting})
+}
+
+// servePlugin moves the harness's first provider onto a plugin profile.
+func (h *harness) servePlugin(profile abi.Profile) {
+	h.t.Helper()
 	digest := strings.Repeat("cd", 32)
-	plugin, err := connectors.NewPluginProfile(digest, abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{{
-		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: hosting,
-	}}}, "acme-chat")
+	plugin, err := connectors.NewPluginProfile(digest, abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{profile}}, profile.ID)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -34,7 +38,7 @@ func (h *harness) servePluginProfile(hosting abi.Hosting) {
 		}
 		if provider.Slots[0].ID == h.slotA {
 			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
-			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = "acme-chat", digest, plugin.Address(nil)
+			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, digest, plugin.Address(nil)
 			h.rt.release.Snapshot.Providers[id] = provider
 		}
 	}

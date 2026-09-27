@@ -323,17 +323,8 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	}
 	switch operation {
 	case "generation":
-		switch p.Dialect {
-		case "openai-chat":
-			return openai.FamilyChat, nil
-		case "openai-responses":
-			return openai.FamilyResponses, nil
-		case "anthropic-messages":
-			return openai.FamilyAnthropic, nil
-		case "gemini-generate-content":
-			return openai.FamilyGemini, nil
-		case "bedrock-converse":
-			return openai.FamilyBedrock, nil
+		if family, ok := generationFamily(p.Dialect); ok {
+			return family, nil
 		}
 	case "token_count":
 		switch p.Dialect {
@@ -365,6 +356,23 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 		return openai.FamilyBedrockInvoke, nil
 	}
 	return "", errors.New("operation has no codec in the selected profile")
+}
+
+// generationFamily is the codec family of a dialect's generation requests.
+func generationFamily(dialect string) (openai.Family, bool) {
+	switch dialect {
+	case "openai-chat":
+		return openai.FamilyChat, true
+	case "openai-responses":
+		return openai.FamilyResponses, true
+	case "anthropic-messages":
+		return openai.FamilyAnthropic, true
+	case "gemini-generate-content":
+		return openai.FamilyGemini, true
+	case "bedrock-converse":
+		return openai.FamilyBedrock, true
+	}
+	return "", false
 }
 
 func (c Config) Supports(operation, surface, mode string) bool {

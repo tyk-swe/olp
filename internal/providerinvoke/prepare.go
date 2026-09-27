@@ -22,9 +22,9 @@ type Invocation struct {
 // Prepare builds a transformed invocation. Automatic providers select the
 // destination by provider kind and apply their parameter defaults. Explicit
 // profile selection fixes the destination dialect and records every effective
-// native default, plugin profile rewrite and hosting wrapper in the prepared
-// document. A plugin profile's envelope stays outside it: see
-// connectors.Config.WrapRequest.
+// native default, plugin profile rewrite, forced upstream streaming and
+// hosting wrapper in the prepared document. A plugin profile's envelope stays
+// outside it: see connectors.Config.WrapRequest.
 func Prepare(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
 	wire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
 	defaults := parameterDefaults
@@ -80,6 +80,9 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 	}
 	prepared, err = config.Rewrite(prepared)
 	if err != nil {
+		return Invocation{}, profileError(err)
+	}
+	if prepared, err = config.StreamRequest(prepared); err != nil {
 		return Invocation{}, profileError(err)
 	}
 	body := prepared.Document().Bytes()
