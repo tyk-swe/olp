@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -149,30 +148,6 @@ func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*reso
 		return nil, nil, resources.ErrContract
 	}
 	return r, &doc, nil
-}
-
-func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
-	if doc == nil {
-		return nil
-	}
-	current, ok := x.snapshot().Routes[r.RouteSlug]
-	if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
-		return notFoundError("not_found", "The stored provider resource is unavailable to this key.")
-	}
-	p, _, e := s.resolveResource(ctx, x, authority, r, operation, use)
-	if e != nil {
-		return e
-	}
-	profile, profileErr := p.provider.Connector().Profile()
-	if profileErr != nil || !p.provider.Enabled || !p.slot.Allows(p.model, r.RouteSlug, authority.ID) || p.model != doc.Binding || p.provider.RevisionID != doc.Serving.RevisionID || profile.ID != doc.Serving.ProfileID || profile.Revision != doc.Serving.ProfileRevision {
-		return pinUnavailable()
-	}
-	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
-		if _, err := s.providerNetworkSecret(ctx, x.request.release, &p.provider); err != nil {
-			return pinUnavailable()
-		}
-	}
-	return nil
 }
 
 func strictResult(body []byte, expectedID string) (oif.Document, string, error) {

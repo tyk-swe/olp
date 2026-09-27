@@ -388,3 +388,50 @@ func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *te
 		t.Fatal("strict video delete did not reach the provider")
 	}
 }
+
+func TestVideoJobOutsideTheKeysRoutesIsMissing(t *testing.T) {
+	h := newAccessHarness(t)
+	upstream := newStrictVideoUpstream(t)
+	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	form.WriteField("model", slug)
+	form.WriteField("prompt", "a job the key later loses")
+	form.Close()
+	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
+	if status != 201 {
+		t.Fatalf("video create=%d %s", status, raw)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	authority, err := h.authority(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["elsewhere"]') WHERE id=$1`, authority.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Advance the key authority as a key change through the API does.
+	if _, err = tx.Exec(t.Context(), "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton", uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	h.refresh()
+	// The owning key may no longer use the job's route, so the job answers
+	// like any other retained resource outside the key's reach.
+	status, raw, _ = h.gatewayRaw("GET", "/v1/videos/"+created.ID, key, nil, nil)
+	if status != 404 || !bytes.Contains(raw, []byte("video_not_found")) {
+		t.Fatalf("a video job outside the key's routes: %d %s", status, raw)
+	}
+}

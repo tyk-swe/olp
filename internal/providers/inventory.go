@@ -11,17 +11,11 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 )
 
-func (s *Server) kinds(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return access.OK(map[string]any{"items": kinds}), nil
 }
 
-func (s *Server) kindCapabilities(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
 	kind := r.PathValue("provider_kind")
 	if kindByName(kind) == nil {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
@@ -29,17 +23,11 @@ func (s *Server) kindCapabilities(r *http.Request) (access.Reply, error) {
 	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilitiesFor(kind, defaultVendor(kind))}), nil
 }
 
-func (s *Server) vendors(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) vendors(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return access.OK(vendors), nil
 }
 
-func (s *Server) inventory(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -71,7 +59,8 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
 		AND ($3::boolean IS NULL OR m.enabled=$3) AND ($4='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(m.capabilities) c WHERE c->>'surface'=$4))
-		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1)
+		AND ($6 OR p.project_id=ANY($7::uuid[]))
+		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1, principal.AllProjects, principal.ProjectIDs())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -102,10 +91,10 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 	}), nil
 }
 
-func (s *Server) generations(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+// generations lists installation-wide runtime releases, which span every
+// project and name their publishers, so it requires installation reach.
+func (s *Server) generations(r *http.Request, principal access.Principal) (access.Reply, error) {
+	var err error
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -123,48 +112,44 @@ func (s *Server) generations(r *http.Request) (access.Reply, error) {
 
 // Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
-	h := s.Access.Handle
-	mux.HandleFunc("GET /api/v1/provider-profiles", h(s.profiles))
-	mux.HandleFunc("GET /api/v1/operation-dialects", h(s.operationDialects))
-	mux.HandleFunc("GET /api/v1/provider-kinds", h(s.kinds))
-	mux.HandleFunc("GET /api/v1/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
-	mux.HandleFunc("GET /api/v1/provider-vendors", h(s.vendors))
-	mux.HandleFunc("GET /api/v1/provider-models", h(s.inventory))
-	mux.HandleFunc("GET /api/v1/runtime-generations", h(s.generations))
-	mux.HandleFunc("GET /api/v1/providers", h(s.providers))
-	mux.HandleFunc("POST /api/v1/providers", s.Access.HandleWith(1<<20, s.createProvider))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}", h(s.provider))
-	mux.HandleFunc("PATCH /api/v1/providers/{provider_id}", s.Access.HandleWith(1<<20, s.updateProvider))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/activate", h(s.activateProvider))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/disable", h(s.disableProvider))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/probe", h(s.probe))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/discovery", s.Access.HandleWith(1<<20, s.discover))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/restore-as-draft", h(s.restoreActiveAsDraft))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/models", h(s.models))
-	mux.HandleFunc("PATCH /api/v1/providers/{provider_id}/models/{model_id}", h(s.setModel))
+	s.Access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
+	s.Access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
+	s.Access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)
+	s.Access.Route(mux, "GET /api/v1/provider-kinds/{provider_kind}/capabilities", s.kindCapabilities)
+	s.Access.Route(mux, "GET /api/v1/provider-vendors", s.vendors)
+	s.Access.Route(mux, "GET /api/v1/provider-models", s.inventory)
+	s.Access.Route(mux, "GET /api/v1/runtime-generations", s.generations)
+	s.Access.Route(mux, "GET /api/v1/providers", s.providers)
+	s.Access.Route(mux, "POST /api/v1/providers", s.createProvider, access.MaxBody(1<<20))
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}", s.provider)
+	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}", s.updateProvider, access.MaxBody(1<<20))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/activate", s.activateProvider)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/disable", s.disableProvider)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/models", s.models)
+	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}/models/{model_id}", s.setModel)
 	// Each advertised capability can consume a full probe budget; reserve
 	// another management budget for preparation, queueing, and persistence.
 	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/network-credentials", h(s.networkCredentials))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/network-credentials", s.Access.HandleWith(256<<10, s.createNetworkCredential))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", h(s.revokeNetworkCredential))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/credentials", h(s.credentials))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", h(s.revoke))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/credential-slots", h(s.slots))
-	mux.HandleFunc("PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", h(s.writeSlot))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.Access.HandleTimeout(65536, certifyTimeout, s.validateSlot))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions", h(s.revisions))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/diff", h(s.revisionDiff))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/{revision_id}", h(s.revision))
-	mux.HandleFunc("GET /api/v1/providers/{provider_id}/revisions/{revision_id}/models", h(s.revisionModels))
-	mux.HandleFunc("POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevisionAsDraft))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/network-credentials", s.networkCredentials)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials", s.createNetworkCredential, access.MaxBody(256<<10))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", s.revokeNetworkCredential)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credentials", s.credentials)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots", s.slots)
+	s.Access.Route(mux, "PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.writeSlot)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions", s.revisions)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/diff", s.revisionDiff)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}", s.revision)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}/models", s.revisionModels)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevisionAsDraft)
 }
 
-func (s *Server) profiles(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return access.OK(map[string]any{"items": connectors.Profiles()}), nil
 }

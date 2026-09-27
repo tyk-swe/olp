@@ -3,10 +3,10 @@
   const services = useServiceCapabilities();
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
+  import type { ManagementRoute } from '$lib/api/requirements';
   import {
-    can,
-    type Capability,
-    type FixedRole
+    allows,
+    type Grant
   } from '$lib/features/access/session/authorization';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import type { IconName } from '$lib/components/icons';
@@ -15,7 +15,8 @@
     label: string;
     href: string;
     icon: IconName;
-    capability?: Capability;
+    /** The management call the page opens with; hidden unless admitted. */
+    route?: ManagementRoute;
   };
 
   type NavigationGroup = {
@@ -30,12 +31,12 @@
   };
 
   let {
-    role,
+    grant,
     variant = 'list',
     label = 'Primary',
     onNavigate
   }: {
-    role: FixedRole;
+    grant: Grant;
     variant?: 'bar' | 'subnav' | 'list';
     label?: string;
     onNavigate?: () => void;
@@ -50,19 +51,19 @@
           label: 'Providers',
           href: resolve('/providers'),
           icon: 'provider',
-          capability: 'configuration.read'
+          route: 'GET /api/v1/providers'
         },
         {
           label: 'Models',
           href: resolve('/models'),
           icon: 'model',
-          capability: 'configuration.read'
+          route: 'GET /api/v1/provider-models'
         },
         {
           label: 'Routes',
           href: resolve('/routes'),
           icon: 'route',
-          capability: 'configuration.read'
+          route: 'GET /api/v1/routes'
         }
       ]
     },
@@ -73,13 +74,13 @@
           label: 'API Keys',
           href: resolve('/api-keys'),
           icon: 'key',
-          capability: 'api_keys.read'
+          route: 'GET /api/v1/api-keys'
         },
         {
           label: 'Access',
           href: resolve('/access'),
           icon: 'access',
-          capability: 'users.read'
+          route: 'GET /api/v1/users'
         }
       ]
     },
@@ -90,37 +91,37 @@
           label: 'Requests',
           href: resolve('/requests'),
           icon: 'request',
-          capability: 'operations.read'
+          route: 'GET /api/v1/requests'
         },
         {
           label: 'Media Jobs',
           href: resolve('/media-jobs'),
           icon: 'request',
-          capability: 'operations.read'
+          route: 'GET /api/v1/media-jobs'
         },
         {
           label: 'Provider Resources',
           href: resolve('/provider-resources'),
           icon: 'request',
-          capability: 'operations.read'
+          route: 'GET /api/v1/provider-resources'
         },
         {
           label: 'Usage',
           href: resolve('/usage'),
           icon: 'usage',
-          capability: 'operations.read'
+          route: 'GET /api/v1/usage/summary'
         },
         {
           label: 'Health',
           href: resolve('/health'),
           icon: 'health',
-          capability: 'operations.read'
+          route: 'GET /api/v1/health/ready'
         },
         {
           label: 'Audit',
           href: resolve('/audit'),
           icon: 'audit',
-          capability: 'operations.read'
+          route: 'GET /api/v1/audit'
         }
       ]
     },
@@ -130,13 +131,13 @@
           label: 'Playground',
           href: resolve('/playground'),
           icon: 'playground',
-          capability: 'playground.use'
+          route: 'POST /api/v1/playground'
         },
         {
           label: 'Settings',
           href: resolve('/settings'),
           icon: 'settings',
-          capability: 'settings.read'
+          route: 'GET /api/v1/settings'
         }
       ]
     }
@@ -152,7 +153,7 @@
     ];
     return (
       (services.gatewayAvailable || controlPaths.includes(item.href)) &&
-      (!item.capability || can(role, item.capability))
+      (!item.route || allows(grant, item.route))
     );
   }
 

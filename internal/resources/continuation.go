@@ -23,7 +23,6 @@ const (
 	StateDispatching     = "dispatching"
 	StateReady           = "ready"
 	StateUnknown         = "outcome_unknown"
-	continuationPurpose  = "provider_continuation"
 )
 
 var (
@@ -112,7 +111,7 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 	// locks share one PostgreSQL statement. Data-modifying CTEs are atomic: a
 	// failed ciphertext write cannot leave an accepted-work journal. The shared
 	// installation lock still fences rotation until this statement commits.
-	ciphertext, err := s.keys.Seal(s.installation, continuationPurpose, copy.UUID.String(), payload)
+	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, copy.UUID.String(), payload)
 	if err != nil {
 		return nil, false, err
 	}
@@ -140,7 +139,7 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
    ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
 )
 SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, continuationPurpose))
+		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.existingClaim(ctx, r)
 	}
@@ -208,7 +207,7 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
 	if err := s.validateContract(r, payload); err != nil {
 		return err
 	}
-	ciphertext, err := s.keys.Seal(s.installation, continuationPurpose, r.UUID.String(), payload)
+	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, r.UUID.String(), payload)
 	if err != nil {
 		return err
 	}
@@ -235,7 +234,7 @@ SELECT EXISTS(SELECT 1 FROM owner),
        EXISTS(SELECT 1 FROM active WHERE active_key_version=$6),
        EXISTS(SELECT 1 FROM updated),EXISTS(SELECT 1 FROM stored)`,
 		r.APIKeyID, r.UUID, StateDispatching, StateReady, KindContinuation,
-		s.keys.Active, continuationPurpose, ciphertext, r.ExpiresAt).Scan(&owner, &active, &updated, &stored)
+		s.keys.Active, secrets.ProviderContinuation, ciphertext, r.ExpiresAt).Scan(&owner, &active, &updated, &stored)
 	if err != nil {
 		return err
 	}
@@ -280,7 +279,7 @@ func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (
 	if err != nil {
 		return nil, nil, err
 	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), continuationPurpose)
+	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
 	if err != nil {
 		return nil, nil, ErrContract
 	}
@@ -341,7 +340,7 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 	if err != nil {
 		return nil, err
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), continuationPurpose, payload, out.ExpiresAt); err != nil {
+	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

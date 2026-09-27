@@ -1,3 +1,4 @@
+import type { ManagementOperation } from '$lib/api/requirements';
 import type { FixedRole } from '$lib/features/access/session/authorization';
 
 export type AuthenticatedUser = {
@@ -6,6 +7,8 @@ export type AuthenticatedUser = {
   display_name: string;
   role: FixedRole;
   access_scope: 'global' | 'assigned';
+  /** The management operations the server grants this member now. */
+  operations: readonly ManagementOperation[];
 };
 
 export type AuthenticatedSession = {

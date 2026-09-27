@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const maxCredentialBytes = 65536
@@ -45,15 +46,11 @@ func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, sec
 	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
 		return "", 0, err
 	}
-	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil)
+	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
 	return id, version, err
 }
 
-func (s *Server) providers(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) providers(r *http.Request, principal access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -81,22 +78,18 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 	return access.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
-func (s *Server) provider(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) provider(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	return s.detailReply(r.Context(), s.Access.Pool, id)
 }
 
-func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	var input createRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -107,7 +100,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -116,6 +109,11 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created provider, so the caller must
+		// still reach its project to receive it.
+		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.ValidText("name", input.Name, 100); err != nil {
@@ -147,7 +145,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
@@ -205,7 +203,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.create", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": input.Configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
@@ -223,7 +221,7 @@ func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error
 	return err
 }
 
-func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -238,7 +236,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -246,7 +244,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -275,7 +273,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, input.Name, input.Configuration.Kind, configuration, etag); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.update", "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.detailReply(r.Context(), tx, id)
@@ -298,8 +296,17 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
+	current, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -309,13 +316,6 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	current, err := load(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
-		return access.Reply{}, err
-	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
@@ -323,7 +323,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, action, "provider", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
@@ -433,7 +433,7 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 	return runtime.RevisionSlot{Slot: slot, Default: row.Default}
 }
 
-func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
@@ -505,7 +505,7 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 	})
 }
 
-func (s *Server) disableProvider(r *http.Request) (access.Reply, error) {
+func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.disable", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if current.State != "active" {
 			return access.Reply{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
@@ -596,11 +596,7 @@ func (v *revisionRow) detail() map[string]any {
 	return m
 }
 
-func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -609,7 +605,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
@@ -631,16 +627,12 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -650,11 +642,7 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	return access.OK(v.detail()), nil
 }
 
-func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -663,7 +651,7 @@ func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -692,16 +680,12 @@ func capabilityKey(model string, c runtime.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
+	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
@@ -838,7 +822,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	return etag, err
 }
 
-func (s *Server) restoreActiveAsDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if current.ActiveRevisionID == nil {
 			return access.Reply{}, access.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
@@ -854,7 +838,7 @@ func (s *Server) restoreActiveAsDraft(r *http.Request) (access.Reply, error) {
 	})
 }
 
-func (s *Server) restoreRevisionAsDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreRevisionAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	ref := r.PathValue("revision_id")
 	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)

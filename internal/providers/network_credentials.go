@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // StoreNetworkCredential uses the existing encryption authority, but a distinct
@@ -25,22 +26,18 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {
 		return "", err
 	}
-	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil); err != nil {
+	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
-	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) networkCredentials(r *http.Request, principal access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err := checkProvider(r.Context(), s.Access.Pool, principal, id, false); err != nil {
+	if _, err := visibleProvider(r.Context(), s.Access.Pool, principal, id); err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
@@ -58,7 +55,7 @@ func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) {
+func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input rotateRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
@@ -72,8 +69,17 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Principal(r, tx, "configure")
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the provider, so the caller must still reach
+	// its project before a replay is served.
+	provider, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := principal.Project(provider.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
@@ -82,13 +88,6 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	provider, err := load(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(principal, provider.ProjectID, true); err != nil {
-		return access.Reply{}, err
 	}
 	if err := access.Match(r, provider.ETag); err != nil {
 		return access.Reply{}, err
@@ -101,7 +100,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.Audit(r.Context(), tx, r, principal.ID, "provider.network_credential.create", "provider", id, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "provider.network_credential.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: http.StatusCreated, ETag: etag, Body: map[string]any{"provider_id": id, "credential_id": credentialID, "etag": etag}}
@@ -111,7 +110,7 @@ func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) 
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) revokeNetworkCredential(r *http.Request) (access.Reply, error) {
+func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.network_credential.revoke", func(ctx context.Context, tx pgx.Tx, principal access.Principal, current *record) (access.Reply, error) {
 		id, err := access.IDParam(r, "credential_id")
 		if err != nil {
@@ -157,7 +156,7 @@ func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte,
 	if err := s.validateNetworkReference(ctx, tx, cfg.ProviderID, cfg); err != nil {
 		return nil, err
 	}
-	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, "provider_credential")
+	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)
 }
 
 func (s *Server) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {

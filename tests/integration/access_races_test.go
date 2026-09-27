@@ -59,7 +59,7 @@ func TestInterruptedRotationResumesAndRejectsStaleWriters(t *testing.T) {
 	var damaged string
 	for i := 0; i < 101; i++ {
 		damaged = uuid.Must(uuid.NewV7()).String()
-		if err = h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, damaged, "mutation_replay", []byte("private replay fixture"), nil); err != nil {
+		if err = h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, damaged, secrets.MutationReplay, []byte("private replay fixture"), nil); err != nil {
 			t.Fatal(err)
 		}
 	}

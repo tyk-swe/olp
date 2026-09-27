@@ -53,17 +53,14 @@ type oidcConfiguration struct {
 func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
-	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose='oidc_client')) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton").Scan(&data)
+	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
 	if err != nil {
 		return c, err
 	}
 	err = json.Unmarshal(data, &c)
 	return c, err
 }
-func (s *Server) oidcConfiguration(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) oidcConfiguration(r *http.Request, _ Principal) (Reply, error) {
 	c, err := loadOIDC(r, s.Pool)
 	return Detail(c, c.ETag), err
 }
@@ -114,7 +111,7 @@ func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provi
 	}
 	return provider, oauth, nil
 }
-func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
+func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		DiscoveryURL  string        `json:"discovery_url"`
 		Issuer        string        `json:"issuer"`
@@ -129,9 +126,6 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		GroupMappings []roleMapping `json:"group_role_mappings"`
 	}
 	if err := Decode(r, &input); err != nil {
-		return Reply{}, err
-	}
-	if _, err := s.Principal(r, s.Pool, "access"); err != nil {
 		return Reply{}, err
 	}
 	c := oidcConfiguration{DiscoveryURL: input.DiscoveryURL, Issuer: input.Issuer, ClientID: input.ClientID, Enabled: true, Scopes: input.Scopes, EmailClaim: input.EmailClaim, GroupsClaim: input.GroupsClaim, DefaultRole: input.DefaultRole, EmailMappings: input.EmailMappings, GroupMappings: input.GroupMappings}
@@ -196,7 +190,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -221,7 +215,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if input.ClientSecret != nil {
 		var previous []byte
 		if old.HasClientSecret {
-			previous, err = s.Keys.Read(r.Context(), tx, s.Installation, c.ID, "oidc_client")
+			previous, err = s.Keys.Read(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -236,7 +230,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		}
 		c.HasClientSecret = *input.ClientSecret != ""
 		if c.HasClientSecret {
-			if err = s.Keys.Store(r.Context(), tx, s.Installation, c.ID, "oidc_client", []byte(*input.ClientSecret), nil); err != nil {
+			if err = s.Keys.Store(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret, []byte(*input.ClientSecret), nil); err != nil {
 				return Reply{}, err
 			}
 		} else {
@@ -255,10 +249,10 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose='oidc_flow'"); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(c, c.ETag))
@@ -270,8 +264,10 @@ type oidcFlow struct {
 }
 
 func (s *Server) beginOIDCLogin(r *http.Request) (Reply, error) { return s.beginOIDC(r, "login") }
-func (s *Server) beginOIDCLink(r *http.Request) (Reply, error)  { return s.beginOIDC(r, "link") }
-func (s *Server) beginOIDCReauthentication(r *http.Request) (Reply, error) {
+func (s *Server) beginOIDCLink(r *http.Request, _ Principal) (Reply, error) {
+	return s.beginOIDC(r, "link")
+}
+func (s *Server) beginOIDCReauthentication(r *http.Request, _ Principal) (Reply, error) {
 	return s.beginOIDC(r, "reauthenticate")
 }
 func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
@@ -329,7 +325,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.ReturnTo = "/"
 	}
 	if kind != "login" {
-		p, err := s.sessionPrincipal(r, tx, "read")
+		p, err := s.Reauthorize(r, tx)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -360,10 +356,10 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN(SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return Reply{}, err
 	}
-	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "oidc_flow", data, &expires); err != nil {
+	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.OIDCFlow, data, &expires); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest("oidc_state", flow.State), s.Auth.Digest("oidc_cookie", cookieToken), c.ETag, expires); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest(secrets.OIDCStateDigest, flow.State), s.Auth.Digest(secrets.OIDCCookieDigest, cookieToken), c.ETag, expires); err != nil {
 		return Reply{}, err
 	}
 	options := []oauth2.AuthCodeOption{oidc.Nonce(flow.Nonce), oauth2.S256ChallengeOption(flow.Verifier)}
@@ -396,17 +392,17 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	state := r.URL.Query().Get("state")
 	var id, etag string
 	var digest []byte
-	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest("oidc_state", state)).Scan(&id, &etag, &digest)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest(secrets.OIDCStateDigest, state)).Scan(&id, &etag, &digest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "This sign-in request expired or was already used.")
 	}
 	if err != nil {
 		return flow, config, err
 	}
-	if !hmac.Equal(digest, s.Auth.Digest("oidc_cookie", cookieValue(r, "__Host-olp_oidc_login_"+id))) {
+	if !hmac.Equal(digest, s.Auth.Digest(secrets.OIDCCookieDigest, cookieValue(r, "__Host-olp_oidc_login_"+id))) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
 	}
-	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, "oidc_flow")
+	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.OIDCFlow)
 	if err != nil {
 		return flow, config, err
 	}
@@ -455,7 +451,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			return Reply{}, err
 		}
 		defer tx.Rollback(r.Context())
-		data, err := s.Keys.Read(r.Context(), tx, s.Installation, c.ID, "oidc_client")
+		data, err := s.Keys.Read(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -531,7 +527,10 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	// reauthentication result. Ordinary login is never a recent-auth proof.
 	var p Principal
 	if flow.Kind != "login" {
-		p, err = s.sessionPrincipal(r, tx, "read")
+		p, err = s.Authenticate(r, tx)
+		if err == nil {
+			err = p.Authorize(Self)
+		}
 		if err != nil {
 			return Reply{}, err
 		}
@@ -644,7 +643,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		response.Cookies = append(response.Cookies, session.Cookies...)
 		response.CSRF = session.CSRF
 	}
-	if err = Audit(r.Context(), tx, r, userID, "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(userID), "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -733,11 +732,8 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 	return usable, rows.Err()
 }
 
-func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	var local, localEnabled, enabled, locallyManaged bool
 	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management='local' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
@@ -766,7 +762,7 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 	}
 	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
-func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
+func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "identity_id")
 	if err != nil {
 		return Reply{}, err
@@ -776,7 +772,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -809,7 +805,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "oidc.unlink", "oidc_identity", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	rotated, err := s.changeSignInMethod(r, tx, p.ID)
@@ -827,7 +823,7 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 		return Reply{}, err
 	}
-	if err := Audit(r.Context(), tx, r, userID, "user.authentication_method_change", "user", userID, "success"); err != nil {
+	if err := Audit(r.Context(), tx, r, UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return s.newSession(r, tx, userID)
@@ -859,14 +855,14 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 		return false, false, err
 	}
 	if !allowed || mapped != "owner" {
-		if err = retireIssuedInvitations(r, tx, userID, "", ""); err != nil {
+		if err = retireIssuedInvitations(r, tx, userID, System, ""); err != nil {
 			return false, false, err
 		}
 	}
 	if _, err = AdvanceAuthority(r, tx); err != nil {
 		return false, false, err
 	}
-	err = Audit(r.Context(), tx, r, "", "user.role_sync_oidc", "user", userID, "success")
+	err = Audit(r.Context(), tx, r, System, "user.role_sync_oidc", "user", userID, "success")
 	return true, allowed, err
 }
 

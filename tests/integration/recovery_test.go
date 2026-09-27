@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -30,7 +31,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	if err := h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, secretID, "oidc_client", []byte("retained credential"), nil); err != nil {
+	if err := h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, secretID, secrets.OIDCClientSecret, []byte("retained credential"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {
@@ -151,7 +152,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer read.Rollback(t.Context())
-				plain, err := h.Server.Keys.Read(t.Context(), read, id, secretID, "oidc_client")
+				plain, err := h.Server.Keys.Read(t.Context(), read, id, secretID, secrets.OIDCClientSecret)
 				if err != nil || string(plain) != "retained credential" {
 					t.Fatalf("credential lost: %v", err)
 				}

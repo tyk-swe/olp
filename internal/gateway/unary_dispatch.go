@@ -88,8 +88,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	if slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*slot.CredentialID)
 	}
-	credentialValues, err := s.auth.Apply(actx, req, plan.Config(), secret, body)
-	if err != nil {
+	if err := s.applyCredentials(actx, x, req, plan.Config(), secret, body); err != nil {
 		if actx.Err() != nil {
 			return fail(state.classify(err, false), nil)
 		}
@@ -112,10 +111,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 			state.upstream.Store(3)
 		}
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
-		failure := &attemptFailure{status: response.StatusCode, upstream: openai.ParseErrorBody(raw)}
-		if failure.upstream != nil {
-			failure.upstream.Message = redactCredentials(failure.upstream.Message, credentialValues)
-		}
+		failure := &attemptFailure{status: response.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		switch {
 		case response.StatusCode == 401 || response.StatusCode == 403:
 			return fail(classCredential, failure)

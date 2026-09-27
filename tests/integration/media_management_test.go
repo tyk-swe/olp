@@ -29,6 +29,7 @@ type videoUpstream struct {
 	createCalls  atomic.Int64
 	getCalls     atomic.Int64
 	deleteCalls  atomic.Int64
+	deleteFails  atomic.Bool
 	contentCalls atomic.Int64
 	contentBytes string
 }
@@ -64,6 +65,10 @@ func newVideoUpstream(t *testing.T) *videoUpstream {
 	})
 	mux.HandleFunc("DELETE /v1/videos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		u.deleteCalls.Add(1)
+		if u.deleteFails.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":%q,"object":"video.deleted","deleted":true}`, r.PathValue("id"))
 	})
@@ -352,16 +357,22 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatalf("delete with stale ETag: %d %v", status, out)
 	}
 	job2 := h.want(op, "GET", job2Path, nil, nil, 200)
+	up.deleteFails.Store(true)
+	if status, out, _ := h.request(op, "DELETE", job2Path, nil, etagHeader(job2)); status != 409 || problemCode(t, out) != "media_job_delete_pending" {
+		t.Fatalf("an unconfirmed provider delete: %d %v", status, out)
+	}
+	up.deleteFails.Store(false)
+	job2 = h.want(op, "GET", job2Path, nil, nil, 200)
 	h.want(op, "DELETE", job2Path, nil, etagHeader(job2), 204)
-	if up.deleteCalls.Load() != 1 {
-		t.Fatalf("provider deletes %d, want 1", up.deleteCalls.Load())
+	if up.deleteCalls.Load() != 2 {
+		t.Fatalf("provider deletes %d, want 2", up.deleteCalls.Load())
 	}
 	deleted := h.want(op, "GET", job2Path, nil, nil, 200)
 	if deleted["lifecycle"] != "deleted" {
 		t.Fatalf("deleted job tombstone %v", deleted)
 	}
 	h.want(op, "DELETE", job2Path, nil, etagHeader(deleted), 204)
-	if up.deleteCalls.Load() != 1 {
+	if up.deleteCalls.Load() != 2 {
 		t.Fatal("a deleted job must not reach the provider again")
 	}
 
@@ -390,18 +401,18 @@ func TestMediaManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	deleteAudited := false
+	deleteActions := map[string]bool{}
 	for rows.Next() {
 		var action string
 		if err := rows.Scan(&action); err != nil {
 			t.Fatal(err)
 		}
-		if action == "media_job.delete" {
-			deleteAudited = true
-		}
+		deleteActions[action] = true
 	}
-	if !deleteAudited {
-		t.Fatal("media_job.delete audit is missing")
+	for _, want := range []string{"media_job.delete_pending", "media_job.delete"} {
+		if !deleteActions[want] {
+			t.Fatalf("delete audit actions %v missing %s", deleteActions, want)
+		}
 	}
 	var leak int
 	if err := h.Pool.QueryRow(t.Context(),

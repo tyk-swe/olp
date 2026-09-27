@@ -13,38 +13,10 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
-
-func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error) {
-	token := strings.TrimSpace(r.Header.Get("X-OLP-API-Key"))
-	if token == "" {
-		header := r.Header.Get("Authorization")
-		if !strings.Contains(header, "AWS4-HMAC-SHA256") && len(header) >= 7 && strings.EqualFold(header[:7], "Bearer ") {
-			token = strings.TrimSpace(header[7:])
-		}
-	}
-	if token == "" {
-		return access.Authority{}, authenticationError("missing_authorization", "Provide the X-OLP-API-Key header or a bearer API key.")
-	}
-	authority, err := s.Runtime.Authenticate(token)
-	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
-		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
-	case err != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "Incorrect API key provided.")
-	case authority.RevokedAt != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has been revoked.")
-	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(s.now()):
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has expired.")
-	case !slices.Contains(authority.Policy.Scopes, "inference"):
-		return access.Authority{}, permissionError("permission_denied", "This API key does not have the inference scope.")
-	}
-	return authority, nil
-}
 
 func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
 	return p.Kind == "bedrock" &&
@@ -233,7 +205,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	if p.slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
 	}
-	if _, err := s.auth.Apply(ctx, req, p.provider.Connector(), secret, body); err != nil {
+	if err := s.applyCredentials(ctx, x, req, p.provider.Connector(), secret, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -267,7 +239,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: bedrockErrorBody(raw), dispatched: true}
+	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(bedrockErrorBody(raw)), dispatched: true}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		f.class = classCredential

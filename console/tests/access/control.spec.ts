@@ -127,7 +127,49 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await expect(
     invited.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
+  await invited.goto('/requests');
+  await expect(
+    invited.getByRole('link', { name: 'Audit', exact: true })
+  ).not.toHaveCount(0);
   await invitedContext.close();
+
+  // The console offers only what the server would admit: with an assigned
+  // access scope, installation pages such as Audit and Settings disappear.
+  const viewerID = await page.evaluate(async () => {
+    const users = await (await fetch('/api/v1/users')).json();
+    return users.items.find(
+      (user: { email: string }) => user.email === 'viewer@example.com'
+    ).id as string;
+  });
+  await changeRemote(page, `/api/v1/users/${viewerID}`, 'PATCH', {
+    access_scope: 'assigned'
+  });
+  const assignedContext = await browser.newContext({
+    baseURL: info.project.use.baseURL
+  });
+  const assigned = await assignedContext.newPage();
+  await assigned.goto('/login');
+  await signIn(assigned, 'viewer@example.com');
+  await expect(
+    assigned.getByRole('heading', { name: viewerLanding })
+  ).toBeVisible();
+  await assigned.goto('/requests');
+  await expect(
+    assigned.getByRole('heading', { name: 'Request Explorer' })
+  ).toBeVisible();
+  for (const page of ['Audit', 'Settings'])
+    await expect(
+      assigned.getByRole('link', { name: page, exact: true })
+    ).toHaveCount(0);
+  await assigned.getByRole('button', { name: 'Open account menu' }).click();
+  await expect(
+    assigned.getByRole('link', { name: 'Installation settings' })
+  ).toHaveCount(0);
+  await assigned.screenshot({
+    path: info.outputPath('assigned-navigation.png'),
+    fullPage: true
+  });
+  await assignedContext.close();
 
   await page.goto('/api-keys/new');
   await page.getByLabel('Key name').fill('Browser application');

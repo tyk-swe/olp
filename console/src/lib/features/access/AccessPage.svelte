@@ -17,10 +17,10 @@
       { id: 'invitations', label: 'Invitations' },
       { id: 'sessions', label: 'Sessions' }
     ];
-    if (access.role === 'owner') {
+    if (access.allows('GET /api/v1/projects'))
       items.push({ id: 'projects', label: 'Projects' });
+    if (access.allows('GET /api/v1/management-tokens'))
       items.push({ id: 'tokens', label: 'Tokens' });
-    }
     items.push({ id: 'oidc', label: 'OIDC' });
     return items;
   });

@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
@@ -61,7 +63,7 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 	if err != nil {
 		return nil, err
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), continuationPurpose, payload, out.ExpiresAt); err != nil {
+	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -99,7 +101,7 @@ func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID st
 	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
 		return nil, nil, ErrContract
 	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), continuationPurpose)
+	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
 	if err != nil || len(payload) == 0 || len(payload) > MaxContinuationBytes {
 		return nil, nil, ErrContract
 	}
@@ -161,7 +163,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 		return nil, nil, ErrContract
 	}
 	if kind == KindStrictBatch && (terminalBatch(r.State) || batchStateRank(state) < batchStateRank(r.State)) {
-		current, err := s.keys.Read(ctx, tx, s.installation, id.String(), continuationPurpose)
+		current, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
 		if err != nil || len(current) == 0 || len(current) > MaxContinuationBytes {
 			return nil, nil, ErrContract
 		}
@@ -170,7 +172,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 	if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, id, state); err != nil {
 		return nil, nil, err
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, id.String(), continuationPurpose, payload, r.ExpiresAt); err != nil {
+	if err = s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, r.ExpiresAt); err != nil {
 		return nil, nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

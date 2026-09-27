@@ -20,26 +20,12 @@ type Server struct {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/configuration/export", s.Access.Handle(s.export))
-	mux.HandleFunc("POST /api/v1/configuration/plan", s.Access.HandleWith(4<<20, s.planEndpoint))
-	mux.HandleFunc("POST /api/v1/configuration/apply", s.Access.HandleTimeout(4<<20, 60*time.Second, s.applyEndpoint))
+	s.Access.Route(mux, "GET /api/v1/configuration/export", s.export)
+	s.Access.Route(mux, "POST /api/v1/configuration/plan", s.planEndpoint, access.MaxBody(4<<20))
+	s.Access.Route(mux, "POST /api/v1/configuration/apply", s.applyEndpoint, access.MaxBody(4<<20), access.Deadline(60*time.Second))
 }
 
-func (s *Server) principal(r *http.Request, q access.Queryer) (access.Principal, error) {
-	p, err := s.Access.Principal(r, q, "configure")
-	if err != nil {
-		return p, err
-	}
-	if !p.AllProjects {
-		return p, access.Forbidden()
-	}
-	return p, nil
-}
-
-func (s *Server) export(r *http.Request) (access.Reply, error) {
-	if _, err := s.principal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) export(r *http.Request, _ access.Principal) (access.Reply, error) {
 	doc, err := s.exportDocument(r.Context(), s.Access.Pool)
 	if err != nil {
 		return access.Reply{}, err
@@ -58,16 +44,13 @@ type promotionInput struct {
 	SecretBindings map[string]string `json:"secret_bindings"`
 }
 
-func (s *Server) planEndpoint(r *http.Request) (access.Reply, error) {
+func (s *Server) planEndpoint(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input promotionInput
 	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Document == nil {
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
-	}
-	if _, err := s.principal(r, s.Access.Pool); err != nil {
-		return access.Reply{}, err
 	}
 	result, err := s.plan(r.Context(), s.Access.Pool, input.Document, input.SecretBindings, input.ExpectedDigest)
 	if err != nil {
@@ -76,7 +59,7 @@ func (s *Server) planEndpoint(r *http.Request) (access.Reply, error) {
 	return access.OK(result), nil
 }
 
-func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
+func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input promotionInput
 	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
@@ -89,7 +72,7 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.principal(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -128,8 +111,9 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 		if err != nil {
 			return access.Reply{}, err
 		}
+		// Changing pricing is an installation setting as well.
 		if changed {
-			if _, err := s.Access.Principal(r, tx, "settings"); err != nil {
+			if err := p.Authorize(access.Settings); err != nil {
 				return access.Reply{}, err
 			}
 		}
@@ -137,7 +121,7 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 	if err = s.applyDocument(r.Context(), tx, p, doc, input.SecretBindings); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "configuration.apply", "configuration", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.OK(result)

@@ -1,4 +1,6 @@
+import type { ManagementRoute } from '$lib/api/requirements';
 import {
+  allows,
   can,
   type Capability,
   type FixedRole
@@ -11,6 +13,7 @@ export type RoleAccess = {
   readonly role: FixedRole | null;
   readonly globalScope: boolean;
   can(capability: Capability): boolean;
+  allows(route: ManagementRoute): boolean;
 };
 
 /**
@@ -39,7 +42,10 @@ export function useRole(): RoleAccess {
       return snapshot.user?.access_scope !== 'assigned';
     },
     can(capability: Capability) {
-      return can(snapshot.user?.role, capability);
+      return can(snapshot.user, capability);
+    },
+    allows(route: ManagementRoute) {
+      return allows(snapshot.user, route);
     }
   };
 }

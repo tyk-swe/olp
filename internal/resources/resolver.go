@@ -120,7 +120,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-		secret, err = r.keys.Read(ctx, query, r.installation, *res.CredentialID, "provider_credential")
+		secret, err = r.keys.Read(ctx, query, r.installation, *res.CredentialID, secrets.ProviderCredential)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
 		}
@@ -140,5 +140,5 @@ func (r *Resolver) NetworkCredential(ctx context.Context, providerID, credential
 	if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", credentialID, providerID).Scan(&valid); err != nil || !valid {
 		return nil, ErrUnavailable
 	}
-	return r.keys.Read(ctx, tx, r.installation, credentialID, "provider_credential")
+	return r.keys.Read(ctx, tx, r.installation, credentialID, secrets.ProviderCredential)
 }

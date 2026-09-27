@@ -203,6 +203,32 @@ func TestManagementTokenLifecycleAndScopes(t *testing.T) {
 	}
 }
 
+func TestManagementTokensActWithinCreatorAuthority(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	creator := h.invite(owner, "automation-owner@example.com", "owner")
+	_, secret := createToken(h, creator, "creator-bound", []string{"read", "access_read", "access", "configure"})
+	member := h.want(creator, "GET", "/api/v1/profile", nil, nil, 200)
+	target := h.want(h.invite(owner, "bystander@example.com", "viewer"), "GET", "/api/v1/profile", nil, nil, 200)
+	h.machineWant(secret, "GET", "/api/v1/users", nil, nil, 200)
+
+	// A demoted creator's token must not keep the owner authority it was
+	// issued under, such as promoting another member to owner.
+	member = h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"role": "operator"}, etagHeader(member), 200)
+	h.machineWant(secret, "PATCH", "/api/v1/users/"+target["id"].(string), map[string]any{"role": "owner"}, etagHeader(target), 403)
+	h.machineWant(secret, "GET", "/api/v1/users", nil, nil, 200)
+	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 200)
+
+	member = h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"active": false}, etagHeader(member), 200)
+	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 401)
+
+	// Authority is evaluated against the creator on every request, so a
+	// reactivated creator's token resumes with the creator's current role.
+	h.want(owner, "PATCH", "/api/v1/users/"+member["id"].(string), map[string]any{"active": true}, etagHeader(member), 200)
+	h.machineWant(secret, "GET", "/api/v1/routes", nil, nil, 200)
+	h.machineWant(secret, "PATCH", "/api/v1/users/"+target["id"].(string), map[string]any{"role": "owner"}, etagHeader(target), 403)
+}
+
 func TestProvisioningReconcilesWithoutLogin(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()

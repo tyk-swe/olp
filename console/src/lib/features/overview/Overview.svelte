@@ -44,7 +44,7 @@
       enabledModels: (overview.data?.enabled_models ?? 0) > 0,
       activeRoute: readyRoutes > 0,
       apiKey: Boolean(overview.data?.usable_api_key),
-      role: access.role
+      grant: access.user
     })
   );
 

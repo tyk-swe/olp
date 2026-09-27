@@ -48,7 +48,7 @@ func TestAzureEntraBearerAndTokenCache(t *testing.T) {
 		if e == nil && (req.Header.Get("Authorization") != "Bearer entra-token" || req.Header.Get("Api-Key") != "") {
 			t.Fatalf("azure apply headers: %v", req.Header)
 		}
-		if e == nil && len(sensitive) == 0 {
+		if e == nil && !sensitive.Contains("entra-token") {
 			t.Fatal("token was not recorded as sensitive material")
 		}
 		return e

@@ -180,27 +180,30 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 	return n, e
 }
 
-func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) ([]string, error) {
-	sensitive := []string{string(secret)}
+// Apply authenticates req for the provider and returns every credential value
+// it sent, so text derived from the reply can be redacted.
+func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
+	var sensitive egress.Sensitive
+	sensitive.Add(string(secret))
 	if err := c.ApplySemantic(req); err != nil {
-		return nil, err
+		return egress.Sensitive{}, err
 	}
 	if c.Kind == "anthropic" && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", "2023-06-01")
 	}
 	switch c.AuthMode {
 	case "none":
-		return nil, nil
+		return egress.Sensitive{}, nil
 	case "headers":
 		if e := egress.ApplyCredentialHeaders(req.Header, c.CredentialHeaders, secret); e != nil {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
 		for _, h := range c.CredentialHeaders {
-			sensitive = append(sensitive, req.Header.Get(h))
+			sensitive.Add(req.Header.Get(h))
 		}
 	case "api_key":
 		if len(secret) == 0 || strings.ContainsAny(string(secret), "\r\n\x00") {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
 		switch c.Kind {
 		case "anthropic":
@@ -215,31 +218,48 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 	case "adc", "service_account":
 		token, e := a.googleToken(ctx, c, secret)
 		if e != nil {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
 		req.Header.Set("Authorization", "Bearer "+token.Value)
-		sensitive = append(sensitive, token.Value)
+		sensitive.Add(token.Value)
 	case "azure_default", "azure_client_secret":
 		token, e := a.azureToken(ctx, c, secret)
 		if e != nil {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
 		req.Header.Set("Authorization", "Bearer "+token.Token)
-		sensitive = append(sensitive, token.Token)
+		sensitive.Add(token.Token)
 	case "static", "default_chain":
 		creds, e := a.awsCredentials(ctx, c, secret)
 		if e != nil {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
 		hash := sha256.Sum256(body)
 		if e := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); e != nil {
-			return nil, ErrAuthentication
+			return egress.Sensitive{}, ErrAuthentication
 		}
-		sensitive = append(sensitive, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, req.Header.Get("Authorization"))
+		header := req.Header.Get("Authorization")
+		sensitive.Add(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, header)
+		// An upstream diagnostic may echo only the signature, not the header.
+		sensitive.Add(sigV4Signature(header))
 	default:
-		return nil, ErrAuthentication
+		return egress.Sensitive{}, ErrAuthentication
 	}
 	return sensitive, nil
+}
+
+// sigV4Signature extracts the signature value a SigV4 Authorization header
+// carries as its ", Signature=<hex>" parameter.
+func sigV4Signature(authorization string) string {
+	i := strings.Index(authorization, "Signature=")
+	if i < 0 {
+		return ""
+	}
+	rest := authorization[i+len("Signature="):]
+	if j := strings.IndexByte(rest, ','); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }
 func cacheKey(c Config, secret []byte) [32]byte {
 	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.AzureScope()+"\x00"), secret...))

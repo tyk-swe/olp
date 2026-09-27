@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestActivationRequiresCurrentCredentialSlotValidation(t *testing.T) {
@@ -67,6 +69,9 @@ func TestActivationRequiresCurrentCredentialSlotValidation(t *testing.T) {
 		t.Fatalf("validation must probe unary and streaming generation: %v", slots)
 	}
 	activate("validated-pool", 200)
+	if outcomes := auditOutcomes(h, "provider.slot.validate", poolID); !slices.Equal(outcomes, []string{"failure", "success"}) {
+		t.Fatalf("slot validations were audited as %v", outcomes)
+	}
 	// Credential changes invalidate evidence even when the old model
 	// certifications or a historical revision are still available.
 	slots = h.want(owner, "PUT", listPath+"/"+defaultID, map[string]any{"slot": map[string]any{"name": "default"}, "credential": "invalid-default"}, withMatch(slots, map[string]string{"Idempotency-Key": "replace-default"}), 200)
@@ -290,5 +295,40 @@ func TestCertificationRejectsMalformedUnaryChoices(t *testing.T) {
 			detail := h.want(owner, "GET", path, nil, nil, 200)
 			h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "reject"}), 422)
 		})
+	}
+}
+
+// auditOutcomes lists the recorded outcomes of action on one resource, oldest
+// first.
+func auditOutcomes(h *accessHarness, action, resourceID string) []string {
+	h.t.Helper()
+	rows, err := h.Pool.Query(h.t.Context(), "SELECT outcome FROM olp.audit WHERE action=$1 AND resource_id=$2 ORDER BY occurred_at,id", action, resourceID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	outcomes, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return outcomes
+}
+
+func TestProbesAndReauthenticationAreAudited(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	up := newVendor(t)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Audited probe", "model": vendorModel, "credential": vendorSecret,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
+	}, map[string]string{"Idempotency-Key": "provider"}, 201)
+	providerID := created["id"].(string)
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/probe", nil, etagHeader(created), 200)
+	if outcomes := auditOutcomes(h, "provider.probe", providerID); !slices.Equal(outcomes, []string{"success"}) {
+		t.Fatalf("the probe was audited as %v", outcomes)
+	}
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_link"}, nil, 204)
+	var reauthenticated int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='session.reauthenticate' AND outcome='success'").Scan(&reauthenticated); err != nil || reauthenticated != 1 {
+		t.Fatalf("reauthentication audits: %d %v", reauthenticated, err)
 	}
 }

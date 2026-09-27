@@ -2271,17 +2271,7 @@
           },
           "scopes": {
             "items": {
-              "enum": [
-                "read",
-                "access_read",
-                "access",
-                "settings",
-                "configure",
-                "keys",
-                "playground",
-                "usage"
-              ],
-              "type": "string"
+              "$ref": "#/components/schemas/ManagementTokenScope"
             },
             "type": "array"
           }
@@ -3169,6 +3159,39 @@
         ],
         "type": "object"
       },
+      "ManagementOperation": {
+        "description": "A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access",
+          "self",
+          "manage_sessions",
+          "manage_tokens",
+          "manage_projects",
+          "local_login"
+        ],
+        "type": "string"
+      },
+      "ManagementTokenScope": {
+        "description": "A management operation that may be delegated to a management token.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access"
+        ],
+        "type": "string"
+      },
       "ManagementTokenResponse": {
         "properties": {
           "all_projects": {
@@ -3219,7 +3242,7 @@
           },
           "scopes": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ManagementTokenScope"
             },
             "type": "array"
           }
@@ -8596,6 +8619,13 @@
           "installation_name": {
             "type": "string"
           },
+          "operations": {
+            "description": "The management operations the signed-in member may perform now; the console shows only what the server would admit.",
+            "items": {
+              "$ref": "#/components/schemas/ManagementOperation"
+            },
+            "type": "array"
+          },
           "user": {
             "$ref": "#/components/schemas/UserResponse"
           }
@@ -8603,7 +8633,8 @@
         "required": [
           "user",
           "installation_name",
-          "csrf_token"
+          "csrf_token",
+          "operations"
         ],
         "type": "object"
       },
@@ -9832,21 +9863,53 @@
         "properties": {
           "scope": {
             "type": "string",
-            "enum": ["system", "instructions", "system_instruction", "messages", "input", "contents"]
+            "enum": [
+              "system",
+              "instructions",
+              "system_instruction",
+              "messages",
+              "input",
+              "contents"
+            ]
           },
-          "index": { "type": "integer", "minimum": 0 },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
           "role": {
             "type": "string",
-            "enum": ["system", "developer", "user", "assistant", "tool", "model", "function", "instruction", "unspecified", "other"]
+            "enum": [
+              "system",
+              "developer",
+              "user",
+              "assistant",
+              "tool",
+              "model",
+              "function",
+              "instruction",
+              "unspecified",
+              "other"
+            ]
           },
           "parts": {
             "type": "array",
             "maxItems": 16,
-            "items": { "$ref": "#/components/schemas/InspectedPart" }
+            "items": {
+              "$ref": "#/components/schemas/InspectedPart"
+            }
           },
-          "omitted_parts": { "type": "integer", "minimum": 0 }
+          "omitted_parts": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
-        "required": ["scope", "index", "role", "parts", "omitted_parts"]
+        "required": [
+          "scope",
+          "index",
+          "role",
+          "parts",
+          "omitted_parts"
+        ]
       },
       "InspectedPart": {
         "type": "object",
@@ -9854,7 +9917,20 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["text", "image", "audio", "video", "media", "document", "tool_call", "tool_result", "reasoning", "refusal", "null", "opaque"]
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "media",
+              "document",
+              "tool_call",
+              "tool_result",
+              "reasoning",
+              "refusal",
+              "null",
+              "opaque"
+            ]
           },
           "call_ordinal": {
             "type": "integer",
@@ -9863,7 +9939,9 @@
             "description": "Content-free ordinal linking a result to a preceding call ID when that relationship is explicit."
           }
         },
-        "required": ["kind"]
+        "required": [
+          "kind"
+        ]
       },
       "InspectedRequestField": {
         "type": "object",
@@ -10295,12 +10373,12 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…) authorizing exactly the management operations it scopes.",
+        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
         "scheme": "bearer",
         "type": "http"
       },
       "sessionCookie": {
-        "description": "Opaque PostgreSQL-backed management session.",
+        "description": "Opaque PostgreSQL-backed management session. Requirement scopes name the management operation the member's role must hold; `installation` also requires an installation-wide access scope.",
         "in": "cookie",
         "name": "__Host-olp_session",
         "type": "apiKey"
@@ -10380,7 +10458,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -10483,7 +10568,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -10529,7 +10621,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -10613,7 +10712,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -10709,7 +10815,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -10828,7 +10941,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -10962,7 +11082,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11059,7 +11188,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -11162,7 +11298,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -11208,7 +11351,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -11302,7 +11452,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
           }
         ],
         "tags": [
@@ -11388,11 +11545,17 @@
         },
         "security": [
           {
-            "bearerToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure",
+              "installation"
+            ]
           },
           {
-            "csrfToken": [],
-            "sessionCookie": []
+            "managementToken": [
+              "configure",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11427,10 +11590,16 @@
         },
         "security": [
           {
-            "bearerToken": []
+            "sessionCookie": [
+              "configure",
+              "installation"
+            ]
           },
           {
-            "sessionCookie": []
+            "managementToken": [
+              "configure",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11485,11 +11654,17 @@
         },
         "security": [
           {
-            "bearerToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure",
+              "installation"
+            ]
           },
           {
-            "csrfToken": [],
-            "sessionCookie": []
+            "managementToken": [
+              "configure",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11544,7 +11719,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -11602,7 +11784,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11695,7 +11886,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11833,7 +12033,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -11899,7 +12108,10 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -12002,7 +12214,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -12058,7 +12273,10 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -12173,7 +12391,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -12321,7 +12542,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -12368,7 +12596,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -12446,7 +12681,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "summary": "Delete a media job's upstream artifact; cleanup, not generation cancellation",
@@ -12505,7 +12747,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -12587,7 +12836,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -12689,10 +12945,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -12760,10 +13020,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -12868,10 +13132,27 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
           },
           {
-            "managementToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -12928,10 +13209,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -13036,10 +13321,27 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
           },
           {
-            "managementToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -13107,10 +13409,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -13205,10 +13511,27 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
           },
           {
-            "managementToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -13265,10 +13588,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -13373,10 +13700,27 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "keys"
+            ]
           },
           {
-            "managementToken": []
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -13514,7 +13858,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -13592,7 +13945,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -13627,7 +13989,9 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -13708,7 +14072,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -13774,7 +14140,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -13975,7 +14343,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -14036,7 +14406,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -14122,7 +14499,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "playground"
+            ]
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
           }
         ],
         "tags": [
@@ -14199,7 +14583,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "playground"
+            ]
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
           }
         ],
         "tags": [
@@ -14257,7 +14648,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14342,7 +14742,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14449,10 +14858,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14520,10 +14935,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14618,10 +15039,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14678,10 +15105,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14786,10 +15219,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14897,10 +15336,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -14988,10 +15433,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15026,7 +15477,9 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -15091,7 +15544,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -15178,7 +15633,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -15275,7 +15732,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -15344,7 +15803,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -15379,7 +15840,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -15445,7 +15913,10 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15538,7 +16009,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15594,7 +16068,10 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15708,7 +16185,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15793,7 +16273,10 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -15891,7 +16374,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -16014,7 +16500,10 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -16104,7 +16593,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16149,7 +16645,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16215,7 +16718,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16298,7 +16808,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16343,7 +16860,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16481,7 +17005,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16509,7 +17040,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16593,7 +17131,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16706,7 +17251,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -16752,7 +17304,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -16825,7 +17384,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -16921,7 +17487,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -16957,7 +17530,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -17013,7 +17593,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17059,7 +17646,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17136,7 +17730,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -17237,7 +17838,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17329,7 +17937,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17412,7 +18027,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17487,7 +18109,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17564,7 +18193,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -17638,7 +18274,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17723,7 +18366,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -17820,7 +18470,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -17961,7 +18618,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -18093,7 +18757,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -18159,7 +18830,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -18242,7 +18920,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -18319,7 +19004,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -18394,7 +19086,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -18449,7 +19148,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -18535,7 +19241,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -18638,7 +19351,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -18717,10 +19437,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -18814,10 +19540,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
           },
           {
-            "managementToken": []
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -18882,7 +19614,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -18929,7 +19670,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -19103,7 +19853,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -19150,7 +19907,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -19208,7 +19972,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -19301,7 +20072,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19359,7 +20137,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19403,7 +20188,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -19476,7 +20268,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19562,7 +20361,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19619,7 +20425,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -19686,7 +20499,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19764,7 +20584,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -19810,7 +20637,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -19903,7 +20737,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -19980,7 +20821,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -20044,7 +20892,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -20099,7 +20954,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -20181,7 +21043,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
           }
         ],
         "tags": [
@@ -20225,7 +21094,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -20278,7 +21154,38 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -20317,7 +21224,14 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [
@@ -20327,6 +21241,7 @@
     },
     "/api/v1/runtime-generations": {
       "get": {
+        "description": "Runtime generations span every project and name their publishers, so listing them requires an installation-wide access scope.",
         "operationId": "list_runtime_generations",
         "parameters": [
           {
@@ -20375,7 +21290,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -20453,7 +21377,9 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -20551,7 +21477,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -20594,7 +21522,9 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -20645,7 +21575,9 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "self"
+            ]
           }
         ],
         "tags": [
@@ -20670,7 +21602,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -20706,7 +21647,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -20770,7 +21720,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -21023,7 +21982,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -21110,7 +22076,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -21215,7 +22188,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -21329,7 +22309,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
           }
         ],
         "tags": [
@@ -21407,7 +22394,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -21454,7 +22450,16 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -21539,7 +22544,16 @@
         "security": [
           {
             "csrfToken": [],
-            "sessionCookie": []
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -21584,7 +22598,14 @@
         },
         "security": [
           {
-            "sessionCookie": []
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
           }
         ],
         "tags": [

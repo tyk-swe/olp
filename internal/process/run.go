@@ -23,7 +23,6 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -31,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -53,6 +53,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	warnEgressExceptions(log, c)
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
 	traces, err := telemetry.Install(telemetry.Config{
@@ -99,25 +100,27 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			return err
 		}
 		defer closeAssets()
-		management.Register(public)
 		public.Handle("/", assets)
 		public.Handle("/health", assets)
 	}
-	// These prefixes must never fall through to the SPA, in any public mode.
-	// When inference is enabled the gateway registers its own, more specific
-	// handlers under /v1/, /anthropic/, and /gemini/; anything left over is
-	// answered honestly instead of reaching the console.
-	for _, prefix := range []string{"/api/", "/v1/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
+	// Reserved prefixes must never fall through to the SPA, in any public
+	// mode. When inference is enabled the gateway answers its catch-all
+	// prefixes itself and registers more specific handlers under the others;
+	// anything left over is answered in the prefix's own error envelope
+	// instead of reaching the console.
+	for _, reserved := range surface.Reserved() {
 		handler := http.HandlerFunc(http.NotFound)
 		if c.Mode.Inference() {
-			switch prefix {
-			case "/v1/":
+			if reserved.GatewayCatchAll {
 				continue
-			case "/anthropic/", "/gemini/":
-				handler = management.NotFound
+			}
+			if reserved.Surface.Inference {
+				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gateway.WriteNotFound(w, r, reserved.Surface.Name)
+				})
 			}
 		}
-		public.Handle(prefix, handler)
+		public.Handle(reserved.Path, handler)
 	}
 	startup, cancelStartup := context.WithTimeout(ctx, c.StartupTimeout)
 	defer cancelStartup()
@@ -263,7 +266,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
 			control.NotificationsActive = limiter != nil
-			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, log)
+			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -360,7 +363,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			request := runtimeConfig.ForInstallation(installation)
 			admission.Tracing = &request
 		}
-		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: admission.Wrap(public)})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, admission.Wrap(public))})
 	}
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()
@@ -452,6 +455,21 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 		}
 	}
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
+}
+
+// warnEgressExceptions announces operator exceptions to the provider egress
+// denylist. They are installation-wide trust decisions that let every
+// provider reach the listed networks, so each process says so at startup.
+func warnEgressExceptions(log *slog.Logger, c config.Config) {
+	if len(c.ProviderEgressAllowCIDRs) == 0 && len(c.ProviderEgressAllowHTTPHosts) == 0 {
+		return
+	}
+	cidrs := make([]string, len(c.ProviderEgressAllowCIDRs))
+	for i, prefix := range c.ProviderEgressAllowCIDRs {
+		cidrs[i] = prefix.String()
+	}
+	log.Warn("provider egress exceptions widen what providers may reach",
+		"allowed_cidrs", cidrs, "plain_http_hosts", c.ProviderEgressAllowHTTPHosts)
 }
 
 // rejectPublic answers a public request its surface's pool could not admit.

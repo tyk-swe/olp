@@ -28,13 +28,18 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |
 | Configuration, connections, startup, shutdown | `internal/config/`, `internal/process/`, `internal/database/` |
 | HTTP middleware, development origin, body limits | `internal/process/` |
-| Outbound networking and secrets | `internal/egress/`, `internal/secrets/` |
+| Public path surfaces: admission pools, console-reserved prefixes, edge routes | `internal/surface/` |
+| Outbound networking, credential redaction, secret purposes | `internal/egress/`, `internal/secrets/` |
+| Management authorization policy, contract requirements, route admission | `internal/access/policy.go`, `contract.go`, `route.go`, `scope.go` |
+| Gateway key locations and retained-resource admission | `internal/gateway/credentials.go`, `retained.go` |
+| Public response security headers | `internal/process/perimeter.go` |
 | Metrics, traces, readiness, worker health | `internal/observability/` |
 
 Feature packages own their SQL, transactions, and workflows; mutations receive
 explicit audit provenance. `openapi/management.json` defines the management
-contract. `make api` generates Go transport types and ignored TypeScript
-declarations; `/api/v1/openapi.json` serves the embedded contract. Integration
+contract, including the security requirement of every operation. `make api`
+generates Go transport types, ignored TypeScript declarations, and the console's
+route requirements; `/api/v1/openapi.json` serves the embedded contract. Integration
 tests check handler/contract parity.
 
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
@@ -107,7 +112,9 @@ resource lifetimes and listeners. Draining, metadata delivery, worker shutdown,
 and trace flushing share one deadline. Production serves static console assets;
 development uses Vite with configured API proxies.
 
-See [gateway execution](gateway.md), [access control](access.md), and the
+See [security architecture](security.md) for how these modules divide the
+security rules. See [gateway execution](gateway.md),
+[access control](access.md), and the
 [worker runbook](operations.md#replicated-worker-health) for their operational
 contracts. See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks,
 integration, and releases.

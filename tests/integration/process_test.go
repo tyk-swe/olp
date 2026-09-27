@@ -105,6 +105,50 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 					get(p.PublicOrigin, "/api/v1/openapi.json", 404)
 					get(p.PublicOrigin, "/", 404)
 				}
+				// The perimeter sets security headers on every public response,
+				// including refusals no handler writes headers for.
+				headers := func(path string) http.Header {
+					t.Helper()
+					resp, err := httpClient.Get(p.PublicOrigin + path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+						t.Fatalf("%s: missing nosniff", path)
+					}
+					return resp.Header
+				}
+				if h := headers("/api/v1/users"); h.Get("X-Frame-Options") != "DENY" || h.Get("Content-Security-Policy") != "default-src 'none'; frame-ancestors 'none'" || h.Get("Cache-Control") != "no-store" {
+					t.Fatalf("management refusal headers: %v", h)
+				}
+				if h := headers("/v1/models"); h.Get("Cache-Control") != "no-store" || h.Get("Cross-Origin-Resource-Policy") != "" {
+					t.Fatalf("inference refusal headers: %v", h)
+				}
+				if mode == "all" || mode == "control" {
+					if h := headers("/providers"); h.Get("X-Frame-Options") != "DENY" || h.Get("Cross-Origin-Opener-Policy") != "same-origin" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+						t.Fatalf("console headers: %v", h)
+					}
+				}
+				// Every inference prefix is reserved from the console, whether
+				// or not this process serves inference.
+				for _, path := range []string{"/native/openai/models/x", "/bedrock/model/x/converse", "/ws/other", "/gemini/unknown"} {
+					if body := get(p.PublicOrigin, path, 404); strings.Contains(string(body), "<html") {
+						t.Fatalf("%s reached the console: %s", path, body)
+					}
+				}
+				if mode == "all" || mode == "gateway" {
+					// Prefixes the gateway only partly claims still answer in
+					// the client's own error envelope, never the management
+					// one.
+					if body := get(p.PublicOrigin, "/native/openai/models/x", 404); !strings.Contains(string(body), `"code":"not_found"`) {
+						t.Fatalf("/native fallback is not an OpenAI error: %s", body)
+					}
+					if body := get(p.PublicOrigin, "/ws/other", 404); !strings.Contains(string(body), `"status":"NOT_FOUND"`) {
+						t.Fatalf("/ws fallback is not a Gemini error: %s", body)
+					}
+				}
 				if mode == "control" {
 					get(p.PublicOrigin, "/v1/models", 404)
 				} else {

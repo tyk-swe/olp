@@ -31,9 +31,11 @@ describe('setup API', () => {
         id: '01980000-0000-7000-8000-000000000001',
         email: 'owner@example.com',
         display_name: 'Ada Owner',
-        role: 'owner'
+        role: 'owner',
+        access_scope: 'global'
       },
-      csrf_token: 'csrf-value'
+      csrf_token: 'csrf-value',
+      operations: ['read', 'self']
     };
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(responseBody), {
@@ -52,7 +54,11 @@ describe('setup API', () => {
         },
         'bootstrap-token-value'
       )
-    ).resolves.toEqual(responseBody);
+    ).resolves.toEqual({
+      ...responseBody,
+      // The console reads the owner's operations from the member it carries.
+      user: { ...responseBody.user, operations: responseBody.operations }
+    });
 
     const request = fetchMock.mock.calls[0]?.[0] as Request;
     expect(new URL(request.url).pathname).toBe('/api/v1/setup');

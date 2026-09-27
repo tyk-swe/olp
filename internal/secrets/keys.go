@@ -97,11 +97,11 @@ func (k *KeyRing) aead(version int) (cipher.AEAD, error) {
 	}
 	return cipher.NewGCM(block)
 }
-func aad(installation, purpose, id string) []byte {
-	b, _ := json.Marshal([]string{"olp-secret-v1", installation, purpose, id})
+func aad(installation string, purpose SealPurpose, id string) []byte {
+	b, _ := json.Marshal([]string{"olp-secret-v1", installation, purpose.name, id})
 	return b
 }
-func (k *KeyRing) Seal(installation, purpose, id string, data []byte) ([]byte, error) {
+func (k *KeyRing) Seal(installation string, purpose SealPurpose, id string, data []byte) ([]byte, error) {
 	a, err := k.aead(k.Active)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (k *KeyRing) Seal(installation, purpose, id string, data []byte) ([]byte, e
 	}
 	return a.Seal(nonce, nonce, data, aad(installation, purpose, id)), nil
 }
-func (k *KeyRing) Open(installation, purpose, id string, version int, data []byte) ([]byte, error) {
+func (k *KeyRing) Open(installation string, purpose SealPurpose, id string, version int, data []byte) ([]byte, error) {
 	a, err := k.aead(version)
 	if err != nil {
 		return nil, err
@@ -136,9 +136,9 @@ func (a *AuthKey) String() string { return "AuthKey([REDACTED])" }
 func NewAuthKey(key []byte, installation string) *AuthKey {
 	return &AuthKey{key: append([]byte(nil), key...), installation: installation}
 }
-func (a *AuthKey) Digest(purpose, value string) []byte {
+func (a *AuthKey) Digest(purpose DigestPurpose, value string) []byte {
 	h := hmac.New(sha256.New, a.key)
-	b, _ := json.Marshal([]string{"olp-auth-v1", a.installation, purpose, value})
+	b, _ := json.Marshal([]string{"olp-auth-v1", a.installation, purpose.name, value})
 	h.Write(b)
 	return h.Sum(nil)
 }

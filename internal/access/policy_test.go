@@ -1,10 +1,21 @@
 package access
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
+	"fmt"
+	"io/fs"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/openapi"
 )
 
 func TestIndependentKeyScopesAndRouteRestrictions(t *testing.T) {
@@ -31,15 +42,7 @@ func TestIndependentKeyScopesAndRouteRestrictions(t *testing.T) {
 		t.Fatal("accepted revoked key")
 	}
 }
-func TestRoleMatrixAndStrongPreconditions(t *testing.T) {
-	for _, role := range []string{"owner", "operator", "developer", "viewer", "unknown"} {
-		if Permission(role, "access") != (role == "owner") {
-			t.Fatal("membership permission", role)
-		}
-		if Permission(role, "keys") != (role == "owner" || role == "operator" || role == "developer") {
-			t.Fatal("key permission", role)
-		}
-	}
+func TestStrongPreconditions(t *testing.T) {
 	for _, value := range []string{"", "W/\"etag\"", "*", "etag", "\"other\""} {
 		r := httptest.NewRequest("PATCH", "/", nil)
 		r.Header.Set("If-Match", value)
@@ -134,4 +137,209 @@ func TestKeyRouteProjectIsolation(t *testing.T) {
 	if !authority.Allows("inference", "route", &copyA, time.Now()) {
 		t.Fatal("same project rejected")
 	}
+}
+
+var update = flag.Bool("update", false, "rewrite golden files from the current behavior")
+
+// golden compares got with testdata/name, or rewrites it under -update.
+func golden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	path := filepath.Join("testdata", name)
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s changed; review the difference as a change of policy and rerun with -update:\n%s", path, got)
+	}
+}
+
+// TestAuthorizationMatrix pins who may perform every management operation.
+func TestAuthorizationMatrix(t *testing.T) {
+	member := func(role string, global bool) Principal {
+		return Principal{User: User{Role: role}, Kind: "user", AllProjects: global}
+	}
+	token := func(creatorRole string, global bool, scopes ...Operation) Principal {
+		p := Principal{Kind: "machine", AllProjects: global, creatorRole: creatorRole}
+		for _, op := range scopes {
+			p.scopes |= 1 << op
+		}
+		return p
+	}
+	principals := []struct {
+		name string
+		p    Principal
+	}{}
+	for _, role := range []string{RoleOwner, RoleOperator, RoleDeveloper, RoleViewer} {
+		principals = append(principals,
+			struct {
+				name string
+				p    Principal
+			}{role + " global", member(role, true)},
+			struct {
+				name string
+				p    Principal
+			}{role + " assigned", member(role, false)})
+	}
+	for _, tc := range []struct {
+		name string
+		p    Principal
+	}{
+		{"token every scope, owner global", token(RoleOwner, true, Operations()...)},
+		{"token every scope, owner assigned", token(RoleOwner, false, Operations()...)},
+		{"token every scope, operator global", token(RoleOperator, true, Operations()...)},
+		{"token read+configure, owner global", token(RoleOwner, true, Read, Configure)},
+		{"unknown role", member("unknown", true)},
+	} {
+		principals = append(principals, tc)
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "%-36s", "principal")
+	for _, op := range Operations() {
+		fmt.Fprintf(&out, " %s", op)
+	}
+	out.WriteString("\n")
+	for _, principal := range principals {
+		fmt.Fprintf(&out, "%-36s", principal.name)
+		for _, op := range Operations() {
+			mark := "-"
+			if principal.p.Authorize(op) == nil {
+				mark = "Y"
+			}
+			fmt.Fprintf(&out, " %*s", len(op.String()), mark)
+		}
+		out.WriteString("\n")
+	}
+	golden(t, "operations.golden", []byte(out.String()))
+}
+
+func TestOperationNamesRoundTrip(t *testing.T) {
+	for _, op := range Operations() {
+		if parsed, ok := ParseOperation(op.String()); !ok || parsed != op {
+			t.Fatalf("%s does not round-trip", op)
+		}
+	}
+	if _, ok := ParseOperation("unknown"); ok {
+		t.Fatal("parsed an unknown operation")
+	}
+	if (Principal{Kind: "user", User: User{Role: RoleOwner}, AllProjects: true}).Authorize(0) == nil {
+		t.Fatal("an unknown operation must never be authorized")
+	}
+}
+
+func TestOperationsMatchTheContract(t *testing.T) {
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openapi.Document, &document); err != nil {
+		t.Fatal(err)
+	}
+	names := func(ops []Operation) []string {
+		var out []string
+		for _, op := range ops {
+			out = append(out, op.String())
+		}
+		return out
+	}
+	for schema, ops := range map[string][]Operation{"ManagementOperation": Operations(), "ManagementTokenScope": TokenScopes()} {
+		if enum := document.Components.Schemas[schema].Enum; !slices.Equal(enum, names(ops)) {
+			t.Errorf("the contract's %s lists %v, the policy %v", schema, enum, names(ops))
+		}
+	}
+}
+
+// Authorization decisions live in the policy: comparing a principal's role or
+// kind elsewhere bypasses it, as the owner-only session checks once did.
+func TestPrincipalRolesAreDecidedOnlyByThePolicy(t *testing.T) {
+	comparison := regexp.MustCompile(`\b(p|principal)\.(Role\s*[!=]=\s*"|Kind\s*[!=]=\s*"(user|machine)")`)
+	for _, name := range productionSources(t) {
+		base := filepath.Base(name)
+		if filepath.Base(filepath.Dir(name)) == "access" && (base == "policy.go" || base == "principal.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if match := comparison.Find(source); match != nil {
+			t.Errorf("%s compares %s; authorize an operation instead", name, match)
+		}
+	}
+}
+
+// docRegion holds the marked region of docs/security.md to rendered, or
+// rewrites it under -update.
+func docRegion(t *testing.T, name, rendered string) {
+	t.Helper()
+	path := "../../docs/security.md"
+	document, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, end := "<!-- "+name+" -->\n", "<!-- /"+name+" -->"
+	i, j := bytes.Index(document, []byte(start)), bytes.Index(document, []byte(end))
+	if i < 0 || j < i {
+		t.Fatalf("docs/security.md has no %s region", name)
+	}
+	current := string(document[i+len(start) : j])
+	if current == rendered {
+		return
+	}
+	if !*update {
+		t.Fatalf("docs/security.md describes %s differently from the code; rerun with -update", name)
+	}
+	updated := append(append(append([]byte{}, document[:i+len(start)]...), rendered...), document[j:]...)
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSecurityDocumentDescribesThePolicy(t *testing.T) {
+	var table strings.Builder
+	table.WriteString("| Operation | Owner | Operator | Developer | Viewer | Installation-wide | Management tokens |\n")
+	table.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	mark := func(held bool) string {
+		if held {
+			return "yes"
+		}
+		return ""
+	}
+	for _, op := range Operations() {
+		r := policy[op]
+		fmt.Fprintf(&table, "| `%s` | %s | %s | %s | %s | %s | %s |\n", op,
+			mark(r.roles.has(RoleOwner)), mark(r.roles.has(RoleOperator)), mark(r.roles.has(RoleDeveloper)), mark(r.roles.has(RoleViewer)),
+			mark(r.installation), mark(r.delegable))
+	}
+	docRegion(t, "operations", table.String())
+}
+
+// productionSources lists every non-test Go source under internal/ and cmd/,
+// at any depth.
+func productionSources(t *testing.T) []string {
+	t.Helper()
+	var sources []string
+	for _, root := range []string{"..", "../../cmd"} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err == nil && !entry.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+				sources = append(sources, path)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sources) < 100 {
+		t.Fatalf("found only %d sources", len(sources))
+	}
+	return sources
 }

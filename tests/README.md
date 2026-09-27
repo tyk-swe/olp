@@ -32,6 +32,12 @@ make test-race GO_TEST_PACKAGES=./internal/gateway GO_TEST_TIMEOUT=10m
 make test-go GO_TEST_ARGS=-cover
 ```
 
+Authorization, key-location, and secret-purpose changes surface as diffs to
+golden files under `internal/*/testdata` and to the generated tables in
+[security architecture](../docs/security.md). Review such a diff as a security
+change, then regenerate deliberately with
+`go test ./internal/access ./internal/secrets ./internal/gateway -update`.
+
 `GO_TEST_PACKAGES` defaults to `./...`, `GO_TEST_TIMEOUT` to `5m` per package,
 and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
 `-mod=readonly`. Coverage reporting is optional; there is no numeric threshold.
@@ -78,7 +84,11 @@ and cloud identity variables. Live calls consume provider quota.
 ## Contract and browser coverage
 
 The release contract test, run inside the process suite, checks that every
-operation in the embedded OpenAPI contract reaches a handler. A test's existence
+operation in the embedded OpenAPI contract reaches a handler. The
+authorization sweep calls every secured management operation as every caller
+in `internal/access/testdata/authorization.golden.json` and holds each
+outcome to that file, and the isolation sweep reads every operation as members
+of another project and fails on any disclosure of a canary project. A test's existence
 does not prove it ran; use CI results for the commit you are checking. Browser
 journeys cover accounting, cloud configuration, bulk certification, grouped
 routes, pools, policy exclusions, preview, publication, playground, and

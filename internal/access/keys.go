@@ -1,10 +1,7 @@
 package access
 
 import (
-	"context"
-	"crypto/hmac"
 	"encoding/json"
-	"errors"
 	"maps"
 	"net/http"
 	"regexp"
@@ -138,11 +135,7 @@ func (s *Server) keyJSON() string {
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)))`
 }
 
-func (s *Server) apiKeys(r *http.Request) (Reply, error) {
-	principal, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) apiKeys(r *http.Request, principal Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -161,11 +154,7 @@ func (s *Server) apiKeys(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return ListReply(items, p), err
 }
-func (s *Server) apiKey(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) apiKey(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "api_key_id")
 	if err != nil {
 		return Reply{}, err
@@ -176,12 +165,12 @@ func (s *Server) apiKey(r *http.Request) (Reply, error) {
 	if err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text,k.project_id::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag, &projectID); err != nil {
 		return Reply{}, err
 	}
-	if !p.CanProject(projectID, false) {
-		return Reply{}, pgx.ErrNoRows
+	if err := p.Project(projectID, View); err != nil {
+		return Reply{}, err
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
-func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
+func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	input := keyInput{KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -191,7 +180,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -200,13 +189,18 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the plaintext secret, so the caller must
+		// still reach the target project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
 	if err := validateKey(input, true); err != nil {
 		return Reply{}, err
 	}
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if input.BudgetGroupID != nil {
@@ -228,7 +222,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest("api_key", secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r, tx)
@@ -236,7 +230,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/api-keys/" + id, Body: map[string]any{"id": id, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}}
-	if err = Audit(r.Context(), tx, r, p.ID, "api_key.create", "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.create", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -244,7 +238,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, result)
 }
-func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
+func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -270,7 +264,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -282,7 +276,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
-	if err := ProjectAccess(p, projectID, true); err != nil {
+	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {
@@ -338,13 +332,17 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "api_key.update", "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "api_key.update", "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag))
 }
-func (s *Server) revokeAPIKey(r *http.Request) (Reply, error) { return s.transitionKey(r, false) }
-func (s *Server) rotateAPIKey(r *http.Request) (Reply, error) { return s.transitionKey(r, true) }
+func (s *Server) revokeAPIKey(r *http.Request, _ Principal) (Reply, error) {
+	return s.transitionKey(r, false)
+}
+func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (Reply, error) {
+	return s.transitionKey(r, true)
+}
 func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	var input map[string]json.RawMessage
 	if rotate && r.ContentLength != 0 {
@@ -366,16 +364,9 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "keys")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
-	}
-	claim, replayed, err := s.Replay(r, tx, p, input)
-	if err != nil {
-		return Reply{}, err
-	}
-	if replayed != nil {
-		return Commit(r, tx, *replayed)
 	}
 	var etag, name string
 	var data []byte
@@ -385,8 +376,17 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
-	if err := ProjectAccess(p, projectID, true); err != nil {
+	// A stored replay returns the rotated secret, so the caller must still
+	// reach this key's project before it is accepted.
+	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
+	}
+	claim, replayed, err := s.Replay(r, tx, p, input)
+	if err != nil {
+		return Reply{}, err
+	}
+	if replayed != nil {
+		return Commit(r, tx, *replayed)
 	}
 	if err = Match(r, etag); err != nil {
 		return Reply{}, err
@@ -437,7 +437,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		action = "api_key.rotate"
 		lookup = secrets.Token()
 		secret = "olp_" + lookup + "_" + secrets.Token()
-		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest("api_key", secret), etag, data, groupID, id)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), etag, data, groupID, id)
 	} else {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
 	}
@@ -452,7 +452,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if rotate {
 		result.Body = map[string]any{"id": id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, action, "api_key", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), action, "api_key", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -489,22 +489,6 @@ type Authority struct {
 	ExpiresAt, RevokedAt        *time.Time
 }
 
-func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority, error) {
-	var a Authority
-	parts := strings.Split(secret, "_")
-	if len(parts) != 3 || parts[0] != "olp" {
-		return a, errors.New("invalid API key")
-	}
-	var digest, data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id WHERE k.lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &digest, &data, &a.ExpiresAt, &a.RevokedAt, &a.BudgetGroupID, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit)
-	if err != nil || !hmac.Equal(digest, s.Auth.Digest("api_key", secret)) {
-		return a, errors.New("invalid API key")
-	}
-	if err = json.Unmarshal(data, &a.Policy); err != nil {
-		return a, err
-	}
-	return a, nil
-}
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {
 	if (a.ProjectID == nil) != (projectID == nil) || (a.ProjectID != nil && *a.ProjectID != *projectID) {
 		return false

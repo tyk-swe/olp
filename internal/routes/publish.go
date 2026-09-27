@@ -47,7 +47,7 @@ func check(d *draft, live map[string]*resolved) error {
 	return nil
 }
 
-func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -58,7 +58,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -66,7 +66,7 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -95,14 +95,14 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.validate", "route_draft", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.validate", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	current.State, current.ETag = "validated", etag
 	return access.Commit(r, tx, access.Detail(current.summary(), etag))
 }
 
-func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -113,8 +113,17 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the draft, so the caller must still reach
+	// its project before a replay is served.
+	current, err := loadDraft(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -123,13 +132,6 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	current, err := loadDraft(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
-		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -189,7 +191,7 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route.activate", "route", routeID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", routeID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"route_id": routeID, "revision_id": revisionID, "revision": revision, "draft_etag": etag, "runtime_generation": generation}, etag)
@@ -313,11 +315,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	return &r, nil
 }
 
-func (s *Server) routes(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) routes(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -350,11 +348,7 @@ func (s *Server) routes(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) route(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -363,8 +357,8 @@ func (s *Server) route(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(row.ProjectID, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(row.ProjectID, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
 	if err != nil {
@@ -373,11 +367,7 @@ func (s *Server) route(r *http.Request) (access.Reply, error) {
 	return access.OK(item), nil
 }
 
-func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -390,8 +380,8 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id<$2 ORDER BY v.id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
@@ -423,11 +413,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -436,8 +422,8 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
@@ -450,7 +436,7 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	return access.OK(v.json(live)), nil
 }
 
-func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
+func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
@@ -461,8 +447,18 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the route, so the caller must still reach
+	// its project before a replay is served.
+	var state, current string
+	var project *string
+	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -471,14 +467,6 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	var state, current string
-	var project *string
-	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, project, true); err != nil {
-		return access.Reply{}, err
 	}
 	if err = access.Match(r, current); err != nil {
 		return access.Reply{}, err
@@ -494,7 +482,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route.retire", "route", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.retire", "route", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag)
@@ -504,11 +492,7 @@ func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -517,8 +501,8 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(project, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(project, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
@@ -577,7 +561,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 	}), nil
 }
 
-func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
+func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
@@ -589,8 +573,17 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	// The stored reply discloses the restored draft, so the caller must still
+	// reach the route's project before a replay is served.
+	project, err := routeProject(r.Context(), tx, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, nil)
@@ -599,13 +592,6 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
-	}
-	project, err := routeProject(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.ProjectAccess(p, project, true); err != nil {
-		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {
@@ -627,7 +613,7 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.restore", "route_draft", draftID, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.restore", "route_draft", draftID, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	d, err := loadDraft(r.Context(), tx, draftID, false)

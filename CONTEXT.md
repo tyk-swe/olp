@@ -93,3 +93,38 @@ or terminal. This is independent of upstream acceptance and response commitment.
 A route permitted to change an invocation or its observed result, such as
 translating between dialects or redacting content.
 _Avoid_: Legacy route, best-effort route.
+
+### Access
+
+**Principal**:
+The authenticated caller of a management operation: a member signed in through a
+session, or a management token.
+_Avoid_: Actor (the audit attribution of a principal).
+
+**Member**:
+A person with an installation role (owner, operator, developer, or viewer) and
+an access scope.
+_Avoid_: Account.
+
+**Management operation**:
+A named kind of management action, such as `configure` or `access`, that
+installation roles grant and management routes require.
+_Avoid_: Permission, capability.
+
+**Access scope**:
+Whether a member reaches the whole installation (installation-wide) or only the
+projects assigned to them (assigned).
+
+**Project boundary**:
+The project a provider, route, key, or other resource belongs to, or the
+unassigned boundary only installation-wide principals reach. A resource beyond a
+principal's reach is indistinguishable from one that does not exist.
+
+**API key**:
+A credential for inference through permitted routes within one project boundary.
+_Avoid_: Token.
+
+**Management token**:
+A credential for management automation that carries delegated management
+operations and acts within its creator's current authority.
+_Avoid_: API key.

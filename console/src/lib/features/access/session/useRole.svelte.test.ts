@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // Runes only observe changes when Svelte compiles for the client, which the
 // default node environment does not select.
+import { operationsFor } from '$lib/features/access/session/test/grants';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
@@ -21,7 +22,8 @@ function sessionFor(role: FixedRole): AuthenticatedSession {
       email: `${role}@example.com`,
       display_name: 'Test Principal',
       role,
-      access_scope: 'global'
+      access_scope: 'global',
+      operations: operationsFor(role)
     },
     csrf_token: 'csrf-role-test'
   };

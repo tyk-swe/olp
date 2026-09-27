@@ -17,16 +17,25 @@ import (
 func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	routes := map[string]func(*http.Request) (Reply, error){
+	public := map[string]PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
-		"GET /api/v1/auth/capabilities": s.capabilities,
-		"POST /api/v1/sessions":         s.login, "GET /api/v1/sessions": s.sessions,
+		"GET /api/v1/auth/capabilities":   s.capabilities,
+		"POST /api/v1/sessions":           s.login,
+		"POST /api/v1/invitations/accept": s.acceptInvitation,
+		"GET /api/v1/oidc/login":          s.beginOIDCLogin, "POST /api/v1/oidc/login": s.beginOIDCLogin,
+		"GET /api/v1/oidc/callback": s.oidcCallback,
+	}
+	for pattern, fn := range public {
+		s.Public(mux, pattern, fn)
+	}
+	routes := map[string]Handler{
+		"GET /api/v1/sessions":         s.sessions,
 		"GET /api/v1/sessions/current": s.currentSession, "DELETE /api/v1/sessions/current": s.logout,
 		"DELETE /api/v1/sessions/{session_id}": s.revokeSession,
 		"GET /api/v1/users":                    s.users, "GET /api/v1/users/{user_id}": s.user, "PATCH /api/v1/users/{user_id}": s.updateUser,
 		"GET /api/v1/invitations": s.invitations, "POST /api/v1/invitations": s.createInvitation,
-		"DELETE /api/v1/invitations/{invitation_id}": s.retireInvitation, "POST /api/v1/invitations/accept": s.acceptInvitation,
-		"GET /api/v1/profile": s.profile, "PATCH /api/v1/profile": s.updateProfile,
+		"DELETE /api/v1/invitations/{invitation_id}": s.retireInvitation,
+		"GET /api/v1/profile":                        s.profile, "PATCH /api/v1/profile": s.updateProfile,
 		"POST /api/v1/profile/password": s.changePassword, "POST /api/v1/profile/password/enroll": s.enrollPassword,
 		"POST /api/v1/profile/reauthenticate": s.reauthenticate,
 		"GET /api/v1/api-keys":                s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
@@ -55,13 +64,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"PUT /api/v1/provisioning/{source}/users/{external_id}":       s.provisionUser,
 		"DELETE /api/v1/provisioning/{source}/users/{external_id}":    s.deprovisionUser,
 		"GET /api/v1/oidc/configuration":                              s.oidcConfiguration, "PUT /api/v1/oidc/configuration": s.putOIDCConfiguration,
-		"GET /api/v1/oidc/login": s.beginOIDCLogin, "POST /api/v1/oidc/login": s.beginOIDCLogin,
 		"POST /api/v1/oidc/link": s.beginOIDCLink, "POST /api/v1/oidc/reauthenticate": s.beginOIDCReauthentication,
-		"GET /api/v1/oidc/callback": s.oidcCallback, "GET /api/v1/oidc/identities": s.oidcIdentities,
+		"GET /api/v1/oidc/identities":                  s.oidcIdentities,
 		"DELETE /api/v1/oidc/identities/{identity_id}": s.unlinkOIDCIdentity,
 	}
 	for pattern, fn := range routes {
-		mux.HandleFunc(pattern, s.Handle(fn))
+		s.Route(mux, pattern, fn)
 	}
 }
 
@@ -124,7 +132,7 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		var count int
 		err = tx.QueryRow(r.Context(), `INSERT INTO olp.auth_admission(action,digest,attempts) VALUES($1,$2,1)
             ON CONFLICT(action,digest) DO UPDATE SET attempts=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN 1 ELSE LEAST(auth_admission.attempts+1,$3+1) END,
-            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.Auth.Digest("admission", bucket.key), bucket.limit).Scan(&count)
+            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.Auth.Digest(secrets.AdmissionDigest, bucket.key), bucket.limit).Scan(&count)
 		if err != nil {
 			return err
 		}
@@ -205,7 +213,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, id, "installation.setup", "installation", s.Installation, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(id), "installation.setup", "installation", s.Installation, "success"); err != nil {
 		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, id)
@@ -215,10 +223,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 	return Commit(r, tx, response)
 }
 
-func (s *Server) users(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) users(r *http.Request, _ Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -230,10 +235,7 @@ func (s *Server) users(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return ListReply(items, p), err
 }
-func (s *Server) user(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) user(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "user_id")
 	if err != nil {
 		return Reply{}, err
@@ -241,7 +243,7 @@ func (s *Server) user(r *http.Request) (Reply, error) {
 	u, err := scanUser(s.Pool.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
 	return Detail(u, u.ETag), err
 }
-func (s *Server) updateUser(r *http.Request) (Reply, error) {
+func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Role        *string `json:"role"`
 		Active      *bool   `json:"active"`
@@ -268,7 +270,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -302,7 +304,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if !u.Active || u.Role != "owner" {
-		if err = retireIssuedInvitations(r, tx, id, p.ID, p.UserID()); err != nil {
+		if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -311,7 +313,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	if _, err = AdvanceAuthority(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "user.update", "user", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	u, err = scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
@@ -368,7 +370,7 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 
 // Invitations are outstanding access grants and cannot outlive the issuer's
 // membership-management authority. Call inside the authority change transaction.
-func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor, revokedBy string) error {
+func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor Actor, revokedBy string) error {
 	result, err := tx.Exec(r.Context(), `UPDATE olp.invitations
         SET revoked_at=now(),revoked_by=NULLIF($2::text,'')::uuid
         WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, revokedBy)
@@ -384,10 +386,7 @@ func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor, revokedB
 const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.role,'invited_by',i.invited_by,'invited_by_email',inviter.email,'accepted_by_email',accepted.email,'revoked_by_email',revoker.email,'accepted_at',i.accepted_at,'revoked_at',i.revoked_at,'expires_at',i.expires_at,'created_at',i.created_at,'status',CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END)`
 const invitationFrom = ` FROM olp.invitations i LEFT JOIN olp.users inviter ON inviter.id=i.invited_by LEFT JOIN olp.users accepted ON accepted.id=i.accepted_by LEFT JOIN olp.users revoker ON revoker.id=i.revoked_by`
 
-func (s *Server) invitations(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) invitations(r *http.Request, _ Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -404,7 +403,7 @@ func invitation(r *http.Request, tx pgx.Tx, id string) (any, error) {
 	err := tx.QueryRow(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id=$1", id).Scan(&data)
 	return json.RawMessage(data), err
 }
-func (s *Server) createInvitation(r *http.Request) (Reply, error) {
+func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Email string `json:"email"`
 		Role  string `json:"role"`
@@ -432,7 +431,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -457,7 +456,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest("invitation", token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
 		return Reply{}, err
 	}
 	body, err := invitation(r, tx, id)
@@ -465,7 +464,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v1/invitations/" + id}
-	if err = Audit(r.Context(), tx, r, p.ID, "invitation.create", "invitation", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.create", "invitation", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
@@ -473,7 +472,7 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, result)
 }
-func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
+func (s *Server) retireInvitation(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "invitation_id")
 	if err != nil {
 		return Reply{}, err
@@ -483,7 +482,7 @@ func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "access")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -505,7 +504,7 @@ func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
 			return Reply{}, err
 		}
-		if err = Audit(r.Context(), tx, r, p.ID, "invitation.revoke", "invitation", id, "success"); err != nil {
+		if err = Audit(r.Context(), tx, r, p.Actor(), "invitation.revoke", "invitation", id, "success"); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -550,7 +549,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var id, address, role string
-	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest("invitation", input.Token)).Scan(&id, &address, &role)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest(secrets.InvitationDigest, input.Token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
 	}
@@ -564,7 +563,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, userID, "invitation.accept", "invitation", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, userID)

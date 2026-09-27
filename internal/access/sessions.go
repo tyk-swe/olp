@@ -13,7 +13,11 @@ import (
 func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
 	var name string
 	err := q.QueryRow(r.Context(), "SELECT name FROM olp.installation WHERE singleton").Scan(&name)
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token)}, err
+	operations := []string{}
+	for _, op := range (Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
+		operations = append(operations, op.String())
+	}
+	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token), "operations": operations}, err
 }
 func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
 	token := secrets.Token()
@@ -25,7 +29,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, e
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest("session", token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
@@ -80,7 +84,7 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 		}
 	}
 	if !valid || !current || !local {
-		if err = Audit(r.Context(), tx, r, "", "session.login", "session", "", "failure"); err != nil {
+		if err = Audit(r.Context(), tx, r, System, "session.login", "session", "", "failure"); err != nil {
 			return Reply{}, err
 		}
 		if err = tx.Commit(r.Context()); err != nil {
@@ -92,16 +96,13 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, id, "session.login", "user", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, UserActor(id), "session.login", "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
 }
-func (s *Server) currentSession(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) currentSession(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	if p.SessionID != "" {
 		if _, err = s.Pool.Exec(r.Context(), "UPDATE olp.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
 			return Reply{}, err
@@ -110,11 +111,7 @@ func (s *Server) currentSession(r *http.Request) (Reply, error) {
 	body, err := s.sessionBody(r, s.Pool, p.User, p.Token)
 	return OK(body), err
 }
-func (s *Server) sessions(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) sessions(r *http.Request, p Principal) (Reply, error) {
 	pagination, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -123,8 +120,10 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if userID == "" {
 		userID = p.ID
 	}
-	if userID != p.ID && p.Role != "owner" {
-		return Reply{}, Forbidden()
+	if userID != p.ID {
+		if err = p.Authorize(ManageSessions); err != nil {
+			return Reply{}, err
+		}
 	}
 	if _, err := ParseUUID(userID); err != nil {
 		return Reply{}, err
@@ -140,15 +139,18 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return ListReply(items, pagination), err
 }
-func (s *Server) logout(r *http.Request) (Reply, error)        { return s.deleteSession(r, true) }
-func (s *Server) revokeSession(r *http.Request) (Reply, error) { return s.deleteSession(r, false) }
+
+func (s *Server) logout(r *http.Request, _ Principal) (Reply, error) { return s.deleteSession(r, true) }
+func (s *Server) revokeSession(r *http.Request, _ Principal) (Reply, error) {
+	return s.deleteSession(r, false)
+}
 func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -167,13 +169,14 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", id).Scan(&userID); err != nil {
 		return Reply{}, err
 	}
-	if userID != p.ID && p.Role != "owner" {
-		return Reply{}, Forbidden()
+	// Another member's session is invisible to a caller who cannot manage it.
+	if userID != p.ID && p.Authorize(ManageSessions) != nil {
+		return Reply{}, pgx.ErrNoRows
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "session.revoke", "session", session, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "session.revoke", "session", session, "success"); err != nil {
 		return Reply{}, err
 	}
 	response := Reply{Status: 204}
@@ -183,11 +186,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	return Commit(r, tx, response)
 }
 
-func (s *Server) profile(r *http.Request) (Reply, error) {
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) profile(r *http.Request, p Principal) (Reply, error) {
 	return s.profileBody(r, s.Pool, p)
 }
 
@@ -223,7 +222,7 @@ func (s *Server) profileBody(r *http.Request, q Queryer, p Principal) (Reply, er
 	}
 	return Detail(map[string]any{"id": p.ID, "email": p.Email, "display_name": p.DisplayName, "role": p.Role, "active": p.Active, "access_scope": p.AccessScope, "etag": p.ETag, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "projects": projects}, p.ETag), nil
 }
-func (s *Server) updateProfile(r *http.Request) (Reply, error) {
+func (s *Server) updateProfile(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Name string `json:"display_name"`
 	}
@@ -238,7 +237,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.sessionPrincipal(r, tx, "read")
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -248,7 +247,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), NewID(), p.ID); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "profile.update", "user", p.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.update", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", p.ID))
@@ -262,9 +261,14 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, reply)
 }
-func (s *Server) changePassword(r *http.Request) (Reply, error) { return s.writePassword(r, false) }
-func (s *Server) enrollPassword(r *http.Request) (Reply, error) { return s.writePassword(r, true) }
-func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
+func (s *Server) changePassword(r *http.Request, p Principal) (Reply, error) {
+	return s.writePassword(r, p, false)
+}
+func (s *Server) enrollPassword(r *http.Request, p Principal) (Reply, error) {
+	return s.writePassword(r, p, true)
+}
+func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply, error) {
+	var err error
 	var input struct {
 		Current string `json:"current_password"`
 		New     string `json:"new_password"`
@@ -273,10 +277,6 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	if err := password(input.New); err != nil {
-		return Reply{}, err
-	}
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
 		return Reply{}, err
 	}
 	if err = s.admit(r, "password", p.ID); err != nil {
@@ -312,7 +312,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.sessionPrincipal(r, tx, "read")
+	p, err = s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -341,7 +341,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 	response.Status = 200
 	response.Body = u
 	response.ETag = u.ETag
-	if err = Audit(r.Context(), tx, r, p.ID, "profile.password.update", "user", p.ID, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.password.update", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -358,7 +358,8 @@ func validatePurpose(purpose, resource string) error {
 	}
 	return Invalid("purpose", "Use password_enrollment, oidc_link, or oidc_unlink with its identity ID.")
 }
-func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
+func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	var input struct {
 		Password string `json:"current_password"`
 		Purpose  string `json:"purpose"`
@@ -368,10 +369,6 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if err := validatePurpose(input.Purpose, input.Resource); err != nil {
-		return Reply{}, err
-	}
-	p, err := s.sessionPrincipal(r, s.Pool, "read")
-	if err != nil {
 		return Reply{}, err
 	}
 	if err = s.admit(r, "reauthentication", p.ID); err != nil {
@@ -396,12 +393,15 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.sessionPrincipal(r, tx, "read")
+	p, err = s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
 	response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = Audit(r.Context(), tx, r, p.Actor(), "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -415,7 +415,7 @@ func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, r
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE session_id=$1 OR expires_at<=now()", p.SessionID); err != nil {
 		return Reply{}, err
 	}
-	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest("recent_auth", token), p.SessionID, purpose, target)
+	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest(secrets.RecentAuthDigest, token), p.SessionID, purpose, target)
 	return Reply{Status: 204, Cookies: []*http.Cookie{cookie(recentCookie, token, 5*time.Minute, true)}}, err
 }
 func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) error {
@@ -423,7 +423,7 @@ func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose,
 	if resource != "" {
 		target = resource
 	}
-	tag, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE digest=$1 AND session_id=$2 AND purpose=$3 AND resource_id IS NOT DISTINCT FROM $4::uuid AND expires_at>now()", s.Auth.Digest("recent_auth", cookieValue(r, recentCookie)), p.SessionID, purpose, target)
+	tag, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE digest=$1 AND session_id=$2 AND purpose=$3 AND resource_id IS NOT DISTINCT FROM $4::uuid AND expires_at>now()", s.Auth.Digest(secrets.RecentAuthDigest, cookieValue(r, recentCookie)), p.SessionID, purpose, target)
 	if err != nil {
 		return err
 	}

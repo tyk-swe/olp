@@ -19,24 +19,28 @@ func TestRecordEncryptionRejectsTamperingAndMisbinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ciphertext, err := ring.Seal("installation-a", "oidc_client", "record-a", []byte("private-value"))
+	ciphertext, err := ring.Seal("installation-a", OIDCClientSecret, "record-a", []byte("private-value"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := ring.Open("installation-a", "oidc_client", "record-a", 1, ciphertext)
+	recovered, err := ring.Open("installation-a", OIDCClientSecret, "record-a", 1, ciphertext)
 	if err != nil || string(recovered) != "private-value" {
 		t.Fatal("round trip failed", err)
 	}
 	if bytes.Contains(ciphertext, []byte("private-value")) {
 		t.Fatal("plaintext persisted")
 	}
-	for _, binding := range [][3]string{{"installation-b", "oidc_client", "record-a"}, {"installation-a", "mutation_replay", "record-a"}, {"installation-a", "oidc_client", "record-b"}} {
-		if _, err := ring.Open(binding[0], binding[1], binding[2], 1, ciphertext); err == nil {
+	for _, binding := range []struct {
+		installation string
+		purpose      SealPurpose
+		id           string
+	}{{"installation-b", OIDCClientSecret, "record-a"}, {"installation-a", MutationReplay, "record-a"}, {"installation-a", OIDCClientSecret, "record-b"}} {
+		if _, err := ring.Open(binding.installation, binding.purpose, binding.id, 1, ciphertext); err == nil {
 			t.Fatal("accepted misbound ciphertext", binding)
 		}
 	}
 	ciphertext[len(ciphertext)-1] ^= 1
-	if _, err = ring.Open("installation-a", "oidc_client", "record-a", 1, ciphertext); err == nil {
+	if _, err = ring.Open("installation-a", OIDCClientSecret, "record-a", 1, ciphertext); err == nil {
 		t.Fatal("accepted tampered ciphertext")
 	}
 	for _, input := range []string{`{}`, `{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"}]}`, `{"active_version":1,"keys":[{"version":1,"key":"invalid"}]}`} {
@@ -61,7 +65,7 @@ func TestSecretPermissionsAndDomainSeparatedDigests(t *testing.T) {
 	}
 	key := bytes.Repeat([]byte{1}, 32)
 	a, b := NewAuthKey(key, "a"), NewAuthKey(key, "b")
-	if bytes.Equal(a.Digest("session", "same"), a.Digest("api_key", "same")) || bytes.Equal(a.Digest("session", "same"), b.Digest("session", "same")) {
+	if bytes.Equal(a.Digest(SessionDigest, "same"), a.Digest(APIKeyDigest, "same")) || bytes.Equal(a.Digest(SessionDigest, "same"), b.Digest(SessionDigest, "same")) {
 		t.Fatal("authentication domains collide")
 	}
 }
@@ -74,7 +78,7 @@ func TestSecretAuthorityLabelsBindStoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := ring.Seal("installation-a", "oidc_client", "record-a", []byte("private-value"))
+	sealed, err := ring.Seal("installation-a", OIDCClientSecret, "record-a", []byte("private-value"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +97,7 @@ func TestSecretAuthorityLabelsBindStoredRecords(t *testing.T) {
 	mac := hmac.New(sha256.New, key)
 	labelled, _ := json.Marshal([]string{"olp-auth-v1", "installation-a", "session", "value"})
 	mac.Write(labelled)
-	if !bytes.Equal(NewAuthKey(key, "installation-a").Digest("session", "value"), mac.Sum(nil)) {
+	if !bytes.Equal(NewAuthKey(key, "installation-a").Digest(SessionDigest, "value"), mac.Sum(nil)) {
 		t.Fatal("digest is not bound to the olp-auth-v1 authority")
 	}
 }

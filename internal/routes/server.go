@@ -315,11 +315,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 	return targets, nil
 }
 
-func (s *Server) drafts(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) drafts(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -354,11 +350,7 @@ func (s *Server) drafts(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func (s *Server) draft(r *http.Request) (access.Reply, error) {
-	p, err := s.Access.Principal(r, s.Access.Pool, "read")
-	if err != nil {
-		return access.Reply{}, err
-	}
+func (s *Server) draft(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -367,13 +359,13 @@ func (s *Server) draft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !p.CanProject(d.ProjectID, false) {
-		return access.Reply{}, pgx.ErrNoRows
+	if err := p.Project(d.ProjectID, access.View); err != nil {
+		return access.Reply{}, err
 	}
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
 
-func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	var input DraftInput
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
@@ -384,7 +376,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -393,9 +385,14 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the created draft, so the caller must
+		// still reach its project to receive it.
+		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return access.Reply{}, err
+		}
 		return access.Commit(r, tx, *replayed)
 	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
@@ -408,7 +405,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.create", "route_draft", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.create", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: 201, Location: "/api/v1/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID, "fidelity": json.RawMessage(input.Fidelity)}}
@@ -418,7 +415,7 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -433,7 +430,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -441,7 +438,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -460,7 +457,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.update", "route_draft", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.update", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	updated, err := loadDraft(r.Context(), tx, id, false)
@@ -474,7 +471,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
+func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
 	if err != nil {
@@ -485,7 +482,7 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err := a.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -493,7 +490,7 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -502,7 +499,7 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.route_drafts WHERE id=$1", id); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.delete", "route_draft", id, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.delete", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: 204})
