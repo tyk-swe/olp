@@ -129,6 +129,11 @@ func TestCarryReportsWhetherARequestWasSent(t *testing.T) {
 	var reached atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached.Add(1)
+		// Closing each connection makes the plugin dial every request, so the
+		// closed upstream refuses the last one. A pooled connection could
+		// otherwise carry it before the plugin noticed the upstream closing
+		// that connection, leaving the request's outcome unknown.
+		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusOK)
 	}))
 	host, digest := carrierFixture(t, upstream.URL, DefaultLimits)
