@@ -106,7 +106,7 @@ func (e Enrollment) Save(ctx context.Context, tx pgx.Tx, a *access.Server) error
 // before it expires, and its session state is deleted as it is read. The
 // caller commits the claim before running the plugin, so no other replica can
 // continue the enrollment meanwhile. A device authorization is polled, never
-// continued, so it is not found.
+// continued: while pending, it is not found.
 func Claim(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, principal string) (Enrollment, error) {
 	e := Enrollment{ID: id, ProviderID: providerID, StartedBy: principal}
 	err := tx.QueryRow(ctx, `UPDATE olp.grant_enrollments SET continued_at=now()
@@ -152,17 +152,11 @@ func unavailable(ctx context.Context, q access.Queryer, providerID, id, principa
 	case err != nil:
 		return err
 	case continued:
-		return used()
+		return access.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
 	case polled:
 		return pgx.ErrNoRows
 	}
 	return access.Fail(410, "grant_enrollment_expired", "This grant enrollment expired. Start another, and paste back what the upstream returns within 10 minutes.")
-}
-
-// used is the problem for an enrollment that was continued, or whose poll
-// failed, which ended it.
-func used() error {
-	return access.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
 }
 
 // Complete records the credential version an enrollment's grant created, in

@@ -2,9 +2,12 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -255,8 +258,9 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	// The claim commits before the plugin reaches the upstream, so no other
-	// status request polls meanwhile.
-	tx, err := a.Begin(r)
+	// status request polls meanwhile. It locks the enrollment alone, not the
+	// installation, since status requests come every few seconds.
+	tx, err := a.Pool.Begin(r.Context())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -286,7 +290,10 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 	if err == nil {
 		return access.OK(grantEnrollmentStatus{Status: grants.Completed, Completion: staged.Body}), nil
 	}
-	if standing, err = enrollment.Settle(context.WithoutCancel(r.Context()), a.Pool, err); err != nil || standing.Status != grants.Pending {
+	standing, err = enrollment.Settle(r.Context(), a.Pool, err)
+	// A poll that ended the enrollment without a grant is audited, unless
+	// the enrollment was cancelled meanwhile.
+	if (err != nil || standing.Status != grants.Pending) && !errors.Is(err, pgx.ErrNoRows) {
 		if audited := s.auditFailedGrantEnrollment(r, p.ID, providerID); audited != nil {
 			return access.Reply{}, audited
 		}

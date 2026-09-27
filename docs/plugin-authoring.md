@@ -397,7 +397,7 @@ func (acme) PollGrant(ctx context.Context, poll plugin.GrantPoll) (plugin.Grant,
 
 - `StartGrant` requests the device authorization upstream and returns its
   `VerificationURL`, at one of the plugin's origins, the `UserCode` the operator
-  enters there (1–64 characters), how many seconds the code lasts in
+  enters there (1–64 bytes), how many seconds the code lasts in
   `ExpiresIn`, and the polling `Interval` in seconds, at most 300 (0 means 5).
   The `Session`, such as the device code, is handed to every poll. OLP polls
   for as long as the user code lasts, at most 30 minutes.

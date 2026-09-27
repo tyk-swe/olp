@@ -458,6 +458,33 @@ describe('grant enrollment by device authorization', () => {
     );
   });
 
+  it('asks again when OLP could not answer, and stops once a poll fails', async () => {
+    vi.mocked(pollGrantEnrollment)
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(
+        new ApiProblem({
+          type: 'https://openllmproxy.dev/problems/grant_enrollment_failed',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'The plugin could not enroll a grant (http_failed).'
+        })
+      );
+    await deviceAuthorization();
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(panel()).not.toBeNull();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'could not enroll a grant'
+    );
+    expect(panel()).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+  });
+
   it('reports a device authorization that expired', async () => {
     vi.mocked(pollGrantEnrollment).mockResolvedValue({ status: 'expired' });
     await deviceAuthorization();

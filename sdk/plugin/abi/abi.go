@@ -442,7 +442,7 @@ type DeviceAuthorization struct {
 	// VerificationURL is where the operator enters the user code, at one of
 	// the plugin's origins.
 	VerificationURL string `json:"verification_url"`
-	// UserCode is the code the operator enters: 1–64 characters without
+	// UserCode is the code the operator enters: 1–64 bytes of text without
 	// control characters.
 	UserCode string `json:"user_code"`
 	// ExpiresIn is how many seconds the user code lasts. OLP polls for at

@@ -6,7 +6,8 @@ import type { Provider } from '$lib/features/providers/api';
 type Schemas = components['schemas'];
 
 /** A grant enrollment in progress: the operator signs in upstream at its
- * authorization URL, then continues it with what the upstream returned. */
+ * authorization URL, then continues it with what the upstream returned; or
+ * approves its device authorization upstream while the console polls it. */
 export type GrantEnrollment = Schemas['GrantEnrollment'];
 /** The credential version a completed grant enrollment staged on the draft. */
 export type GrantEnrollmentCompletion = Schemas['GrantEnrollmentCompletion'];

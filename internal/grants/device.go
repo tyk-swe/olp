@@ -122,7 +122,7 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 }
 
 // stands reads where a device authorization stands when no poll is due. One
-// whose poll failed was continued, and is refused as such.
+// that a failed poll ended is refused as used.
 func stands(ctx context.Context, q access.Queryer, providerID, id, principal string) (Standing, error) {
 	var (
 		s                  Standing
@@ -141,7 +141,7 @@ func stands(ctx context.Context, q access.Queryer, providerID, id, principal str
 	case outcome != "":
 		s.Status = Status(outcome)
 	case continued:
-		return s, used()
+		return s, access.Fail(409, "grant_enrollment_used", "A poll of this device authorization failed, which ended the grant enrollment. Start another.")
 	case expired:
 		s.Status = Expired
 	default:
@@ -172,14 +172,19 @@ func Poll(ctx context.Context, rt *plugins.Runtime, q access.Queryer, e Enrollme
 // Settle records why a poll step Watch claimed obtained no grant, or why its
 // grant could not be staged, and returns where the enrollment stands: Pending,
 // polled again after the interval, which grows by 5 seconds when the upstream
-// asked to slow down; Denied; or Expired. Any other failure ends the
-// enrollment and is the problem Settle returns. An enrollment cancelled
-// meanwhile is not found.
+// asked to slow down; Denied; or Expired. A poll whose status request ctx
+// ended first leaves the enrollment Pending too, since what it found is
+// unknown. Any other failure ends the enrollment and is the problem Settle
+// returns. An enrollment cancelled meanwhile is not found.
 func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) (Standing, error) {
 	var code string
 	if reported, ok := errors.AsType[*abi.Error](failed); ok {
 		code = reported.Code
 	}
+	if ctx.Err() != nil {
+		code = abi.CodeAuthorizationPending
+	}
+	ctx = context.WithoutCancel(ctx)
 	switch code {
 	case abi.CodeAuthorizationPending, abi.CodeSlowDown:
 		if code == abi.CodeSlowDown {

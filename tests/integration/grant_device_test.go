@@ -3,7 +3,9 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -221,6 +223,9 @@ type deviceLoginAuthority struct {
 	// code is the authorization code the approved device login returned,
 	// until it is exchanged.
 	code string
+	// hold, while set, holds each poll until it is closed, once the poll is
+	// announced on arrived.
+	hold, arrived chan struct{}
 }
 
 func newDeviceLoginAuthority(t *testing.T) *deviceLoginAuthority {
@@ -234,6 +239,13 @@ func newDeviceLoginAuthority(t *testing.T) *deviceLoginAuthority {
 		writeJSON(w, map[string]string{"device_auth_id": "auth-1", "user_code": a.userCode, "interval": "7"})
 	})
 	mux.HandleFunc("POST /api/accounts/deviceauth/token", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		hold := a.hold
+		a.mu.Unlock()
+		if hold != nil {
+			a.arrived <- struct{}{}
+			<-hold
+		}
 		var polled struct {
 			DeviceAuthID string `json:"device_auth_id"`
 			UserCode     string `json:"user_code"`
@@ -281,6 +293,57 @@ func TestCustomDeviceAuthorizationVariantEnrollsThroughPluginSteps(t *testing.T)
 	}
 	pollDue(t, h, enrollment)
 	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
+
+	// A status request abandoned while its poll runs leaves the enrollment
+	// pending, whatever the poll found, and the next one polls again.
+	hold := make(chan struct{})
+	authority.mu.Lock()
+	authority.hold, authority.arrived = hold, make(chan struct{}, 1)
+	authority.mu.Unlock()
+	pollDue(t, h, enrollment)
+	ctx, abandon := context.WithCancel(t.Context())
+	request, err := http.NewRequestWithContext(ctx, "POST", h.HTTP.URL+path+"/grant-enrollments/"+enrollment["id"].(string)+"/poll", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Origin", h.Server.Origin)
+	request.Header.Set("X-CSRF-Token", owner.CSRF)
+	for _, cookie := range owner.Cookies {
+		request.AddCookie(cookie)
+	}
+	abandoned := make(chan error, 1)
+	go func() {
+		_, err := http.DefaultClient.Do(request)
+		abandoned <- err
+	}()
+	<-authority.arrived
+	abandon()
+	if err = <-abandoned; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the abandoned status request returned %v", err)
+	}
+	authority.mu.Lock()
+	authority.hold = nil
+	authority.mu.Unlock()
+	close(hold)
+	// Once the poll settles, the claim's lease gives way to the interval.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		var ended, leased bool
+		if err = h.Pool.QueryRow(t.Context(), "SELECT continued_at IS NOT NULL, poll_at>=now()+interval '30 seconds' FROM olp.grant_enrollments WHERE id=$1", enrollment["id"]).Scan(&ended, &leased); err != nil {
+			t.Fatal(err)
+		}
+		if ended {
+			t.Fatal("an abandoned status request ended the enrollment")
+		}
+		if !leased {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the abandoned poll never settled")
+		}
+	}
+	pollDue(t, h, enrollment)
+	wantStatus(t, pollGrantEnrollment(h, owner, path, enrollment, 200), "pending")
+
 	authority.mu.Lock()
 	authority.approved = true
 	authority.mu.Unlock()

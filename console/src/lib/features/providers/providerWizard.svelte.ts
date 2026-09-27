@@ -4,6 +4,7 @@ import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 import {
+  ApiProblem,
   errorMessage as message,
   fieldIssues,
   isEtagMismatch,
@@ -263,7 +264,8 @@ export class ProviderWizardState {
   /** Asks whether the operator approved the device upstream, and returns how
    * many seconds to wait before asking again, or null once the enrollment
    * ended. On approval, the grant is the draft's credential version, and the
-   * connection is tested with it. */
+   * connection is tested with it. A request that fails without an answer,
+   * such as while OLP restarts, is asked again. */
   pollGrantEnrollment = async (): Promise<number | null> => {
     const enrollment = this.grantEnrollment;
     if (!enrollment) return null;
@@ -276,8 +278,9 @@ export class ProviderWizardState {
     }
     // Cancelled meanwhile.
     if (this.grantEnrollment !== enrollment) return null;
-    if (status?.status === 'pending')
-      return status.interval ?? enrollment.device?.interval ?? null;
+    const interval = enrollment.device?.interval ?? null;
+    if (status?.status === 'pending') return status.interval ?? interval;
+    if (unanswered(failure)) return interval;
     this.grantEnrollment = null;
     if (status?.status === 'completed') {
       await this.run('grant', async () =>
@@ -298,9 +301,10 @@ export class ProviderWizardState {
     const enrollment = this.grantEnrollment;
     if (!enrollment) return;
     await this.run('grant-cancel', async () => {
-      await cancelGrantEnrollment(enrollment);
+      // Abandoned at once, so a status request answering meanwhile is ignored.
       this.grantEnrollment = null;
       this.grantInput = '';
+      await cancelGrantEnrollment(enrollment);
     });
   };
   discoverWizardProvider = async () => {
@@ -498,4 +502,12 @@ export class ProviderWizardState {
       this.grantInput = '';
     });
   }
+}
+
+/** Whether a request failed on the way, or OLP could not answer it for now,
+ * so that asking again may succeed. */
+function unanswered(error: unknown): boolean {
+  if (error instanceof ApiProblem)
+    return [502, 503, 504].includes(error.problem.status);
+  return error instanceof TypeError;
 }

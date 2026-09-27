@@ -273,7 +273,9 @@ denies it; and `expired` when the device authorization or the enrollment
 expires first. Polling stops at any of those, or when the enrollment is
 cancelled. A poll that fails otherwise, such as one that can't reach the
 upstream, ends the enrollment with the same problems as a failed continuation,
-and later status requests answer `grant_enrollment_used`.
+and later status requests answer `grant_enrollment_used`. A status request that
+ends before its poll does, such as one its client abandoned, leaves the
+enrollment pending, and the next one polls again.
 
 A grant enrollment lasts 10 minutes; a device authorization lasts as long as
 its user code, at most 30 minutes. Its session state, such as the PKCE verifier
