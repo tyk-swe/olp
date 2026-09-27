@@ -14,6 +14,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Content-policy validation and matching | `internal/contentpolicy/` |
 | Provider-resource mappings and stored-response accounting | `internal/resources/` and `internal/gateway/` |
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
+| Upstream failure classes and upstream acceptance | `internal/upstream/` |
 | Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
 | Ordered generation views and independent operation contracts | `internal/operations/` |
 | Strict generation admission, continuation and semantic obligations | `internal/interaction/` |
@@ -61,7 +62,12 @@ Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`
 owns shared attempt progression, reservations, settlement, health and failover
 for canonical inference and ordinary media. `executor.go` and `media.go` retain
 their transport deadlines, streaming commitment and delivery; adjacent resource,
-video, Bedrock, and realtime paths handle their specific lifecycles. Protocol
+video, Bedrock, and realtime paths handle their specific lifecycles. Every
+upstream call path, including media workers and provider probes, reports its
+evidence to the `internal/upstream` classifier: whether the request reached the
+upstream, the status and error it stated, and any interruption or transport
+failure. The classifier derives the failure class and upstream acceptance, so a
+transport other than net/http is classified the same way. Protocol
 codecs live in `internal/protocols/`. Independent key-authority refresh prevents
 a failed activation from retaining revoked access.
 

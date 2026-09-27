@@ -23,20 +23,21 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-// FailureClass mirrors the gateway attempt classification for media calls.
-type FailureClass string
+// FailureClass is the upstream failure class of a media call.
+type FailureClass = upstream.Class
 
 const (
-	ClassConnect        FailureClass = "connect"
-	ClassTimeout        FailureClass = "timeout"
-	ClassRateLimit      FailureClass = "rate_limit"
-	ClassUpstreamServer FailureClass = "upstream_server"
-	ClassUpstreamClient FailureClass = "upstream_client"
-	ClassCredential     FailureClass = "credential"
-	ClassProtocol       FailureClass = "protocol"
-	ClassCancelled      FailureClass = "cancelled"
+	ClassConnect        = upstream.Connect
+	ClassTimeout        = upstream.Timeout
+	ClassRateLimit      = upstream.RateLimit
+	ClassUpstreamServer = upstream.ServerError
+	ClassUpstreamClient = upstream.ClientError
+	ClassCredential     = upstream.Credential
+	ClassProtocol       = upstream.Protocol
+	ClassCancelled      = upstream.Cancelled
 )
 
 // Failure is one classified upstream media failure. Ambiguous marks a
@@ -133,18 +134,9 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}()
 	}
 
-	// dispatched records whether request bytes provably left this gateway.
+	// dispatched records whether request bytes may have reached the upstream.
 	var dispatched atomic.Bool
-	trace := &httptrace.ClientTrace{
-		WroteHeaders: func() { dispatched.Store(true) },
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				dispatched.Store(true)
-			}
-		},
-		GotFirstResponseByte: func() { dispatched.Store(true) },
-	}
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), call.Method, endpoint, body)
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, upstream.Trace(&dispatched)), call.Method, endpoint, body)
 	if err != nil {
 		if pipe != nil {
 			pipe.Close()
@@ -171,7 +163,8 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			<-multipartDone
 		}
 		if ctx.Err() != nil {
-			return nil, &Failure{Class: classifyTransport(ctx, err), Detail: "media request interrupted"}
+			class := upstream.Classifier{}.Classify(upstream.Evidence{Interrupted: interrupted(ctx, err), Err: err}).Class
+			return nil, &Failure{Class: class, Detail: "media request interrupted"}
 		}
 		return nil, &Failure{Class: ClassCredential, Detail: "provider credential could not be applied"}
 	}
@@ -196,10 +189,10 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			pipe.Close()
 			<-multipartDone
 		}
-		class := classifyTransport(ctx, err)
 		sent := dispatched.Load()
-		return nil, &Failure{Class: class, Dispatched: sent,
-			Ambiguous: call.Ambiguous && sent, Detail: "upstream transport failed"}
+		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: sent, Interrupted: interrupted(ctx, err), Err: err})
+		return nil, &Failure{Class: outcome.Class, Dispatched: sent,
+			Ambiguous: call.Ambiguous && outcome.Acceptance.Unresolved(), Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
 	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) {
@@ -219,17 +212,12 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		if failure.Upstream != nil {
 			failure.Upstream.Message = redactCredentials(failure.Upstream.Message, credentialValues)
 		}
-		switch {
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			failure.Class = ClassCredential
-		case resp.StatusCode == http.StatusTooManyRequests:
-			failure.Class = ClassRateLimit
+		// A non-idempotent call's work may survive a server failure, never a
+		// stated rejection.
+		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
+		failure.Class, failure.Ambiguous = outcome.Class, call.Ambiguous && outcome.Acceptance.Unresolved()
+		if failure.Class == ClassRateLimit {
 			failure.RetryAfter = retryAfterHeader(resp.Header.Get("Retry-After"), t.now())
-		case resp.StatusCode >= 500:
-			failure.Class = ClassUpstreamServer
-			failure.Ambiguous = call.Ambiguous
-		default:
-			failure.Class = ClassUpstreamClient
 		}
 		return nil, failure
 	}
@@ -546,19 +534,20 @@ func transcriptionTextContentType(resp *http.Response, format string) bool {
 	}
 }
 
-// classifyTransport maps a transport error and context state to a class.
-func classifyTransport(ctx context.Context, err error) FailureClass {
+// interrupted reports why this side ended a media exchange: the caller's
+// cancellation, or an expired deadline including a transport timeout.
+func interrupted(ctx context.Context, err error) error {
 	if errors.Is(err, context.Canceled) {
-		return ClassCancelled
+		return context.Canceled
 	}
 	if ctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
-		return ClassTimeout
+		return context.DeadlineExceeded
 	}
 	var nerr interface{ Timeout() bool }
 	if errors.As(err, &nerr) && nerr.Timeout() {
-		return ClassTimeout
+		return context.DeadlineExceeded
 	}
-	return ClassConnect
+	return nil
 }
 
 func retryAfterHeader(header string, now time.Time) time.Duration {

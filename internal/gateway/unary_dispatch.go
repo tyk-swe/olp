@@ -15,12 +15,13 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, operationplan.Result, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
-	state := &attemptState{parent: ctx}
+	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
 	attemptCtx, trace := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finish := func() {
 		if trace != nil {
@@ -36,9 +37,6 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		}
 		f.dispatched = state.dispatched.Load()
 		f.noRetry = f.dispatched
-		if f.dispatched && state.upstream.Load() != 3 && (class == classConnect || class == classTimeout || class == classUpstreamServer) {
-			class = classAmbiguous
-		}
 		f.class = class
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
@@ -47,7 +45,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 			fact.RetryAfter = &v
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = state.upstreamState()
+			fact.Interaction.UpstreamState = string(state.evidence().Acceptance())
 		}
 		fact.recordEvidence(f.billingUncertain())
 		finish()
@@ -108,28 +106,18 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	fact.FirstByte = &received
 	fact.Status = response.StatusCode
 	if response.StatusCode != http.StatusOK {
-		if response.StatusCode < 500 {
-			state.upstream.Store(3)
-		}
 		raw, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
 		failure := &attemptFailure{status: response.StatusCode, upstream: openai.ParseErrorBody(raw)}
 		if failure.upstream != nil {
 			failure.upstream.Message = redactCredentials(failure.upstream.Message, credentialValues)
 		}
-		switch {
-		case response.StatusCode == 401 || response.StatusCode == 403:
-			return fail(classCredential, failure)
-		case response.StatusCode == 429:
+		class := state.rejected(response.StatusCode, failure.upstream)
+		if class == classRateLimit {
 			failure.retryAfter = retryAfter(response.Header.Get("Retry-After"), s.now())
-			return fail(classRateLimit, failure)
-		case response.StatusCode >= 500:
-			return fail(classUpstreamServer, failure)
-		case contextWindowError(failure.upstream):
-			return fail(classContextWindow, failure)
 		}
-		return fail(classUpstreamClient, failure)
+		return fail(class, failure)
 	}
-	state.upstream.Store(2)
+	state.accepted = true
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
@@ -145,7 +133,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	if len(raw) > cap {
 		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
 	}
-	state.upstream.Store(3)
+	state.settled = true
 	result, err := plan.Decode(raw)
 	fact.Usage = accountingUsage(result.Usage)
 	for _, decision := range result.Decisions {

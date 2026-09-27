@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -743,9 +744,6 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	fact.Mode = "realtime"
 	finish := func(class string, e *Error) *Error {
 		fact.Class = class
-		if fact.Interaction != nil && fact.Status > 0 {
-			fact.Interaction.UpstreamState = usage.UpstreamTerminal
-		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
 		x.facts = append(x.facts, fact)
@@ -772,28 +770,16 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
 	if err != nil {
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = usage.UpstreamUnknown
-		}
 		status := 0
 		if resp != nil {
 			status = resp.StatusCode
 		}
 		fact.Status = status
-		class := classConnect
-		switch {
-		case ctx.Err() != nil:
-			class = classCancelled
-		case status == http.StatusUnauthorized || status == http.StatusForbidden:
-			class = classCredential
-		case status == http.StatusTooManyRequests:
-			class = classRateLimit
-		case status >= 500:
-			class = classUpstreamServer
-		case status != 0:
-			class = classUpstreamClient
+		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: status, Interrupted: ctx.Err(), Err: err})
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = string(outcome.Acceptance)
 		}
-		return nil, finish(class, upstreamError(&attemptFailure{status: status, upstream: upstreamResponseError(resp)}))
+		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: upstreamResponseError(resp)}))
 	}
 	fact.Class = "success"
 	if fact.Interaction != nil {

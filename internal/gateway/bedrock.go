@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error) {
@@ -245,14 +246,8 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	received := s.now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
@@ -268,16 +263,9 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: bedrockErrorBody(raw), dispatched: true}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -127,17 +128,18 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 func statusError(status int) *probeError {
 	detail := fmt.Sprintf("The upstream answered HTTP %d.", status)
 	code := "upstream_rejected"
+	class := upstream.Classifier{}.Classify(upstream.Evidence{Status: status}).Class
 	switch {
-	case status == 401:
-		code, detail = "upstream_authentication_failed", "The upstream rejected the credential (HTTP 401)."
-	case status == 403:
-		code, detail = "upstream_permission_denied", "The upstream denied access (HTTP 403)."
-	case status == 404:
-		code, detail = "upstream_not_found", "The upstream has no such resource (HTTP 404)."
-	case status == 429:
-		code, detail = "upstream_rate_limit", "The upstream is rate limiting (HTTP 429)."
-	case status >= 500:
+	case class == upstream.Credential && status == http.StatusForbidden:
+		code, detail = "upstream_permission_denied", fmt.Sprintf("The upstream denied access (HTTP %d).", status)
+	case class == upstream.Credential:
+		code, detail = "upstream_authentication_failed", fmt.Sprintf("The upstream rejected the credential (HTTP %d).", status)
+	case class == upstream.RateLimit:
+		code, detail = "upstream_rate_limit", fmt.Sprintf("The upstream is rate limiting (HTTP %d).", status)
+	case class == upstream.ServerError:
 		code, detail = "upstream_unavailable", fmt.Sprintf("The upstream failed (HTTP %d).", status)
+	case status == http.StatusNotFound:
+		code, detail = "upstream_not_found", "The upstream has no such resource (HTTP 404)."
 	}
 	return &probeError{Code: code, Detail: detail}
 }

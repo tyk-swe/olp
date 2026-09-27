@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 func ptrInt64(v int64) *int64 { return &v }
@@ -15,32 +13,6 @@ func streamChunk(model, text string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, `data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"`+model+`","choices":[{"index":0,"delta":{"content":"`+text+`"},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n")
-	}
-}
-
-func TestContextWindowClassificationIsExact(t *testing.T) {
-	for code, want := range map[string]bool{
-		"context_length_exceeded":     true,
-		"Context-Length-Exceeded":     true,
-		"context window exceeded":     true,
-		"max_context_length_exceeded": true,
-		"prompt_too_long":             true,
-		"invalid_value":               false,
-		"context_length":              false,
-		"":                            false,
-	} {
-		if got := contextWindowError(&openai.UpstreamError{Code: code}); got != want {
-			t.Errorf("code %q: got %v, want %v", code, got, want)
-		}
-	}
-	if !contextWindowError(&openai.UpstreamError{Type: "context_window_exceeded"}) {
-		t.Error("typed error type must classify")
-	}
-	if contextWindowError(&openai.UpstreamError{Message: "context_length_exceeded"}) {
-		t.Error("message prose must never classify")
-	}
-	if contextWindowError(nil) {
-		t.Error("nil upstream error must not classify")
 	}
 }
 

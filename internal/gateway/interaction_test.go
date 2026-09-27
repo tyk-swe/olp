@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -77,6 +78,33 @@ func TestStrictUnknownUpstreamOutcomeNeverFailsOver(t *testing.T) {
 			}
 			if fact.Interaction == nil || fact.Interaction.UpstreamState != want || fact.Interaction.ClientState != usage.ClientUnobserved || fact.Committed || !fact.BillingUncertain {
 				t.Fatalf("incorrect acceptance/observation evidence %+v / %+v", fact, fact.Interaction)
+			}
+		})
+	}
+}
+
+func TestStrictServerFailureLeavesUpstreamOutcomeUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		harness func(*testing.T) *harness
+		path    string
+		body    string
+	}{
+		{"generation", func(t *testing.T) *harness { return strictHarness(t, nil) }, "/v1/chat/completions", `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]}`},
+		{"image generation", func(t *testing.T) *harness { return strictMediaHarness(t, media.OpImageGeneration, nil, nil) }, "/v1/images/generations", `{"model":"` + routeSlug + `","prompt":"photo"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.harness(t)
+			h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"busy","type":"server_error"}}`))
+			resp := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(tc.body), nil)
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(raw), "ambiguous_upstream_result") || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
+				t.Fatalf("status=%d body=%s dispatches=%d/%d", resp.StatusCode, raw, h.mock.count("a"), h.mock.count("b"))
+			}
+			fact := h.sink.last(t).Attempts[0]
+			if fact.Class != classAmbiguous || fact.Status != http.StatusServiceUnavailable || fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamUnknown || !fact.BillingUncertain {
+				t.Fatalf("server failure evidence %+v / %+v", fact, fact.Interaction)
 			}
 		})
 	}
