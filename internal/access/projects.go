@@ -13,10 +13,7 @@ import (
 const projectFields = `'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
 const projectFrom = " FROM olp.projects p JOIN olp.users u ON u.id=p.created_by"
 
-func (s *Server) projects(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) projects(r *http.Request, _ Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -29,10 +26,7 @@ func (s *Server) projects(r *http.Request) (Reply, error) {
 	return ListReply(items, p), err
 }
 
-func (s *Server) project(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) project(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "project_id")
 	if err != nil {
 		return Reply{}, err
@@ -48,7 +42,7 @@ func duplicateName(err error) bool {
 	return errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "projects_name"
 }
 
-func (s *Server) createProject(r *http.Request) (Reply, error) {
+func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Name string `json:"name"`
 	}
@@ -60,7 +54,7 @@ func (s *Server) createProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, ManageProjects)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -105,7 +99,7 @@ func loadProject(r *http.Request, tx pgx.Tx, id string) (string, error) {
 	return etag, err
 }
 
-func (s *Server) updateProject(r *http.Request) (Reply, error) {
+func (s *Server) updateProject(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Name string `json:"name"`
 	}
@@ -121,7 +115,7 @@ func (s *Server) updateProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, ManageProjects)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -155,10 +149,7 @@ func (s *Server) updateProject(r *http.Request) (Reply, error) {
 const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u.email,'display_name',u.display_name,'role',u.role,'active',u.active,'added_by',m.added_by,'added_by_email',a.email,'created_at',m.created_at`
 const projectMemberFrom = " FROM olp.project_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.users a ON a.id=m.added_by"
 
-func (s *Server) projectMembers(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, ManageProjects); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) projectMembers(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "project_id")
 	if err != nil {
 		return Reply{}, err
@@ -185,11 +176,7 @@ func (s *Server) projectMembers(r *http.Request) (Reply, error) {
 	return ListReplyBy(items, p, func(item map[string]any) string { return item["user_id"].(string) }), nil
 }
 
-func (s *Server) projectMemberships(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) projectMemberships(r *http.Request, p Principal) (Reply, error) {
 	// The principal already carries its project roles, whether a member's
 	// own or those a management token inherits from its creator.
 	rows, err := s.Pool.Query(r.Context(), "SELECT id::text,name FROM olp.projects WHERE $1 OR id=ANY($2::uuid[]) ORDER BY lower(name),id", p.AllProjects, p.ProjectIDs())
@@ -212,11 +199,11 @@ func (s *Server) projectMemberships(r *http.Request) (Reply, error) {
 	return OK(map[string]any{"items": items}), rows.Err()
 }
 
-func (s *Server) putProjectMember(r *http.Request) (Reply, error) {
+func (s *Server) putProjectMember(r *http.Request, _ Principal) (Reply, error) {
 	return s.writeProjectMember(r, false)
 }
 
-func (s *Server) deleteProjectMember(r *http.Request) (Reply, error) {
+func (s *Server) deleteProjectMember(r *http.Request, _ Principal) (Reply, error) {
 	return s.writeProjectMember(r, true)
 }
 
@@ -245,7 +232,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, ManageProjects)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

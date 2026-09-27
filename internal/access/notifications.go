@@ -56,11 +56,7 @@ func notificationOperation(projectID *string) Operation {
 	return Keys
 }
 
-func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDestinations(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -76,11 +72,7 @@ func (s *Server) notificationDestinations(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) notificationDestination(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDestination(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "notification_destination_id")
 	if err != nil {
 		return Reply{}, err
@@ -141,7 +133,7 @@ func (s *Server) validateDestination(input destinationInput) error {
 	return s.validateDestinationURL(input.URL)
 }
 
-func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
+func (s *Server) createNotificationDestination(r *http.Request, _ Principal) (Reply, error) {
 	var input destinationInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -151,8 +143,11 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationOperation(input.ProjectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(input.ProjectID)); err != nil {
 		return Reply{}, err
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
@@ -206,7 +201,7 @@ func (s *Server) createNotificationDestination(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
+func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -228,7 +223,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Authenticate(r, tx)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -307,11 +302,7 @@ func (s *Server) updateNotificationDestination(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 
-func (s *Server) notificationRules(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationRules(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -327,11 +318,7 @@ func (s *Server) notificationRules(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) notificationRule(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationRule(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "budget_alert_rule_id")
 	if err != nil {
 		return Reply{}, err
@@ -416,7 +403,7 @@ func (s *Server) validateRule(r *http.Request, tx pgx.Tx, input ruleInput) error
 	return s.validateRuleDestination(r, tx, input)
 }
 
-func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
+func (s *Server) createNotificationRule(r *http.Request, _ Principal) (Reply, error) {
 	var input ruleInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -426,8 +413,11 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, notificationOperation(input.ProjectID))
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = p.Authorize(notificationOperation(input.ProjectID)); err != nil {
 		return Reply{}, err
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
@@ -483,7 +473,7 @@ func (s *Server) createNotificationRule(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
+func (s *Server) updateNotificationRule(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -507,7 +497,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Authenticate(r, tx)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -597,11 +587,7 @@ func (s *Server) updateNotificationRule(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 
-func (s *Server) notificationDeliveries(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) notificationDeliveries(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err

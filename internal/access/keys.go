@@ -138,11 +138,7 @@ func (s *Server) keyJSON() string {
 		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)))`
 }
 
-func (s *Server) apiKeys(r *http.Request) (Reply, error) {
-	principal, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) apiKeys(r *http.Request, principal Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -161,11 +157,7 @@ func (s *Server) apiKeys(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return ListReply(items, p), err
 }
-func (s *Server) apiKey(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) apiKey(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "api_key_id")
 	if err != nil {
 		return Reply{}, err
@@ -181,7 +173,7 @@ func (s *Server) apiKey(r *http.Request) (Reply, error) {
 	}
 	return Detail(json.RawMessage(data), etag), nil
 }
-func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
+func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	input := keyInput{KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -191,7 +183,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Keys)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -244,7 +236,7 @@ func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, result)
 }
-func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
+func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -270,7 +262,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Keys)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -343,8 +335,12 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag))
 }
-func (s *Server) revokeAPIKey(r *http.Request) (Reply, error) { return s.transitionKey(r, false) }
-func (s *Server) rotateAPIKey(r *http.Request) (Reply, error) { return s.transitionKey(r, true) }
+func (s *Server) revokeAPIKey(r *http.Request, _ Principal) (Reply, error) {
+	return s.transitionKey(r, false)
+}
+func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (Reply, error) {
+	return s.transitionKey(r, true)
+}
 func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	var input map[string]json.RawMessage
 	if rotate && r.ContentLength != 0 {
@@ -366,7 +362,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Keys)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

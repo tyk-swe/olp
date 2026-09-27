@@ -60,10 +60,7 @@ func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	err = json.Unmarshal(data, &c)
 	return c, err
 }
-func (s *Server) oidcConfiguration(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, AccessRead); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) oidcConfiguration(r *http.Request, _ Principal) (Reply, error) {
 	c, err := loadOIDC(r, s.Pool)
 	return Detail(c, c.ETag), err
 }
@@ -114,7 +111,7 @@ func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provi
 	}
 	return provider, oauth, nil
 }
-func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
+func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		DiscoveryURL  string        `json:"discovery_url"`
 		Issuer        string        `json:"issuer"`
@@ -129,9 +126,6 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		GroupMappings []roleMapping `json:"group_role_mappings"`
 	}
 	if err := Decode(r, &input); err != nil {
-		return Reply{}, err
-	}
-	if _, err := s.Principal(r, s.Pool, Access); err != nil {
 		return Reply{}, err
 	}
 	c := oidcConfiguration{DiscoveryURL: input.DiscoveryURL, Issuer: input.Issuer, ClientID: input.ClientID, Enabled: true, Scopes: input.Scopes, EmailClaim: input.EmailClaim, GroupsClaim: input.GroupsClaim, DefaultRole: input.DefaultRole, EmailMappings: input.EmailMappings, GroupMappings: input.GroupMappings}
@@ -196,7 +190,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Access)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -270,8 +264,10 @@ type oidcFlow struct {
 }
 
 func (s *Server) beginOIDCLogin(r *http.Request) (Reply, error) { return s.beginOIDC(r, "login") }
-func (s *Server) beginOIDCLink(r *http.Request) (Reply, error)  { return s.beginOIDC(r, "link") }
-func (s *Server) beginOIDCReauthentication(r *http.Request) (Reply, error) {
+func (s *Server) beginOIDCLink(r *http.Request, _ Principal) (Reply, error) {
+	return s.beginOIDC(r, "link")
+}
+func (s *Server) beginOIDCReauthentication(r *http.Request, _ Principal) (Reply, error) {
 	return s.beginOIDC(r, "reauthenticate")
 }
 func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
@@ -329,7 +325,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.ReturnTo = "/"
 	}
 	if kind != "login" {
-		p, err := s.Principal(r, tx, Self)
+		p, err := s.Reauthorize(r, tx)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -531,7 +527,10 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	// reauthentication result. Ordinary login is never a recent-auth proof.
 	var p Principal
 	if flow.Kind != "login" {
-		p, err = s.Principal(r, tx, Self)
+		p, err = s.Authenticate(r, tx)
+		if err == nil {
+			err = p.Authorize(Self)
+		}
 		if err != nil {
 			return Reply{}, err
 		}
@@ -733,11 +732,8 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 	return usable, rows.Err()
 }
 
-func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	var local, localEnabled, enabled, locallyManaged bool
 	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management='local' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
@@ -766,7 +762,7 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 	}
 	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
-func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
+func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "identity_id")
 	if err != nil {
 		return Reply{}, err
@@ -776,7 +772,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Self)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

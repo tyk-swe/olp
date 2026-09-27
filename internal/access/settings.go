@@ -8,14 +8,8 @@ import (
 	"time"
 )
 
-func (s *Server) settings(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
-	if err = p.AuthorizeInstallation(Read); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) settings(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(s) FROM olp.settings s ORDER BY key")
 	if err != nil {
 		return Reply{}, err
@@ -23,20 +17,14 @@ func (s *Server) settings(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return OK(map[string]any{"items": items}), err
 }
-func (s *Server) setting(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
-	if err = p.AuthorizeInstallation(Read); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) setting(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	var data []byte
 	var etag string
 	err = s.Pool.QueryRow(r.Context(), "SELECT to_jsonb(s),etag::text FROM olp.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
 	return Detail(json.RawMessage(data), etag), err
 }
-func (s *Server) updateSetting(r *http.Request) (Reply, error) {
+func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Value string `json:"value"`
 	}
@@ -66,7 +54,7 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Settings)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -100,14 +88,8 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
-func (s *Server) auditEvents(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
-	if err = p.AuthorizeInstallation(Read); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) auditEvents(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err

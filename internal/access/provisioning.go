@@ -17,7 +17,7 @@ func provisioningID(r *http.Request, name, field string, max int) (string, error
 	return value, nil
 }
 
-func (s *Server) provisionUser(r *http.Request) (Reply, error) {
+func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
@@ -53,7 +53,7 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Access)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -115,7 +115,7 @@ func (s *Server) provisionUser(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(u, u.ETag))
 }
 
-func (s *Server) deprovisionUser(r *http.Request) (Reply, error) {
+func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
 	source, err := provisioningID(r, "source", "source", 100)
 	if err != nil {
 		return Reply{}, err
@@ -129,7 +129,7 @@ func (s *Server) deprovisionUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Access)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

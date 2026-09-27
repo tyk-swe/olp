@@ -51,11 +51,7 @@ func (s *Server) budgetGroupJSON() string {
 		`||jsonb_build_object('enforcement_active',` + enforcement + `))`
 }
 
-func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) budgetGroups(r *http.Request, p Principal) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -68,11 +64,7 @@ func (s *Server) budgetGroups(r *http.Request) (Reply, error) {
 	return ListReply(items, page), err
 }
 
-func (s *Server) budgetGroup(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Read)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) budgetGroup(r *http.Request, p Principal) (Reply, error) {
 	id, err := IDParam(r, "budget_group_id")
 	if err != nil {
 		return Reply{}, err
@@ -89,7 +81,7 @@ func (s *Server) budgetGroup(r *http.Request) (Reply, error) {
 	return Detail(json.RawMessage(data), etag), nil
 }
 
-func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
+func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
 	var input budgetGroupInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -99,7 +91,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Keys)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -130,7 +122,7 @@ func (s *Server) createBudgetGroup(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
+func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
 	var patch map[string]json.RawMessage
 	if err := Decode(r, &patch); err != nil {
 		return Reply{}, err
@@ -156,7 +148,7 @@ func (s *Server) updateBudgetGroup(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Keys)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

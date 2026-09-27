@@ -97,11 +97,8 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, response)
 }
-func (s *Server) currentSession(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) currentSession(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	if p.SessionID != "" {
 		if _, err = s.Pool.Exec(r.Context(), "UPDATE olp.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
 			return Reply{}, err
@@ -110,11 +107,7 @@ func (s *Server) currentSession(r *http.Request) (Reply, error) {
 	body, err := s.sessionBody(r, s.Pool, p.User, p.Token)
 	return OK(body), err
 }
-func (s *Server) sessions(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) sessions(r *http.Request, p Principal) (Reply, error) {
 	pagination, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -143,15 +136,17 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	return ListReply(items, pagination), err
 }
 
-func (s *Server) logout(r *http.Request) (Reply, error)        { return s.deleteSession(r, true) }
-func (s *Server) revokeSession(r *http.Request) (Reply, error) { return s.deleteSession(r, false) }
+func (s *Server) logout(r *http.Request, _ Principal) (Reply, error) { return s.deleteSession(r, true) }
+func (s *Server) revokeSession(r *http.Request, _ Principal) (Reply, error) {
+	return s.deleteSession(r, false)
+}
 func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Self)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -187,11 +182,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	return Commit(r, tx, response)
 }
 
-func (s *Server) profile(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
-		return Reply{}, err
-	}
+func (s *Server) profile(r *http.Request, p Principal) (Reply, error) {
 	return s.profileBody(r, s.Pool, p)
 }
 
@@ -227,7 +218,7 @@ func (s *Server) profileBody(r *http.Request, q Queryer, p Principal) (Reply, er
 	}
 	return Detail(map[string]any{"id": p.ID, "email": p.Email, "display_name": p.DisplayName, "role": p.Role, "active": p.Active, "access_scope": p.AccessScope, "etag": p.ETag, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "projects": projects}, p.ETag), nil
 }
-func (s *Server) updateProfile(r *http.Request) (Reply, error) {
+func (s *Server) updateProfile(r *http.Request, _ Principal) (Reply, error) {
 	var input struct {
 		Name string `json:"display_name"`
 	}
@@ -242,7 +233,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, Self)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -266,9 +257,14 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	}
 	return Commit(r, tx, reply)
 }
-func (s *Server) changePassword(r *http.Request) (Reply, error) { return s.writePassword(r, false) }
-func (s *Server) enrollPassword(r *http.Request) (Reply, error) { return s.writePassword(r, true) }
-func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
+func (s *Server) changePassword(r *http.Request, p Principal) (Reply, error) {
+	return s.writePassword(r, p, false)
+}
+func (s *Server) enrollPassword(r *http.Request, p Principal) (Reply, error) {
+	return s.writePassword(r, p, true)
+}
+func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply, error) {
+	var err error
 	var input struct {
 		Current string `json:"current_password"`
 		New     string `json:"new_password"`
@@ -277,10 +273,6 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	if err := password(input.New); err != nil {
-		return Reply{}, err
-	}
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
 		return Reply{}, err
 	}
 	if err = s.admit(r, "password", p.ID); err != nil {
@@ -316,7 +308,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Principal(r, tx, Self)
+	p, err = s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -362,7 +354,8 @@ func validatePurpose(purpose, resource string) error {
 	}
 	return Invalid("purpose", "Use password_enrollment, oidc_link, or oidc_unlink with its identity ID.")
 }
-func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
+func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
+	var err error
 	var input struct {
 		Password string `json:"current_password"`
 		Purpose  string `json:"purpose"`
@@ -372,10 +365,6 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if err := validatePurpose(input.Purpose, input.Resource); err != nil {
-		return Reply{}, err
-	}
-	p, err := s.Principal(r, s.Pool, Self)
-	if err != nil {
 		return Reply{}, err
 	}
 	if err = s.admit(r, "reauthentication", p.ID); err != nil {
@@ -400,7 +389,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Principal(r, tx, Self)
+	p, err = s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

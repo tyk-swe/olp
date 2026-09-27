@@ -61,10 +61,7 @@ func validManagementToken(input managementTokenInput) error {
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
 const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
-func (s *Server) managementTokens(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, ManageTokens); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) managementTokens(r *http.Request, _ Principal) (Reply, error) {
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -77,10 +74,7 @@ func (s *Server) managementTokens(r *http.Request) (Reply, error) {
 	return ListReply(items, p), err
 }
 
-func (s *Server) managementToken(r *http.Request) (Reply, error) {
-	if _, err := s.Principal(r, s.Pool, ManageTokens); err != nil {
-		return Reply{}, err
-	}
+func (s *Server) managementToken(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "management_token_id")
 	if err != nil {
 		return Reply{}, err
@@ -91,7 +85,7 @@ func (s *Server) managementToken(r *http.Request) (Reply, error) {
 	return Detail(json.RawMessage(data), etag), err
 }
 
-func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
+func (s *Server) createManagementToken(r *http.Request, _ Principal) (Reply, error) {
 	var input managementTokenInput
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
@@ -101,7 +95,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, ManageTokens)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -152,7 +146,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
+func (s *Server) revokeManagementToken(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "management_token_id")
 	if err != nil {
 		return Reply{}, err
@@ -162,7 +156,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, ManageTokens)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
