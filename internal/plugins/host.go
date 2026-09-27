@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -108,10 +109,18 @@ func (h *Host) Call(ctx context.Context, digest string, call Call, result any) e
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && !awaitingApproval(call.Method, err) {
 		h.runtime.log.Warn("plugin call failed", "plugin_digest", digest, "plugin_method", call.Method, "error", err)
 	}
 	return err
+}
+
+// awaitingApproval reports whether err is a device authorization's poll
+// finding the device not approved yet, which its caller expects every
+// interval.
+func awaitingApproval(method string, err error) bool {
+	reported, ok := errors.AsType[*abi.Error](err)
+	return ok && method == abi.MethodGrantPoll && (reported.Code == abi.CodeAuthorizationPending || reported.Code == abi.CodeSlowDown)
 }
 
 // Close releases the code of every plugin the Host holds, stopping unconfined

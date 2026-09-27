@@ -437,6 +437,43 @@ against a fictional authority with the authorization code flow and PKCE, and
 refreshes its grants with rotating refresh tokens. It sends each account's
 requests to the API base URL its token response names.
 
+### Device authorization
+
+An upstream that authorizes a device instead, with the OAuth 2.0 device
+authorization grant (RFC 8628) or its own variant, has `StartGrant` return a
+`Device` rather than a `URL`, and the plugin implements `plugin.GrantPoller`
+too:
+
+```go
+func (acme) PollGrant(ctx context.Context, poll plugin.GrantPoll) (plugin.Grant, error)
+```
+
+- `StartGrant` requests the device authorization upstream and returns its
+  `VerificationURL`, at one of the plugin's origins, the `UserCode` the operator
+  enters there (1–64 bytes), how many seconds the code lasts in
+  `ExpiresIn`, and the polling `Interval` in seconds, at most 300 (0 means 5).
+  The `Session`, such as the device code, is handed to every poll. OLP polls
+  for as long as the user code lasts, at most 30 minutes.
+- While the operator approves the device upstream, OLP calls `PollGrant`,
+  waiting the interval between polls. It returns the `Grant` once the operator
+  approved, like `ExchangeGrant` does, and until then fails with a
+  `*plugin.Error` whose code is RFC 8628's: `abi.CodeAuthorizationPending`, or
+  `abi.CodeSlowDown` to have OLP wait 5 seconds longer from then on; and
+  `abi.CodeAccessDenied` or `abi.CodeExpiredToken` once the operator denied the
+  device or it expired, which ends the enrollment. Any other failure ends it
+  too.
+
+OLP never calls `ExchangeGrant` for a device authorization, so a plugin whose
+upstream only authorizes devices may have it report an error.
+
+An upstream's own variant maps onto the same steps. For one that answers
+polls with an HTTP 403 until the operator approves, and then with an
+authorization code to exchange, `PollGrant` reports the 403 as
+`abi.CodeAuthorizationPending`, and after the approval exchanges the code with
+`plugin.Fetch` within the same poll. The reference plugin's
+`reference-device-chat` profile implements RFC 8628 against its fictional
+authority, and places and refreshes its grants as `reference-grant-chat` does.
+
 ### Fetch
 
 `plugin.Fetch` sends an HTTP request through OLP, the only way a plugin reaches
@@ -590,8 +627,9 @@ A response carries either a result or an error:
 ```
 
 Error codes `invalid_request`, `unknown_method`, `internal`, `state_mismatch`,
-`origin_not_approved` and `http_failed` are shared; a plugin may report codes of
-its own.
+`origin_not_approved` and `http_failed` are shared, as are RFC 8628's
+`authorization_pending`, `slow_down`, `access_denied` and `expired_token` for
+`grant_poll`; a plugin may report codes of its own.
 
 ### Calls for a provider
 
@@ -613,14 +651,18 @@ OLP calls, through `olp_call`:
 | --- | --- | --- |
 | `manifest` | none | The manifest, as described above. |
 | `sign` | `{"profile": "…", "method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>", "credential": "…"}` | `{"headers": {"Name": "value"}}` |
-| `grant_start` | `{"profile": "…"}` | `{"url": "…", "session": "…"}` |
+| `grant_start` | `{"profile": "…"}` | `{"url": "…", "session": "…"}`, or `{"device": {"verification_url": "…", "user_code": "…", "expires_in": 900, "interval": 5}, "session": "…"}` |
 | `grant_exchange` | `{"profile": "…", "session": "…", "input": "…"}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600, "principal": "…", "facts": {"name": "value"}}` |
+| `grant_poll` | `{"profile": "…", "session": "…"}` | As for `grant_exchange` |
 | `grant_refresh` | `{"profile": "…", "refresh_token": "…", "facts": {"name": "value"}}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600}`, optionally with `principal` and `facts` |
 
 OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
 the provider whose request it signs, and the grant steps only for profiles that
 declare `"grant": {"facts": ["name"]}`, on behalf of the provider enrolling or
-refreshing a grant.
+refreshing a grant: `grant_exchange` after a `grant_start` that returned a
+`url`, and `grant_poll`, once per interval, after one that returned a `device`,
+until it returns a grant or fails with another code than
+`authorization_pending` or `slow_down`.
 
 ### Capabilities
 
@@ -632,8 +674,8 @@ The plugin calls, through `host_call`:
 | `http` | `{"method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>"}` | `{"status": 200, "header": {"Name": ["value"]}, "body": "<base64>"}` |
 
 A call may use only the capabilities OLP grants it; any other capability returns
-`unknown_method`. OLP grants `http` to `grant_start`, `grant_exchange` and
-`grant_refresh`.
+`unknown_method`. OLP grants `http` to `grant_start`, `grant_exchange`,
+`grant_poll` and `grant_refresh`.
 
 ### Stdio transport
 

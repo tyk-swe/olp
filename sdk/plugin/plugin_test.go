@@ -188,6 +188,33 @@ func TestServeRefreshesGrants(t *testing.T) {
 	}
 }
 
+// poller is a plugin that enrolls grants by device authorization.
+type poller struct{ enroller }
+
+// PollGrant reports the device approved once the session says so.
+func (poller) PollGrant(_ context.Context, poll GrantPoll) (Grant, error) {
+	if poll.Session != "approved" {
+		return Grant{}, &Error{Code: abi.CodeAuthorizationPending, Message: "not yet"}
+	}
+	return Grant{AccessToken: "at", Principal: "device@acme.example"}, nil
+}
+
+// A GrantPoller polls a device authorization; a GrantEnroller that isn't one
+// polls nothing.
+func TestServePollsDeviceAuthorizations(t *testing.T) {
+	response := serveWith(t, poller{}, `{"method":"grant_poll","params":{"profile":"acme-account","session":"approved"}}`)
+	var grant Grant
+	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.Principal != "device@acme.example" {
+		t.Fatalf("grant_poll response %+v", response)
+	}
+	if response = serveWith(t, poller{}, `{"method":"grant_poll","params":{"profile":"acme-account","session":"device"}}`); response.Error == nil || response.Error.Code != abi.CodeAuthorizationPending {
+		t.Fatalf("grant_poll of a pending device answered %+v", response)
+	}
+	if response = serveWith(t, enroller{}, `{"method":"grant_poll","params":{"session":"approved"}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
+		t.Fatalf("a plugin without device authorization answered %+v", response)
+	}
+}
+
 // A plugin can't declare a profile that authenticates with a grant without a
 // GrantEnroller: it reports no manifest, so OLP never installs it.
 func TestServeRefusesAGrantProfileWithoutAGrantEnroller(t *testing.T) {

@@ -6,10 +6,13 @@ import type { Provider } from '$lib/features/providers/api';
 type Schemas = components['schemas'];
 
 /** A grant enrollment in progress: the operator signs in upstream at its
- * authorization URL, then continues it with what the upstream returned. */
+ * authorization URL, then continues it with what the upstream returned; or
+ * approves its device authorization upstream while the console polls it. */
 export type GrantEnrollment = Schemas['GrantEnrollment'];
 /** The credential version a completed grant enrollment staged on the draft. */
 export type GrantEnrollmentCompletion = Schemas['GrantEnrollmentCompletion'];
+/** Where a grant enrollment by device authorization stands. */
+export type GrantEnrollmentStatus = Schemas['GrantEnrollmentStatus'];
 
 /** Starts grant enrollment for the provider draft the operator sees, for its
  * default credential slot or, to re-enroll a slot's grant, the slot named. */
@@ -45,6 +48,25 @@ export async function continueGrantEnrollment(
         }
       },
       body: { input }
+    }
+  );
+  return result(response.data, response.error, response.response);
+}
+
+/** Asks where a grant enrollment by device authorization stands. Once its
+ * interval has passed, the request polls the upstream through the plugin. */
+export async function pollGrantEnrollment(
+  enrollment: Pick<GrantEnrollment, 'id' | 'provider_id'>
+): Promise<GrantEnrollmentStatus> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll',
+    {
+      params: {
+        path: {
+          provider_id: enrollment.provider_id,
+          enrollment_id: enrollment.id
+        }
+      }
     }
   );
   return result(response.data, response.error, response.response);

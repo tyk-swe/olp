@@ -2,9 +2,12 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -29,9 +32,10 @@ type grantStart struct {
 
 // startGrantEnrollment runs the first step of grant enrollment for a draft
 // whose plugin profile authenticates with a grant: the plugin builds the
-// authorization request the operator opens to sign in upstream. The grant
-// will back the credential slot the request names, or the default slot; for a
-// slot a grant already backs, this re-enrolls its grant.
+// authorization request the operator opens to sign in upstream, or starts a
+// device authorization the operator approves upstream. The grant will back the
+// credential slot the request names, or the default slot; for a slot a grant
+// already backs, this re-enrolls its grant.
 func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
@@ -105,9 +109,13 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	if err = enrollment.Save(r.Context(), tx, a); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 201, Body: map[string]any{
-		"id": enrollment.ID, "provider_id": id, "slot_id": slotID, "authorization_url": enrollment.AuthorizationURL, "expires_at": enrollment.ExpiresAt,
-	}})
+	body := map[string]any{"id": enrollment.ID, "provider_id": id, "slot_id": slotID, "expires_at": enrollment.ExpiresAt}
+	if device := enrollment.Device; device != nil {
+		body["device"] = map[string]any{"verification_url": device.VerificationURL, "user_code": device.UserCode, "interval": device.Interval}
+	} else {
+		body["authorization_url"] = enrollment.AuthorizationURL
+	}
+	return access.Commit(r, tx, access.Reply{Status: 201, Body: body})
 }
 
 type grantContinuation struct {
@@ -211,6 +219,9 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = enrollment.Complete(r.Context(), tx, credentialID); err != nil {
+		return access.Reply{}, err
+	}
 	bound, err := tx.Exec(r.Context(), "UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL WHERE provider_id=$1 AND id=$2", current.ID, enrollment.SlotID, credentialID)
 	if err != nil {
 		return access.Reply{}, err
@@ -228,14 +239,119 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.enroll", "provider_credential", credentialID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: map[string]any{
-		"provider_id": current.ID, "etag": etag, "credential_id": credentialID, "credential_version": version, "principal": grant.Principal,
-	}})
+	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(current.ID, etag, grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal})})
 }
 
-// auditFailedGrantEnrollment records a continuation that failed, in its own
-// transaction once the completion's rolled back. Like every audit record, it
-// names the principal and the provider, never what was pasted back.
+// completion is what a completed grant enrollment reports: the credential
+// version its grant created, staged on the provider draft with the ETag.
+func completion(providerID, etag string, credential grants.Credential) map[string]any {
+	return map[string]any{"provider_id": providerID, "etag": etag, "credential_id": credential.ID, "credential_version": credential.Version, "principal": credential.Principal}
+}
+
+// A grantEnrollmentStatus is what a status request reports about a grant
+// enrollment by device authorization.
+type grantEnrollmentStatus struct {
+	Status grants.Status `json:"status"`
+	// Interval is how many seconds to wait before the next status request,
+	// while the enrollment is pending.
+	Interval int64 `json:"interval,omitempty"`
+	// Completion is what a continuation returns, once the enrollment
+	// completed.
+	Completion any `json:"completion,omitempty"`
+}
+
+// pollGrantEnrollment serves a status request for a grant enrollment by
+// device authorization. Control runs no background jobs, so status requests
+// drive polling: one made once the plugin's interval has passed since the
+// last poll runs one poll step, and since the enrollment's session state is
+// persisted, any control replica serves the next. Once the operator approves
+// the device, the grant is staged like a pasted-back one.
+func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
+	a := s.Access
+	providerID, err := access.IDParam(r, "provider_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	enrollmentID, err := access.IDParam(r, "enrollment_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	// The claim commits before the plugin reaches the upstream, so no other
+	// status request polls meanwhile. It locks the enrollment alone, not the
+	// installation, since status requests come every few seconds.
+	tx, err := a.Pool.Begin(r.Context())
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := a.Principal(r, tx, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	current, err := load(r.Context(), tx, providerID, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
+	enrollment, standing, err := grants.Watch(r.Context(), tx, a, providerID, enrollmentID, p.ID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		return access.Reply{}, err
+	}
+	if enrollment == nil {
+		return access.OK(grantStatus(current, standing)), nil
+	}
+	staged, err := s.pollGrant(r, current, *enrollment)
+	if err == nil {
+		return access.OK(grantEnrollmentStatus{Status: grants.Completed, Completion: staged.Body}), nil
+	}
+	standing, err = enrollment.Settle(r.Context(), a.Pool, err)
+	// A poll that ended the enrollment without a grant is audited, unless
+	// the enrollment was cancelled meanwhile.
+	if (err != nil || standing.Status != grants.Pending) && !errors.Is(err, pgx.ErrNoRows) {
+		if audited := s.auditFailedGrantEnrollment(r, p.ID, providerID); audited != nil {
+			return access.Reply{}, audited
+		}
+	}
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return access.OK(grantStatus(current, standing)), nil
+}
+
+// pollGrant runs a poll step of a device authorization, for the provider with
+// its current options and over its network path, and stages the grant once
+// the operator approved the device.
+func (s *Server) pollGrant(r *http.Request, current *record, enrollment grants.Enrollment) (access.Reply, error) {
+	cfg := &current.Configuration
+	client, err := s.connectionClient(r.Context(), cfg, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	grant, err := grants.Poll(r.Context(), s.Plugins, enrollment, cfg.Options.PluginOptions, client)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return s.stageGrant(r, current, enrollment, grant)
+}
+
+// grantStatus reports where a device authorization stands.
+func grantStatus(current *record, standing grants.Standing) grantEnrollmentStatus {
+	status := grantEnrollmentStatus{Status: standing.Status, Interval: int64(standing.Interval / time.Second)}
+	if standing.Status == grants.Completed {
+		status.Completion = completion(current.ID, current.ETag, standing.Credential)
+	}
+	return status
+}
+
+// auditFailedGrantEnrollment records a continuation that failed, or a device
+// authorization's poll that ended it without a grant, in its own transaction
+// once the completion's rolled back. Like every audit record, it names the
+// principal and the provider, never what was pasted back.
 func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
 	tx, err := s.Access.Pool.Begin(ctx)

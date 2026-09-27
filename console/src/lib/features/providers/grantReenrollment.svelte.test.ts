@@ -10,6 +10,7 @@ import {
 } from './credentials';
 import {
   continueGrantEnrollment,
+  pollGrantEnrollment,
   startGrantEnrollment,
   type GrantEnrollment
 } from './grants';
@@ -22,6 +23,7 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
 vi.mock('./grants', () => ({
   startGrantEnrollment: vi.fn(),
   continueGrantEnrollment: vi.fn(),
+  pollGrantEnrollment: vi.fn(),
   cancelGrantEnrollment: vi.fn()
 }));
 vi.mock('./credentials', async (original) => ({
@@ -193,6 +195,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   if (component) await unmount(component);
   component = undefined;
   client.clear();
@@ -340,5 +343,62 @@ describe('grant re-enrollment in the credential pool', () => {
       expect.objectContaining({ id: provider.id }),
       'slot-standby'
     );
+  });
+
+  it('enrolls a slot by device authorization, polling until the operator approves', async () => {
+    const device: GrantEnrollment = {
+      id: 'enrollment-2',
+      provider_id: provider.id,
+      slot_id: 'slot-standby',
+      device: {
+        verification_url: 'https://login.example.com/device',
+        user_code: 'ABCD-EFGH',
+        interval: 5
+      },
+      expires_at: '2026-09-27T06:30:00Z'
+    };
+    vi.mocked(startGrantEnrollment).mockResolvedValue(device);
+    vi.mocked(pollGrantEnrollment)
+      .mockResolvedValueOnce({ status: 'pending', interval: 10 })
+      .mockResolvedValueOnce({
+        status: 'completed',
+        completion: {
+          provider_id: provider.id,
+          etag: 'v4',
+          credential_id: 'credential-2',
+          credential_version: 2,
+          principal
+        }
+      });
+    await openProvider();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    button(pool(), 'Enroll grant')!.click();
+    for (let i = 0; i < 20 && !panel(); i++) {
+      await vi.advanceTimersByTimeAsync(0);
+      flushSync();
+    }
+    expect(panel()!.querySelector('.user-code')?.textContent).toContain(
+      'ABCD-EFGH'
+    );
+    expect(startGrantEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: provider.id }),
+      'slot-standby'
+    );
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(pollGrantEnrollment).toHaveBeenCalledWith(device);
+    flushSync();
+    expect(panel()).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(pool().querySelector('[role="status"]')?.textContent).toContain(
+        `Standby: grant enrolled for ${principal} as credential version 2, pending activation.`
+      );
+    });
+    expect(panel()).toBeNull();
   });
 });

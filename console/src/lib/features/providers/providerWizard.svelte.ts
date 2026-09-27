@@ -7,6 +7,7 @@ import {
   errorMessage as message,
   fieldIssues,
   isEtagMismatch,
+  unanswered,
   type FieldIssue
 } from '$lib/api/http';
 import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
@@ -35,8 +36,10 @@ import type { ProviderProfile } from '$lib/features/providers/profiles';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
+  pollGrantEnrollment,
   startGrantEnrollment,
-  type GrantEnrollment
+  type GrantEnrollment,
+  type GrantEnrollmentStatus
 } from '$lib/features/providers/grants';
 import {
   authOptionsFor,
@@ -258,13 +261,50 @@ export class ProviderWizardState {
       await this.testConnection((await this.refetchWizardModels()).provider);
     });
   };
+  /** Asks whether the operator approved the device upstream, and returns how
+   * many seconds to wait before asking again, or null once the enrollment
+   * ended. On approval, the grant is the draft's credential version, and the
+   * connection is tested with it. A request that fails without an answer,
+   * such as while OLP restarts, is asked again. */
+  pollGrantEnrollment = async (): Promise<number | null> => {
+    const enrollment = this.grantEnrollment;
+    if (!enrollment) return null;
+    let status: GrantEnrollmentStatus | undefined;
+    let failure: unknown;
+    try {
+      status = await pollGrantEnrollment(enrollment);
+    } catch (error) {
+      failure = error;
+    }
+    // Cancelled meanwhile.
+    if (this.grantEnrollment !== enrollment) return null;
+    const interval = enrollment.device?.interval ?? null;
+    if (status?.status === 'pending') return status.interval ?? interval;
+    if (unanswered(failure)) return interval;
+    this.grantEnrollment = null;
+    if (status?.status === 'completed') {
+      await this.run('grant', async () =>
+        this.testConnection((await this.refetchWizardModels()).provider)
+      );
+      return null;
+    }
+    this.errorMessage =
+      status?.status === 'denied'
+        ? 'The device sign-in was denied upstream. Save and sign in upstream to try again.'
+        : status?.status === 'expired'
+          ? 'The device sign-in expired before it was approved. Save and sign in upstream to try again.'
+          : message(failure);
+    this.validationIssues = [];
+    return null;
+  };
   cancelGrantEnrollment = async () => {
     const enrollment = this.grantEnrollment;
     if (!enrollment) return;
     await this.run('grant-cancel', async () => {
-      await cancelGrantEnrollment(enrollment);
+      // Abandoned at once, so a status request answering meanwhile is ignored.
       this.grantEnrollment = null;
       this.grantInput = '';
+      await cancelGrantEnrollment(enrollment);
     });
   };
   discoverWizardProvider = async () => {

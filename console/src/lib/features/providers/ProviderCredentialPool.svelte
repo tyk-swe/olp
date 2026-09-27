@@ -1,15 +1,18 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { apiClient } from '$lib/api/client';
-  import { result, errorMessage } from '$lib/api/http';
+  import { result, errorMessage, unanswered } from '$lib/api/http';
   import type { components } from '$lib/api/schema';
   import type { Provider } from './api';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {
     cancelGrantEnrollment,
     continueGrantEnrollment,
+    pollGrantEnrollment,
     startGrantEnrollment,
-    type GrantEnrollment
+    type GrantEnrollment,
+    type GrantEnrollmentCompletion,
+    type GrantEnrollmentStatus
   } from './grants';
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from './providerKeys';
@@ -149,17 +152,57 @@
         enrollment = null;
         grantInput = '';
       }
-      notice = `${enrollmentSlot}: grant enrolled for ${completion.principal} as credential version ${completion.credential_version}, pending activation. Validate its access, then test and activate the provider.`;
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.credentials(provider.id)
-      });
-      await onChanged();
-      await pool.refetch();
+      await enrolled(completion);
     } catch (e) {
       error = errorMessage(e);
     } finally {
       busy = '';
     }
+  }
+  /** Asks whether the operator approved the device upstream, and returns how
+   * many seconds to wait before asking again, or null once the enrollment
+   * ended. A request that fails without an answer, such as while OLP
+   * restarts, is asked again. */
+  async function pollEnrollment(): Promise<number | null> {
+    const current = enrollment;
+    if (!current) return null;
+    let status: GrantEnrollmentStatus | undefined;
+    let failure: unknown;
+    try {
+      status = await pollGrantEnrollment(current);
+    } catch (e) {
+      failure = e;
+    }
+    // Cancelled meanwhile.
+    if (enrollment !== current) return null;
+    const interval = current.device?.interval ?? null;
+    if (status?.status === 'pending') return status.interval ?? interval;
+    if (unanswered(failure)) return interval;
+    enrollment = null;
+    try {
+      if (status?.status === 'completed' && status.completion) {
+        await enrolled(status.completion);
+      } else if (status?.status === 'denied') {
+        error = `${enrollmentSlot}: the device sign-in was denied upstream. Sign in again to enroll its grant.`;
+      } else if (status?.status === 'expired') {
+        error = `${enrollmentSlot}: the device sign-in expired before it was approved. Sign in again to enroll its grant.`;
+      } else {
+        error = errorMessage(failure);
+      }
+    } catch (e) {
+      error = errorMessage(e);
+    }
+    return null;
+  }
+  /** Reports the credential version a completed enrollment staged on the
+   * slot, and reloads the provider. */
+  async function enrolled(completion: GrantEnrollmentCompletion) {
+    notice = `${enrollmentSlot}: grant enrolled for ${completion.principal} as credential version ${completion.credential_version}, pending activation. Validate its access, then test and activate the provider.`;
+    await queryClient.invalidateQueries({
+      queryKey: providerKeys.credentials(provider.id)
+    });
+    await onChanged();
+    await pool.refetch();
   }
   async function cancelEnrollment() {
     const current = enrollment;
@@ -167,9 +210,11 @@
     busy = 'grant-cancel';
     error = '';
     try {
-      await cancelGrantEnrollment(current);
+      // Abandoned at once, so a status request answering meanwhile is
+      // ignored.
       enrollment = null;
       grantInput = '';
+      await cancelGrantEnrollment(current);
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -297,6 +342,7 @@
       bind:input={grantInput}
       {busy}
       onContinue={continueEnrollment}
+      onPoll={pollEnrollment}
       onCancel={cancelEnrollment}
     />{/if}
   {#if canManage && !editing}<button

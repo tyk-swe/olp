@@ -65,6 +65,13 @@ const (
 	// what the operator pasted back is exchanged for, on behalf of the
 	// enrolling provider (Request.Provider). It may use CapabilityHTTP.
 	MethodGrantExchange = "grant_exchange"
+	// MethodGrantPoll takes a GrantPoll and returns the Grant a device
+	// authorization obtained once the operator approved it, on behalf of the
+	// enrolling provider (Request.Provider). Until then it fails with
+	// CodeAuthorizationPending or CodeSlowDown, and with CodeAccessDenied or
+	// CodeExpiredToken once the device authorization can't be approved. It
+	// may use CapabilityHTTP.
+	MethodGrantPoll = "grant_poll"
 	// MethodGrantRefresh takes a GrantRefresh and returns the Grant it
 	// refreshes to. OLP's workers call it ahead of the grant's access token's
 	// expiry, and early when the upstream refused the access token, on behalf
@@ -104,6 +111,23 @@ const (
 	// refreshing the grant. A refresh failure with any other code is
 	// transient, and OLP retries it.
 	CodeInvalidGrant = "invalid_grant"
+)
+
+// Codes a device authorization's poll reports while it obtains no grant: the
+// token endpoint's error codes in the OAuth 2.0 device authorization grant
+// (RFC 8628, section 3.5), which a plugin reports for its upstream's own
+// variant too.
+const (
+	// CodeAuthorizationPending: the operator has not approved the device yet.
+	CodeAuthorizationPending = "authorization_pending"
+	// CodeSlowDown: the operator has not approved the device yet, and OLP
+	// waits 5 seconds longer between this and every later poll.
+	CodeSlowDown = "slow_down"
+	// CodeAccessDenied: the operator denied the device authorization.
+	CodeAccessDenied = "access_denied"
+	// CodeExpiredToken: the device authorization expired before the operator
+	// approved it.
+	CodeExpiredToken = "expired_token"
 )
 
 // Request is one call, from OLP to a plugin or from a plugin to OLP.
@@ -415,18 +439,42 @@ type GrantStart struct {
 	Profile string `json:"profile"`
 }
 
-// GrantAuthorization is the result of MethodGrantStart: the authorization
-// request the operator opens to sign in upstream.
+// GrantAuthorization is the result of MethodGrantStart: how the operator
+// authorizes the upstream account, with either an authorization request to
+// open or a device authorization to approve.
 type GrantAuthorization struct {
 	// URL is the authorization request, at one of the plugin's origins, with
 	// its state and PKCE challenge. After signing in, the operator pastes
 	// back the loopback callback URL the upstream redirects to, or the code
-	// it displays.
-	URL string `json:"url"`
-	// Session is the plugin's state for exchanging what is pasted back, such
-	// as the PKCE verifier and the request's state: at most 16 KiB, which
-	// OLP stores encrypted and hands to MethodGrantExchange.
+	// it displays, which MethodGrantExchange exchanges.
+	URL string `json:"url,omitempty"`
+	// Device, instead of URL, is a device authorization the operator
+	// approves upstream while OLP polls it with MethodGrantPoll.
+	Device *DeviceAuthorization `json:"device,omitempty"`
+	// Session is the plugin's state for the next step, such as the PKCE
+	// verifier and the request's state, or the device code: at most 16 KiB,
+	// which OLP stores encrypted and hands to MethodGrantExchange once, or to
+	// each MethodGrantPoll.
 	Session string `json:"session"`
+}
+
+// DeviceAuthorization is a device authorization the operator approves
+// upstream, as in the OAuth 2.0 device authorization grant (RFC 8628) or an
+// upstream's own variant: the operator opens the verification URL, on any
+// device, enters the user code and approves.
+type DeviceAuthorization struct {
+	// VerificationURL is where the operator enters the user code, at one of
+	// the plugin's origins.
+	VerificationURL string `json:"verification_url"`
+	// UserCode is the code the operator enters: 1–64 bytes of text without
+	// control characters.
+	UserCode string `json:"user_code"`
+	// ExpiresIn is how many seconds the user code lasts. OLP polls for at
+	// most 30 minutes.
+	ExpiresIn int64 `json:"expires_in"`
+	// Interval is how many seconds OLP waits between polls, at most 300,
+	// or 5 when 0.
+	Interval int64 `json:"interval,omitempty"`
 }
 
 // GrantExchange is the parameter of MethodGrantExchange.
@@ -437,6 +485,13 @@ type GrantExchange struct {
 	// Input is what the operator pasted back: the whole callback URL, or the
 	// code the upstream displayed.
 	Input string `json:"input"`
+}
+
+// GrantPoll is the parameter of MethodGrantPoll.
+type GrantPoll struct {
+	Profile string `json:"profile"`
+	// Session is the GrantAuthorization's session.
+	Session string `json:"session"`
 }
 
 // Grant is rotating upstream authorization a plugin obtained, which OLP holds

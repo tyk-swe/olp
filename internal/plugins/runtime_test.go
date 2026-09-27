@@ -94,6 +94,9 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 			Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 		}}, {ID: "reference-streaming", Label: "Reference Responses, streaming only", Dialect: "openai-responses", Hosting: abi.Hosting{
 			Address: "https://api.example.com/streaming/v1", Headers: headers, ForceStreaming: true,
+		}}, {ID: "reference-device-chat", Label: "Reference Chat Completions with device sign-in", Dialect: "openai-chat", Grant: &abi.GrantAuthentication{Facts: []string{"account", "api_base"}}, Hosting: abi.Hosting{
+			Address: "{grant.api_base}",
+			Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 		}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {

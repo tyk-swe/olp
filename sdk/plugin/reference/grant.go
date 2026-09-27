@@ -31,7 +31,10 @@ type session struct {
 	Verifier string `json:"verifier"`
 }
 
-func (reference) StartGrant(context.Context, plugin.GrantStart) (plugin.GrantAuthorization, error) {
+func (reference) StartGrant(ctx context.Context, start plugin.GrantStart) (plugin.GrantAuthorization, error) {
+	if start.Profile == deviceProfile {
+		return startDeviceAuthorization(ctx)
+	}
 	s := session{State: random(), Verifier: random()}
 	challenge := sha256.Sum256([]byte(s.Verifier))
 	query := url.Values{

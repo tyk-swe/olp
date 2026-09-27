@@ -236,7 +236,9 @@ holds beneath an ordinary, immutable credential version
 ([ADR 0006](adr/0006-grants-beneath-immutable-credentials.md)).
 
 In the provider wizard's Connection stage, choosing such a profile replaces the
-credential field with grant enrollment. After saving the draft:
+credential field with grant enrollment. After saving the draft, the plugin
+starts one of two sign-ins, whichever its upstream uses. With an authorization
+page:
 
 1. OLP shows the authorization URL the plugin builds, with its state and PKCE
    challenge, at one of the plugin's approved origins.
@@ -248,18 +250,46 @@ credential field with grant enrollment. After saving the draft:
    stages it on the draft's default credential slot like a rotated credential,
    and the wizard tests the connection with it.
 
+With device authorization, as in RFC 8628 or an upstream's own variant, such
+as ChatGPT Codex's device login:
+
+1. OLP shows the verification URL, at one of the plugin's approved origins,
+   and the user code, each with a copy action.
+2. The operator opens the verification URL, on any device, enters the user
+   code and approves the device upstream.
+3. Meanwhile the wizard polls the enrollment's status. Once the upstream
+   reports the approval, OLP creates and stages the credential version as
+   above, and the wizard tests the connection with it.
+
 Through the management API, which needs the `configure` scope:
 
 | Operation | Request |
 | --- | --- |
-| Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`, and optionally `{"slot_id": "<credential slot>"}` for a slot other than the default; returns the enrollment's `id`, `slot_id`, `authorization_url` and `expires_at`. |
-| Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL or code>"}`; returns the new `credential_id`, `credential_version` and observed `principal`. |
+| Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`, and optionally `{"slot_id": "<credential slot>"}` for a slot other than the default; returns the enrollment's `id`, `slot_id`, `expires_at`, and either its `authorization_url` or its `device` authorization: `verification_url`, `user_code` and the polling `interval` in seconds. |
+| Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL or code>"}`, for an enrollment with an authorization URL; returns the new `credential_id`, `credential_version` and observed `principal`. |
+| Poll | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/poll`, for a device authorization; returns its `status`, with the `interval` to wait while `pending`, or the `completion`, like a continuation's, once `completed`. |
 | Cancel | `DELETE /api/v1/providers/{id}/grant-enrollments/{enrollment_id}` |
 
-A grant enrollment lasts 10 minutes. Its session state, such as the PKCE
-verifier, is stored encrypted in the database, so any control replica can
-continue it. Only the principal that started it continues or cancels it, and it
-is continued once, whatever the outcome. Continuing fails with:
+Control runs no background jobs, so status requests drive a device
+authorization's polling. A status request made once the interval has passed
+since the last poll runs one plugin poll step; any other reports the status
+without reaching the upstream. When the upstream asks to slow down, the
+interval grows by 5 seconds from then on. The status is `pending` until the
+operator approves the device, then `completed`; `denied` when the operator
+denies it; and `expired` when the device authorization or the enrollment
+expires first. Polling stops at any of those, or when the enrollment is
+cancelled. A poll that fails otherwise, such as one that can't reach the
+upstream, ends the enrollment with the same problems as a failed continuation,
+and later status requests answer `grant_enrollment_used`. A status request that
+ends before its poll does, such as one its client abandoned, leaves the
+enrollment pending, and the next one polls again.
+
+A grant enrollment lasts 10 minutes; a device authorization lasts as long as
+its user code, at most 30 minutes. Its session state, such as the PKCE verifier
+or the device code, is stored encrypted in the database, so any control replica
+can continue or poll it. Only the principal that started it continues, polls or
+cancels it. An enrollment with an authorization URL is continued once, whatever
+the outcome. Continuing fails with:
 
 | Code | Reason |
 | --- | --- |
@@ -534,9 +564,11 @@ Permissions stay recorded, so enabling the tier again restores them.
 Audit records `plugin.install`, `plugin.approve`, `plugin.permit` and
 `plugin.uninstall` with the owner as actor and the digest as resource. A
 repeated upload of an installed digest records nothing. It records
-`provider.grant.enroll` for every continuation that reaches the plugin: a
-success with the new credential version as resource, a failure with the
-provider. Audit never records what was pasted back or obtained.
+`provider.grant.enroll` for every continuation that reaches the plugin, and for
+the poll that ends a device authorization: a success with the new credential
+version as resource, a failure, including a denied or expired device
+authorization, with the provider. Audit never records what was pasted back or
+obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'
