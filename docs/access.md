@@ -113,7 +113,13 @@ pricing also require `settings`; imports with unchanged pricing or only provider
 and route changes require `configure`. Requests carrying an `olpm_` bearer
 credential are non-browser traffic: they do not send Origin or CSRF proofs and
 are authenticated by token digest, expiry, and revocation. Every other bearer or
-cookie request keeps the full browser defenses. Token administration itself —
+cookie request keeps the full browser defenses. A token acts within its
+creator's current authority: it fails authentication while the creator is
+inactive or OIDC-deauthorized, loses operations the creator's current role does
+not hold, and reaches only the creator's projects when the creator has an
+assigned access scope. Nothing is revoked, so a creator who regains authority
+also restores their tokens; see
+[the decision](adr/0005-management-tokens-act-within-their-creators-authority.md). Token administration itself —
 create, list, read, revoke — is always session-owner-only; no management token
 can manage tokens. Revocation and expiry take effect immediately and audit
 records attribute machine actions to the token rather than to a member.

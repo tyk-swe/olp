@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/mail"
@@ -538,34 +539,54 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret, operation 
 	if len(parts) != 3 {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
-	var digest, data, projectData []byte
-	var live bool
-	err := q.QueryRow(r.Context(), "SELECT id::text,name,scopes,digest,created_by::text,expires_at>now() AND revoked_at IS NULL,all_projects,project_ids FROM olp.management_tokens WHERE lookup_id=$1", parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &p.AllProjects, &projectData)
+	var digest, data, projectData, memberData []byte
+	var live, allProjects bool
+	var creatorRole, creatorScope string
+	// A token acts within its creator's current authority. An inactive or
+	// deauthorized creator retires it and a demoted or reassigned creator
+	// narrows it, without changing the stored token.
+	err := q.QueryRow(r.Context(), `SELECT t.id::text,t.name,t.scopes,t.digest,t.created_by::text,
+		t.expires_at>now() AND t.revoked_at IS NULL AND u.active AND u.oidc_authorized,
+		t.all_projects,t.project_ids,u.role,u.access_scope,
+		COALESCE((SELECT jsonb_object_agg(m.project_id,m.role) FROM olp.project_members m WHERE m.user_id=u.id),'{}'::jsonb)
+		FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by WHERE t.lookup_id=$1`, parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &allProjects, &projectData, &creatorRole, &creatorScope, &memberData)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest("management_token", secret))) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
 	if err != nil {
 		return p, err
 	}
-	if p.AllProjects {
-		p.AccessScope = "global"
-	} else {
-		p.AccessScope = "assigned"
-		var projectIDs []string
-		if err = json.Unmarshal(projectData, &projectIDs); err != nil {
-			return p, err
-		}
-		p.Projects = map[string]string{}
-		for _, id := range projectIDs {
-			p.Projects[id] = "manager"
-		}
-	}
 	var scopes []string
 	if err = json.Unmarshal(data, &scopes); err != nil {
 		return p, err
 	}
-	if !slices.Contains(scopes, operation) {
+	if !slices.Contains(scopes, operation) || !Permission(creatorRole, operation) {
 		return p, Forbidden()
+	}
+	creatorGlobal := creatorScope == "global"
+	p.AllProjects = allProjects && creatorGlobal
+	if p.AllProjects {
+		p.AccessScope = "global"
+	} else {
+		p.AccessScope = "assigned"
+		var memberships map[string]string
+		if err = json.Unmarshal(memberData, &memberships); err != nil {
+			return p, err
+		}
+		projectIDs := slices.Collect(maps.Keys(memberships))
+		if !allProjects {
+			if err = json.Unmarshal(projectData, &projectIDs); err != nil {
+				return p, err
+			}
+		}
+		p.Projects = map[string]string{}
+		for _, id := range projectIDs {
+			if creatorGlobal {
+				p.Projects[id] = "manager"
+			} else if role, ok := memberships[id]; ok {
+				p.Projects[id] = role
+			}
+		}
 	}
 	return p, restrictInstallation(p, operation)
 }
