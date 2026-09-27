@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const maxSlots = 64
@@ -591,7 +592,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		if slot.CredentialRevoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "This slot references a revoked credential.")
 		}
-		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, "provider_credential"); err != nil {
+		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, secrets.ProviderCredential); err != nil {
 			return access.Reply{}, err
 		}
 	}

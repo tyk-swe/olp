@@ -339,7 +339,7 @@ func (w *alertWorker) notificationSecret(ctx context.Context, secretID *string) 
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	return w.keys.Read(ctx, tx, w.installation, *secretID, "notification_secret")
+	return w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
 }
 
 func deliveryErrorCode(err error) string {

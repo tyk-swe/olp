@@ -247,7 +247,7 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose='provider_continuation'`, id); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -259,7 +259,7 @@ func (s *Store) CleanupExpired(ctx context.Context, now time.Time) (int64, error
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets s USING olp.provider_resources r WHERE s.id=r.id AND s.purpose='provider_continuation' AND r.expires_at<=$1`, now); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets s USING olp.provider_resources r WHERE s.id=r.id AND s.purpose=$2 AND r.expires_at<=$1`, now, secrets.ProviderContinuation); err != nil {
 		return 0, err
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM olp.provider_resources WHERE expires_at IS NOT NULL AND expires_at<=$1`, now)

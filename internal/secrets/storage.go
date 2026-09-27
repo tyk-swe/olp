@@ -16,7 +16,50 @@ type RowQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id, purpose string, data []byte, expires *time.Time) error {
+// RowsQuerier reads many rows, as a pool or a transaction does.
+type RowsQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+var errUnknownPurpose = errors.New("an encrypted secret names an unknown purpose")
+
+// VerifyAll authenticates every stored secret, including expired records and
+// old key versions, and counts the records under each key version. A version
+// number alone does not identify key material, so a process refuses a ring
+// that cannot open everything the installation stores.
+func (k *KeyRing) VerifyAll(ctx context.Context, q RowsQuerier, installation string) (map[int]int, error) {
+	rows, err := q.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets ORDER BY id")
+	if err != nil {
+		return nil, errors.New("cannot inspect encrypted records")
+	}
+	defer rows.Close()
+	versions := map[int]int{}
+	for rows.Next() {
+		var id, name string
+		var version int
+		var ciphertext []byte
+		if err = rows.Scan(&id, &name, &version, &ciphertext); err != nil {
+			return nil, errors.New("cannot read encrypted record")
+		}
+		purpose, ok := ParseSealPurpose(name)
+		if !ok {
+			return nil, errUnknownPurpose
+		}
+		if !k.Has(version) {
+			return nil, errors.New("master key ring is missing a stored version")
+		}
+		if _, err = k.Open(installation, purpose, id, version, ciphertext); err != nil {
+			return nil, err
+		}
+		versions[version]++
+	}
+	if err = rows.Err(); err != nil {
+		return nil, errors.New("cannot inspect encrypted records")
+	}
+	return versions, nil
+}
+
+func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id string, purpose SealPurpose, data []byte, expires *time.Time) error {
 	var active int
 	// Shared writers may seal independent records concurrently. Rotation takes
 	// FOR UPDATE on this row, so it still waits for every in-flight write and
@@ -35,7 +78,7 @@ func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id, purpos
         ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,ciphertext=excluded.ciphertext,expires_at=excluded.expires_at`, id, purpose, k.Active, ciphertext, expires)
 	return err
 }
-func (k *KeyRing) Read(ctx context.Context, query RowQuerier, installation, id, purpose string) ([]byte, error) {
+func (k *KeyRing) Read(ctx context.Context, query RowQuerier, installation, id string, purpose SealPurpose) ([]byte, error) {
 	var version int
 	var encrypted []byte
 	err := query.QueryRow(ctx, "SELECT key_version,ciphertext FROM olp.secrets WHERE id=$1 AND purpose=$2 AND (expires_at IS NULL OR expires_at>now())", id, purpose).Scan(&version, &encrypted)
@@ -80,10 +123,14 @@ func (k *KeyRing) rotateBatch(ctx context.Context, pool *pgxpool.Pool, installat
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var id, purpose string
+			var id, name string
 			var ciphertext []byte
-			if err = rows.Scan(&id, &purpose, &ciphertext); err != nil {
+			if err = rows.Scan(&id, &name, &ciphertext); err != nil {
 				return 0, err
+			}
+			purpose, ok := ParseSealPurpose(name)
+			if !ok {
+				return 0, errUnknownPurpose
 			}
 			if _, err = k.Open(installation, purpose, id, k.Active, ciphertext); err != nil {
 				return 0, err
@@ -99,16 +146,23 @@ func (k *KeyRing) rotateBatch(ctx context.Context, pool *pgxpool.Pool, installat
 		return 0, err
 	}
 	type record struct {
-		id, purpose string
-		version     int
-		data        []byte
+		id      string
+		purpose SealPurpose
+		version int
+		data    []byte
 	}
 	var records []record
 	for rows.Next() {
 		var r record
-		if err = rows.Scan(&r.id, &r.purpose, &r.version, &r.data); err != nil {
+		var name string
+		if err = rows.Scan(&r.id, &name, &r.version, &r.data); err != nil {
 			rows.Close()
 			return 0, err
+		}
+		var ok bool
+		if r.purpose, ok = ParseSealPurpose(name); !ok {
+			rows.Close()
+			return 0, errUnknownPurpose
 		}
 		records = append(records, r)
 	}

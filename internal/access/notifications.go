@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-)
 
-const notificationSecretPurpose = "notification_secret"
+	"github.com/tyk-swe/olp/internal/secrets"
+)
 
 const destinationFields = `'id',d.id,'name',d.name,'url',d.url,'project_id',d.project_id,'project_name',p.name,'enabled',d.enabled,'etag',d.etag,'created_by',d.created_by,'created_by_email',u.email,'created_at',d.created_at,'updated_at',d.updated_at`
 const destinationFrom = ` FROM olp.notification_destinations d
@@ -118,7 +118,7 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 		return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 	}
 	secretID := NewID()
-	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, notificationSecretPurpose, []byte(secret), nil); err != nil {
+	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, secrets.NotificationSecret, []byte(secret), nil); err != nil {
 		return err
 	}
 	_, err := tx.Exec(r.Context(),

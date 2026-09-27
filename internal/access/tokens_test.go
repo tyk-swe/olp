@@ -127,7 +127,7 @@ const (
 func TestMachinePrincipalResolution(t *testing.T) {
 	s := machineServer(t)
 	secret := "olpm_lookup_random"
-	digest := s.Auth.Digest("management_token", secret)
+	digest := s.Auth.Digest(secrets.ManagementTokenDigest, secret)
 	live := stubQueryer{tokenRow(digest, []string{"read", "configure"}, nil)}
 
 	r := machineRequest(secret, "GET")
@@ -159,7 +159,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	for name, row := range map[string]pgx.Row{
 		"unknown":    stubRow{err: pgx.ErrNoRows},
 		"retired":    tokenRow(digest, []string{"read"}, map[int]any{tokenLive: false}),
-		"bad digest": tokenRow(s.Auth.Digest("management_token", "olpm_lookup_other"), []string{"read"}, nil),
+		"bad digest": tokenRow(s.Auth.Digest(secrets.ManagementTokenDigest, "olpm_lookup_other"), []string{"read"}, nil),
 		"mangled":    tokenRow(digest, []string{"read"}, nil),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 func TestMachinePrincipalActsWithinCreatorAuthority(t *testing.T) {
 	s := machineServer(t)
 	secret := "olpm_lookup_random"
-	digest := s.Auth.Digest("management_token", secret)
+	digest := s.Auth.Digest(secrets.ManagementTokenDigest, secret)
 	every := []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
 	resolve := func(row stubRow, operation Operation) (Principal, error) {
 		return authorize(s, machineRequest(secret, "GET"), stubQueryer{row}, operation)

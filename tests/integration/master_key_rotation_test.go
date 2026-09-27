@@ -52,7 +52,7 @@ func TestRotationAuthenticatesEveryDestinationSecretBeforeWriting(t *testing.T) 
 					key = replacement
 				}
 				id := fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
-				ciphertext, err := key.Seal(h.Server.Installation, "oidc_flow", id, []byte("private rotation fixture"))
+				ciphertext, err := key.Seal(h.Server.Installation, secrets.OIDCFlow, id, []byte("private rotation fixture"))
 				if err != nil {
 					t.Fatal(err)
 				}

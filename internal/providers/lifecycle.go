@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const maxCredentialBytes = 65536
@@ -45,7 +46,7 @@ func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, sec
 	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
 		return "", 0, err
 	}
-	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil)
+	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
 	return id, version, err
 }
 

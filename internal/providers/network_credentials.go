@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // StoreNetworkCredential uses the existing encryption authority, but a distinct
@@ -25,7 +26,7 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {
 		return "", err
 	}
-	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, "provider_credential", []byte(secret), nil); err != nil {
+	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -153,7 +154,7 @@ func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte,
 	if err := s.validateNetworkReference(ctx, tx, cfg.ProviderID, cfg); err != nil {
 		return nil, err
 	}
-	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, "provider_credential")
+	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)
 }
 
 func (s *Server) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {

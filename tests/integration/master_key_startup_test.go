@@ -4,6 +4,8 @@ package integration_test
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +49,7 @@ func TestStartupAuthenticatesEveryStoredSecret(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Model an interrupted rotation: current and old versions coexist.
-			for i, purpose := range []string{"oidc_client", "oidc_flow", "mutation_replay"} {
+			for i, purpose := range []secrets.SealPurpose{secrets.OIDCClientSecret, secrets.OIDCFlow, secrets.MutationReplay} {
 				ring := current
 				if i == 2 {
 					ring = h.Server.Keys
@@ -90,5 +92,29 @@ func TestStartupAuthenticatesEveryStoredSecret(t *testing.T) {
 				t.Fatal("startup changed stored secrets")
 			}
 		})
+	}
+}
+
+// The database accepts exactly the purposes the secrets package can seal, so
+// every stored record names a purpose a process can open.
+func TestSealPurposesMatchTheDatabase(t *testing.T) {
+	h := newAccessHarness(t)
+	var definition string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+		JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace
+		WHERE n.nspname='olp' AND r.relname='secrets' AND c.contype='c' AND pg_get_constraintdef(c.oid) LIKE '%purpose = ANY%'`).Scan(&definition); err != nil {
+		t.Fatal(err)
+	}
+	var stored, sealed []string
+	for _, match := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(definition, -1) {
+		stored = append(stored, match[1])
+	}
+	for _, purpose := range secrets.SealPurposes() {
+		sealed = append(sealed, purpose.String())
+	}
+	slices.Sort(stored)
+	slices.Sort(sealed)
+	if !slices.Equal(stored, sealed) {
+		t.Fatalf("the database accepts purposes %v, the secrets package seals %v", stored, sealed)
 	}
 }

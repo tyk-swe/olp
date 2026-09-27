@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -624,7 +625,7 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if state.Revoked {
 		return nil, state, access.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
 	}
-	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, "provider_credential")
+	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, secrets.ProviderCredential)
 	if err != nil {
 		return nil, state, err
 	}

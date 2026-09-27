@@ -29,7 +29,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, e
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest("session", token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
@@ -415,7 +415,7 @@ func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, r
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE session_id=$1 OR expires_at<=now()", p.SessionID); err != nil {
 		return Reply{}, err
 	}
-	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest("recent_auth", token), p.SessionID, purpose, target)
+	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest(secrets.RecentAuthDigest, token), p.SessionID, purpose, target)
 	return Reply{Status: 204, Cookies: []*http.Cookie{cookie(recentCookie, token, 5*time.Minute, true)}}, err
 }
 func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) error {
@@ -423,7 +423,7 @@ func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose,
 	if resource != "" {
 		target = resource
 	}
-	tag, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE digest=$1 AND session_id=$2 AND purpose=$3 AND resource_id IS NOT DISTINCT FROM $4::uuid AND expires_at>now()", s.Auth.Digest("recent_auth", cookieValue(r, recentCookie)), p.SessionID, purpose, target)
+	tag, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE digest=$1 AND session_id=$2 AND purpose=$3 AND resource_id IS NOT DISTINCT FROM $4::uuid AND expires_at>now()", s.Auth.Digest(secrets.RecentAuthDigest, cookieValue(r, recentCookie)), p.SessionID, purpose, target)
 	if err != nil {
 		return err
 	}

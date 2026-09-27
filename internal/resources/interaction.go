@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const InteractionContract = "gemini-interaction/v1beta"
@@ -54,7 +56,7 @@ func (s *Store) PutInteractionContract(ctx context.Context, r *Resource, upstrea
 	if err != nil {
 		return nil, err
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), continuationPurpose, payload, out.ExpiresAt); err != nil {
+	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -90,7 +92,7 @@ func (s *Store) ReadInteractionContract(ctx context.Context, owner, localID stri
 	if r.ContractVersion == nil || *r.ContractVersion != InteractionContract || r.UpstreamID != id.String() || !interactionState(r.State) {
 		return nil, "", ErrContract
 	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), continuationPurpose)
+	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
 	if err != nil || len(payload) == 0 || len(payload) > 1024 {
 		return nil, "", ErrContract
 	}
@@ -144,7 +146,7 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 	if tag.RowsAffected() != 1 {
 		return ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, continuationPurpose); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

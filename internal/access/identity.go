@@ -132,7 +132,7 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		var count int
 		err = tx.QueryRow(r.Context(), `INSERT INTO olp.auth_admission(action,digest,attempts) VALUES($1,$2,1)
             ON CONFLICT(action,digest) DO UPDATE SET attempts=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN 1 ELSE LEAST(auth_admission.attempts+1,$3+1) END,
-            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.Auth.Digest("admission", bucket.key), bucket.limit).Scan(&count)
+            window_started_at=CASE WHEN auth_admission.window_started_at<=now()-interval '1 minute' THEN now() ELSE auth_admission.window_started_at END RETURNING attempts`, action, s.Auth.Digest(secrets.AdmissionDigest, bucket.key), bucket.limit).Scan(&count)
 		if err != nil {
 			return err
 		}
@@ -456,7 +456,7 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest("invitation", token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
 		return Reply{}, err
 	}
 	body, err := invitation(r, tx, id)
@@ -549,7 +549,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	var id, address, role string
-	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest("invitation", input.Token)).Scan(&id, &address, &role)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest(secrets.InvitationDigest, input.Token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
 	}

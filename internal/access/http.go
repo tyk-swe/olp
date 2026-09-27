@@ -77,7 +77,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 	if err = tx.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton FOR UPDATE").Scan(&fingerprint, &active); err != nil {
 		return nil, err
 	}
-	expected := auth.Digest("installation", "identity")
+	expected := auth.Digest(secrets.InstallationDigest, "identity")
 	if fingerprint != nil && !hmac.Equal(fingerprint, expected) {
 		return nil, errors.New("authentication key does not match the installation")
 	}
@@ -85,32 +85,10 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 		return nil, errors.New("master key active version differs; run master-key reencrypt or reload the current ring")
 	}
 	// Authenticate every record, including expired replays and old key versions,
-	// before admitting writes. A version number alone does not identify a key.
-	rows, err := tx.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets")
-	if err != nil {
+	// before admitting writes.
+	if _, err = keys.VerifyAll(ctx, tx, installation); err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var id, purpose string
-		var version int
-		var ciphertext []byte
-		if err = rows.Scan(&id, &purpose, &version, &ciphertext); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if !keys.Has(version) {
-			rows.Close()
-			return nil, errors.New("master key ring is missing a stored version")
-		}
-		if _, err = keys.Open(installation, purpose, id, version, ciphertext); err != nil {
-			rows.Close()
-			return nil, err
-		}
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
 	if _, err = tx.Exec(ctx, "UPDATE olp.installation SET auth_fingerprint=$1,active_key_version=$2 WHERE singleton", expected, keys.Active); err != nil {
 		return nil, err
 	}

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type Queryer interface {
@@ -72,7 +74,7 @@ func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
 	var p Principal
 	p.Kind = "user"
 	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -136,7 +138,7 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 		t.all_projects,t.project_ids,u.role,u.access_scope,
 		COALESCE((SELECT jsonb_object_agg(m.project_id,m.role) FROM olp.project_members m WHERE m.user_id=u.id),'{}'::jsonb)
 		FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by WHERE t.lookup_id=$1`, parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &allProjects, &projectData, &p.creatorRole, &creatorScope, &memberData)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest("management_token", secret))) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest(secrets.ManagementTokenDigest, secret))) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
 	if err != nil {
@@ -179,5 +181,5 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 	return p, nil
 }
 func (s *Server) csrf(token string) string {
-	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest("csrf", token))
+	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest(secrets.CSRFDigest, token))
 }

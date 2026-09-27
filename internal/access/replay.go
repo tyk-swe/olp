@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type ReplayClaim struct {
@@ -28,7 +30,7 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (Rep
 	if err != nil {
 		return c, nil, err
 	}
-	c.Fingerprint = s.Auth.Digest("mutation", string(data))
+	c.Fingerprint = s.Auth.Digest(secrets.MutationDigest, string(data))
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN (SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return c, nil, err
 	}
@@ -44,7 +46,7 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (Rep
 	if !hmac.Equal(stored, c.Fingerprint) {
 		return c, nil, Fail(409, "idempotency_conflict", "This Idempotency-Key belongs to a different request.")
 	}
-	data, err = s.Keys.Read(r.Context(), tx, s.Installation, id, "mutation_replay")
+	data, err = s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.MutationReplay)
 	if err != nil {
 		return c, nil, err
 	}
@@ -76,7 +78,7 @@ func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, resul
 	// and must remain replayable in full for an otherwise valid write to commit.
 	id := NewID()
 	expires := time.Now().Add(24 * time.Hour)
-	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "mutation_replay", data, &expires); err != nil {
+	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MutationReplay, data, &expires); err != nil {
 		return err
 	}
 	_, err = tx.Exec(r.Context(), "INSERT INTO olp.replays(actor,key,fingerprint,secret_id,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor,key) DO UPDATE SET fingerprint=excluded.fingerprint,secret_id=excluded.secret_id,expires_at=excluded.expires_at", c.Actor, c.Key, c.Fingerprint, id, expires)

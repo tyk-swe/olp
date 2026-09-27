@@ -53,7 +53,7 @@ type oidcConfiguration struct {
 func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
-	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose='oidc_client')) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton").Scan(&data)
+	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
 	if err != nil {
 		return c, err
 	}
@@ -215,7 +215,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if input.ClientSecret != nil {
 		var previous []byte
 		if old.HasClientSecret {
-			previous, err = s.Keys.Read(r.Context(), tx, s.Installation, c.ID, "oidc_client")
+			previous, err = s.Keys.Read(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -230,7 +230,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 		}
 		c.HasClientSecret = *input.ClientSecret != ""
 		if c.HasClientSecret {
-			if err = s.Keys.Store(r.Context(), tx, s.Installation, c.ID, "oidc_client", []byte(*input.ClientSecret), nil); err != nil {
+			if err = s.Keys.Store(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret, []byte(*input.ClientSecret), nil); err != nil {
 				return Reply{}, err
 			}
 		} else {
@@ -249,7 +249,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose='oidc_flow'"); err != nil {
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
@@ -356,10 +356,10 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN(SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return Reply{}, err
 	}
-	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "oidc_flow", data, &expires); err != nil {
+	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.OIDCFlow, data, &expires); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest("oidc_state", flow.State), s.Auth.Digest("oidc_cookie", cookieToken), c.ETag, expires); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at) VALUES($1,$2,$3,$4,$5)", id, s.Auth.Digest(secrets.OIDCStateDigest, flow.State), s.Auth.Digest(secrets.OIDCCookieDigest, cookieToken), c.ETag, expires); err != nil {
 		return Reply{}, err
 	}
 	options := []oauth2.AuthCodeOption{oidc.Nonce(flow.Nonce), oauth2.S256ChallengeOption(flow.Verifier)}
@@ -392,17 +392,17 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	state := r.URL.Query().Get("state")
 	var id, etag string
 	var digest []byte
-	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest("oidc_state", state)).Scan(&id, &etag, &digest)
+	err = tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.Auth.Digest(secrets.OIDCStateDigest, state)).Scan(&id, &etag, &digest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "This sign-in request expired or was already used.")
 	}
 	if err != nil {
 		return flow, config, err
 	}
-	if !hmac.Equal(digest, s.Auth.Digest("oidc_cookie", cookieValue(r, "__Host-olp_oidc_login_"+id))) {
+	if !hmac.Equal(digest, s.Auth.Digest(secrets.OIDCCookieDigest, cookieValue(r, "__Host-olp_oidc_login_"+id))) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
 	}
-	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, "oidc_flow")
+	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.OIDCFlow)
 	if err != nil {
 		return flow, config, err
 	}
@@ -451,7 +451,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			return Reply{}, err
 		}
 		defer tx.Rollback(r.Context())
-		data, err := s.Keys.Read(r.Context(), tx, s.Installation, c.ID, "oidc_client")
+		data, err := s.Keys.Read(r.Context(), tx, s.Installation, c.ID, secrets.OIDCClientSecret)
 		if err != nil {
 			return Reply{}, err
 		}

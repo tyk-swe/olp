@@ -217,7 +217,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest("api_key", secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r, tx)
@@ -430,7 +430,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		action = "api_key.rotate"
 		lookup = secrets.Token()
 		secret = "olp_" + lookup + "_" + secrets.Token()
-		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest("api_key", secret), etag, data, groupID, id)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), etag, data, groupID, id)
 	} else {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
 	}

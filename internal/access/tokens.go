@@ -132,7 +132,7 @@ func (s *Server) createManagementToken(r *http.Request, _ Principal) (Reply, err
 		return Reply{}, err
 	}
 	var createdAt time.Time
-	if err = tx.QueryRow(r.Context(), "INSERT INTO olp.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.Auth.Digest("management_token", secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
+	if err = tx.QueryRow(r.Context(), "INSERT INTO olp.management_tokens(id,lookup_id,digest,name,scopes,all_projects,project_ids,created_by,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at", id, lookup, s.Auth.Digest(secrets.ManagementTokenDigest, secret), strings.TrimSpace(input.Name), scopes, allProjects, projectData, p.ID, etag, input.ExpiresAt).Scan(&createdAt); err != nil {
 		return Reply{}, err
 	}
 	body := map[string]any{"id": id, "lookup_id": lookup, "name": strings.TrimSpace(input.Name), "scopes": input.Scopes, "all_projects": allProjects, "project_ids": projectIDs, "created_by": p.ID, "created_by_email": p.Email, "etag": etag, "expires_at": input.ExpiresAt, "revoked_at": nil, "created_at": createdAt, "secret": secret}

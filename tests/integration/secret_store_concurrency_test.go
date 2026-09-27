@@ -31,7 +31,7 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx1.Rollback(context.Background())
-	if err := ring.Store(t.Context(), tx1, installation, ids[0], "provider_continuation", []byte("private-"+ids[0]), &expires); err != nil {
+	if err := ring.Store(t.Context(), tx1, installation, ids[0], secrets.ProviderContinuation, []byte("private-"+ids[0]), &expires); err != nil {
 		t.Fatal(err)
 	}
 	second := make(chan error, 1)
@@ -43,7 +43,7 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		if err == nil {
 			defer tx.Rollback(context.Background())
 			close(secondReady)
-			err = ring.Store(ctx, tx, installation, ids[1], "provider_continuation", []byte("private-"+ids[1]), &expires)
+			err = ring.Store(ctx, tx, installation, ids[1], secrets.ProviderContinuation, []byte("private-"+ids[1]), &expires)
 			if err == nil {
 				err = tx.Commit(ctx)
 			}
@@ -77,7 +77,7 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx3.Rollback(context.Background())
-	if err := ring.Store(t.Context(), tx3, installation, ids[2], "provider_continuation", []byte("private-"+ids[2]), &expires); err != nil {
+	if err := ring.Store(t.Context(), tx3, installation, ids[2], secrets.ProviderContinuation, []byte("private-"+ids[2]), &expires); err != nil {
 		t.Fatal(err)
 	}
 	rotated, err := secrets.ParseRing([]byte(`{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"},{"version":2,"key":"` + strings.Repeat("ef", 32) + `"}]}`))
@@ -119,7 +119,7 @@ func TestEncryptedStoresOverlapWhileRotationStillFencesThem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		plaintext, err := rotated.Read(t.Context(), tx, installation, id, "provider_continuation")
+		plaintext, err := rotated.Read(t.Context(), tx, installation, id, secrets.ProviderContinuation)
 		tx.Rollback(context.Background())
 		if err != nil || !bytes.Equal(plaintext, []byte("private-"+id)) {
 			t.Fatalf("rotation lost an overlapping secret store: %v", err)
