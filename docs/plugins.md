@@ -348,7 +348,8 @@ OLP discards its refresh token and the grant lapses, so a restored revision
 that selects the version again serves it only after a new grant enrollment.
 Nothing served the grant, so no notification is sent; audit records
 `provider.grant.retire` with the credential version as resource and the worker
-as actor.
+as actor. Revoking a credential version ends its grant at once: OLP deletes
+the refresh token, and nothing refreshes the grant again.
 
 A refresh advances the grant beneath the same credential version: the new
 access token replaces the old one, and the grant's generation advances. The

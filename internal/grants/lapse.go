@@ -104,3 +104,21 @@ func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
 	_, err := access.AdvanceAuthority(ctx, tx)
 	return err
 }
+
+// Revoke ends the grant beneath a credential version as an operator revokes
+// the version, in the revocation's transaction: a revoked version never
+// serves again, so the grant's refresh token is deleted and nothing refreshes
+// the grant again. A version without a grant has nothing to end.
+func Revoke(ctx context.Context, tx pgx.Tx, credentialID string) error {
+	var refreshTokenID *string
+	err := tx.QueryRow(ctx, `UPDATE olp.provider_grants SET refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+		WHERE credential_id=$1 RETURNING old.refresh_token_id::text`, credentialID).Scan(&refreshTokenID)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && refreshTokenID == nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *refreshTokenID, RefreshPurpose)
+	return err
+}

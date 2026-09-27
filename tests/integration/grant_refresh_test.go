@@ -381,3 +381,29 @@ func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 		t.Fatalf("a grant that can't be refreshed was scheduled again: %+v", grant)
 	}
 }
+
+// Revoking a credential version ends its grant: the refresh token is deleted
+// at once, and no worker refreshes the grant again.
+func TestRevokingACredentialVersionEndsItsGrant(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	credentialID := enrollGrant(t, h, owner, path)
+
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "POST", path+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	if grant := readGrant(t, h, credentialID); grant.refreshToken != nil || grant.refresh != nil || grant.lapsed != nil {
+		t.Fatalf("the revoked version's grant is %+v", grant)
+	}
+	var tokens int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+		t.Fatalf("%d refresh tokens survived the revocation: %v", tokens, err)
+	}
+	issued := len(authority.Issued())
+	dueNow(t, h, credentialID)
+	if pass(t, grantRefresher(t, h)) || len(authority.Issued()) != issued {
+		t.Fatal("a worker refreshed the grant of a revoked version")
+	}
+}

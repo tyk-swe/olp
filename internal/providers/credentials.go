@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -191,7 +192,8 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 }
 
 // revoke marks a credential version unusable everywhere: drafts, published
-// revisions, and gateways that learn it through the authority refresh.
+// revisions, and gateways that learn it through the authority refresh. It
+// ends the version's grant, if it has one.
 func (s *Server) revoke(r *http.Request) (access.Reply, error) {
 	return s.mutation(r, "provider.credential.revoke", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
@@ -211,6 +213,9 @@ func (s *Server) revoke(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, access.Fail(409, "already_revoked", "This credential version is already revoked.")
 		}
 		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = grants.Revoke(ctx, tx, credentialID); err != nil {
 			return access.Reply{}, err
 		}
 		generation, err := access.AdvanceAuthority(ctx, tx)
