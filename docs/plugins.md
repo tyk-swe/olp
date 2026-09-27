@@ -333,11 +333,22 @@ credential slot whose version doesn't match the provider's authentication.
 
 Workers refresh each grant that has a refresh token through its plugin, a
 quarter of the access token's lifetime before it expires and at most ten
-minutes before. The refresh runs on behalf of the provider as its active
-revision configures it, or its draft before the first activation, with its
-options and over its network path; its HTTP reaches only the plugin's approved
-origins. A per-grant PostgreSQL advisory lock keeps the refresh to one worker,
-so a refresh token that rotates is spent once however many workers run.
+minutes before. The refresh runs on behalf of a configuration that uses the
+grant: one that pins the plugin build that enrolled it and selects its
+credential version in a credential slot, the provider's active revision before
+its draft. It runs with that configuration's options and over its network
+path, and its HTTP reaches only the plugin's approved origins. A per-grant
+PostgreSQL advisory lock keeps the refresh to one worker, so a refresh token
+that rotates is spent once however many workers run.
+
+A grant that no configuration uses any more, such as a credential version that
+re-enrolling its slot replaced, or one enrolled for a draft that moved to
+another plugin build, is retired when it next comes due instead of refreshed:
+OLP discards its refresh token and the grant lapses, so a restored revision
+that selects the version again serves it only after a new grant enrollment.
+Nothing served the grant, so no notification is sent; audit records
+`provider.grant.retire` with the credential version as resource and the worker
+as actor.
 
 A refresh advances the grant beneath the same credential version: the new
 access token replaces the old one, and the grant's generation advances. The
@@ -685,8 +696,9 @@ repeated upload of an installed digest records nothing. It records
 the poll that ends a device authorization: a success with the new credential
 version as resource, a failure, including a denied or expired device
 authorization, with the provider. It records `provider.grant.lapse` when a
-grant [lapses](#lapsed-grants). Audit never records what was pasted back or
-obtained.
+grant [lapses](#lapsed-grants), and `provider.grant.retire` when a worker
+[retires](#grant-refresh) a grant nothing uses. Audit never records what was
+pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'

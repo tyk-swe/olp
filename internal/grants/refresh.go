@@ -55,7 +55,8 @@ var errAnotherAccount = errors.New("the refresh authorizes another account than 
 // and a rotating refresh token is spent once. The new access token rewrites
 // the secret of the grant's credential version and advances the grant's
 // generation, which gateways poll; the refresh token stays under
-// RefreshPurpose. A refresh that fails permanently lapses the grant.
+// RefreshPurpose. A refresh that fails permanently lapses the grant, and a
+// grant that no configuration uses any more is retired rather than refreshed.
 type Refresher struct {
 	Pool         *pgxpool.Pool
 	Keys         *secrets.KeyRing
@@ -88,11 +89,12 @@ func (r *Refresher) Run(ctx context.Context) {
 	}
 }
 
-// Pass refreshes the grants due a refresh now. A grant another worker is
-// refreshing is left to it. A refresh that fails is recorded on its grant and
-// retried with backoff, unless the failure is permanent and lapses the grant;
-// the pass fails only when it can't read or record grants. It reports whether
-// it refreshed a grant or recorded a failure.
+// Pass refreshes the grants due a refresh now, or retires those no
+// configuration uses. A grant another worker is refreshing is left to it. A
+// refresh that fails is recorded on its grant and retried with backoff, unless
+// the failure is permanent and lapses the grant; the pass fails only when it
+// can't read or record grants. It reports whether it refreshed or retired a
+// grant or recorded a failure.
 func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 	due, err := r.due(ctx)
 	if err != nil {
@@ -154,9 +156,21 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 	return refreshed, err
 }
 
+// using is the configuration a grant refreshes on behalf of, as a column of a
+// query over the grant's credential version c: one that pins the plugin build
+// that enrolled the grant and selects the version in one of its credential
+// slots, the provider's active revision before its draft. It is NULL when no
+// configuration uses the grant, which is then retired.
+const using = `coalesce(
+	(SELECT r.configuration FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
+		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest
+		AND r.slots @> jsonb_build_array(jsonb_build_object('credential_id',c.id))),
+	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
+		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)))`
+
 // dueGrant is what refreshing a grant needs: its credential version's
 // provider, plugin, principal and facts, its refresh token's secret, and the
-// provider's configuration.
+// configuration it refreshes on behalf of.
 type dueGrant struct {
 	credentialID, providerID, digest, principal string
 	facts                                       map[string]string
@@ -177,26 +191,29 @@ type refreshConfiguration struct {
 
 // refreshLocked refreshes a grant this connection holds the lock of, if it
 // is still due: a worker that refreshed it meanwhile scheduled its next
-// refresh. It records the outcome on the grant.
+// refresh. It records the outcome on the grant. A grant no configuration
+// uses is retired instead.
 func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentialID string) (bool, error) {
 	g := dueGrant{credentialID: credentialID}
-	// The refresh runs on behalf of the provider as it is configured with
-	// the grant's plugin: as its active revision pins it, or as its draft
-	// does before that.
-	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,
-		CASE WHEN r.configuration->>'profile_revision'=c.plugin_digest THEN r.configuration ELSE p.configuration END
-		FROM olp.provider_grants g
-		JOIN olp.provider_credentials c ON c.id=g.credential_id
-		JOIN olp.providers p ON p.id=c.provider_id
-		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
+	var configuration *refreshConfiguration
+	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,`+using+`
+		FROM olp.provider_grants g JOIN olp.provider_credentials c ON c.id=g.credential_id
 		WHERE g.credential_id=$1 AND g.refresh_at<=now() AND g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL`, credentialID).
-		Scan(&g.providerID, &g.digest, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &g.configuration)
+		Scan(&g.providerID, &g.digest, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	if configuration == nil {
+		retired, err := endGrant(ctx, conn, &g, retire)
+		if retired {
+			r.Log.Info("grant retired: no configuration uses it", "provider_id", g.providerID, "credential_id", g.credentialID)
+		}
+		return retired, err
+	}
+	g.configuration = *configuration
 	step, cancel := context.WithTimeout(ctx, refreshTimeout)
 	defer cancel()
 	grant, err := r.run(step, conn, &g)
@@ -267,7 +284,8 @@ func checkRefreshed(g *dueGrant, grant abi.Grant) error {
 // store holds a refreshed grant: its credential version's secret serves the
 // new access token with the grant's facts, a rotated refresh token replaces
 // the spent one, and the grant's generation advances, so gateways reload it
-// on their next poll.
+// on their next poll. A grant that ended during its refresh, such as one an
+// operator revoked, keeps nothing of it.
 func (r *Refresher) store(ctx context.Context, conn *pgx.Conn, g *dueGrant, grant abi.Grant) error {
 	served, err := json.Marshal(connectors.GrantCredential{AccessToken: grant.AccessToken, Facts: g.facts})
 	if err != nil {
@@ -276,18 +294,26 @@ func (r *Refresher) store(ctx context.Context, conn *pgx.Conn, g *dueGrant, gran
 	expires, refreshAt := schedule(time.Now(), grant.ExpiresIn, true)
 	var generation int64
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		// Writing a secret holds the installation row, which transactions
+		// that end grants take before the grant's.
 		if err := r.Keys.Store(ctx, tx, r.Installation, g.credentialID, "provider_credential", served, nil); err != nil {
 			return err
 		}
-		if grant.RefreshToken != "" {
-			if err := r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, RefreshPurpose, []byte(grant.RefreshToken), nil); err != nil {
-				return err
-			}
+		if err := tx.QueryRow(ctx, `UPDATE olp.provider_grants SET generation=generation+1,expires_at=$3,refresh_at=$4,
+			refresh_failures=0,refresh_failure=NULL,updated_at=now() WHERE credential_id=$1 AND refresh_token_id=$2 RETURNING generation`,
+			g.credentialID, g.refreshTokenID, expires, refreshAt).Scan(&generation); err != nil {
+			return err
 		}
-		return tx.QueryRow(ctx, `UPDATE olp.provider_grants SET generation=generation+1,expires_at=$2,refresh_at=$3,
-			refresh_failures=0,refresh_failure=NULL,updated_at=now() WHERE credential_id=$1 RETURNING generation`, g.credentialID, expires, refreshAt).Scan(&generation)
+		if grant.RefreshToken == "" {
+			return nil
+		}
+		return r.Keys.Store(ctx, tx, r.Installation, g.refreshTokenID, RefreshPurpose, []byte(grant.RefreshToken), nil)
 	})
-	if err == nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		r.Log.Info("grant ended during its refresh", "provider_id", g.providerID, "credential_id", g.credentialID)
+		return nil
+	case err == nil:
 		r.Log.Info("grant refreshed", "provider_id", g.providerID, "credential_id", g.credentialID, "generation", generation)
 	}
 	return err
@@ -301,12 +327,26 @@ func (r *Refresher) fail(ctx context.Context, conn *pgx.Conn, g *dueGrant, failu
 	if !permanent(failure) {
 		retry := time.Now().Add(backoff(g.failures + 1))
 		r.Log.Warn("grant refresh failed", "provider_id", g.providerID, "credential_id", g.credentialID, "retry_at", retry, "reason", reason)
-		_, err := conn.Exec(ctx, "UPDATE olp.provider_grants SET refresh_at=$2,refresh_failures=refresh_failures+1,refresh_failure=$3,updated_at=now() WHERE credential_id=$1",
-			g.credentialID, retry, reason)
+		_, err := conn.Exec(ctx, "UPDATE olp.provider_grants SET refresh_at=$3,refresh_failures=refresh_failures+1,refresh_failure=$4,updated_at=now() WHERE credential_id=$1 AND refresh_token_id=$2",
+			g.credentialID, g.refreshTokenID, retry, reason)
 		return err
 	}
-	r.Log.Warn("grant lapsed", "provider_id", g.providerID, "credential_id", g.credentialID, "reason", reason)
-	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error { return lapse(ctx, tx, g, reason) })
+	lapsed, err := endGrant(ctx, conn, g, func(ctx context.Context, tx pgx.Tx, g *dueGrant) (bool, error) { return lapse(ctx, tx, g, reason) })
+	if lapsed {
+		r.Log.Warn("grant lapsed", "provider_id", g.providerID, "credential_id", g.credentialID, "reason", reason)
+	}
+	return err
+}
+
+// endGrant runs end, which ends a due grant, lapsing or retiring it, in a
+// transaction on conn, and reports whether the grant ended.
+func endGrant(ctx context.Context, conn *pgx.Conn, g *dueGrant, end func(context.Context, pgx.Tx, *dueGrant) (bool, error)) (bool, error) {
+	var done bool
+	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) (err error) {
+		done, err = end(ctx, tx, g)
+		return err
+	})
+	return done && err == nil, err
 }
 
 // backoff is how long a grant's refresh waits after its failures-th failure

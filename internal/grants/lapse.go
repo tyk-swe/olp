@@ -40,20 +40,65 @@ func permanent(failure error) bool {
 // notification rule subscribed to grant lapses is sent one delivery of it, and
 // key authority advances, so gateways stop serving the grant's credential
 // version within one authority poll. Lapse is terminal: only a new grant
-// enrollment, which creates another credential version, replaces the grant.
-func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) error {
-	if _, err := tx.Exec(ctx, `UPDATE olp.provider_grants SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,
-		refresh_failures=refresh_failures+1,refresh_failure=$2,updated_at=now() WHERE credential_id=$1`, g.credentialID, reason); err != nil {
-		return err
+// enrollment, which creates another credential version, replaces the grant. A
+// grant that ended meanwhile, no longer holding the refresh token the worker
+// read, is left as it is. lapse reports whether it lapsed the grant.
+func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) (bool, error) {
+	if err := serialize(ctx, tx); err != nil {
+		return false, err
 	}
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,
+		refresh_failures=refresh_failures+1,refresh_failure=$3,updated_at=now() WHERE credential_id=$1 AND refresh_token_id=$2`, g.credentialID, g.refreshTokenID, reason)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	if err = ended(ctx, tx, g, "provider.grant.lapse"); err != nil {
+		return false, err
+	}
+	return true, usage.NotifyGrantLapsed(ctx, tx, g.credentialID)
+}
+
+// retire retires, in tx, a due grant that no configuration uses any more
+// (using): a superseded credential version that re-enrollment unbound, or
+// one a draft enrolled before moving to another plugin build. Refreshing it
+// would spend the upstream's refresh quota and keep an authorization alive
+// that nothing serves. Like a lapse, retirement discards the grant's refresh
+// token for good and makes its credential version ineligible, should a
+// restored revision select it again, until a new grant enrollment; but since
+// nothing served the grant, nobody is notified. It is audited, as the reason
+// the version lapsed. retire reports whether it retired the grant: one that a
+// configuration uses again is left due, for the next pass to refresh.
+func retire(ctx context.Context, tx pgx.Tx, g *dueGrant) (bool, error) {
+	if err := serialize(ctx, tx); err != nil {
+		return false, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND g.credential_id=$1 AND g.refresh_token_id=$2 AND `+using+` IS NULL`,
+		g.credentialID, g.refreshTokenID)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	return true, ended(ctx, tx, g, "provider.grant.retire")
+}
+
+// serialize orders tx behind provider writes, which change what uses a
+// credential version and revoke versions, and behind every other transaction
+// that ends a grant, by holding the installation row as they do.
+func serialize(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, "SELECT FROM olp.installation WHERE singleton FOR UPDATE")
+	return err
+}
+
+// ended completes, in tx, the end of a due grant whose lapsed_at is now set:
+// its refresh token is deleted, action is audited with the worker as the
+// actor, and key authority advances, so gateways stop serving the grant's
+// credential version within one authority poll.
+func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", g.refreshTokenID, RefreshPurpose); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family)
-		VALUES($1,'provider.grant.lapse','provider_credential',$2,'success',$3)`, access.NewID(), g.credentialID, workerAgent); err != nil {
-		return err
-	}
-	if err := usage.NotifyGrantLapsed(ctx, tx, g.credentialID); err != nil {
+		VALUES($1,$2,'provider_credential',$3,'success',$4)`, access.NewID(), action, g.credentialID, workerAgent); err != nil {
 		return err
 	}
 	_, err := access.AdvanceAuthority(ctx, tx)
