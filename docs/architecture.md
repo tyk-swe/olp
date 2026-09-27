@@ -24,6 +24,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
+| Playground execution state, request composition, routing inspection | `console/src/lib/features/inference/playground/` |
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |
 | Configuration, connections, startup, shutdown | `internal/config/`, `internal/process/`, `internal/database/` |
 | HTTP middleware, development origin, body limits | `internal/process/` |
@@ -35,6 +36,25 @@ explicit audit provenance. `openapi/management.json` defines the management
 contract. `make api` generates Go transport types and ignored TypeScript
 declarations; `/api/v1/openapi.json` serves the embedded contract. Integration
 tests check handler/contract parity.
+
+`internal/runtime/revision.go` reconstructs providers and routes from scanned
+revision metadata and stored JSON. Runtime publication and retained-resource
+resolution share these pure decoders. Their callers still own SQL, transactions,
+authorization, credential checks, and operation eligibility. Publication alone
+drops empty provider limits; retained resources preserve the stored limits.
+
+The console usage feature owns `PricingRevisionsPanel`, including its queries,
+form, decimal validation, submission, and pagination. Settings keeps the panel
+mounted for the page's lifetime and coordinates shared feedback and mutual
+exclusion between setting saves and pricing creation through its `blocked`,
+`onBusyChange`, and `onFeedback` props. The panel applies installation capabilities
+and role permissions to its queries and rendering.
+
+Each mounted playground page creates one `PlaygroundState` rune instance. It
+owns queries, mutations, request construction, routing inspection, eligibility,
+effects, and stream cancellation on unmount. The page owns presentation constants,
+markup, and styles. Strict clients, native operations, audio translation, and
+realtime traces keep their own operation-specific behavior.
 
 Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`
 owns shared attempt progression, reservations, settlement, health and failover

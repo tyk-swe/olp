@@ -2,7 +2,6 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -49,68 +48,30 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 }
 
 func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
-	var providerID, providerName, providerState string
-	var providerProject *string
-	var configuration, models, slots []byte
+	providerRevision := runtime.ProviderRevision{RevisionID: res.ProviderRevisionID}
 	err := query.QueryRow(ctx,
 		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
-		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots, &providerName, &providerState, &providerProject)
+		res.ProviderRevisionID).Scan(&providerRevision.ID, &providerRevision.Configuration, &providerRevision.Models, &providerRevision.Slots, &providerRevision.Name, &providerRevision.State, &providerRevision.ProjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
 	}
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if providerID != res.ProviderID {
+	if providerRevision.ID != res.ProviderID {
 		return nil, nil, nil, nil, fmt.Errorf("provider revision %s belongs to %s, not %s: %w",
-			res.ProviderRevisionID, providerID, res.ProviderID, ErrNoRows)
+			res.ProviderRevisionID, providerRevision.ID, res.ProviderID, ErrNoRows)
 	}
 
-	provider := &runtime.Provider{ID: providerID, Name: providerName, Enabled: providerState == "active", ProjectID: providerProject, RevisionID: res.ProviderRevisionID, Capabilities: []runtime.Capability{}}
-	var cfg runtime.Configuration
-	var revisionModels []runtime.RevisionModel
-	var revisionSlots []runtime.RevisionSlot
-	if err = json.Unmarshal(configuration, &cfg); err == nil {
-		err = json.Unmarshal(models, &revisionModels)
-	}
-	if err == nil {
-		err = json.Unmarshal(slots, &revisionSlots)
-	}
+	provider, err := runtime.DecodeProviderRevision(providerRevision)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("provider %s revision: %w", providerID, err)
-	}
-	provider.Network = cfg.Options.Network
-	provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
-	provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
-	provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings
-	provider.Kind = cfg.Kind
-	provider.AuthMode = cfg.AuthMode
-	provider.Endpoint = cfg.Endpoint
-	provider.CloudRegion, provider.CloudProject, provider.Deployment, provider.APIVersion = cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion
-	provider.Models = cfg.Options.Models
-	provider.CredentialHeaders = cfg.Options.CredentialHeaders
-	provider.ParameterDefaults = cfg.Options.ParameterDefaults
-	provider.VendorID = cfg.Options.VendorID
-	provider.Limits = cfg.Options.Limits
-	for _, revisionSlot := range revisionSlots {
-		provider.Slots = append(provider.Slots, revisionSlot.Slot)
-		if revisionSlot.Default {
-			provider.DefaultSlotID = revisionSlot.ID
-			provider.ActiveCredential = revisionSlot.CredentialID
-		}
-	}
-	for _, model := range revisionModels {
-		for _, c := range model.Capabilities {
-			if c.Source == "certified" {
-				provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: model.UpstreamModel, Operation: c.Operation, Surface: c.Surface, Mode: c.Mode})
-			}
-		}
+		return nil, nil, nil, nil, err
 	}
 
 	var slot *runtime.Slot
-	for i := range revisionSlots {
-		if revisionSlots[i].ID == res.SlotID {
-			copied := revisionSlots[i].Slot
+	for i := range provider.Slots {
+		if provider.Slots[i].ID == res.SlotID {
+			copied := provider.Slots[i]
 			slot = &copied
 			break
 		}
@@ -123,48 +84,25 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 		return nil, nil, nil, nil, fmt.Errorf("slot %s credential drifted: %w", res.SlotID, ErrNoRows)
 	}
 
-	route := &runtime.Route{RevisionID: res.RouteRevisionID}
-	var operations, targets, policy, fidelity, contentPolicy []byte
+	routeRevision := runtime.RouteRevision{RevisionID: res.RouteRevisionID}
 	err = query.QueryRow(ctx,
 		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy
          FROM olp.route_revisions v JOIN olp.routes r ON r.id=v.route_id WHERE v.id=$1`,
-		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
-		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &fidelity, &contentPolicy)
+		res.RouteRevisionID).Scan(&routeRevision.ID, &routeRevision.Slug, &routeRevision.Revision, &routeRevision.Operations,
+		&routeRevision.OverallTimeout, &routeRevision.MaxAttempts, &routeRevision.Targets, &routeRevision.PublishedAt, &routeRevision.Policy, &routeRevision.ProjectID, &routeRevision.Fidelity, &routeRevision.ContentPolicy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, nil, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
 	}
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if route.Slug != res.RouteSlug {
+	if routeRevision.Slug != res.RouteSlug {
 		return nil, nil, nil, nil, fmt.Errorf("route revision %s is slug %s, not %s: %w",
-			res.RouteRevisionID, route.Slug, res.RouteSlug, ErrNoRows)
+			res.RouteRevisionID, routeRevision.Slug, res.RouteSlug, ErrNoRows)
 	}
-	var published []runtime.PublishedTarget
-	if err = json.Unmarshal(operations, &route.Operations); err == nil {
-		err = json.Unmarshal(targets, &published)
-	}
+	route, err := runtime.DecodeRouteRevision(routeRevision)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("route %s revision: %w", route.Slug, err)
-	}
-	if len(policy) > 0 {
-		if err = json.Unmarshal(policy, &route.Policy); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("route %s policy: %w", route.Slug, err)
-		}
-	}
-	if len(contentPolicy) > 0 {
-		if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
-			return nil, nil, nil, nil, err
-		}
-	}
-	route.Fidelity, err = runtime.DecodeFidelity(fidelity)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("route %s fidelity: %w", route.Slug, err)
-	}
-	route.RoutingID = route.ID
-	route.PublishedAt = route.PublishedAt.UTC()
-	for _, t := range published {
-		route.Targets = append(route.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
+		return nil, nil, nil, nil, err
 	}
 	if !slices.Contains(route.Operations, operation) {
 		return nil, nil, nil, nil, fmt.Errorf("route %s revision does not allow %s: %w", route.Slug, operation, ErrNoRows)
@@ -187,7 +125,7 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
 		}
 	}
-	return provider, route, slot, secret, nil
+	return &provider, &route, slot, secret, nil
 }
 
 // NetworkCredential resolves a retained provider revision's network identity

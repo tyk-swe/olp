@@ -414,6 +414,85 @@ describe('streaming', () => {
     expect(captured!.aborted).toBe(true);
   });
 
+  it('starts a new page with fresh form and stream state after unmount cancellation', async () => {
+    vi.mocked(simulateRouting).mockResolvedValue([eligibleDecision]);
+    const signals: AbortSignal[] = [];
+    vi.mocked(streamPlayground).mockImplementation(
+      (_request, handlers, signal) => {
+        signals.push(signal);
+        handlers.frame('stream from this mount');
+        return new Promise((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(
+                Object.assign(new Error('Cancelled'), { name: 'AbortError' })
+              ),
+            { once: true }
+          );
+        });
+      }
+    );
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'first prompt');
+    await enableStream();
+    submit();
+    await settle(0);
+    expect(host.textContent).toContain('stream from this mount');
+    await unmount(component!);
+    component = undefined;
+    await settle(0);
+    expect(signals[0].aborted).toBe(true);
+
+    await establish();
+    expect(input('#playground-model').value).toBe('');
+    expect(input('#playground-input').value).toBe('');
+    expect(streamToggle().checked).toBe(false);
+    expect(host.textContent).not.toContain('stream from this mount');
+    expect(host.textContent).toContain('Ready to test');
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'second prompt');
+    await enableStream();
+    submit();
+    await settle(0);
+    expect(signals).toHaveLength(2);
+    expect(signals[1].aborted).toBe(false);
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Clear')!
+      .click();
+    await settle(0);
+    expect(signals[1].aborted).toBe(true);
+    expect(host.textContent).not.toContain('stream from this mount');
+    expect(host.textContent).not.toContain('The playground stream failed.');
+  });
+
+  it('refuses streaming until eligibility succeeds and resets the toggle when the route changes', async () => {
+    const pending = Promise.withResolvers<RoutingDecision[]>();
+    vi.mocked(simulateRouting).mockReturnValue(pending.promise);
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    await enableStream();
+    expect(host.textContent).toContain('Checking streaming eligibility');
+    submit();
+    expect(streamPlayground).not.toHaveBeenCalled();
+    expect(runPlayground).not.toHaveBeenCalled();
+    pending.resolve([{ ...eligibleDecision, eligible: false }]);
+    await settle(0);
+    expect(host.textContent).toContain(
+      'No published target reports streaming eligibility'
+    );
+    submit();
+    expect(streamPlayground).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Streaming has not been verified');
+    fill('#playground-model', 'another-route');
+    expect(streamToggle().checked).toBe(false);
+    expect(host.textContent).not.toContain(
+      'No published target reports streaming eligibility'
+    );
+  });
+
   it('warns instead of streaming when the route has an output policy', async () => {
     const policyRoute: ActiveRoute = {
       ...route,

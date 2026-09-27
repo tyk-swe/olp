@@ -8,6 +8,14 @@ import {
   type Setting
 } from '$lib/features/settings/api';
 import SettingsPageProbe from './test/SettingsPageProbe.svelte';
+import { listProviderKinds } from '$lib/features/providers/models';
+import { listProviderVendors } from '$lib/features/providers/api';
+import { listPricingSources } from '$lib/features/usage/pricingSources';
+import {
+  createPricingRevision,
+  listPricing,
+  type PricingRevision
+} from '$lib/features/usage/pricing';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -19,6 +27,20 @@ vi.mock('$lib/features/settings/api', async (original) => ({
   ...(await original<typeof import('$lib/features/settings/api')>()),
   listSettings: vi.fn(),
   updateSetting: vi.fn()
+}));
+vi.mock('$lib/features/providers/models', () => ({
+  listProviderKinds: vi.fn()
+}));
+vi.mock('$lib/features/providers/api', () => ({
+  listProviderVendors: vi.fn()
+}));
+vi.mock('$lib/features/usage/pricingSources', async (original) => ({
+  ...(await original<typeof import('$lib/features/usage/pricingSources')>()),
+  listPricingSources: vi.fn()
+}));
+vi.mock('$lib/features/usage/pricing', () => ({
+  createPricingRevision: vi.fn(),
+  listPricing: vi.fn()
 }));
 
 const auditSetting: Setting = {
@@ -178,3 +200,145 @@ it.each([true, false])(
     expect(authenticationCapabilities).toHaveBeenCalledTimes(1);
   }
 );
+
+async function establishPricing() {
+  client.setQueryData(['service-capabilities'], {
+    ...capabilities,
+    gateway_available: true,
+    limits_enforced: true
+  });
+  client.setQueryData(
+    [
+      'routing-policy',
+      'installation',
+      '00000000-0000-0000-0000-000000000000',
+      ''
+    ],
+    { policy: {}, etag: 'policy-v1' }
+  );
+  vi.mocked(listPricingSources).mockResolvedValue([]);
+  vi.mocked(listPricing).mockResolvedValue({ items: [], nextCursor: null });
+  vi.mocked(listProviderVendors).mockResolvedValue([]);
+  vi.mocked(listProviderKinds).mockResolvedValue([
+    {
+      kind: 'openai',
+      label: 'OpenAI',
+      description: '',
+      auth_modes: [],
+      default_auth_mode: 'api_key',
+      fields: [],
+      presets: []
+    }
+  ]);
+  component = mount(SettingsPageProbe, { target: host, props: { client } });
+  await vi.waitFor(() =>
+    expect(host.querySelector<HTMLSelectElement>('#provider-kind')?.value).toBe(
+      'openai'
+    )
+  );
+  const model = host.querySelector<HTMLInputElement>('#price-model')!;
+  model.value = 'chat';
+  model.dispatchEvent(new Event('input', { bubbles: true }));
+  const price = host.querySelector<HTMLInputElement>('#input-price')!;
+  price.value = '2.00';
+  price.dispatchEvent(new Event('input', { bubbles: true }));
+  edit(auditSetting.key, '30');
+}
+
+function pricingSubmit() {
+  host
+    .querySelector('form.price-form')!
+    .dispatchEvent(
+      new SubmitEvent('submit', { bubbles: true, cancelable: true })
+    );
+  flushSync();
+}
+
+it('serializes pricing creation with setting saves and shares their feedback', async () => {
+  const pending = Promise.withResolvers<Setting>();
+  vi.mocked(updateSetting)
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce({
+      ...auditSetting,
+      value: '45',
+      etag: 'setting-v3'
+    });
+  vi.mocked(createPricingRevision).mockRejectedValue(
+    new Error('Pricing rejected')
+  );
+  await establishPricing();
+  saveButton(auditSetting.key).click();
+  await vi.waitFor(() => expect(updateSetting).toHaveBeenCalledTimes(1));
+  const priceButton = host.querySelector<HTMLButtonElement>(
+    '.price-form button[type="submit"]'
+  )!;
+  expect(priceButton.disabled).toBe(true);
+  pricingSubmit();
+  expect(createPricingRevision).not.toHaveBeenCalled();
+  pending.resolve({ ...auditSetting, value: '30', etag: 'setting-v2' });
+  await vi.waitFor(() => expect(priceButton.disabled).toBe(false));
+  expect(host.textContent).toContain('Audit retention (days) saved.');
+  pricingSubmit();
+  await vi.waitFor(() =>
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'Pricing rejected'
+    )
+  );
+  expect(host.textContent).not.toContain('Audit retention (days) saved.');
+  edit(auditSetting.key, '45');
+  expect(saveButton(auditSetting.key).disabled).toBe(false);
+  saveButton(auditSetting.key).click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Audit retention (days) saved.')
+  );
+  expect(host.textContent).not.toContain('Pricing rejected');
+});
+
+it('keeps pricing mounted and blocks setting saves throughout creation and capability changes', async () => {
+  const pending = Promise.withResolvers<PricingRevision>();
+  vi.mocked(createPricingRevision).mockReturnValue(pending.promise);
+  await establishPricing();
+  pricingSubmit();
+  await vi.waitFor(() =>
+    expect(createPricingRevision).toHaveBeenCalledTimes(1)
+  );
+  expect(saveButton(auditSetting.key).disabled).toBe(true);
+  client.setQueryData(['service-capabilities'], {
+    ...capabilities,
+    gateway_available: false,
+    limits_enforced: false
+  });
+  await vi.waitFor(() => expect(host.querySelector('.price-form')).toBeNull());
+  expect(saveButton(auditSetting.key).disabled).toBe(true);
+  client.setQueryData(['service-capabilities'], {
+    ...capabilities,
+    gateway_available: true,
+    limits_enforced: true
+  });
+  await vi.waitFor(() =>
+    expect(host.querySelector<HTMLInputElement>('#price-model')?.value).toBe(
+      'chat'
+    )
+  );
+  expect(
+    host.querySelector<HTMLButtonElement>('.price-form button[type="submit"]')!
+      .disabled
+  ).toBe(true);
+  saveButton(auditSetting.key).click();
+  expect(updateSetting).not.toHaveBeenCalled();
+  pending.resolve({
+    id: 'pricing-revision',
+    revision: 1,
+    prices: [],
+    effective_at: '2026-09-15T12:00:00Z',
+    created_at: '2026-09-15T12:00:00Z',
+    created_by: 'owner',
+    source_name: null,
+    source_snapshot_id: null
+  });
+  await vi.waitFor(() =>
+    expect(saveButton(auditSetting.key).disabled).toBe(false)
+  );
+  expect(host.textContent).toContain('Pricing revision created.');
+  expect(host.querySelector<HTMLInputElement>('#price-model')!.value).toBe('');
+});

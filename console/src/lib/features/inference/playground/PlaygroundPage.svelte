@@ -3,110 +3,19 @@
   import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '$lib/features/routes/routingExplanation';
   import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
-  let routing = $state('{}');
-  import { routeKeys } from '$lib/features/routes/routeKeys';
-
-  import { createMutation, createQuery } from '@tanstack/svelte-query';
-  import { listRoutes, simulateRouting } from '$lib/features/routes/api';
-  import { hasOutputRules } from '$lib/features/routes/routeEditor';
-  import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
-  import {
-    runPlayground,
-    streamPlayground,
-    type PlaygroundOperation,
-    type PlaygroundRequest,
-    type PlaygroundStreamDone
-  } from '$lib/features/inference/playground/api';
-  import {
-    inspectRouting,
-    type InspectRoutingInput
-  } from '$lib/features/inference/playground/inspection';
-  import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+  import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
+  import { errorMessage } from '$lib/api/http';
+  import { formatInteger } from '$lib/format';
   import RealtimeTrace from './RealtimeTrace.svelte';
   import OperationResult from './OperationResult.svelte';
   import StrictToolPlayground from './StrictToolPlayground.svelte';
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
   import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
-  import {
-    nativeDialects,
-    nativeOperationRequest,
-    type NativeOperation
-  } from './nativeOperation';
-  import {
-    playgroundTemplates,
-    templateFor
-  } from '$lib/features/inference/playground/templates';
-  import { onDestroy } from 'svelte';
-  import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
-  import { abortError, errorMessage } from '$lib/api/http';
-  import { formatInteger } from '$lib/format';
-  import {
-    parseMaxOutputTokens,
-    parseResponseSchema,
-    parseTemperature,
-    parseTools
-  } from '$lib/features/inference/playground/validation';
+  import { nativeDialects, type NativeOperation } from './nativeOperation';
+  import { playgroundTemplates } from './templates';
+  import { PlaygroundState } from './playgroundState.svelte';
 
-  type Mode = 'text' | 'tools' | 'structured';
-  type Composer = 'basic' | 'advanced';
-  let mode = $state<Mode>('text');
-  let composer = $state<Composer>('basic');
-  let operation = $state<PlaygroundOperation>('generation');
-  let surface = $state<'openai' | 'anthropic' | 'gemini'>('openai');
-  let model = $state('');
-  let input = $state('');
-  let rawJson = $state(JSON.stringify(playgroundTemplates[0].request, null, 2));
-  let templateKey = $state(playgroundTemplates[0].key);
-  let nativeDialect = $state('');
-  let streamEnabled = $state(false);
-  let streamCheck = $state<
-    'idle' | 'checking' | 'ok' | 'unsupported' | 'unknown'
-  >('idle');
-  let streamCheckMessage = $state('');
-  let streaming = $state(false);
-  let streamFrames = $state<string[]>([]);
-  let streamDone = $state<PlaygroundStreamDone | null>(null);
-  let streamProblem = $state<string | null>(null);
-  let streamAbort: AbortController | null = null;
-  let temperature = $state('');
-  let maxOutputTokens = $state('');
-  let toolsJson = $state(
-    '[\n  {\n    "name": "get_weather",\n    "description": "Get weather for a city",\n    "input_schema": {\n      "type": "object",\n      "properties": { "city": { "type": "string" } },\n      "required": ["city"]\n    }\n  }\n]'
-  );
-  let schemaJson = $state(
-    '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}'
-  );
-  let validationError = $state('');
-  let completedRequest = $state<PlaygroundRequest | null>(null);
-  const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
-  }));
-  const apiKeys = createQuery(() => ({
-    queryKey: apiKeyQueries.list(),
-    queryFn: ({ signal }) => listApiKeys(signal)
-  }));
-  const mutation = createMutation(() => ({ mutationFn: runPlayground }));
-  const selectedRoute = $derived(
-    (routes.data ?? []).find((route) => route.slug === model.trim())
-  );
-  const strictSelected = $derived(
-    selectedRoute?.latest_revision?.fidelity?.mode === 'strict'
-  );
-  const outputPolicyActive = $derived(
-    hasOutputRules(selectedRoute?.latest_revision?.content_policy?.rules ?? [])
-  );
-  const routeOperations = $derived(
-    selectedRoute?.latest_revision?.operations ?? null
-  );
-  const operationKnown = $derived(
-    routeOperations == null || routeOperations.includes(operation)
-  );
-  const streamSelectable = $derived(
-    operation === 'generation' && !outputPolicyActive
-  );
-
+  const playground = new PlaygroundState();
   const operations = [
     { value: 'generation', label: 'Generation' },
     { value: 'token_count', label: 'Token count' },
@@ -118,333 +27,17 @@
     { value: 'translation', label: 'Audio translation' },
     { value: 'realtime', label: 'Realtime event trace' }
   ];
+
   const composerModes = [
     { value: 'basic', label: 'Basic' },
     { value: 'advanced', label: 'Advanced' }
   ];
 
-  $effect(() => {
-    void model;
-    void surface;
-    void operation;
-    streamEnabled = false;
-    streamCheck = 'idle';
-    streamCheckMessage = '';
-  });
-
-  $effect(() => {
-    if (
-      operation !== 'generation' &&
-      operation !== 'token_count' &&
-      surface !== 'openai'
-    )
-      surface = 'openai';
-  });
-
-  function applyTemplate(key: string) {
-    templateKey = key;
-    const template = templateFor(key);
-    if (!template) return;
-    operation = template.operation;
-    if (template.surface) surface = template.surface;
-    nativeDialect = template.nativeDialect ?? '';
-    rawJson = JSON.stringify(template.request, null, 2);
-  }
-
-  async function checkStreamCapability() {
-    streamCheckMessage = '';
-    if (!selectedRoute) {
-      streamCheck = 'unknown';
-      streamCheckMessage =
-        'The route slug is not an active route, so streaming support cannot be verified.';
-      return;
-    }
-    streamCheck = 'checking';
-    try {
-      const decisions = await simulateRouting({
-        route: model.trim(),
-        surface,
-        mode: 'streaming',
-        preferences: JSON.parse(routing || '{}')
-      });
-      if (decisions.some((decision) => decision.eligible)) {
-        streamCheck = 'ok';
-      } else {
-        streamCheck = 'unsupported';
-        streamCheckMessage =
-          'No published target reports streaming eligibility for this route and surface.';
-      }
-    } catch {
-      streamCheck = 'unknown';
-      streamCheckMessage =
-        'Streaming capability could not be verified; the route may reject the stream.';
-    }
-  }
-
-  function toggleStream(enabled: boolean) {
-    streamEnabled = enabled;
-    if (enabled) void checkStreamCapability();
-    else {
-      streamCheck = 'idle';
-      streamCheckMessage = '';
-    }
-  }
-
-  function cancelStream() {
-    streamAbort?.abort();
-  }
-
-  function clearResult() {
-    streamAbort?.abort();
-    streamFrames = [];
-    streamDone = null;
-    streamProblem = null;
-    mutation.reset();
-    completedRequest = null;
-  }
-
-  onDestroy(() => {
-    streamAbort?.abort();
-  });
-  const simulation = createMutation(() => ({
-    // Wrapped so the mutation context is not passed as the abort signal.
-    mutationFn: (input: InspectRoutingInput) => inspectRouting(input)
-  }));
-
-  let simulateKeyId = $state('');
-  let simulateSeed = $state('');
-  let inspectDialect = $state('');
-  let inspectedInputs = $state('');
-  let simulationError = $state('');
-
-  // A dry run is always the most recent action when it has data, because
-  // submitting a real test resets it.
-  const explanation = $derived(
-    simulation.data?.length && inspectedInputs === inspectionInputs()
-      ? { dryRun: true, decisions: simulation.data }
-      : mutation.data?.routing?.length
-        ? { dryRun: false, decisions: mutation.data.routing }
-        : null
-  );
-
-  function inspectionInputs() {
-    return JSON.stringify([
-      model,
-      surface,
-      operation,
-      composer,
-      rawJson,
-      streamEnabled,
-      routing,
-      simulateKeyId,
-      simulateSeed,
-      inspectDialect,
-      nativeDialect
-    ]);
-  }
-
-  function currentNativeDialect(): string {
-    const options = nativeDialects(operation);
-    return options.includes(nativeDialect) ? nativeDialect : (options[0] ?? '');
-  }
-
-  function advancedRequest(): Record<string, unknown> {
-    if (operation === 'translation') return { model: model.trim() };
-    const raw = parseNativeJSON(rawJson);
-    if (!nativeObject(raw))
-      throw new Error('The request document must be a JSON object.');
-    return raw;
-  }
-
-  function requestControls() {
-    return {
-      temperature: parseTemperature(temperature),
-      max_output_tokens: parseMaxOutputTokens(maxOutputTokens),
-      tools: mode === 'tools' ? parseTools(toolsJson) : undefined,
-      response_format:
-        mode === 'structured' ? parseResponseSchema(schemaJson) : undefined
-    };
-  }
-
-  async function explain() {
-    simulationError = '';
-    if (!model.trim()) {
-      simulationError = 'Enter an active route slug.';
-      return;
-    }
-    try {
-      const version = inspectionInputs();
-      const registeredNative =
-        strictSelected &&
-        composer === 'advanced' &&
-        nativeDialects(operation).length > 0;
-      const selectedDialect = registeredNative
-        ? currentNativeDialect()
-        : inspectDialect || undefined;
-      const input: InspectRoutingInput = {
-        route: model.trim(),
-        operation: composer === 'advanced' ? operation : 'generation',
-        surface: registeredNative ? 'native' : surface,
-        mode:
-          operation === 'realtime'
-            ? 'realtime'
-            : registeredNative
-              ? 'unary'
-              : streamEnabled
-                ? 'streaming'
-                : 'unary',
-        preferences: JSON.parse(routing),
-        apiKeyId: simulateKeyId || null,
-        seed: simulateSeed,
-        clientContract:
-          registeredNative && operation === 'embeddings'
-            ? 'raw-vector-storage/1'
-            : undefined,
-        ...(composer === 'advanced' && operation !== 'realtime'
-          ? {
-              request: registeredNative
-                ? nativeOperationRequest(
-                    rawJson,
-                    model.trim(),
-                    selectedDialect!
-                  )
-                : advancedRequest(),
-              dialect: selectedDialect as
-                InspectRoutingInput['dialect'] | undefined
-            }
-          : {})
-      };
-      await simulation.mutateAsync(input);
-      inspectedInputs = version;
-    } catch (error) {
-      simulationError = errorMessage(
-        error,
-        'The routing explanation could not be produced.'
-      );
-    }
-  }
   const modes = [
     { value: 'text', label: 'Text' },
     { value: 'tools', label: 'Tools' },
     { value: 'structured', label: 'Structured output' }
   ];
-
-  async function runStream(request: PlaygroundRequest) {
-    streamAbort = new AbortController();
-    streaming = true;
-    streamFrames = [];
-    streamDone = null;
-    streamProblem = null;
-    completedRequest = request;
-    try {
-      await streamPlayground(
-        request,
-        {
-          frame: (frame) => {
-            streamFrames = [...streamFrames, frame];
-          },
-          done: (meta) => {
-            streamDone = meta;
-          },
-          error: (problem) => {
-            streamProblem = problem.message ?? 'The playground stream failed.';
-          }
-        },
-        streamAbort.signal
-      );
-    } catch (error) {
-      if (!abortError(error))
-        streamProblem = errorMessage(error, 'The playground stream failed.');
-    } finally {
-      streaming = false;
-      streamAbort = null;
-    }
-  }
-
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    validationError = '';
-    // The run that follows produces its own explanation, so the dry run stops
-    // competing for the panel.
-    simulation.reset();
-    simulationError = '';
-    if (!model.trim()) {
-      validationError = 'Enter an active route slug.';
-      return;
-    }
-    if (composer === 'advanced' && !operationKnown) {
-      validationError = `The route does not offer the ${operation} operation.`;
-      return;
-    }
-    if (streamEnabled && streamCheck !== 'ok') {
-      validationError =
-        'Streaming has not been verified as available for this route.';
-      return;
-    }
-    if (strictSelected) {
-      validationError =
-        'Use the qualified public client below for this strict route.';
-      return;
-    }
-    if (operation === 'translation') {
-      validationError = 'Use the audio upload form below.';
-      return;
-    }
-    if (operation === 'realtime') {
-      validationError =
-        'Use the local realtime event viewer below; it does not open a provider session.';
-      return;
-    }
-    if (operation === 'classification' || operation === 'scoring') {
-      validationError =
-        'This operation requires a strict registered native route and the public client below.';
-      return;
-    }
-    let request: PlaygroundRequest;
-    try {
-      if (composer === 'advanced') {
-        request = {
-          routing: JSON.parse(routing),
-          model: model.trim(),
-          surface,
-          operation,
-          request: advancedRequest(),
-          stream: streamEnabled ? true : undefined
-        };
-      } else {
-        if (!input.trim()) {
-          validationError = 'Enter a prompt.';
-          return;
-        }
-        request = {
-          routing: JSON.parse(routing),
-          model: model.trim(),
-          input,
-          surface,
-          stream: streamEnabled ? true : undefined,
-          ...requestControls()
-        };
-      }
-    } catch (error) {
-      validationError = errorMessage(error, 'Check the request fields.');
-      return;
-    }
-    streamFrames = [];
-    streamDone = null;
-    streamProblem = null;
-    completedRequest = request;
-    if (streamEnabled) {
-      await runStream(request);
-      return;
-    }
-    // A transport or route failure is rendered by the result panel; rethrowing
-    // here would leave an unhandled rejection with nothing to catch it.
-    try {
-      await mutation.mutateAsync(request);
-    } catch {
-      validationError = '';
-    }
-  }
 </script>
 
 <svelte:head><title>Playground · OpenLLMProxy</title></svelte:head>
@@ -470,42 +63,45 @@
 </div>
 
 <div class="playground-grid">
-  <form class="card composer" onsubmit={submit}>
+  <form class="card composer" onsubmit={playground.submit}>
     <RoutingPreferencesForm
-      bind:value={routing}
+      bind:value={playground.routing}
       id="playground-routing"
-      disabled={mutation.isPending || streaming}
+      disabled={playground.mutation.isPending || playground.streaming}
     />
     <SegmentedRadioGroup
       label="Composer"
       name="playground-composer"
-      value={composer}
+      value={playground.composer}
       items={composerModes}
       onChange={(value) => {
-        if (value === 'basic' || value === 'advanced') composer = value;
+        if (value === 'basic' || value === 'advanced')
+          playground.composer = value;
       }}
     />
-    {#if composer === 'advanced'}
+    {#if playground.composer === 'advanced'}
       <div class="route-grid">
         <div class="form-field">
           <label for="playground-operation">Operation</label><select
             id="playground-operation"
-            bind:value={operation}
+            bind:value={playground.operation}
           >
             {#each operations as option (option.value)}<option
                 value={option.value}>{option.label}</option
               >{/each}
           </select>
-          {#if !operationKnown}<small class="field-error" role="alert"
+          {#if !playground.operationKnown}<small
+              class="field-error"
+              role="alert"
               >The selected route does not offer this operation.</small
-            >{:else if routeOperations == null}<small
+            >{:else if playground.routeOperations == null}<small
               class="policy-note"
               role="status"
               >Route capabilities are unknown until a matching active route is
               entered — the route enforces the final decision.</small
             >{/if}
         </div>
-        {#if operation === 'realtime'}
+        {#if playground.operation === 'realtime'}
           <p class="policy-note">
             The local trace viewer below does not use a route or request
             template and starts no session.
@@ -514,8 +110,9 @@
           <div class="form-field">
             <label for="playground-template">Template</label><select
               id="playground-template"
-              value={templateKey}
-              onchange={(event) => applyTemplate(event.currentTarget.value)}
+              value={playground.templateKey}
+              onchange={(event) =>
+                playground.applyTemplate(event.currentTarget.value)}
             >
               {#each playgroundTemplates as template (template.key)}<option
                   value={template.key}>{template.label}</option
@@ -530,11 +127,11 @@
       <SegmentedRadioGroup
         label="Test mode"
         name="playground-mode"
-        value={mode}
+        value={playground.mode}
         items={modes}
         onChange={(value) => {
           if (value === 'text' || value === 'tools' || value === 'structured')
-            mode = value;
+            playground.mode = value;
         }}
       />
     {/if}
@@ -542,39 +139,44 @@
       <div class="form-field">
         <label for="playground-model">Route slug</label><input
           id="playground-model"
-          bind:value={model}
+          bind:value={playground.model}
           list="playground-routes"
           autocomplete="off"
           placeholder="support-chat"
           aria-describedby="model-help route-status"
         />
         <datalist id="playground-routes">
-          {#each routes.data ?? [] as route (route.id)}
+          {#each playground.routes.data ?? [] as route (route.id)}
             <option value={route.slug}></option>
           {/each}
         </datalist>
         <small id="model-help"
           >Choose an active route suggestion or enter its public slug.</small
         >
-        {#if outputPolicyActive}<small class="policy-note" role="status"
+        {#if playground.outputPolicyActive}<small
+            class="policy-note"
+            role="status"
             >This route enforces an output content policy — streaming requests
             are rejected. Playground runs are unary and still permitted.</small
           >{/if}
         <div id="route-status">
-          {#if routes.isPending}
+          {#if playground.routes.isPending}
             <small role="status">Loading active routes…</small>
-          {:else if routes.isError}
+          {:else if playground.routes.isError}
             <p class="field-error" role="alert">
-              {errorMessage(routes.error, 'Active routes could not be loaded.')}
+              {errorMessage(
+                playground.routes.error,
+                'Active routes could not be loaded.'
+              )}
             </p>
             <small>You can still enter a route slug.</small>
             <button
               type="button"
               class="button button-secondary"
-              onclick={() => routes.refetch()}
-              disabled={routes.isFetching}>Retry routes</button
+              onclick={() => playground.routes.refetch()}
+              disabled={playground.routes.isFetching}>Retry routes</button
             >
-          {:else if routes.data?.length === 0}
+          {:else if playground.routes.data?.length === 0}
             <small
               >No active routes are available. Activate a route to get started.</small
             >
@@ -584,28 +186,28 @@
       <div class="form-field">
         <label for="playground-surface">Client surface</label><select
           id="playground-surface"
-          bind:value={surface}
-          disabled={composer === 'advanced' &&
-            operation !== 'generation' &&
-            operation !== 'token_count'}
+          bind:value={playground.surface}
+          disabled={playground.composer === 'advanced' &&
+            playground.operation !== 'generation' &&
+            playground.operation !== 'token_count'}
           ><option value="openai">OpenAI</option><option value="anthropic"
             >Anthropic</option
           ><option value="gemini">Gemini</option></select
         ><small
-          >{composer === 'advanced' &&
-          operation !== 'generation' &&
-          operation !== 'token_count'
+          >{playground.composer === 'advanced' &&
+          playground.operation !== 'generation' &&
+          playground.operation !== 'token_count'
             ? 'This operation is served on the OpenAI surface.'
             : 'Capability filtering uses this originating protocol.'}</small
         >
       </div>
     </div>
-    {#if composer === 'basic'}
+    {#if playground.composer === 'basic'}
       <div class="route-grid">
         <div class="form-field">
           <label for="playground-temperature">Temperature</label><input
             id="playground-temperature"
-            bind:value={temperature}
+            bind:value={playground.temperature}
             inputmode="decimal"
             autocomplete="off"
             placeholder="Provider default"
@@ -615,7 +217,7 @@
         <div class="form-field">
           <label for="playground-max-output">Max output tokens</label><input
             id="playground-max-output"
-            bind:value={maxOutputTokens}
+            bind:value={playground.maxOutputTokens}
             inputmode="numeric"
             autocomplete="off"
             placeholder="Provider default"
@@ -626,31 +228,31 @@
       <div class="form-field">
         <label for="playground-input">Prompt</label><textarea
           id="playground-input"
-          bind:value={input}
+          bind:value={playground.input}
           rows="9"
           placeholder="Ask the model something…"></textarea>
       </div>
-      {#if mode === 'tools'}<div class="form-field">
+      {#if playground.mode === 'tools'}<div class="form-field">
           <label for="playground-tools">Tools JSON</label><textarea
             id="playground-tools"
-            bind:value={toolsJson}
+            bind:value={playground.toolsJson}
             rows="12"
             class="mono"
             spellcheck="false"></textarea>
         </div>{/if}
-      {#if mode === 'structured'}<div class="form-field">
+      {#if playground.mode === 'structured'}<div class="form-field">
           <label for="playground-schema">JSON Schema</label><textarea
             id="playground-schema"
-            bind:value={schemaJson}
+            bind:value={playground.schemaJson}
             rows="12"
             class="mono"
             spellcheck="false"></textarea>
         </div>{/if}
-    {:else if operation !== 'realtime' && operation !== 'translation'}
+    {:else if playground.operation !== 'realtime' && playground.operation !== 'translation'}
       <div class="form-field">
         <label for="playground-raw">Request JSON</label><textarea
           id="playground-raw"
-          bind:value={rawJson}
+          bind:value={playground.rawJson}
           rows="16"
           class="mono"
           spellcheck="false"
@@ -661,32 +263,35 @@
         >
       </div>
     {/if}
-    {#if operation === 'generation'}
+    {#if playground.operation === 'generation'}
       <div class="form-field stream-toggle">
         <label class="checkbox-label"
           ><input
             type="checkbox"
-            checked={streamEnabled}
-            disabled={!streamSelectable || streaming}
-            onchange={(event) => toggleStream(event.currentTarget.checked)}
+            checked={playground.streamEnabled}
+            disabled={!playground.streamSelectable || playground.streaming}
+            onchange={(event) =>
+              playground.toggleStream(event.currentTarget.checked)}
           />
           Stream the response</label
         >
-        {#if outputPolicyActive}<small class="policy-note" role="status"
+        {#if playground.outputPolicyActive}<small
+            class="policy-note"
+            role="status"
             >Output content policy requires unary responses — streaming is
             disabled.</small
-          >{:else if streamEnabled && streamCheck === 'checking'}<small
+          >{:else if playground.streamEnabled && playground.streamCheck === 'checking'}<small
             role="status">Checking streaming eligibility…</small
-          >{:else if streamEnabled && streamCheckMessage}<small
+          >{:else if playground.streamEnabled && playground.streamCheckMessage}<small
             class="policy-note"
-            role="status">{streamCheckMessage}</small
+            role="status">{playground.streamCheckMessage}</small
           >{/if}
       </div>
     {/if}
-    {#if validationError}<p class="field-error" role="alert">
-        {validationError}
+    {#if playground.validationError}<p class="field-error" role="alert">
+        {playground.validationError}
       </p>{/if}
-    {#if strictSelected && operation !== 'realtime'}<p
+    {#if playground.strictSelected && playground.operation !== 'realtime'}<p
         class="policy-note"
         role="status"
       >
@@ -702,22 +307,26 @@
         eligibility only. No provider inference, job, or tool is started, and
         nothing is billed.
       </p>
-      {#if composer === 'advanced'}
+      {#if playground.composer === 'advanced'}
         <div class="form-field">
           <label for="playground-inspect-dialect">Native request dialect</label>
           <select
             id="playground-inspect-dialect"
-            value={strictSelected && nativeDialects(operation).length
-              ? currentNativeDialect()
-              : inspectDialect}
+            value={playground.strictSelected &&
+            nativeDialects(playground.operation).length
+              ? playground.currentNativeDialect()
+              : playground.inspectDialect}
             onchange={(event) => {
-              if (strictSelected && nativeDialects(operation).length)
-                nativeDialect = event.currentTarget.value;
-              else inspectDialect = event.currentTarget.value;
+              if (
+                playground.strictSelected &&
+                nativeDialects(playground.operation).length
+              )
+                playground.nativeDialect = event.currentTarget.value;
+              else playground.inspectDialect = event.currentTarget.value;
             }}
           >
             <option value="">Default for operation and surface</option>
-            {#each strictSelected && nativeDialects(operation).length ? nativeDialects(operation) : inspectionDialects(operation, surface) as dialect (dialect)}
+            {#each playground.strictSelected && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -732,11 +341,11 @@
           <label for="playground-simulate-key">Evaluate as API key</label
           ><select
             id="playground-simulate-key"
-            bind:value={simulateKeyId}
+            bind:value={playground.simulateKeyId}
             aria-describedby="simulate-key-help"
           >
             <option value="">No API key authority</option>
-            {#each apiKeys.data ?? [] as key (key.id)}
+            {#each playground.apiKeys.data ?? [] as key (key.id)}
               {#if !key.revoked_at}<option value={key.id}>{key.name}</option
                 >{/if}
             {/each}
@@ -747,7 +356,7 @@
         <div class="form-field">
           <label for="playground-simulate-seed">Seed</label><input
             id="playground-simulate-seed"
-            bind:value={simulateSeed}
+            bind:value={playground.simulateSeed}
             autocomplete="off"
             maxlength="256"
             placeholder="Any stable value"
@@ -757,38 +366,42 @@
           >
         </div>
       </div>
-      {#if simulationError}<p class="field-error" role="alert">
-          {simulationError}
+      {#if playground.simulationError}<p class="field-error" role="alert">
+          {playground.simulationError}
         </p>{/if}
       <button
         class="button button-secondary"
         type="button"
-        disabled={simulation.isPending}
-        onclick={explain}
-        >{simulation.isPending ? 'Inspecting…' : 'Inspect plan'}</button
+        disabled={playground.simulation.isPending}
+        onclick={playground.explain}
+        >{playground.simulation.isPending
+          ? 'Inspecting…'
+          : 'Inspect plan'}</button
       >
     </details>
     <div class="run-actions">
       <button
         class="button button-primary"
         type="submit"
-        disabled={mutation.isPending ||
-          streaming ||
-          strictSelected ||
-          operation === 'realtime' ||
-          operation === 'translation' ||
-          (composer === 'advanced' && !operationKnown)}
-        >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
+        disabled={playground.mutation.isPending ||
+          playground.streaming ||
+          playground.strictSelected ||
+          playground.operation === 'realtime' ||
+          playground.operation === 'translation' ||
+          (playground.composer === 'advanced' && !playground.operationKnown)}
+        >{playground.mutation.isPending || playground.streaming
+          ? 'Running…'
+          : 'Run test'}</button
       >
-      {#if streaming}<button
+      {#if playground.streaming}<button
           class="button button-secondary"
           type="button"
-          onclick={cancelStream}>Cancel</button
+          onclick={playground.cancelStream}>Cancel</button
         >{/if}
-      {#if streamFrames.length > 0 || streamDone || streamProblem || mutation.data}<button
+      {#if playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem || playground.mutation.data}<button
           class="button button-secondary"
           type="button"
-          onclick={clearResult}>Clear</button
+          onclick={playground.clearResult}>Clear</button
         >{/if}
     </div>
   </form>
@@ -803,55 +416,66 @@
         <p class="eyebrow">Ephemeral response</p>
         <h2 id="result-title">Result</h2>
       </div>
-      {#if mutation.data && !mutation.isPending}<span class="badge success"
-          >{mutation.data.latency_ms} ms</span
+      {#if playground.mutation.data && !playground.mutation.isPending}<span
+          class="badge success">{playground.mutation.data.latency_ms} ms</span
         >{/if}
     </div>
-    {#if streaming || streamFrames.length > 0 || streamDone || streamProblem}
-      {#if streamProblem}<div class="inline-problem" role="alert">
-          {streamProblem}
+    {#if playground.streaming || playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem}
+      {#if playground.streamProblem}<div class="inline-problem" role="alert">
+          {playground.streamProblem}
         </div>{/if}
-      {#if streamFrames.length > 0}<div class="output">
+      {#if playground.streamFrames.length > 0}<div class="output">
           <h3>Frames</h3>
-          <pre data-testid="stream-frames">{streamFrames.join('')}</pre>
+          <pre data-testid="stream-frames">{playground.streamFrames.join(
+              ''
+            )}</pre>
         </div>{/if}
-      {#if streaming}<div class="loading-state" role="status">
+      {#if playground.streaming}<div class="loading-state" role="status">
           Streaming response…
         </div>{/if}
-      {#if streamDone}<dl>
+      {#if playground.streamDone}<dl>
           <div>
             <dt>Response ID</dt>
-            <dd class="mono">{streamDone.id ?? 'Not reported'}</dd>
+            <dd class="mono">{playground.streamDone.id ?? 'Not reported'}</dd>
           </div>
           <div>
             <dt>Route</dt>
-            <dd>{streamDone.model ?? 'Not reported'}</dd>
+            <dd>{playground.streamDone.model ?? 'Not reported'}</dd>
           </div>
           <div>
             <dt>Input tokens</dt>
-            <dd>{formatInteger(streamDone.usage?.input_tokens)}</dd>
+            <dd>{formatInteger(playground.streamDone.usage?.input_tokens)}</dd>
           </div>
           <div>
             <dt>Output tokens</dt>
-            <dd>{formatInteger(streamDone.usage?.output_tokens)}</dd>
+            <dd>{formatInteger(playground.streamDone.usage?.output_tokens)}</dd>
           </div>
           <div>
             <dt>Total tokens</dt>
-            <dd>{formatInteger(streamDone.usage?.total_tokens)}</dd>
+            <dd>{formatInteger(playground.streamDone.usage?.total_tokens)}</dd>
           </div>
         </dl>{/if}
-    {:else if mutation.isPending}<div class="loading-state" role="status">
+    {:else if playground.mutation.isPending}<div
+        class="loading-state"
+        role="status"
+      >
         Waiting for the route…
       </div>
-    {:else if mutation.isError}<div class="inline-problem" role="alert">
-        {errorMessage(mutation.error, 'The playground request failed.')}
+    {:else if playground.mutation.isError}<div
+        class="inline-problem"
+        role="alert"
+      >
+        {errorMessage(
+          playground.mutation.error,
+          'The playground request failed.'
+        )}
       </div>
-    {:else if mutation.data}
-      {#if mutation.data.refusal}<div class="refusal" role="alert">
+    {:else if playground.mutation.data}
+      {#if playground.mutation.data.refusal}<div class="refusal" role="alert">
           <strong>The model refused this request</strong>
-          <p>{mutation.data.refusal}</p>
+          <p>{playground.mutation.data.refusal}</p>
         </div>{/if}
-      {#if !mutation.data.refusal && !mutation.data.output_text && !mutation.data.tool_calls?.length && mutation.data.response === undefined && (mutation.data.structured_output === undefined || mutation.data.structured_output === null)}<div
+      {#if !playground.mutation.data.refusal && !playground.mutation.data.output_text && !playground.mutation.data.tool_calls?.length && playground.mutation.data.response === undefined && (playground.mutation.data.structured_output === undefined || playground.mutation.data.structured_output === null)}<div
           class="empty-state"
         >
           <div>
@@ -862,64 +486,78 @@
             </p>
           </div>
         </div>{/if}
-      {#if mutation.data.response !== undefined}<div class="output">
+      {#if playground.mutation.data.response !== undefined}<div class="output">
           <OperationResult
-            operation={completedRequest?.operation ?? 'generation'}
-            response={mutation.data.response}
-            responseRaw={mutation.data.response_raw}
-            request={completedRequest?.request}
+            operation={playground.completedRequest?.operation ?? 'generation'}
+            response={playground.mutation.data.response}
+            responseRaw={playground.mutation.data.response_raw}
+            request={playground.completedRequest?.request}
           />
         </div>{/if}
-      {#if mutation.data.output_text}<div class="output">
+      {#if playground.mutation.data.output_text}<div class="output">
           <h3>Text</h3>
-          <pre>{mutation.data.output_text}</pre>
+          <pre>{playground.mutation.data.output_text}</pre>
         </div>{/if}
-      {#if mutation.data.tool_calls?.length}<div class="output">
+      {#if playground.mutation.data.tool_calls?.length}<div class="output">
           <h3>Tool calls</h3>
-          <pre>{JSON.stringify(mutation.data.tool_calls, null, 2)}</pre>
+          <pre>{JSON.stringify(
+              playground.mutation.data.tool_calls,
+              null,
+              2
+            )}</pre>
         </div>{/if}
-      {#if mutation.data.structured_output !== undefined && mutation.data.structured_output !== null}<div
+      {#if playground.mutation.data.structured_output !== undefined && playground.mutation.data.structured_output !== null}<div
           class="output"
         >
           <h3>Structured output</h3>
-          <pre>{JSON.stringify(mutation.data.structured_output, null, 2)}</pre>
+          <pre>{JSON.stringify(
+              playground.mutation.data.structured_output,
+              null,
+              2
+            )}</pre>
         </div>{/if}
       <dl>
         <div>
           <dt>Response ID</dt>
-          <dd class="mono">{mutation.data.id}</dd>
+          <dd class="mono">{playground.mutation.data.id}</dd>
         </div>
         <div>
           <dt>Route</dt>
-          <dd>{mutation.data.model}</dd>
+          <dd>{playground.mutation.data.model}</dd>
         </div>
         <div>
           <dt>Provider model</dt>
-          <dd>{mutation.data.provider_model ?? 'Not reported'}</dd>
+          <dd>{playground.mutation.data.provider_model ?? 'Not reported'}</dd>
         </div>
         <div>
           <dt>Finish reason</dt>
-          <dd>{mutation.data.finish_reason ?? 'Not reported'}</dd>
+          <dd>{playground.mutation.data.finish_reason ?? 'Not reported'}</dd>
         </div>
         <div>
           <dt>Input tokens</dt>
-          <dd>{formatInteger(mutation.data.usage?.input_tokens)}</dd>
+          <dd>{formatInteger(playground.mutation.data.usage?.input_tokens)}</dd>
         </div>
         <div>
           <dt>Cached input tokens</dt>
-          <dd>{formatInteger(mutation.data.usage?.cached_input_tokens)}</dd>
+          <dd>
+            {formatInteger(playground.mutation.data.usage?.cached_input_tokens)}
+          </dd>
         </div>
         <div>
           <dt>Output tokens</dt>
-          <dd>{formatInteger(mutation.data.usage?.output_tokens)}</dd>
+          <dd>
+            {formatInteger(playground.mutation.data.usage?.output_tokens)}
+          </dd>
         </div>
         <div>
           <dt>Reasoning tokens</dt>
-          <dd>{formatInteger(mutation.data.usage?.reasoning_tokens)}</dd>
+          <dd>
+            {formatInteger(playground.mutation.data.usage?.reasoning_tokens)}
+          </dd>
         </div>
         <div>
           <dt>Total tokens</dt>
-          <dd>{formatInteger(mutation.data.usage?.total_tokens)}</dd>
+          <dd>{formatInteger(playground.mutation.data.usage?.total_tokens)}</dd>
         </div>
       </dl>
     {:else}<div class="empty-state">
@@ -934,21 +572,24 @@
   </section>
 </div>
 
-{#if strictSelected && operation !== 'translation'}
-  {#if composer === 'advanced' && operation === 'generation' && surface === 'openai'}
-    {#key model.trim()}
-      <StrictToolPlayground route={model.trim()} requestText={rawJson} />
-    {/key}
-  {:else if composer === 'advanced' && nativeDialects(operation).length}
-    {#key `${model.trim()}:${operation}:${templateKey}`}
-      <NativeOperationPlayground
-        route={model.trim()}
-        operation={operation as NativeOperation}
-        requestText={rawJson}
-        bind:dialect={nativeDialect}
+{#if playground.strictSelected && playground.operation !== 'translation'}
+  {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
+    {#key playground.model.trim()}
+      <StrictToolPlayground
+        route={playground.model.trim()}
+        requestText={playground.rawJson}
       />
     {/key}
-  {:else if operation !== 'realtime'}
+  {:else if playground.composer === 'advanced' && nativeDialects(playground.operation).length}
+    {#key `${playground.model.trim()}:${playground.operation}:${playground.templateKey}`}
+      <NativeOperationPlayground
+        route={playground.model.trim()}
+        operation={playground.operation as NativeOperation}
+        requestText={playground.rawJson}
+        bind:dialect={playground.nativeDialect}
+      />
+    {/key}
+  {:else if playground.operation !== 'realtime'}
     <section class="card strict-client-unavailable" role="status">
       This route needs a native or negotiated public client. Choose Advanced,
       Generation, OpenAI and the negotiated tool template for the currently
@@ -957,22 +598,24 @@
   {/if}
 {/if}
 
-{#if composer === 'advanced' && operation === 'translation'}
-  {#key model.trim()}<AudioTranslationPlayground route={model.trim()} />{/key}
+{#if playground.composer === 'advanced' && playground.operation === 'translation'}
+  {#key playground.model.trim()}<AudioTranslationPlayground
+      route={playground.model.trim()}
+    />{/key}
 {/if}
 
-{#if composer === 'advanced' && operation === 'realtime'}
+{#if playground.composer === 'advanced' && playground.operation === 'realtime'}
   <RealtimeTrace />
 {/if}
 
-{#if explanation}<section class="card composer">
+{#if playground.explanation}<section class="card composer">
     <h2>Routing explanation</h2>
     <p class="explanation-source">
-      {explanation.dryRun
+      {playground.explanation.dryRun
         ? 'Dry run against the published runtime. No provider request was sent.'
         : 'From the request that just ran.'}
     </p>
-    <RoutingDecisions rows={decisionRows(explanation.decisions)} />
+    <RoutingDecisions rows={decisionRows(playground.explanation.decisions)} />
   </section>{/if}
 
 <style>

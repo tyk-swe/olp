@@ -19,10 +19,10 @@ Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 Run from the repository root after setup:
 
-| Command                    | Purpose                                          |
-| -------------------------- | ------------------------------------------------ |
+| Command                     | Purpose                                            |
+| --------------------------- | -------------------------------------------------- |
 | `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest |
-| `pnpm --dir console build`  | Static assets and asset manifest                 |
+| `pnpm --dir console build`  | Static assets and asset manifest                   |
 
 Management requests use the generated `openapi-fetch` client. Update
 `openapi/management.json` alongside Go handlers and run `make api`; never edit

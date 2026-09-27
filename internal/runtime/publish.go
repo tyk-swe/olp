@@ -11,58 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
 )
-
-// RevisionModel is the published shape of one enabled model inside a provider
-// revision. Provider activation writes it; publication reads it.
-type RevisionModel struct {
-	ID            string               `json:"id"`
-	UpstreamModel string               `json:"upstream_model"`
-	DisplayName   string               `json:"display_name"`
-	Capabilities  []RevisionCapability `json:"capabilities"`
-}
-
-// RevisionCapability records whether a tuple was certified when activated.
-type RevisionCapability struct {
-	Operation   string     `json:"operation"`
-	Surface     string     `json:"surface"`
-	Mode        string     `json:"mode"`
-	Source      string     `json:"source"`
-	CertifiedAt *time.Time `json:"certified_at,omitempty"`
-}
-
-// RevisionSlot is the published shape of one credential slot.
-type RevisionSlot struct {
-	Slot
-	Default bool `json:"default"`
-}
-
-// Configuration is the subset of a provider configuration the gateway needs.
-type Configuration struct {
-	ProfileID       string `json:"profile_id,omitempty"`
-	ProfileRevision string `json:"profile_revision,omitempty"`
-	Kind            string `json:"kind"`
-	AuthMode        string `json:"auth_mode"`
-	Endpoint        string `json:"endpoint"`
-	CloudRegion     string `json:"cloud_region"`
-	CloudProject    string `json:"cloud_project"`
-	Deployment      string `json:"deployment"`
-	APIVersion      string `json:"api_version"`
-	Options         struct {
-		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
-		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
-		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
-		OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
-		Bindings          map[string]connectors.Binding    `json:"bindings,omitempty"`
-		Models            map[string]json.RawMessage       `json:"models"`
-		CredentialHeaders []string                         `json:"credential_headers"`
-		Limits            *Limits                          `json:"limits"`
-		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
-		VendorID          string                           `json:"vendor_id"`
-	} `json:"options"`
-}
 
 // Published identifies a recorded release.
 type Published struct {
@@ -135,54 +84,17 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		return nil, err
 	}
 	for rows.Next() {
-		var state string
-		var configuration, models, slots []byte
-		provider := Provider{Capabilities: []Capability{}}
-		if err = rows.Scan(&provider.ID, &state, &provider.RevisionID, &provider.Name, &configuration, &models, &slots, &provider.ProjectID); err != nil {
+		var revision ProviderRevision
+		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		var cfg Configuration
-		var revisionModels []RevisionModel
-		var revisionSlots []RevisionSlot
-		if err = json.Unmarshal(configuration, &cfg); err == nil {
-			err = json.Unmarshal(models, &revisionModels)
-		}
-		if err == nil {
-			err = json.Unmarshal(slots, &revisionSlots)
-		}
+		provider, err := DecodeProviderRevision(revision)
 		if err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("provider %s revision: %w", provider.ID, err)
+			return nil, err
 		}
-		provider.Enabled = state == "active"
-		provider.Network = cfg.Options.Network
-		provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
-		provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
-		provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings
-		provider.Kind = cfg.Kind
-		provider.AuthMode = cfg.AuthMode
-		provider.Endpoint = cfg.Endpoint
-		provider.CloudRegion, provider.CloudProject, provider.Deployment, provider.APIVersion = cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion
-		provider.Models = cfg.Options.Models
-		provider.CredentialHeaders = cfg.Options.CredentialHeaders
-		provider.ParameterDefaults = cfg.Options.ParameterDefaults
-		provider.VendorID = cfg.Options.VendorID
-		provider.Limits = publishedLimits(cfg.Options.Limits)
-		for _, model := range revisionModels {
-			for _, c := range model.Capabilities {
-				if c.Source == "certified" {
-					provider.Capabilities = append(provider.Capabilities, Capability{Model: model.UpstreamModel, Operation: c.Operation, Surface: c.Surface, Mode: c.Mode})
-				}
-			}
-		}
-		for _, slot := range revisionSlots {
-			provider.Slots = append(provider.Slots, slot.Slot)
-			if slot.Default {
-				provider.ActiveCredential = slot.CredentialID
-				provider.DefaultSlotID = slot.ID
-			}
-		}
+		provider.Limits = publishedLimits(provider.Limits)
 		snapshot.Providers[provider.ID] = provider
 	}
 	rows.Close()
@@ -195,36 +107,13 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var operations, targets, policy, contentPolicy, fidelity []byte
-		route := Route{}
-		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy, &fidelity); err != nil {
+		var revision RouteRevision
+		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.ContentPolicy, &revision.Fidelity); err != nil {
 			return nil, err
 		}
-		var published []PublishedTarget
-		if err = json.Unmarshal(operations, &route.Operations); err == nil {
-			err = json.Unmarshal(targets, &published)
-		}
+		route, err := DecodeRouteRevision(revision)
 		if err != nil {
-			return nil, fmt.Errorf("route %s revision: %w", route.Slug, err)
-		}
-		if len(policy) > 0 {
-			if err = json.Unmarshal(policy, &route.Policy); err != nil {
-				return nil, err
-			}
-		}
-		if len(contentPolicy) > 0 {
-			if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
-				return nil, fmt.Errorf("route %s content policy: %w", route.Slug, err)
-			}
-		}
-		route.Fidelity, err = DecodeFidelity(fidelity)
-		if err != nil {
-			return nil, fmt.Errorf("route %s fidelity: %w", route.Slug, err)
-		}
-		route.RoutingID = route.ID
-		route.PublishedAt = route.PublishedAt.UTC()
-		for _, t := range published {
-			route.Targets = append(route.Targets, Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
+			return nil, err
 		}
 		snapshot.Routes[route.Slug] = route
 	}
@@ -266,19 +155,4 @@ func publishedLimits(l *Limits) *Limits {
 		return nil
 	}
 	return l
-}
-
-// PublishedTarget is the stored shape of one route revision target. The
-// provider model identity doubles as the routing identity so affinity survives
-// revisions that keep the same target.
-type PublishedTarget struct {
-	ID              string `json:"id"`
-	ProviderModelID string `json:"provider_model_id"`
-	ProviderID      string `json:"provider_id"`
-	ProviderName    string `json:"provider_name"`
-	ProviderModel   string `json:"provider_model"`
-	Priority        int    `json:"priority"`
-	Weight          int64  `json:"weight"`
-	TimeoutMS       int64  `json:"timeout_ms"`
-	Position        int    `json:"position"`
 }
