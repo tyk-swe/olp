@@ -618,6 +618,30 @@ func (e PlaygroundResponseFormat2Type) Valid() bool {
 	}
 }
 
+// Defines values for PluginFailureRuleClass.
+const (
+	PluginFailureRuleClassCredential  PluginFailureRuleClass = "credential"
+	PluginFailureRuleClassRateLimited PluginFailureRuleClass = "rate_limited"
+	PluginFailureRuleClassRetryable   PluginFailureRuleClass = "retryable"
+	PluginFailureRuleClassTerminal    PluginFailureRuleClass = "terminal"
+)
+
+// Valid indicates whether the value is a known member of the PluginFailureRuleClass enum.
+func (e PluginFailureRuleClass) Valid() bool {
+	switch e {
+	case PluginFailureRuleClassCredential:
+		return true
+	case PluginFailureRuleClassRateLimited:
+		return true
+	case PluginFailureRuleClassRetryable:
+		return true
+	case PluginFailureRuleClassTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -2620,10 +2644,49 @@ type PluginApprovalRequest struct {
 	Origins []string `json:"origins"`
 }
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+// PluginDiscovery The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.
+type PluginDiscovery struct {
+	// Id The field of each model object that holds its ID.
+	Id string `json:"id"`
+
+	// Models The top-level field of the listing that holds the array of model objects.
+	Models string `json:"models"`
+
+	// Pagination How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.
+	Pagination *PluginPagination `json:"pagination,omitempty"`
+
+	// Path The listing's path, which extends the address, such as /models.
+	Path string `json:"path"`
+}
+
+// PluginFailureRule Classifies the upstream failures it matches: unsuccessful responses by status and the error their body states, and errors stated in-band, such as a stream's error event, by code and type. It matches when every value it declares matches exactly, and declares at least one.
+type PluginFailureRule struct {
+	// Class credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
+	Class PluginFailureRuleClass `json:"class"`
+
+	// Code The stated error's code.
+	Code *string `json:"code,omitempty"`
+
+	// Status The unsuccessful response's HTTP status. A rule with a status never matches an in-band error.
+	Status *int `json:"status,omitempty"`
+
+	// Type The stated error's type.
+	Type *string `json:"type,omitempty"`
+}
+
+// PluginFailureRuleClass credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
+type PluginFailureRuleClass string
+
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing and the classification of its failures. Header and query values are templates in which {credential} stands for the provider's static credential.
 type PluginHosting struct {
 	// Address Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.
 	Address string `json:"address"`
+
+	// Classification Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.
+	Classification *[]PluginFailureRule `json:"classification,omitempty"`
+
+	// Discovery The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.
+	Discovery *PluginDiscovery `json:"discovery,omitempty"`
 
 	// Headers Declared request headers by name, with value templates.
 	Headers *map[string]string `json:"headers,omitempty"`
@@ -2652,12 +2715,24 @@ type PluginManifest struct {
 	Version string `json:"version"`
 }
 
+// PluginPagination How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.
+type PluginPagination struct {
+	// Cursor The top-level field of a page that holds the next page's cursor.
+	Cursor string `json:"cursor"`
+
+	// More The top-level boolean field of a page that reports whether another page follows.
+	More *string `json:"more,omitempty"`
+
+	// Parameter The query parameter that carries the cursor.
+	Parameter string `json:"parameter"`
+}
+
 // PluginProfile A provider profile the plugin supplies around a built-in dialect.
 type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing and the classification of its failures. Header and query values are templates in which {credential} stands for the provider's static credential.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
@@ -3180,6 +3255,9 @@ type ProviderProfile struct {
 	Id              string                            `json:"id"`
 	Kind            string                            `json:"kind"`
 	Label           string                            `json:"label"`
+
+	// ModelDiscovery Whether a plugin profile declares the upstream's model listing. Without it, operators declare the models of a provider using the profile. A built-in profile's provider kind decides its discovery, and it omits this field.
+	ModelDiscovery *bool `json:"model_discovery,omitempty"`
 
 	// OperationDialects Dialect identity for each supported operation.
 	OperationDialects map[string]string `json:"operation_dialects"`

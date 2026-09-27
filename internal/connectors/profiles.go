@@ -44,6 +44,10 @@ type Profile struct {
 	// Plugin is the provider plugin that supplies the profile, or nil for a
 	// built-in profile.
 	Plugin *Plugin `json:"plugin,omitempty"`
+	// ModelDiscovery reports that a plugin profile declares how the upstream
+	// lists its models; operators declare the models of a plugin profile
+	// without it. A built-in profile's provider kind decides its discovery.
+	ModelDiscovery bool `json:"model_discovery,omitempty"`
 	// Strict reports whether the profile may serve strict routes: its hosting
 	// changes only authorization, address and headers, or is a qualified
 	// built-in binding.
@@ -646,7 +650,7 @@ func RegisterProfile(p Profile) error {
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
 		return errors.New("profile transport and capabilities are required")
 	}
-	p.Plugin, p.Strict = nil, template.Strict
+	p.Plugin, p.ModelDiscovery, p.Strict = nil, false, template.Strict
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil

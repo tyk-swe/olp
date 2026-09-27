@@ -22,6 +22,7 @@ type Recorded = {
   requests: {
     method: string;
     path: string;
+    query: string;
     headers: Record<string, string>;
     body: { stream?: boolean } | null;
   }[];
@@ -104,7 +105,9 @@ test('an operator connects a provider through an approved plugin profile', async
   await expect(pinned).toContainText(digest);
   await expect(page.getByRole('textbox', { name: 'Endpoint' })).toHaveCount(0);
   await page.getByLabel('Provider name').fill(providerName);
-  await page.getByLabel('Probe model').fill(upstream.model);
+  // The profile declares model discovery, so the model is only a seed, as for
+  // built-in kinds.
+  await page.getByLabel('Seed model (optional)').fill(upstream.model);
   await page
     .getByLabel('Credential', { exact: true })
     .fill(upstream.credential);
@@ -121,11 +124,20 @@ test('an operator connects a provider through an approved plugin profile', async
   const providerId = ((await (await created).json()) as { id: string }).id;
   await expect(page.getByText(upstream.credential)).toHaveCount(0);
 
-  // Plugin providers have no model list: the probe model is declared, and
-  // each model is certified.
+  // The profile's declared discovery lists the upstream's models, across its
+  // pages, and each model is certified.
   await expect(
-    page.getByRole('heading', { name: 'Declare upstream models' })
+    page.getByRole('heading', { name: 'Discover upstream models' })
   ).toBeVisible();
+  await expect(page.getByText(/1 models listed/)).toBeVisible();
+  const discovered = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname ===
+        `/api/v1/providers/${providerId}/discovery`
+  );
+  await page.getByRole('button', { name: 'Discover upstream models' }).click();
+  expect((await discovered).status()).toBe(200);
   await expect(
     page.getByText(upstream.model, { exact: true }).first()
   ).toBeVisible();
@@ -166,6 +178,11 @@ test('an operator connects a provider through an approved plugin profile', async
     await request.get(`${upstream.origin}/__test__/requests`)
   ).json()) as Recorded;
   expect(observed.unexpected).toEqual([]);
+  expect(
+    observed.requests.some(
+      (call) => call.path === '/v1/models' && call.query === 'page_token=page-2'
+    )
+  ).toBe(true);
   expect(
     observed.requests.some(
       (call) =>

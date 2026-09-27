@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  declaresModels,
   dialectSurface,
   pluginProfileGroups,
   type ProviderProfile
@@ -61,6 +62,29 @@ describe('plugin profile catalogue', () => {
       { plugin: first, profiles: [chat, messages] },
       { plugin: second, profiles: [upgraded] }
     ]);
+  });
+
+  it('has operators declare the models of a plugin profile without discovery', () => {
+    const digest = 'a'.repeat(64);
+    const pinned = {
+      kind: 'plugin',
+      profile_id: 'acme-chat',
+      profile_revision: digest
+    };
+    const plugin = profile({
+      kind: 'plugin',
+      id: 'acme-chat',
+      revision: digest
+    });
+    const discovering = { ...plugin, model_discovery: true };
+    expect(declaresModels(pinned, [plugin])).toBe(true);
+    expect(declaresModels(pinned, [discovering])).toBe(false);
+    // Another build of the plugin discovers nothing for this one.
+    expect(
+      declaresModels(pinned, [{ ...discovering, revision: 'b'.repeat(64) }])
+    ).toBe(true);
+    expect(declaresModels(pinned, undefined)).toBe(true);
+    expect(declaresModels({ kind: 'openai' }, undefined)).toBe(false);
   });
 
   it('names the surface that speaks a dialect natively', () => {

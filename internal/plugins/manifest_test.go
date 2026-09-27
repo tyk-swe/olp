@@ -15,7 +15,11 @@ func validManifest() abi.Manifest {
 		Version: "1.2.0+build.7",
 		Origins: []string{"https://api.acme.example", "http://127.0.0.1:8080", "https://[::1]:8443"},
 		Profiles: []abi.Profile{
-			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}}},
+			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{
+				Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
+				Discovery:      &abi.Discovery{Path: "/models", Models: "data", ID: "id"},
+				Classification: []abi.FailureRule{{Status: 400, Code: "insufficient_quota", Class: abi.ClassRateLimited}},
+			}},
 			{ID: "acme-messages", Label: "Acme Messages", Dialect: "anthropic-messages", Hosting: abi.Hosting{Address: "http://127.0.0.1:8080", Query: map[string]string{"key": "{credential}"}}},
 		},
 	}
@@ -66,6 +70,10 @@ func TestManifestValidation(t *testing.T) {
 		"uncanonical origin":   {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://api.acme.example:443/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
 		"reserved header":      {func(m *abi.Manifest) { m.Profiles[0].Hosting.Headers["Host"] = "{credential}" }, CodeManifestInvalid, "manifest.profiles[0].hosting.headers.Host"},
 		"credential not given": {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query = nil }, CodeManifestInvalid, "manifest.profiles[1].hosting"},
+		"listing path":         {func(m *abi.Manifest) { m.Profiles[0].Hosting.Discovery.Path = "https://other.example/models" }, CodeManifestInvalid, "manifest.profiles[0].hosting.discovery.path"},
+		"unknown failure class": {func(m *abi.Manifest) {
+			m.Profiles[0].Hosting.Classification[0].Class = "quota"
+		}, CodeManifestInvalid, "manifest.profiles[0].hosting.classification[0].class"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
@@ -83,9 +91,13 @@ func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
 	if _, err = decodeManifest(data); err != nil {
 		t.Fatal(err)
 	}
-	extended := strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1)
-	_, err = decodeManifest([]byte(extended))
-	wantError(t, err, CodeManifestInvalid, "manifest")
+	for _, extended := range []string{
+		strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1),
+		strings.Replace(string(data), `"class":`, `"retry_after":5,"class":`, 1),
+	} {
+		_, err = decodeManifest([]byte(extended))
+		wantError(t, err, CodeManifestInvalid, "manifest")
+	}
 	_, err = decodeManifest([]byte(`{"name":"` + strings.Repeat("a", maxManifestBytes) + `"}`))
 	wantError(t, err, CodeManifestInvalid, "manifest")
 }

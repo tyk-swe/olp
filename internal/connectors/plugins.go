@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -116,7 +117,7 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		// Semantic headers and query settings belong to the dialect, so the
 		// provider configures them as it would for the dialect's direct hosting.
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
-		Plugin: &plugin,
+		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil,
 		// The adaptation changes only authorization, address and declared
 		// headers, so the profile serves strict routes.
 		Strict: true,
@@ -174,8 +175,9 @@ func (p *PluginProfile) UnmarshalJSON(data []byte) error {
 
 // hosting is a parsed hosting adaptation.
 type hosting struct {
-	headers map[string]template
-	query   map[string]template
+	headers        map[string]template
+	query          map[string]template
+	classification []upstream.Rule
 }
 
 // credentialValue names the static credential in templates.
@@ -233,6 +235,14 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	if !placed.uses(credentialValue) {
 		return hosting{}, &ProfileError{Field: "hosting", Message: "Place the static credential with {credential} in a header or query parameter."}
 	}
+	if err := validateDiscovery(declaredHosting); err != nil {
+		return hosting{}, err
+	}
+	classification, err := parseClassification(declaredHosting.Classification)
+	if err != nil {
+		return hosting{}, err
+	}
+	placed.classification = classification
 	return placed, nil
 }
 

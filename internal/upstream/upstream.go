@@ -105,6 +105,33 @@ type Classifier struct {
 	// twice: a failure that would fail over while the upstream's acceptance
 	// is unresolved is Ambiguous.
 	AtMostOnce bool
+	// Declared is the provider profile's declared classification. The first
+	// rule that matches a failure the upstream stated decides its class ahead
+	// of the built-in rules; AtMostOnce still applies to it.
+	Declared []Rule
+}
+
+// A Rule is a declared classification: the class of the failures the upstream
+// stated that it matches. It matches an unsuccessful response or an in-band
+// error when each value it sets equals the failure's: Status its status, Code
+// and Type its stated error's code and type. A rule with a status never
+// matches an in-band error.
+type Rule struct {
+	Status     int
+	Code, Type string
+	Class      Class
+}
+
+func (r Rule) matches(e Evidence) bool {
+	switch {
+	case r.Status != 0 && r.Status != e.Status:
+		return false
+	case r.Code != "" && (e.Error == nil || e.Error.Code != r.Code):
+		return false
+	case r.Type != "" && (e.Error == nil || e.Error.Type != r.Type):
+		return false
+	}
+	return true
 }
 
 // Outcome is a classified failure.
@@ -132,6 +159,11 @@ func (c Classifier) class(e Evidence) Class {
 		return Timeout
 	case e.Interrupted != nil:
 		return Cancelled
+	}
+	if class, ok := c.declared(e); ok {
+		return class
+	}
+	switch {
 	case e.Status != 0:
 		return c.rejection(e.Status, e.Error)
 	case e.Error != nil:
@@ -144,6 +176,20 @@ func (c Classifier) class(e Evidence) Class {
 		return Protocol
 	}
 	return Connect
+}
+
+// declared classifies a failure the upstream stated, an unsuccessful status or
+// an in-band error, by the first declared rule that matches it.
+func (c Classifier) declared(e Evidence) (Class, bool) {
+	if e.Status == 0 && e.Error == nil {
+		return "", false
+	}
+	for _, rule := range c.Declared {
+		if rule.matches(e) {
+			return rule.Class, true
+		}
+	}
+	return "", false
 }
 
 // rejection classifies an unsuccessful status by its code and error body.

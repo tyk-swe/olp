@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderKindCapability } from '$lib/features/providers/models';
+import type { ProviderProfile } from '$lib/features/providers/profiles';
 import {
   activationReady,
   authOptionsFor,
@@ -644,10 +645,30 @@ describe('plugin providers', () => {
         credential: 'required'
       }
     ],
-    fields: [{ field: 'model', label: 'Probe model', required: true }],
+    fields: [],
     presets: []
   };
   const digest = 'c'.repeat(64);
+  const profile = (model_discovery?: boolean): ProviderProfile => ({
+    id: 'reference-chat',
+    revision: digest,
+    label: 'Reference Chat Completions',
+    kind: 'plugin',
+    dialect: 'openai-chat',
+    dialect_revision: 'unversioned-2026-09-22',
+    hosting: 'plugin',
+    authentication: ['static_credential'],
+    transport: 'http',
+    operations: ['generation'],
+    operation_dialects: { generation: 'openai-chat' },
+    default_schemas: {},
+    semantic_headers: ['Openai-Beta'],
+    query_settings: [],
+    documentation: '',
+    strict: true,
+    plugin: { digest, name: 'reference', version: '0.1.0' },
+    model_discovery
+  });
 
   it('pins a plugin profile by its digest and leaves the address to the server', () => {
     const draft = createProviderDraft(pluginSpec);
@@ -672,16 +693,28 @@ describe('plugin providers', () => {
     expect(draft.document?.at(['profile_id'])).toBeUndefined();
   });
 
-  it('requires a plugin profile and a probe model, since plugins have no discovery', () => {
+  it('requires a plugin profile, and a probe model unless the profile discovers models', () => {
     const draft = createProviderDraft(pluginSpec);
     draft.name = 'Reference';
     draft.credential = 'secret';
     expect(requiresProbeModel(draft, pluginSpec)).toBe(true);
-    expect(requiresProbeModel({ presetId: '' }, openAiSpec)).toBe(false);
+    expect(
+      requiresProbeModel({ kind: 'openai', presetId: '' }, openAiSpec)
+    ).toBe(false);
     expect(validateProviderDraft(draft, pluginSpec)).toBe(
       'Provider plugin requires plugin profile, probe model.'
     );
     selectPluginProfile(draft, { id: 'reference-chat', revision: digest });
+    // Until the catalogue says the profile discovers models, it declares them.
+    expect(requiresProbeModel(draft, pluginSpec)).toBe(true);
+    expect(requiresProbeModel(draft, pluginSpec, [profile()])).toBe(true);
+    expect(
+      validateProviderDraft(draft, pluginSpec, { profiles: [profile()] })
+    ).toBe('Provider plugin requires probe model.');
+    expect(requiresProbeModel(draft, pluginSpec, [profile(true)])).toBe(false);
+    expect(
+      validateProviderDraft(draft, pluginSpec, { profiles: [profile(true)] })
+    ).toBeNull();
     draft.model = 'reference-model';
     expect(validateProviderDraft(draft, pluginSpec)).toBeNull();
   });

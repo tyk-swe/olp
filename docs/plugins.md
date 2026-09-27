@@ -51,7 +51,8 @@ its manifest declares:
 
 - **profiles**, each naming the built-in dialect it serves and its hosting
   adaptation: the address its requests go to, at one of the plugin's origins,
-  and the headers and query parameters it declares;
+  the headers and query parameters it declares, and any model listing and
+  failure classification;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -97,14 +98,25 @@ that carries it is redacted wherever upstream text is recorded.
 No built-in kind's defaults apply to a plugin provider:
 
 - **Endpoint:** the profile's address.
-- **Discovery:** there is no upstream model listing. Declare models, such as
-  the wizard's probe model; each is certified individually.
+- **Discovery:** only the profile's declared model listing, if it declares one.
+  The probe and discover flows then list the upstream's models, following its
+  pages, as for built-in kinds, and the catalogue entry reports
+  `model_discovery: true`. Without one, declare models, such as the wizard's
+  probe model; each is certified individually.
 - **API-key header:** only the headers and query parameters the profile
   declares carry the credential.
 - **Vendor prices:** a plugin provider has no vendor, so no list price applies.
   Its attempts are unpriced until a pricing revision carries a price scoped to
   that provider (`provider_kind: "plugin"` with its `provider_id`); a plugin
   price must name its provider.
+
+A profile may also declare how its upstream's failures are classified. The
+first declared rule matching a failure decides whether it is a credential
+failure, a rate limit, retryable or terminal, which governs
+[failover and cooldown](provider-routing.md) as it does for built-in classes;
+for example, a `400` carrying the upstream's own quota code can cool the slot
+and fail over like a `429`. The built-in rules classify every failure no rule
+matches. The declarations apply to gateway attempts and probes alike.
 
 A plugin profile changes only authorization, address and declared headers, so
 its catalogue entry reports `strict: true` and it serves strict routes.

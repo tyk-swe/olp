@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -20,9 +21,14 @@ func pluginManifest() abi.Manifest {
 	return abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
 		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
 		Hosting: abi.Hosting{
-			Address: "https://api.acme.example/v2",
-			Headers: map[string]string{"authorization": "Token {credential}", "X-Acme-Key": "{credential}", "X-Acme-Client": "olp"},
-			Query:   map[string]string{"key": "{credential}"},
+			Address:   "https://api.acme.example/v2",
+			Headers:   map[string]string{"authorization": "Token {credential}", "X-Acme-Key": "{credential}", "X-Acme-Client": "olp"},
+			Query:     map[string]string{"key": "{credential}"},
+			Discovery: &abi.Discovery{Path: "/models", Models: "data", ID: "id", Pagination: &abi.Pagination{Parameter: "page_token", Cursor: "next_page_token"}},
+			Classification: []abi.FailureRule{
+				{Status: 400, Code: "insufficient_quota", Class: abi.ClassRateLimited},
+				{Type: "overloaded", Class: abi.ClassRetryable},
+			},
 		},
 	}}}
 }
@@ -143,6 +149,62 @@ func TestPluginProfileSurvivesPublication(t *testing.T) {
 	}
 }
 
+// A profile's declared discovery and classification reach the provider
+// unchanged through publication, with the classes that govern failover.
+func TestPluginProfileDeclaresDiscoveryAndClassification(t *testing.T) {
+	c := pluginConfig(t, pluginManifest())
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published Config
+	if err = json.Unmarshal(encoded, &published); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []Config{c, published} {
+		profile, _ := c.Profile()
+		discovery, declared := c.Plugin.Discovery()
+		if !profile.ModelDiscovery || !declared || discovery.Path != "/models" || discovery.Models != "data" || discovery.ID != "id" ||
+			*discovery.Pagination != (abi.Pagination{Parameter: "page_token", Cursor: "next_page_token"}) {
+			t.Fatalf("discovery %v %+v", profile.ModelDiscovery, discovery)
+		}
+		want := []upstream.Rule{{Status: 400, Code: "insufficient_quota", Class: upstream.RateLimit}, {Type: "overloaded", Class: upstream.ServerError}}
+		if got := c.Classification(); !slices.Equal(got, want) {
+			t.Fatalf("classification %+v", got)
+		}
+	}
+	discovery, _ := c.Plugin.Discovery()
+	discovery.Pagination.Cursor = "changed"
+	if again, _ := c.Plugin.Discovery(); again.Pagination.Cursor != "next_page_token" {
+		t.Fatal("a caller changed the profile's discovery")
+	}
+	for class, want := range map[string]upstream.Class{abi.ClassCredential: upstream.Credential, abi.ClassRateLimited: upstream.RateLimit, abi.ClassRetryable: upstream.ServerError, abi.ClassTerminal: upstream.ClientError} {
+		manifest := pluginManifest()
+		manifest.Profiles[0].Hosting.Classification = []abi.FailureRule{{Status: 409, Class: class}}
+		if got := pluginConfig(t, manifest).Classification(); len(got) != 1 || got[0].Class != want {
+			t.Errorf("%s classified as %+v", class, got)
+		}
+	}
+
+	undeclared := pluginManifest()
+	undeclared.Profiles[0].Hosting.Discovery, undeclared.Profiles[0].Hosting.Classification = nil, nil
+	c = pluginConfig(t, undeclared)
+	if profile, _ := c.Profile(); profile.ModelDiscovery || c.Classification() != nil {
+		t.Fatalf("a profile declaring neither: %+v %+v", profile, c.Classification())
+	}
+	if _, declared := c.Plugin.Discovery(); declared {
+		t.Fatal("found an undeclared listing")
+	}
+	if (Config{Kind: "openai"}).Classification() != nil {
+		t.Fatal("a built-in profile declares a classification")
+	}
+	for _, builtin := range Profiles() {
+		if builtin.ModelDiscovery {
+			t.Fatalf("built-in %s declares discovery", builtin.ID)
+		}
+	}
+}
+
 func TestPluginProviderConfigurationFollowsItsProfile(t *testing.T) {
 	c := pluginConfig(t, pluginManifest())
 	for name, mutate := range map[string]func(*Config){
@@ -204,6 +266,24 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 		"credential not given": {func(p *abi.Profile) {
 			p.Hosting.Headers, p.Hosting.Query = map[string]string{"X-Acme-Client": "olp"}, nil
 		}, "hosting"},
+		"relative listing path":  {func(p *abi.Profile) { p.Hosting.Discovery.Path = "models" }, "hosting.discovery.path"},
+		"listing path query":     {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/models?limit=100" }, "hosting.discovery.path"},
+		"listing dot segment":    {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/v2/../admin" }, "hosting.discovery.path"},
+		"listing placeholder":    {func(p *abi.Profile) { p.Hosting.Discovery.Path = "/{credential}/models" }, "hosting.discovery.path"},
+		"no model array":         {func(p *abi.Profile) { p.Hosting.Discovery.Models = "" }, "hosting.discovery.models"},
+		"no model ID field":      {func(p *abi.Profile) { p.Hosting.Discovery.ID = "" }, "hosting.discovery.id"},
+		"control in a field":     {func(p *abi.Profile) { p.Hosting.Discovery.ID = "id\n" }, "hosting.discovery.id"},
+		"malformed parameter":    {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "page token" }, "hosting.discovery.pagination.parameter"},
+		"placed parameter":       {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Parameter = "key" }, "hosting.discovery.pagination.parameter"},
+		"no cursor field":        {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.Cursor = "" }, "hosting.discovery.pagination.cursor"},
+		"long more field":        {func(p *abi.Profile) { p.Hosting.Discovery.Pagination.More = strings.Repeat("m", 129) }, "hosting.discovery.pagination.more"},
+		"too many rules":         {func(p *abi.Profile) { p.Hosting.Classification = make([]abi.FailureRule, 33) }, "hosting.classification"},
+		"rule matching anything": {func(p *abi.Profile) { p.Hosting.Classification[1].Type = "" }, "hosting.classification[1]"},
+		"successful status":      {func(p *abi.Profile) { p.Hosting.Classification[0].Status = 200 }, "hosting.classification[0].status"},
+		"control in a code":      {func(p *abi.Profile) { p.Hosting.Classification[0].Code = "quota\n" }, "hosting.classification[0].code"},
+		"long type":              {func(p *abi.Profile) { p.Hosting.Classification[1].Type = strings.Repeat("t", 257) }, "hosting.classification[1].type"},
+		"unknown class":          {func(p *abi.Profile) { p.Hosting.Classification[0].Class = "fatal" }, "hosting.classification[0].class"},
+		"no class":               {func(p *abi.Profile) { p.Hosting.Classification[1].Class = "" }, "hosting.classification[1].class"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := pluginManifest().Profiles[0]

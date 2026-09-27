@@ -36,13 +36,24 @@ const pluginCredential = "reference-static-secret"
 // pluginUpstream is the fictional upstream the reference plugin's profile
 // places requests at: an OpenAI Chat Completions server that takes its key as
 // a token in the Authorization header and wants clients to identify
-// themselves. It records the headers of every request.
+// themselves. It lists its models on two pages, answers a request to spend the
+// quota with its own quota_exhausted code on a 400, and records the headers of
+// every request and the page token of every listing.
 type pluginUpstream struct {
 	*httptest.Server
 	mu          sync.Mutex
 	credentials []string
 	requests    []http.Header
+	listings    []string
 }
+
+// The pluginUpstream's models besides vendorModel, and the prompts it rejects.
+const (
+	pluginLargeModel = "reference-large"
+	pluginSmallModel = "reference-small"
+	quotaPrompt      = "Spend the quota."
+	invalidPrompt    = "Break the request."
+)
 
 func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	t.Helper()
@@ -57,15 +68,39 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 			writeJSON(w, map[string]any{"error": map[string]any{"message": "Unknown token " + r.Header.Get("Authorization"), "type": "invalid_request_error", "code": "invalid_api_key"}})
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+			token := r.URL.Query().Get("page_token")
+			u.mu.Lock()
+			u.listings = append(u.listings, token)
+			u.mu.Unlock()
+			if token == "page-2" {
+				writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": pluginSmallModel}}})
+				return
+			}
+			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel}, map[string]any{"id": pluginLargeModel}}, "next_page_token": "page-2"})
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
 		var body struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
+			Model    string `json:"model"`
+			Stream   bool   `json:"stream"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		if prompt := body.Messages[len(body.Messages)-1].Content; prompt == quotaPrompt || prompt == invalidPrompt {
+			code, message := "quota_exhausted", "The account's quota is exhausted."
+			if prompt == invalidPrompt {
+				code, message = "invalid_value", "The request is invalid."
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{"error": map[string]any{"message": message, "type": "invalid_request_error", "code": code}})
+			return
+		}
 		usage := map[string]any{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
 		if !body.Stream {
 			writeJSON(w, map[string]any{"id": "chatcmpl-reference", "object": "chat.completion", "created": 1, "model": body.Model,
@@ -93,6 +128,14 @@ func (u *pluginUpstream) received() []http.Header {
 	return slices.Clone(u.requests)
 }
 
+// listed returns the page token of every model listing request, "" for the
+// first page.
+func (u *pluginUpstream) listed() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return slices.Clone(u.listings)
+}
+
 // installReferencePlugin builds the reference plugin against the upstream,
 // installs it and approves the origins it declares.
 func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string) string {
@@ -104,7 +147,7 @@ func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upst
 	return digestOf(module)
 }
 
-// certifyPluginProvider certifies a plugin provider's declared model for
+// certifyPluginProvider certifies a plugin provider's model vendorModel for
 // unary and streaming chat, and activates it.
 func certifyPluginProvider(t *testing.T, h *accessHarness, owner *browser, path string) {
 	t.Helper()
@@ -113,7 +156,11 @@ func certifyPluginProvider(t *testing.T, h *accessHarness, owner *browser, path 
 		t.Fatalf("plugin provider probe: %v", probe)
 	}
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any)
-	modelID := models[0].(map[string]any)["id"].(string)
+	certified := slices.IndexFunc(models, func(model any) bool { return model.(map[string]any)["upstream_model"] == vendorModel })
+	if certified < 0 {
+		t.Fatalf("the provider has no model %s: %v", vendorModel, models)
+	}
+	modelID := models[certified].(map[string]any)["id"].(string)
 	capabilities := []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}}
 	detail = h.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": capabilities}, etagHeader(detail), 200)
 	if certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(detail), 200); certified["status"] != "certified" {
@@ -133,10 +180,9 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 
 	kinds := h.want(owner, "GET", "/api/v1/provider-kinds", nil, nil, 200)["items"].([]any)
 	plugin := kinds[slices.IndexFunc(kinds, func(k any) bool { return k.(map[string]any)["kind"] == "plugin" })].(map[string]any)
-	// No endpoint field: the profile's address is the endpoint. With no upstream
-	// discovery, the operator names a model to probe.
-	if fields := plugin["fields"].([]any); plugin["default_auth_mode"] != "static_credential" || len(fields) != 1 ||
-		fields[0].(map[string]any)["field"] != "model" || fields[0].(map[string]any)["required"] != true {
+	// No endpoint field: the profile's address is the endpoint. Whether the
+	// operator names a model to probe depends on the profile's discovery.
+	if plugin["default_auth_mode"] != "static_credential" || len(plugin["fields"].([]any)) != 0 {
 		t.Fatalf("plugin kind %v", plugin)
 	}
 
@@ -177,8 +223,6 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	if configuration["endpoint"] != upstream.URL+"/v1" || configuration["options"].(map[string]any)["vendor_id"] != nil {
 		t.Fatalf("the provider did not take its profile's address alone: %v", configuration)
 	}
-	// Plugin providers have no upstream discovery: the declared model is
-	// certified instead.
 	certifyPluginProvider(t, h, owner, path)
 
 	draft := fidelityDraft("reference-strict", created["id"])
@@ -286,6 +330,65 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 			t.Fatalf("mounted dispatch: %d %s with %v", response.StatusCode, content, last)
 		}
 	})
+}
+
+// A plugin profile's declared discovery lists the upstream's models, page by
+// page, in the probe and discover flows, so the operator names no model to
+// probe. Its declared classification decides what a gateway attempt's failure
+// is: the upstream's exhausted quota on a 400 is a rate limit, while an
+// undeclared 400 stays a rejected request.
+func TestPluginProfileDiscoversModelsAndClassifiesFailuresAsDeclared(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	upstream := newPluginUpstream(t, pluginCredential)
+	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0")
+	profiles := h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any)
+	if catalogued := profiles[slices.IndexFunc(profiles, func(p any) bool { return p.(map[string]any)["revision"] == digest })]; catalogued.(map[string]any)["model_discovery"] != true {
+		t.Fatalf("catalogued %v", catalogued)
+	}
+
+	create := map[string]any{"name": "Reference", "credential": pluginCredential,
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "static_credential", "profile_id": "reference-chat", "profile_revision": digest}}
+	created := h.want(owner, "POST", "/api/v1/providers", create, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + created["id"].(string)
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200); probe["succeeded"] != true || probe["discovered_models"] != float64(3) {
+		t.Fatalf("probe %v", probe)
+	}
+	detail = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "POST", path+"/discovery", map[string]any{"models": []any{}}, etagHeader(detail), 200)
+	var discovered []string
+	for _, model := range h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any) {
+		discovered = append(discovered, model.(map[string]any)["upstream_model"].(string))
+	}
+	slices.Sort(discovered)
+	if !slices.Equal(discovered, []string{vendorModel, pluginLargeModel, pluginSmallModel}) || !slices.Equal(upstream.listed(), []string{"", "page-2", "", "page-2"}) {
+		t.Fatalf("discovered %v from pages %q", discovered, upstream.listed())
+	}
+	for _, headers := range upstream.received() {
+		if headers.Get("Authorization") != "Token "+pluginCredential || headers.Get("X-Reference-Client") != "olp" {
+			t.Fatalf("the listing was not placed like a request: %v", headers)
+		}
+	}
+	certifyPluginProvider(t, h, owner, path)
+
+	draft := fidelityDraft("reference-quota", created["id"])
+	draft["fidelity"] = map[string]any{"mode": "strict"}
+	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Reference", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-quota"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	h.refresh()
+	chat := func(prompt string) (int, any) {
+		status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-quota", "messages": []any{map[string]any{"role": "user", "content": prompt}}})
+		failure, _ := reply["error"].(map[string]any)
+		return status, failure["code"]
+	}
+	if status, code := chat(invalidPrompt); status != 400 || code != "upstream_rejected" {
+		t.Fatalf("an undeclared rejection: %d %v", status, code)
+	}
+	if status, code := chat(quotaPrompt); status != 429 || code != "upstream_rate_limit" {
+		t.Fatalf("the declared quota failure: %d %v", status, code)
+	}
 }
 
 // Moving a provider to another installed build of its plugin is an ordinary

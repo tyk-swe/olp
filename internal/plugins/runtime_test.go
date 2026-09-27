@@ -70,8 +70,10 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
 		Origins:     []string{"https://api.example.com", "https://login.example.com"},
 		Profiles: []abi.Profile{{ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
-			Address: "https://api.example.com/v1",
-			Headers: map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
+			Address:        "https://api.example.com/v1",
+			Headers:        map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"},
+			Discovery:      &abi.Discovery{Path: "/models", Models: "data", ID: "id", Pagination: &abi.Pagination{Parameter: "page_token", Cursor: "next_page_token"}},
+			Classification: []abi.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
 		}}},
 	}
 	if !reflect.DeepEqual(manifest, want) {

@@ -1,5 +1,10 @@
 <script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
   import type { Provider, ProviderProbe } from '$lib/features/providers/api';
+  import {
+    declaresModels,
+    listProviderProfiles
+  } from '$lib/features/providers/profiles';
   import { probeSummary } from '$lib/features/providers/providerEditor';
 
   let {
@@ -19,9 +24,15 @@
   } = $props();
 
   const disabled = $derived(Boolean(busy));
-  // Plugin providers have no upstream model list: the operator declares
-  // models and each is certified.
-  const plugin = $derived(provider?.configuration.kind === 'plugin');
+  const profiles = createQuery(() => ({
+    queryKey: ['provider-profiles'],
+    queryFn: ({ signal }) => listProviderProfiles(signal)
+  }));
+  // A plugin profile without model discovery has no upstream model list: the
+  // operator declares models and each is certified.
+  const declared = $derived(
+    provider ? declaresModels(provider.configuration, profiles.data) : false
+  );
 </script>
 
 {#snippet declaration()}
@@ -45,13 +56,13 @@
 
 <section class="card stage" aria-labelledby="discovery-heading">
   <p class="eyebrow">Probe passed</p>
-  {#if plugin}
+  {#if declared}
     <h2 id="discovery-heading">Declare upstream models</h2>
     {#if probe}<p class="success-line">✓ {probeSummary(probe)}</p>{/if}
     <p>
-      Plugin providers have no upstream model list. The probe model is already
-      declared; add any other model identifiers here. Each model is certified
-      individually before it can serve.
+      This plugin profile declares no upstream model list. The probe model is
+      already declared; add any other model identifiers here. Each model is
+      certified individually before it can serve.
     </p>
     <div class="manual-fallback">{@render declaration()}</div>
   {:else}

@@ -13,7 +13,7 @@ func TestProbeStatusErrorsUseLocalDiagnostics(t *testing.T) {
 		500: {Code: "upstream_unavailable", Detail: "The upstream failed (HTTP 500)."},
 		503: {Code: "upstream_unavailable", Detail: "The upstream failed (HTTP 503)."},
 	} {
-		if got := statusError(status); *got != want {
+		if got := statusError(&Configuration{Kind: KindOpenAI}, status, nil); *got != want {
 			t.Errorf("HTTP %d: %+v, want %+v", status, *got, want)
 		}
 	}

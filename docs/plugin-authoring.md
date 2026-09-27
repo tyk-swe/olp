@@ -79,7 +79,8 @@ returns.
 ### Hosting adaptation
 
 A profile's `Hosting` declares where and how the dialect's requests reach the
-upstream. OLP runs it for every request of a provider using the profile; no
+upstream, how the upstream lists its models and how its failures are
+classified. OLP runs it for every request of a provider using the profile; no
 plugin code runs per request. Providers using the profile authenticate with a
 static credential, which the adaptation places.
 
@@ -88,6 +89,8 @@ static credential, which the adaptation places.
 | `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query, fragment or placeholders. It becomes the endpoint of every provider using the profile. |
 | `Headers` | At most 16 request headers by name. Hop-by-hop, framing, content negotiation, tracing and `X-OLP-` headers are OLP's, and the dialect's semantic headers, such as `Anthropic-Version` or `OpenAI-Beta`, are the provider's. |
 | `Query` | At most 16 query parameters of the address by name: 1–128 letters, digits, `.`, `_`, `~` and `-`, other than the dialect's semantic query settings and addressing, such as Gemini's `alt`. |
+| `Discovery` | Optional: the upstream's [model listing](#model-discovery). |
+| `Classification` | Optional: at most 32 [failure classification](#failure-classification) rules. |
 
 Header and query values are templates of at most 2048 characters without
 control characters. `{credential}` stands for the provider's static credential,
@@ -95,6 +98,55 @@ such as `Token {credential}`, and braces appear nowhere else. At least one value
 must place the credential. OLP refuses a credential it can't place in a header,
 such as one containing a line break, before sending anything, and redacts every
 value that carries the credential wherever it records upstream text.
+
+### Model discovery
+
+With `Discovery`, operators discover a provider's models as they do for
+built-in kinds; without it, they declare each model, and OLP certifies it.
+OLP sends `GET` to the listing with the profile's headers and query parameters
+placed as for any request, and reads a JSON object:
+
+| Field | Rule |
+| --- | --- |
+| `Path` | The listing's path, which extends the address: `/models` under `https://api.acme.example/v1`. At most 512 characters of path segments of letters, digits and URL punctuation, without dot segments, query, fragment or placeholders. |
+| `Models` | The listing's top-level field holding the array of model objects, such as `data`. |
+| `ID` | The field of each model object holding its ID, such as `id`. OLP removes a `models/` prefix and skips objects without a valid string ID. |
+| `Pagination` | Optional. `Parameter` is the query parameter that carries a cursor, such as `page_token`, other than one `Query` places. `Cursor` is the page's field holding the next page's cursor, and `More`, if declared, its boolean field reporting whether another page follows. |
+
+Field names are top-level names of 1–128 characters without control
+characters. A page without a cursor is the last; with `More`, so is a page whose
+`More` is not `true`, and one whose `More` is `true` must carry a cursor. OLP
+lists at most 2000 models and refuses a listing that repeats a cursor.
+
+### Failure classification
+
+`Classification` decides the class of the upstream failures its rules match,
+which governs [failover and cooldown](provider-routing.md). A failure is an
+unsuccessful response with the error its body states, or an error the upstream
+states in-band, such as a stream's error event. The stated error is the
+dialect's error object, such as `{"error": {"type": "…", "code": "…"}}`.
+
+A `FailureRule` matches a failure when every value it declares matches exactly,
+and it declares at least one: `Status`, an HTTP status from 400 to 599; `Code`
+and `Type`, the stated error's code and type, of at most 256 characters. A rule
+with a status never matches an in-band error. The first matching rule decides
+the `Class`:
+
+| Class | Effect |
+| --- | --- |
+| `credential` | The upstream refused the credential: the credential version cools down and the request fails over. |
+| `rate_limited` | The upstream is limiting the credential, such as an exhausted quota: the slot cools down, for the upstream's `Retry-After` when it sends one, and the request fails over. |
+| `retryable` | Another attempt may succeed: the request fails over, unless the upstream may have performed work a strict route must not repeat. |
+| `terminal` | The request itself was refused: it does not fail over, and the caller receives the upstream's rejection. |
+
+OLP's built-in rules classify every failure no rule matches: among others, 401
+and 403 are credential failures, 429 a rate limit, 5xx retryable and other 4xx
+statuses terminal. For example, an upstream that reports an exhausted quota as
+a `400` with its own code declares:
+
+```go
+Classification: []plugin.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
+```
 
 ## What a plugin can reach
 
