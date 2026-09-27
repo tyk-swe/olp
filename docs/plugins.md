@@ -172,9 +172,9 @@ OLP validates the values against the declaration when the draft is saved and
 refuses a missing required option, an undeclared one, or a value outside its
 enum or pattern with `validation_failed`, naming the option as
 `configuration.options.plugin_options.<name>`. An empty value leaves an option
-unset. The hosting adaptation places the values in the address, headers and
-query parameters it declares, and every call OLP makes to the plugin on behalf
-of the provider carries them.
+unset. The hosting adaptation places the values in the address, headers,
+query parameters and envelope fields it declares, and every call OLP makes to
+the plugin on behalf of the provider, such as its signing hook, carries them.
 
 Options are part of the provider's configuration like any other setting:
 changing them is a draft change whose certification starts over, the revision

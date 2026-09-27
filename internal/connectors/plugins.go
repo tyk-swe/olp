@@ -413,7 +413,7 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	if placed.classification, err = parseClassification(declaredHosting.Classification); err != nil {
 		return hosting{}, err
 	}
-	if placed.envelope, err = parseEnvelope(declaredHosting.Envelope); err != nil {
+	if placed.envelope, err = parseEnvelope(declaredHosting.Envelope, known); err != nil {
 		return hosting{}, err
 	}
 	if placed.rewrites, err = parseRewrites(declaredHosting.Rewrites, declared.Dialect); err != nil {

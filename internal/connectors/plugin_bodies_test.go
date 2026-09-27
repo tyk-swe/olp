@@ -63,6 +63,20 @@ func TestPluginEnvelopeWrapsRequestsAndUnwrapsResponses(t *testing.T) {
 	}
 }
 
+// Envelope fields may carry the provider's options, filled from its values as
+// hosting's headers and query parameters are.
+func TestPluginEnvelopeFieldsCarryTheProvidersOptions(t *testing.T) {
+	manifest := envelopedManifest()
+	manifest.Profiles[0].Options = []abi.Option{{Name: "project", Label: "Project"}}
+	manifest.Profiles[0].Hosting.Envelope.Fields["project"] = "projects/{options.project}"
+	c := pluginConfig(t, manifest)
+	c.PluginOptions = map[string]string{"project": `acme "prod"`}
+	wrapped := c.WrapRequest([]byte(`{"contents":[]}`), "acme-large")
+	if want := `{"model":"acme-large","project":"projects/acme \"prod\"","request":{"contents":[]}}`; string(wrapped) != want {
+		t.Fatalf("wrapped %s, want %s", wrapped, want)
+	}
+}
+
 func TestPluginEnvelopeUnwrapsEachStreamEvent(t *testing.T) {
 	c := pluginConfig(t, envelopedManifest())
 	upstream := "event: chunk\nid: 7\ndata: {\"response\":{\"n\":1},\"traceId\":\"t-1\"}\n\n" +
@@ -243,13 +257,18 @@ func TestPluginEnvelopeAndRewriteValidationLocatesTheOffendingValue(t *testing.T
 		"field is the body":   {func(p *abi.Profile) { p.Hosting.Envelope.Fields["request"] = "olp" }, "hosting.envelope.fields.request"},
 		"credential in body":  {func(p *abi.Profile) { p.Hosting.Envelope.Fields["key"] = "{credential}" }, "hosting.envelope.fields.key"},
 		"unknown placeholder": {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "{project}" }, "hosting.envelope.fields.project"},
-		"field control":       {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "olp\n" }, "hosting.envelope.fields.project"},
-		"model in a header":   {func(p *abi.Profile) { p.Hosting.Headers["X-Model"] = "{model}" }, "hosting.headers.X-Model"},
-		"too many rewrites":   {func(p *abi.Profile) { p.Hosting.Rewrites = rewrites }, "hosting.rewrites"},
-		"unknown op":          {func(p *abi.Profile) { p.Hosting.Rewrites[0].Op = "replace" }, "hosting.rewrites[0].op"},
-		"set without value":   {func(p *abi.Profile) { p.Hosting.Rewrites[0].Value = nil }, "hosting.rewrites[0].value"},
-		"invalid value":       {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{`) }, "hosting.rewrites[1].value"},
-		"ambiguous value":     {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{"a":1,"a":2}`) }, "hosting.rewrites[1].value"},
+		"undeclared option":   {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "{options.project}" }, "hosting.envelope.fields.project"},
+		"optional option": {func(p *abi.Profile) {
+			p.Options = []abi.Option{{Name: "project", Label: "Project", Optional: true}}
+			p.Hosting.Envelope.Fields["project"] = "{options.project}"
+		}, "hosting.envelope.fields.project"},
+		"field control":     {func(p *abi.Profile) { p.Hosting.Envelope.Fields["project"] = "olp\n" }, "hosting.envelope.fields.project"},
+		"model in a header": {func(p *abi.Profile) { p.Hosting.Headers["X-Model"] = "{model}" }, "hosting.headers.X-Model"},
+		"too many rewrites": {func(p *abi.Profile) { p.Hosting.Rewrites = rewrites }, "hosting.rewrites"},
+		"unknown op":        {func(p *abi.Profile) { p.Hosting.Rewrites[0].Op = "replace" }, "hosting.rewrites[0].op"},
+		"set without value": {func(p *abi.Profile) { p.Hosting.Rewrites[0].Value = nil }, "hosting.rewrites[0].value"},
+		"invalid value":     {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{`) }, "hosting.rewrites[1].value"},
+		"ambiguous value":   {func(p *abi.Profile) { p.Hosting.Rewrites[1].Value = json.RawMessage(`{"a":1,"a":2}`) }, "hosting.rewrites[1].value"},
 		"deep value": {func(p *abi.Profile) {
 			p.Hosting.Rewrites[0].Value = json.RawMessage(strings.Repeat("[", 40) + strings.Repeat("]", 40))
 		}, "hosting.rewrites[0].value"},

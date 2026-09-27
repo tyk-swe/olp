@@ -220,7 +220,7 @@ accounting see plain dialect bodies:
 | Field | Rule |
 | --- | --- |
 | `Envelope.Request` | The member of the upstream's request object that carries the dialect's request body. Without it, OLP sends the body as it is. |
-| `Envelope.Fields` | Only with `Request`: at most 16 other members of the request object, by name, other than `Request`. Values are templates, as for headers, that become JSON strings; `{model}` stands for the upstream model the request is for, and the credential never goes in a body. |
+| `Envelope.Fields` | Only with `Request`: at most 16 other members of the request object, by name, other than `Request`. Values are templates, as for headers, that become JSON strings; `{model}` stands for the upstream model the request is for, `{options.<name>}` for the provider's value of a required option, and the credential never goes in a body. |
 | `Envelope.Response` | The member of each successful response and stream event that carries the dialect's response or event. Without it, OLP reads responses as they are. |
 | `Rewrites[].Op` | `set` replaces the member, `default` sets it unless the request has it, even as `null`, and `delete` removes it if present. |
 | `Rewrites[].Path` | A JSON pointer to an object member, 1–8 names deep, such as `/generationConfig/seed`. Each member is rewritten at most once, and nothing inside a member another rewrite changes. The model and delivery members OLP binds, `/model`, `/stream` and Chat Completions' `/stream_options`, can't be rewritten. |

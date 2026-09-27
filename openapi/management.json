@@ -4369,7 +4369,7 @@
               "maxLength": 2048,
               "type": "string"
             },
-            "description": "The request object's other members by name, with value templates in which {model} stands for the upstream model. They become JSON strings.",
+            "description": "The request object's other members by name, with value templates in which {model} stands for the upstream model and {options.<name>} for the provider's value of one of the profile's required options. They become JSON strings.",
             "maxProperties": 16,
             "type": "object"
           },

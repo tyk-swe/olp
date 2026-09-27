@@ -48,7 +48,9 @@ type envelope struct {
 	response string
 }
 
-func parseEnvelope(declared *abi.Envelope) (*envelope, error) {
+// parseEnvelope reads an envelope whose field templates may reference the
+// model and what known admits of the profile's options.
+func parseEnvelope(declared *abi.Envelope, known func(name string) error) (*envelope, error) {
 	if declared == nil {
 		return nil, nil
 	}
@@ -76,7 +78,7 @@ func parseEnvelope(declared *abi.Envelope) (*envelope, error) {
 		case name == declared.Request:
 			return nil, &ProfileError{Field: field, Message: "This member carries the dialect's body."}
 		}
-		value, err := parseValue(field, declared.Fields[name], envelopePlaceholder)
+		value, err := parseValue(field, declared.Fields[name], envelopePlaceholders(known))
 		if err != nil {
 			return nil, err
 		}
@@ -85,13 +87,19 @@ func parseEnvelope(declared *abi.Envelope) (*envelope, error) {
 	return parsed, nil
 }
 
-// envelopePlaceholder admits what envelope fields may reference: the model,
-// and never the credential, which stays out of bodies.
-func envelopePlaceholder(name string) error {
-	if name != modelValue {
-		return fmt.Errorf("OLP has no placeholder {%s} in an envelope field; use {model}.", name)
+// envelopePlaceholders admits what envelope fields may reference: the model
+// and the options known admits, and never the credential, which stays out of
+// bodies.
+func envelopePlaceholders(known func(name string) error) func(name string) error {
+	return func(name string) error {
+		switch {
+		case name == modelValue:
+			return nil
+		case strings.HasPrefix(name, optionPlaceholder):
+			return known(name)
+		}
+		return fmt.Errorf("OLP has no placeholder {%s} in an envelope field; use {model} or {options.<name>}.", name)
 	}
-	return nil
 }
 
 // wrap places a dialect request body in the envelope, with its fields
@@ -177,9 +185,12 @@ func (c Config) envelope() *envelope {
 }
 
 // envelopeValues are the values envelope templates place in a request for
-// model.
+// model: the model and the provider's options. The credential is empty, as
+// no envelope template places it.
 func (c Config) envelopeValues(model string) map[string]string {
-	return map[string]string{modelValue: c.Model(model)}
+	values := templateValues(nil, c.PluginOptions)
+	values[modelValue] = c.Model(model)
+	return values
 }
 
 // WrapRequest returns the body OLP sends for a dialect request body to model:

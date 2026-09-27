@@ -2685,7 +2685,7 @@ type PluginDiscovery struct {
 
 // PluginEnvelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
 type PluginEnvelope struct {
-	// Fields The request object's other members by name, with value templates in which {model} stands for the upstream model. They become JSON strings.
+	// Fields The request object's other members by name, with value templates in which {model} stands for the upstream model and {options.<name>} for the provider's value of one of the profile's required options. They become JSON strings.
 	Fields *map[string]string `json:"fields,omitempty"`
 
 	// Request The member of the upstream's request object that carries the dialect's request body.

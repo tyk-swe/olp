@@ -206,7 +206,9 @@ type Envelope struct {
 	Request string `json:"request,omitempty"`
 	// Fields are the request object's other members, by name. Values are
 	// templates, which become JSON strings. The placeholder {model} stands for
-	// the upstream model the request is for.
+	// the upstream model the request is for, and {options.<name>} for the
+	// provider's value of one of the profile's required options. The
+	// credential never goes in a body.
 	Fields map[string]string `json:"fields,omitempty"`
 	// Response names the member of the upstream's successful responses and
 	// stream events that carries the dialect's response or event, such as
