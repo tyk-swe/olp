@@ -383,17 +383,19 @@ func loadModels(ctx context.Context, q access.Queryer, providerID string, enable
 }
 
 type slotRow struct {
-	ID                   string
-	Default              bool
-	Position             int
-	Name                 string
-	Enabled              bool
-	Priority             int
-	Weight               int64
-	CredentialID         *string
-	CredentialVersion    *int
-	CredentialRevoked    bool
-	CredentialGrant      bool
+	ID                string
+	Default           bool
+	Position          int
+	Name              string
+	Enabled           bool
+	Priority          int
+	Weight            int64
+	CredentialID      *string
+	CredentialVersion *int
+	CredentialRevoked bool
+	// CredentialPlugin is the digest of the plugin build whose grant
+	// enrollment created the credential version, or "" for a pasted one.
+	CredentialPlugin     string
 	CredentialLapsed     bool
 	CredentialPrincipal  string
 	Restrictions         slotRestrictions
@@ -409,7 +411,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,c.plugin_digest IS NOT NULL,g.lapsed_at IS NOT NULL,coalesce(c.principal,''),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),g.lapsed_at IS NOT NULL,coalesce(c.principal,''),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -418,12 +420,11 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 	for rows.Next() {
 		var row slotRow
 		var restrictions, limits []byte
-		var revoked, grant *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &grant, &row.CredentialLapsed, &row.CredentialPrincipal, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		var revoked *bool
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialLapsed, &row.CredentialPrincipal, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
-		row.CredentialGrant = grant != nil && *grant
 		if err = json.Unmarshal(restrictions, &row.Restrictions); err == nil {
 			err = json.Unmarshal(limits, &row.Limits)
 		}
@@ -436,17 +437,20 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 }
 
 // credentialFits refuses a slot whose credential version the provider can't
-// authenticate with: a version with a grant beneath it (CredentialGrant) for a
-// provider that takes a static credential, or a pasted one for a provider
-// that authenticates with a grant.
+// authenticate with (Configuration.Authenticates): a version with a grant
+// beneath it for a provider that takes a static credential, a pasted one for
+// a provider that authenticates with a grant, or a grant another build of the
+// plugin enrolled.
 func (row *slotRow) credentialFits(cfg *Configuration) error {
 	switch {
-	case row.CredentialID == nil || !cfg.CredentialRequired() || row.CredentialGrant == cfg.Grant():
+	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin):
 		return nil
-	case row.CredentialGrant:
+	case !cfg.Grant():
 		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
+	case row.CredentialPlugin == "":
+		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
 	}
-	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
+	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build of the plugin enrolled. A grant serves only the plugin build that enrolled it: re-enroll the slot's grant through the build this provider pins.")
 }
 
 // observedPrincipal is the principal the slot observes: the one grant

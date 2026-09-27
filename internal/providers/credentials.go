@@ -618,6 +618,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		if slot.CredentialLapsed {
 			return access.Reply{}, access.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
 		}
+		if err = slot.credentialFits(&current.Configuration); err != nil {
+			return access.Reply{}, err
+		}
 		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, "provider_credential"); err != nil {
 			return access.Reply{}, err
 		}

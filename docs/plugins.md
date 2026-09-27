@@ -427,6 +427,16 @@ any principal a serving binding declares
 To pool several upstream accounts, create a provider for each and list them as
 targets of one route.
 
+A grant serves only the plugin build that enrolled it, which its credential
+version records: a build is known by its digest, since any build's manifest may
+claim any name, and a plugin gets only its own grant
+([ADR 0005](adr/0005-confined-provider-plugins.md)). Moving a provider to
+another build of its plugin, an upgrade included, therefore takes a new grant
+enrollment for each of its credential slots: until then, probing, validating
+or activating a slot that holds the other build's grant is refused with
+`422 credential_mismatch`. The active revision keeps serving, and its grants
+keep refreshing, until the provider is activated with the new build.
+
 ## Configuration promotion
 
 [Configuration exports](configuration.md#configuration-promotion-artifacts)
@@ -439,7 +449,8 @@ reports a `plugin` blocker for the digest. A static plugin credential binds thro
 other secret. A credential slot a grant backs imports without a credential: the
 plan lists it for grant enrollment, and the imported provider activates once
 grant enrollment, the credential pool's **Enroll grant** on each slot, has given
-its serving slots credential versions.
+its serving slots credential versions. A slot already holding a grant that
+another build enrolled is listed for grant enrollment too.
 
 ## Uninstalling
 

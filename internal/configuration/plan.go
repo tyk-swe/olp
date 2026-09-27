@@ -77,8 +77,9 @@ func (r *planResult) sort() {
 type existingSlot struct {
 	ID           string
 	CredentialID *string
-	// Grant reports whether a grant backs the credential version.
-	Grant bool
+	// PluginDigest is the plugin build whose grant enrollment created the
+	// credential version, or "" for a pasted one.
+	PluginDigest string
 }
 
 type existingProvider struct {
@@ -158,7 +159,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = providers.Err(); err != nil {
 		return nil, err
 	}
-	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,c.plugin_digest IS NOT NULL
+	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,coalesce(c.plugin_digest,'')
         FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL`)
 	if err != nil {
 		return nil, err
@@ -171,12 +172,12 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	for slots.Next() {
 		var providerID, name, id string
 		var credentialID *string
-		var grant bool
-		if err = slots.Scan(&providerID, &name, &id, &credentialID, &grant); err != nil {
+		var digest string
+		if err = slots.Scan(&providerID, &name, &id, &credentialID, &digest); err != nil {
 			return nil, err
 		}
 		if p, ok := byProvider[providerID]; ok {
-			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID, Grant: grant}
+			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID, PluginDigest: digest}
 		}
 	}
 	if err = slots.Err(); err != nil {
@@ -646,8 +647,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 				current = existing.Slots[slot.Name]
 			}
 			// The slot's credential version serves on only if the provider
-			// authenticates with its kind: a grant, or a static credential.
-			fits := current.CredentialID != nil && current.Grant == p.Configuration.Grant()
+			// authenticates with it: a static credential, or a grant the
+			// plugin build it pins enrolled.
+			fits := current.CredentialID != nil && p.Configuration.Authenticates(current.PluginDigest)
 			secret, supplied := bindings[ref]
 			switch {
 			case supplied:
