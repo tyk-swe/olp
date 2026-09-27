@@ -167,8 +167,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
 	// Worker replicas also need the runtime manager and the key ring: media
-	// reconciliation serves jobs against their pinned historical providers and
-	// checks the live credential revocation authority.
+	// reconciliation serves jobs against their pinned historical providers
+	// with credentials from the manager's credential source.
 	var keys *secrets.KeyRing
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 		var auth *secrets.AuthKey
@@ -230,15 +230,15 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					Spool:            spool,
 					MaxResponseBytes: c.ProviderMaxResponseBytes,
 				},
-				Revoked: rt.Revoked,
-				Log:     log,
+				Credentials: rt,
+				Log:         log,
 			}
 		}
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
 				gw.Resources = resources.NewEncrypted(pool, installation, keys)
-				gw.Resolver = resources.NewResolver(pool, installation, keys)
+				gw.Resolver = resources.NewResolver(pool)
 			}
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather

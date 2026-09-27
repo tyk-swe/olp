@@ -62,7 +62,36 @@ func (f *fakeRuntime) Authenticate(secret string) (access.Authority, error) {
 	return a, nil
 }
 
-func (f *fakeRuntime) Revoked(id string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.revoked[id] }
+func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case f.stale:
+		return runtime.StaleAuthority
+	case f.revoked[id]:
+		return runtime.Revoked
+	}
+	return runtime.Eligible
+}
+
+// Secret serves eligible credentials the pinned release installed. The fake's
+// secret authority, for callers that pin no release, is its current release.
+func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, error) {
+	if f.Eligibility(id) != runtime.Eligible {
+		return nil, runtime.ErrCredentialUnavailable
+	}
+	if release == nil {
+		release = f.Release()
+	}
+	if secret, ok := release.Credential(id); ok {
+		return secret, nil
+	}
+	return nil, runtime.ErrCredentialUnavailable
+}
+
+func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
+	return f.Secret(ctx, release, id)
+}
 
 type capture struct {
 	mu   sync.Mutex
@@ -424,6 +453,38 @@ func TestCredentialFailureCoolsVersionAndFailsOver(t *testing.T) {
 	}
 	if !h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+env.Attempts[0].CredentialID) {
 		t.Fatal("rejected credential version should be cooling down")
+	}
+}
+
+// authoritySecrets serves one credential version from a secret authority that
+// answers only once the reading context ends.
+type authoritySecrets struct {
+	*fakeRuntime
+	credentialID string
+}
+
+func (a authoritySecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, error) {
+	if id != a.credentialID {
+		return a.fakeRuntime.Secret(ctx, release, id)
+	}
+	<-ctx.Done()
+	return nil, fmt.Errorf("credential %s: %w: %w", id, runtime.ErrCredentialUnavailable, ctx.Err())
+}
+
+func TestInterruptedSecretReadIsNotACredentialFailure(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.gateway.Runtime = authoritySecrets{fakeRuntime: h.rt, credentialID: h.credA}
+	h.rt.release.Snapshot.Routes[routeSlug].Targets[0].Timeout = 50
+	resp, _ := h.chat(fullKey, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.Status)
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 2 || env.Attempts[0].Class != classTimeout || env.Attempts[1].Class != classSuccess {
+		t.Fatalf("attempts %+v", env.Attempts)
+	}
+	if h.mock.count("a") != 0 || h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+h.credA) {
+		t.Fatal("the attempt timer interrupting a secret read was blamed on the credential")
 	}
 }
 

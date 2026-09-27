@@ -18,16 +18,18 @@ type TokenDemand struct {
 }
 
 type SelectionOptions struct {
-	KeyID             string
-	Preferences       *Preferences
-	Parameters        []string
-	Inputs            *usage.RoutingInputs
-	TokenDemand       *TokenDemand
-	Now               time.Time
-	CheckSlots        bool
-	CredentialRevoked func(string) bool
-	Accept            func(Provider, Target) error
-	Effective         func(Provider, Target) ([]string, *TokenDemand)
+	KeyID       string
+	Preferences *Preferences
+	Parameters  []string
+	Inputs      *usage.RoutingInputs
+	TokenDemand *TokenDemand
+	Now         time.Time
+	CheckSlots  bool
+	// CredentialEligibility excludes credential versions that may not serve;
+	// a provider's ineligible network credential names its reason.
+	CredentialEligibility func(credentialID string) Eligibility
+	Accept                func(Provider, Target) error
+	Effective             func(Provider, Target) ([]string, *TokenDemand)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -146,14 +148,18 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			reason = "outside_preferred_order"
 		}
 		if reason == "" && options.CheckSlots {
-			if provider.Network != nil && provider.Network.CredentialID != "" && options.CredentialRevoked != nil && options.CredentialRevoked(provider.Network.CredentialID) {
-				reason = "network_credential_revoked"
+			if provider.Network != nil && provider.Network.CredentialID != "" && options.CredentialEligibility != nil {
+				if eligibility := options.CredentialEligibility(provider.Network.CredentialID); eligibility != Eligible {
+					reason = "network_credential_" + string(eligibility)
+				}
 			}
 		}
 		if reason == "" && options.CheckSlots {
 			row.slots = SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity)
-			if options.CredentialRevoked != nil {
-				row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool { return slot.CredentialID != nil && options.CredentialRevoked(*slot.CredentialID) })
+			if options.CredentialEligibility != nil {
+				row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool {
+					return slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != Eligible
+				})
 			}
 			if len(row.slots) == 0 {
 				reason = "no_eligible_credentials"

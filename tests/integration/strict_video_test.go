@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -242,12 +244,12 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
 		t.Fatal(err)
 	}
-	oldRevoked := recovered.Revoked
-	recovered.Revoked = func(string) bool { return true }
+	live := recovered.Credentials
+	recovered.Credentials = revokedCredentials{live}
 	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
 		t.Fatal("revoked provider read native source")
 	}
-	recovered.Revoked = oldRevoked
+	recovered.Credentials = live
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
@@ -325,8 +327,18 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 	if err != nil || count == 0 {
 		t.Fatalf("master key rotation did not include video source: %d %v", count, err)
 	}
+	auth, err := secrets.DecodeKey(h.AuthHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A restarted process reads every secret with the rotated ring, the pinned
+	// provider credential included.
+	credentials := runtime.NewManager(h.Pool, h.Server.Installation, secrets.NewAuthKey(auth, h.Server.Installation), rotatedRing, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := credentials.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	restarted := *h.Media
-	restarted.Keys = rotatedRing
+	restarted.Keys, restarted.Credentials = rotatedRing, credentials
 	source, err := restarted.ReadNativeVideoSource(t.Context(), record, record.APIKeyID)
 	if err != nil || !bytes.Contains(source, []byte("9007199254740993")) {
 		t.Fatalf("rotated source unavailable: %v", err)
@@ -388,3 +400,9 @@ func TestStrictVideoJobOnATransformedRouteIsListedAndDeletableButNotServed(t *te
 		t.Fatal("strict video delete did not reach the provider")
 	}
 }
+
+// revokedCredentials is a credential source whose authority revoked every
+// credential version.
+type revokedCredentials struct{ runtime.Credentials }
+
+func (revokedCredentials) Eligibility(string) runtime.Eligibility { return runtime.Revoked }

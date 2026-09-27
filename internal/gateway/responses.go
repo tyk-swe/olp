@@ -148,7 +148,6 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 		x.attempts = []runtime.Attempt{p.attempt}
 		x.budget = 1
 		x.pinnedSlot = &slot
-		x.pinnedSecret = p.secret
 		return nil
 	}
 	historical.Targets = []runtime.Target{p.target}
@@ -163,7 +162,6 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	x.attempts = []runtime.Attempt{p.attempt}
 	x.budget = 1
 	x.pinnedSlot = &p.slot
-	x.pinnedSecret = p.secret
 	return nil
 }
 
@@ -403,7 +401,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	var out []byte
 	if res.Kind == resources.KindStrictResponse {
 		if nativeStatus == "failed" {
-			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, s.responseCredentialValues(x, p, resp))
+			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, s.responseCredentialValues(ctx, x, p, resp))
 			if err != nil {
 				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider failure contained unsafe native fields.")
 			}

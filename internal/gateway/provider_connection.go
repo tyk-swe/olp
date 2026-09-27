@@ -2,29 +2,57 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
+// slotSecret asks the credential source for a credential slot's usable
+// secret. A slot without a credential version authenticates without one.
+func (s *Server) slotSecret(ctx context.Context, release *runtime.Release, slot runtime.Slot) ([]byte, error) {
+	if slot.CredentialID == nil {
+		return nil, nil
+	}
+	return s.Runtime.Secret(ctx, release, *slot.CredentialID)
+}
+
+// applySlotCredential prepares an upstream request with a credential slot:
+// the credential source serves the slot's secret, then the connector hosts,
+// authenticates and signs the request. It returns the values to redact. The
+// caller classifies a failure of either step alike, so a secret read the
+// context interrupted is not blamed on the credential.
+func (s *Server) applySlotCredential(ctx context.Context, req *http.Request, cfg connectors.Config, release *runtime.Release, slot runtime.Slot, body []byte) ([]string, error) {
+	secret, err := s.slotSecret(ctx, release, slot)
+	if err != nil {
+		return nil, err
+	}
+	return s.auth.Apply(ctx, req, cfg, secret, body)
+}
+
+// providerNetworkSecret asks the credential source for the provider's network
+// credential. A resource can retain a compatible historical profile and
+// network credential after the current release changed; current revocation
+// still wins.
 func (s *Server) providerNetworkSecret(ctx context.Context, release *runtime.Release, provider *runtime.Provider) ([]byte, error) {
 	if provider.Network == nil || provider.Network.CredentialID == "" {
 		return nil, nil
 	}
-	id := provider.Network.CredentialID
-	if s.Runtime.Revoked(id) {
-		return nil, errors.New("provider network credential is revoked or authority is stale")
+	return s.Runtime.NetworkSecret(ctx, release, provider.ID, provider.Network.CredentialID)
+}
+
+// pinEligibility reports whether a pinned slot's credential version and its
+// provider's network credential may still serve.
+func (s *Server) pinEligibility(p *pin) runtime.Eligibility {
+	if p.slot.CredentialID != nil {
+		if eligibility := s.Runtime.Eligibility(*p.slot.CredentialID); eligibility != runtime.Eligible {
+			return eligibility
+		}
 	}
-	if secret, ok := release.Credential(id); ok {
-		return secret, nil
+	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
+		return s.Runtime.Eligibility(p.provider.Network.CredentialID)
 	}
-	// A resource can retain a compatible historical profile and network
-	// credential after the current release changed. Current revocation wins.
-	if s.Resolver == nil {
-		return nil, errors.New("provider network credential is unavailable")
-	}
-	return s.Resolver.NetworkCredential(ctx, provider.ID, id)
+	return runtime.Eligible
 }
 
 func providerConnectionScope(provider *runtime.Provider, slot runtime.Slot) string {

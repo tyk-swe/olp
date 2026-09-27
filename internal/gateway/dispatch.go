@@ -12,8 +12,8 @@ import (
 type gateVerdict int
 
 const (
-	// gateSkip marks a slot unusable at dispatch time — a credential revoked
-	// or cooled since the plan ranked it — so the sibling slot is tried.
+	// gateSkip marks a slot unusable at dispatch time — a credential no longer
+	// eligible or cooled since the plan ranked it — so the sibling slot is tried.
 	gateSkip gateVerdict = iota
 	// gateDenied means the provider circuit refused its half-open probe, a
 	// decision every sibling credential on the endpoint shares.
@@ -87,16 +87,16 @@ func (s *Server) cooling(ctx context.Context, providerID string, slot *runtime.S
 // crosses — ordinary inference, media, and durable video create alike. A slot
 // list filtered before an earlier call is not authority for a later sibling,
 // so each candidate is revalidated in slot order: live API and network
-// credential revocation, the route deadline, the distributed or local cooldown,
+// credential eligibility, the route deadline, the distributed or local cooldown,
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
 func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
-	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Revoked(*slot.CredentialID) {
+	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != runtime.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
-	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Revoked(provider.Network.CredentialID) {
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Eligibility(provider.Network.CredentialID) != runtime.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
 	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
