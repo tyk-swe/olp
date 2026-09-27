@@ -130,3 +130,12 @@ func TestOIDCDialStopsWhenCanceled(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityEgressHasNoExceptionsOutsideTestBuilds(t *testing.T) {
+	if !oidcTestBuild && (len(identityEgress.AllowedNetworks) != 0 || len(identityEgress.PlainHTTPHosts) != 0) {
+		t.Fatal("identity egress must apply the public-address rule without exceptions")
+	}
+	if identityEgress.Permits(netip.MustParseAddr("10.0.0.1")) || identityEgress.PermitsPlainHTTP("idp.example") {
+		t.Fatal("identity egress admitted a private address or plain HTTP")
+	}
+}

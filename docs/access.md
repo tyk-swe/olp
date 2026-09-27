@@ -62,8 +62,9 @@ omitting the supported-methods field defaults to `client_secret_basic`.
 Unsupported token authentication methods are rejected during configuration.
 Discovery and endpoints must use HTTPS and public addresses. The dedicated
 client rejects redirects, credentials in URLs, private/reserved DNS answers,
-oversized responses, and unbounded waits. Provider egress settings cannot weaken
-identity egress.
+oversized responses, and unbounded waits. It applies the provider egress
+address denylist without any operator exceptions and is never built from the
+provider policy, so provider egress settings cannot weaken identity egress.
 
 Authorization binds a single-use encrypted flow to the browser, configuration
 ETag, state, nonce, PKCE verifier, and initiating session when applicable. ID
