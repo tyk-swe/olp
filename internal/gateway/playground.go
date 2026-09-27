@@ -20,7 +20,8 @@ import (
 const playgroundTimeout = 2 * time.Minute
 
 // Playground serves the console's unary test surface through the same
-// executor as API traffic, authenticated by console session.
+// executor as API traffic, admitting a console session or management token
+// that holds the playground operation.
 type Playground struct {
 	Access  *access.Server
 	Gateway *Server

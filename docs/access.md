@@ -11,8 +11,11 @@ Administrators belong to one trusted installation. See
 
 Owners manage membership, OIDC, local-login availability, and other users'
 sessions. Operators can read membership and manage keys/settings. Developers can
-manage keys. Viewers can read key metadata, settings, and audit records. Every
-user manages their own profile and sessions. The last usable owner cannot be
+manage keys. Viewers can read configuration, key metadata, and usage, and with
+an installation-wide scope also settings and audit records. Every user manages
+their own profile and sessions. The
+[operation table](security.md#management-authorization) lists exactly what each
+role holds. The last usable owner cannot be
 removed, disabled, or stranded by authentication configuration changes.
 
 Disabling or changing a member's role revokes their sessions. Losing membership

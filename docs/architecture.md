@@ -29,7 +29,10 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Configuration, connections, startup, shutdown | `internal/config/`, `internal/process/`, `internal/database/` |
 | HTTP middleware, development origin, body limits | `internal/process/` |
 | Public path surfaces: admission pools, console-reserved prefixes, edge routes | `internal/surface/` |
-| Outbound networking and secrets | `internal/egress/`, `internal/secrets/` |
+| Outbound networking, credential redaction, secret purposes | `internal/egress/`, `internal/secrets/` |
+| Management authorization policy, contract requirements, route admission | `internal/access/policy.go`, `contract.go`, `route.go`, `scope.go` |
+| Gateway key locations and retained-resource admission | `internal/gateway/credentials.go`, `retained.go` |
+| Public response security headers | `internal/process/perimeter.go` |
 | Metrics, traces, readiness, worker health | `internal/observability/` |
 
 Feature packages own their SQL, transactions, and workflows; mutations receive
@@ -109,7 +112,9 @@ resource lifetimes and listeners. Draining, metadata delivery, worker shutdown,
 and trace flushing share one deadline. Production serves static console assets;
 development uses Vite with configured API proxies.
 
-See [gateway execution](gateway.md), [access control](access.md), and the
+See [security architecture](security.md) for how these modules divide the
+security rules. See [gateway execution](gateway.md),
+[access control](access.md), and the
 [worker runbook](operations.md#replicated-worker-health) for their operational
 contracts. See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks,
 integration, and releases.

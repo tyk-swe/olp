@@ -278,3 +278,49 @@ func TestPrincipalRolesAreDecidedOnlyByThePolicy(t *testing.T) {
 		}
 	}
 }
+
+// docRegion holds the marked region of docs/security.md to rendered, or
+// rewrites it under -update.
+func docRegion(t *testing.T, name, rendered string) {
+	t.Helper()
+	path := "../../docs/security.md"
+	document, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, end := "<!-- "+name+" -->\n", "<!-- /"+name+" -->"
+	i, j := bytes.Index(document, []byte(start)), bytes.Index(document, []byte(end))
+	if i < 0 || j < i {
+		t.Fatalf("docs/security.md has no %s region", name)
+	}
+	current := string(document[i+len(start) : j])
+	if current == rendered {
+		return
+	}
+	if !*update {
+		t.Fatalf("docs/security.md describes %s differently from the code; rerun with -update", name)
+	}
+	updated := append(append(append([]byte{}, document[:i+len(start)]...), rendered...), document[j:]...)
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSecurityDocumentDescribesThePolicy(t *testing.T) {
+	var table strings.Builder
+	table.WriteString("| Operation | Owner | Operator | Developer | Viewer | Installation-wide | Management tokens |\n")
+	table.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	mark := func(held bool) string {
+		if held {
+			return "yes"
+		}
+		return ""
+	}
+	for _, op := range Operations() {
+		r := policy[op]
+		fmt.Fprintf(&table, "| `%s` | %s | %s | %s | %s | %s | %s |\n", op,
+			mark(r.roles.has(RoleOwner)), mark(r.roles.has(RoleOperator)), mark(r.roles.has(RoleDeveloper)), mark(r.roles.has(RoleViewer)),
+			mark(r.installation), mark(r.delegable))
+	}
+	docRegion(t, "operations", table.String())
+}

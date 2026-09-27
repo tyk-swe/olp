@@ -14,8 +14,9 @@ import (
 
 // Server exposes the read side of accounting — usage reports, request history,
 // pricing revisions, and the gateway epochs that bound what was lost — over the
-// management API. Every route authenticates as a console session through the
-// access server; nothing here is reachable with an API key.
+// management API. Every route admits the console session or management token
+// its contract requirement names; nothing here is reachable with a gateway API
+// key.
 type Server struct {
 	Access *access.Server
 	// VendorKind resolves a vendor catalogue identifier to its connector kind.

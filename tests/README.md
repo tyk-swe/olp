@@ -32,6 +32,12 @@ make test-race GO_TEST_PACKAGES=./internal/gateway GO_TEST_TIMEOUT=10m
 make test-go GO_TEST_ARGS=-cover
 ```
 
+Authorization, key-location, and secret-purpose changes surface as diffs to
+golden files under `internal/*/testdata` and to the generated tables in
+[security architecture](../docs/security.md). Review such a diff as a security
+change, then regenerate deliberately with
+`go test ./internal/access ./internal/secrets ./internal/gateway -update`.
+
 `GO_TEST_PACKAGES` defaults to `./...`, `GO_TEST_TIMEOUT` to `5m` per package,
 and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
 `-mod=readonly`. Coverage reporting is optional; there is no numeric threshold.
