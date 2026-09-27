@@ -356,7 +356,9 @@ All three endpoints require the `configure` operation and an all-projects
 principal, so assigned users and project-scoped machine tokens receive 403;
 all-project machine tokens with `read` and `configure` scopes can automate
 export, plan, and apply. The console exposes the workflow to global
-owner/operator sessions under **Settings → Configuration promotion**.
+owner/operator sessions under **Settings → Configuration promotion**, which
+asks for the secret bindings a plan requires and forgets them whenever the
+artifact changes.
 
 ### Versioned provider profiles and per-connection networking
 
