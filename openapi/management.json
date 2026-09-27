@@ -1352,15 +1352,39 @@
       "ConfigurationPlanItem": {
         "properties": {
           "action": {
+            "description": "What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.",
+            "enum": [
+              "create",
+              "reuse",
+              "replace",
+              "noop",
+              "bind",
+              "stage",
+              "enroll",
+              "conflict",
+              "blocker"
+            ],
             "type": "string"
           },
           "detail": {
+            "description": "Qualifies the action, or names the conflict or blocker, such as `secret_binding_required`, `grant_enrollment_required`, `plugin_not_installed` or `plugin_not_approved`",
             "type": "string"
           },
           "key": {
+            "description": "Natural identity of the item: a name, slug or credential reference; a plugin's digest",
             "type": "string"
           },
           "kind": {
+            "enum": [
+              "configuration",
+              "project",
+              "plugin",
+              "provider",
+              "network_credential",
+              "credential",
+              "route",
+              "pricing"
+            ],
             "type": "string"
           }
         },
@@ -1547,7 +1571,7 @@
               "type": "string",
               "writeOnly": true
             },
-            "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed",
+            "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
             "type": "object"
           }
         },
@@ -1710,7 +1734,7 @@
       "ConfigurationSlotEntry": {
         "properties": {
           "credential_ref": {
-            "description": "Stable 'provider-name/slot-name-or-default' reference; null for credentialless authentication",
+            "description": "Stable 'provider-name/slot-name-or-default' reference to the slot's credential; null for credentialless authentication. Every slot of a provider that authenticates with a grant has one: exports never carry grant material, and importing leaves the slot for grant enrollment.",
             "type": [
               "string",
               "null"

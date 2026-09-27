@@ -77,6 +77,8 @@ func (r *planResult) sort() {
 type existingSlot struct {
 	ID           string
 	CredentialID *string
+	// Grant reports whether a grant backs the credential version.
+	Grant bool
 }
 
 type existingProvider struct {
@@ -156,7 +158,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = providers.Err(); err != nil {
 		return nil, err
 	}
-	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text
+	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,c.plugin_digest IS NOT NULL
         FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL`)
 	if err != nil {
 		return nil, err
@@ -169,11 +171,12 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	for slots.Next() {
 		var providerID, name, id string
 		var credentialID *string
-		if err = slots.Scan(&providerID, &name, &id, &credentialID); err != nil {
+		var grant bool
+		if err = slots.Scan(&providerID, &name, &id, &credentialID, &grant); err != nil {
 			return nil, err
 		}
 		if p, ok := byProvider[providerID]; ok {
-			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID}
+			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID, Grant: grant}
 		}
 	}
 	if err = slots.Err(); err != nil {
@@ -264,157 +267,168 @@ func normalizeDocument(doc *Document) {
 	}
 }
 
-func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) error {
+// validateDocument refuses an artifact that is invalid anywhere, and pins the
+// plugin profiles its plugin providers name. It returns the plugins this
+// installation can't use yet, by digest, with why: they block the plan.
+func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) (map[string]string, error) {
 	if doc.APIVersion != APIVersion {
-		return access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
+		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
 	if len(doc.Projects) > maxProjects {
-		return access.Invalid("projects", "Declare at most "+strconv.Itoa(maxProjects)+" projects.")
+		return nil, access.Invalid("projects", "Declare at most "+strconv.Itoa(maxProjects)+" projects.")
 	}
 	seen := map[string]bool{}
 	for i, p := range doc.Projects {
 		field := "projects." + strconv.Itoa(i) + ".name"
 		if err := access.ValidText(field, p.Name, 100); err != nil {
-			return err
+			return nil, err
 		}
 		if seen[strings.ToLower(p.Name)] {
-			return access.Invalid(field, "Project names must be unique.")
+			return nil, access.Invalid(field, "Project names must be unique.")
 		}
 		seen[strings.ToLower(p.Name)] = true
 	}
 	if len(doc.Providers) > maxProviders {
-		return access.Invalid("providers", "Declare at most "+strconv.Itoa(maxProviders)+" providers.")
+		return nil, access.Invalid("providers", "Declare at most "+strconv.Itoa(maxProviders)+" providers.")
 	}
 	seen = map[string]bool{}
 	refs := map[string]bool{}
+	unavailable := map[string]string{}
 	totalModels := 0
 	for i := range doc.Providers {
 		// Applying stores the entry's configuration, so a plugin provider
-		// pins its plugin profile there and takes its address.
-		if err := doc.Providers[i].Configuration.Pin(ctx, q, s.Unconfined); err != nil {
-			return err
+		// pins its plugin profile there and takes its address. One whose
+		// plugin this installation can't use yet is validated with its
+		// plugin profile once it can.
+		refusal, err := pinPlugin(ctx, q, s.Unconfined, &doc.Providers[i].Configuration)
+		if err != nil {
+			return nil, err
 		}
 		p := doc.Providers[i]
 		prefix := "providers." + strconv.Itoa(i)
 		if err := access.ValidText(prefix+".name", p.Name, 100); err != nil {
-			return err
+			return nil, err
 		}
 		if seen[strings.ToLower(p.Name)] {
-			return access.Invalid(prefix+".name", "Provider names must be unique.")
+			return nil, access.Invalid(prefix+".name", "Provider names must be unique.")
 		}
 		seen[strings.ToLower(p.Name)] = true
 		if p.Project != nil {
 			if err := access.ValidText(prefix+".project", *p.Project, 100); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		p.Configuration.Normalize()
 		if p.Configuration.Options.Network != nil && p.Configuration.Options.Network.CredentialID != "" {
-			return access.Invalid(prefix+".configuration.options.network.credential_id", "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
+			return nil, access.Invalid(prefix+".configuration.options.network.credential_id", "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
 		}
 		if p.NetworkCredentialRef != nil && (p.Configuration.Options.Network == nil || *p.NetworkCredentialRef != networkRef(p.Name) || len(*p.NetworkCredentialRef) > maxCredentialRef) {
-			return access.Invalid(prefix+".network_credential_ref", "Use the provider name followed by /network and configure network options.")
+			return nil, access.Invalid(prefix+".network_credential_ref", "Use the provider name followed by /network and configure network options.")
 		}
 		if p.NetworkCredentialRef != nil {
 			if refs[*p.NetworkCredentialRef] {
-				return access.Invalid(prefix+".network_credential_ref", "Credential references must be distinct.")
+				return nil, access.Invalid(prefix+".network_credential_ref", "Credential references must be distinct.")
 			}
 			refs[*p.NetworkCredentialRef] = true
 		}
-		if err := p.Configuration.Validate(s.Egress); err != nil {
-			return err
+		if refusal != "" {
+			unavailable[p.Configuration.ProfileRevision] = refusal
+		} else if err := p.Configuration.Validate(s.Egress); err != nil {
+			return nil, err
 		}
 		totalModels += len(p.Models)
 		if totalModels > maxModels {
-			return access.Invalid("providers.models", "Declare at most "+strconv.Itoa(maxModels)+" models in total.")
+			return nil, access.Invalid("providers.models", "Declare at most "+strconv.Itoa(maxModels)+" models in total.")
 		}
 		modelSeen := map[string]bool{}
 		for j, m := range p.Models {
 			mfield := prefix + ".models." + strconv.Itoa(j)
 			if err := providers.ValidModelName(mfield+".upstream_model", m.UpstreamModel); err != nil {
-				return err
+				return nil, err
 			}
 			if modelSeen[m.UpstreamModel] {
-				return access.Invalid(mfield+".upstream_model", "Model names must be unique per provider.")
+				return nil, access.Invalid(mfield+".upstream_model", "Model names must be unique per provider.")
 			}
 			modelSeen[m.UpstreamModel] = true
 			if m.DisplayName == "" {
 				m.DisplayName = m.UpstreamModel
 			}
 			if err := providers.ValidModelName(mfield+".display_name", m.DisplayName); err != nil {
-				return err
+				return nil, err
 			}
 			capabilities := make([]providers.CapabilityInput, 0, len(m.Capabilities))
 			for _, c := range m.Capabilities {
 				capabilities = append(capabilities, providers.CapabilityInput{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode})
 			}
 			if _, err := providers.ValidCapabilities(capabilities); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if len(p.Slots) < 1 || len(p.Slots) > maxSlots {
-			return access.Invalid(prefix+".slots", "Declare 1–"+strconv.Itoa(maxSlots)+" credential slots per provider.")
+			return nil, access.Invalid(prefix+".slots", "Declare 1–"+strconv.Itoa(maxSlots)+" credential slots per provider.")
 		}
 		positions, names := map[int]bool{}, map[string]bool{}
 		defaults := 0
 		for j, slot := range p.Slots {
 			sfield := prefix + ".slots." + strconv.Itoa(j)
 			if err := access.ValidText(sfield+".name", slot.Name, 100); err != nil {
-				return err
+				return nil, err
 			}
 			if names[slot.Name] {
-				return access.Invalid(sfield+".name", "Slot names must be unique per provider.")
+				return nil, access.Invalid(sfield+".name", "Slot names must be unique per provider.")
 			}
 			names[slot.Name] = true
 			if slot.Position < 0 || slot.Position > 32767 || positions[slot.Position] {
-				return access.Invalid(sfield+".position", "Use unique positions from 0 to 32767.")
+				return nil, access.Invalid(sfield+".position", "Use unique positions from 0 to 32767.")
 			}
 			positions[slot.Position] = true
 			if slot.IsDefault {
 				defaults++
 			}
 			if slot.Priority < 0 || slot.Priority > 32767 {
-				return access.Invalid(sfield+".priority", "Use a priority from 0 to 32767.")
+				return nil, access.Invalid(sfield+".priority", "Use a priority from 0 to 32767.")
 			}
 			if slot.Weight < 1 || slot.Weight > 1000000 {
-				return access.Invalid(sfield+".weight", "Use a weight from 1 to 1000000.")
+				return nil, access.Invalid(sfield+".weight", "Use a weight from 1 to 1000000.")
 			}
 			if len(slot.Restrictions.AllowedAPIKeys) > 0 {
-				return access.Fail(422, "non_portable_reference", "allowed_api_keys cannot be promoted; re-establish them on the destination after creating keys.")
+				return nil, access.Fail(422, "non_portable_reference", "allowed_api_keys cannot be promoted; re-establish them on the destination after creating keys.")
 			}
 			if len(slot.Restrictions.AllowedRoutes) > 100 || len(slot.Restrictions.AllowedModels) > 2000 {
-				return access.Invalid(sfield, "Use at most 100 routes and 2000 models per slot.")
+				return nil, access.Invalid(sfield, "Use at most 100 routes and 2000 models per slot.")
 			}
 			for _, route := range slot.Restrictions.AllowedRoutes {
 				if !access.RouteSlug.MatchString(route) {
-					return access.Invalid(sfield+".allowed_routes", "Use route slugs.")
+					return nil, access.Invalid(sfield+".allowed_routes", "Use route slugs.")
 				}
 			}
 			for _, model := range slot.Restrictions.AllowedModels {
 				if err := providers.ValidModelName(sfield+".allowed_models", model); err != nil {
-					return err
+					return nil, err
 				}
 			}
 			if !providers.ValidQuota(slot.Limits) {
-				return access.Invalid(sfield, "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
+				return nil, access.Invalid(sfield, "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 			}
 			if slot.CredentialRef != nil {
 				want := CredentialRef(p.Name, slot.Name)
 				if *slot.CredentialRef != want {
-					return access.Invalid(sfield+".credential_ref", "Credential references must read "+want+".")
+					return nil, access.Invalid(sfield+".credential_ref", "Credential references must read "+want+".")
 				}
 				if len(*slot.CredentialRef) > maxCredentialRef {
-					return access.Invalid(sfield+".credential_ref", "Credential references must fit within 200 bytes.")
+					return nil, access.Invalid(sfield+".credential_ref", "Credential references must fit within 200 bytes.")
 				}
 				if refs[*slot.CredentialRef] {
-					return access.Invalid(sfield+".credential_ref", "Credential references must be unique.")
+					return nil, access.Invalid(sfield+".credential_ref", "Credential references must be unique.")
 				}
 				refs[*slot.CredentialRef] = true
+			} else if p.Configuration.Grant() {
+				return nil, access.Invalid(sfield+".credential_ref", "A grant backs each of this provider's credential slots: reference its credential as "+CredentialRef(p.Name, slot.Name)+".")
 			}
 		}
 		if defaults != 1 {
-			return access.Invalid(prefix+".slots", "Declare exactly one default slot per provider.")
+			return nil, access.Invalid(prefix+".slots", "Declare exactly one default slot per provider.")
 		}
 		if p.Configuration.CredentialRequired() {
 			hasCredential := false
@@ -422,18 +436,18 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				hasCredential = hasCredential || slot.CredentialRef != nil
 			}
 			if !hasCredential {
-				return access.Invalid(prefix+".slots", "This authentication mode requires at least one credential slot.")
+				return nil, access.Invalid(prefix+".slots", "This authentication mode requires at least one credential slot.")
 			}
 		} else {
 			for _, slot := range p.Slots {
 				if slot.CredentialRef != nil {
-					return access.Invalid(prefix+".slots.credential_ref", "This authentication mode takes no stored credential.")
+					return nil, access.Invalid(prefix+".slots.credential_ref", "This authentication mode takes no stored credential.")
 				}
 			}
 		}
 	}
 	if len(doc.Routes) > maxRoutes {
-		return access.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
+		return nil, access.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
 	}
 	routeSeen := map[string]bool{}
 	docProviders := map[string]*ProviderEntry{}
@@ -443,62 +457,62 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	for i, rt := range doc.Routes {
 		prefix := "routes." + strconv.Itoa(i)
 		if _, err := runtime.DecodeFidelity(rt.Fidelity); err != nil {
-			return access.Invalid(prefix+".fidelity", err.Error())
+			return nil, access.Invalid(prefix+".fidelity", err.Error())
 		}
 		if err := routes.ValidateFidelityPolicy(rt.Fidelity, rt.ContentPolicy); err != nil {
-			return err
+			return nil, err
 		}
 		if routeSeen[rt.Slug] {
-			return access.Invalid(prefix+".slug", "Route slugs must be unique.")
+			return nil, access.Invalid(prefix+".slug", "Route slugs must be unique.")
 		}
 		routeSeen[rt.Slug] = true
 		if !access.RouteSlug.MatchString(rt.Slug) {
-			return access.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
+			return nil, access.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 		}
 		if len(rt.Targets) > maxTargets {
-			return access.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
+			return nil, access.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
 		}
 		if rt.Project != nil {
 			if err := access.ValidText(prefix+".project", *rt.Project, 100); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if rt.RoutingPolicy != nil {
 			if err := rt.RoutingPolicy.Validate(); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		for j, t := range rt.Targets {
 			tfield := prefix + ".targets." + strconv.Itoa(j)
 			provider, ok := docProviders[strings.ToLower(t.Provider)]
 			if !ok {
-				return access.Invalid(tfield+".provider", "Target "+strconv.Itoa(j)+" names a provider the document does not declare.")
+				return nil, access.Invalid(tfield+".provider", "Target "+strconv.Itoa(j)+" names a provider the document does not declare.")
 			}
 			found := false
 			for _, m := range provider.Models {
 				found = found || m.UpstreamModel == t.ProviderModel
 			}
 			if !found {
-				return access.Invalid(tfield+".provider_model", "Target "+strconv.Itoa(j)+" names a model the provider does not declare.")
+				return nil, access.Invalid(tfield+".provider_model", "Target "+strconv.Itoa(j)+" names a model the provider does not declare.")
 			}
 			if lower(rt.Project) != lower(provider.Project) {
-				return access.Fail(422, "target_project_mismatch", "Target "+strconv.Itoa(j)+" belongs to a different project than the route.")
+				return nil, access.Fail(422, "target_project_mismatch", "Target "+strconv.Itoa(j)+" belongs to a different project than the route.")
 			}
 		}
 	}
 	if doc.Pricing != nil {
 		if _, err := time.Parse(time.RFC3339, doc.Pricing.EffectiveAt); err != nil {
-			return access.Invalid("pricing.effective_at", "Use an RFC3339 date and time.")
+			return nil, access.Invalid("pricing.effective_at", "Use an RFC3339 date and time.")
 		}
 		if len(doc.Pricing.Prices) > maxPrices {
-			return access.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
+			return nil, access.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
 		}
 	}
-	return nil
+	return unavailable, nil
 }
 
 func validateBindings(doc *Document, bindings map[string]string) error {
-	refs := map[string]bool{}
+	refs, grants := map[string]bool{}, map[string]bool{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
@@ -506,10 +520,14 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
 				refs[*slot.CredentialRef] = true
+				grants[*slot.CredentialRef] = p.Configuration.Grant()
 			}
 		}
 	}
 	for name, secret := range bindings {
+		if grants[name] {
+			return access.Invalid("secret_bindings."+name, grantBindingRefused)
+		}
 		for _, provider := range doc.Providers {
 			if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
 				if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
@@ -531,7 +549,8 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 }
 
 func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings map[string]string, expected *string) (*planResult, error) {
-	if err := s.validateDocument(ctx, q, doc); err != nil {
+	unavailable, err := s.validateDocument(ctx, q, doc)
+	if err != nil {
 		return nil, err
 	}
 	if err := validateBindings(doc, bindings); err != nil {
@@ -543,6 +562,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	result := &planResult{Digest: digest, Actions: []planItem{}, Conflicts: []planItem{}, Blockers: []planItem{}}
+	for plugin, refusal := range unavailable {
+		result.blocker("plugin", plugin, refusal)
+	}
 	state, err := loadState(ctx, q)
 	if err != nil {
 		return nil, err
@@ -619,21 +641,26 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 				continue
 			}
 			ref := *slot.CredentialRef
-			if secret, supplied := bindings[ref]; supplied {
-				var live *string
-				if ok {
-					if current, present := existing.Slots[slot.Name]; present {
-						live = current.CredentialID
-					}
-				}
-				if same, err := s.bindingMatches(ctx, q, live, secret); err == nil && same {
+			var current existingSlot
+			if ok {
+				current = existing.Slots[slot.Name]
+			}
+			// The slot's credential version serves on only if the provider
+			// authenticates with its kind: a grant, or a static credential.
+			fits := current.CredentialID != nil && current.Grant == p.Configuration.Grant()
+			secret, supplied := bindings[ref]
+			switch {
+			case supplied:
+				if same, err := s.bindingMatches(ctx, q, current.CredentialID, secret); err == nil && same {
 					result.item("credential", ref, "reuse", "")
 				} else {
 					result.item("credential", ref, "bind", "")
 				}
-			} else if ok && existing.Slots[slot.Name].CredentialID != nil {
+			case fits:
 				result.item("credential", ref, "reuse", "")
-			} else {
+			case p.Configuration.Grant():
+				result.item("credential", ref, "enroll", "grant_enrollment_required")
+			default:
 				result.blocker("credential", ref, "secret_binding_required")
 			}
 		}
@@ -790,6 +817,7 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 	entry.Models = models
 	entry.Slots = slots
 	portableNetwork(entry)
+	referenceGrants(entry)
 	return entry, nil
 }
 

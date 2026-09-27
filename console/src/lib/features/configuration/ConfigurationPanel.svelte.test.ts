@@ -141,6 +141,128 @@ it('applies with the collected bindings', async () => {
   expect(host.textContent).toContain('Configuration staged.');
 });
 
+const digest = 'a1b2c3d4e5f6'.padEnd(64, '0');
+
+const pluginDocument: ConfigurationDocument = {
+  ...document,
+  providers: [
+    {
+      name: 'Reference account',
+      project: null,
+      configuration: {
+        kind: 'plugin',
+        auth_mode: 'grant',
+        profile_id: 'reference-grant-chat',
+        profile_revision: digest,
+        endpoint: null,
+        cloud_region: null,
+        cloud_project: null,
+        deployment: null,
+        api_version: null,
+        options: {
+          credential_headers: [],
+          limits: null,
+          models: {},
+          parameter_defaults: {},
+          vendor_id: null
+        }
+      },
+      models: [],
+      slots: []
+    }
+  ]
+};
+
+it('names the plugin build a blocked artifact pins and where to install it', async () => {
+  vi.mocked(planConfiguration).mockResolvedValue({
+    digest: 'abc123',
+    actions: [],
+    conflicts: [],
+    blockers: [
+      {
+        kind: 'plugin',
+        key: digest,
+        action: 'blocker',
+        detail: 'plugin_not_installed'
+      }
+    ]
+  });
+  render();
+  pasteArtifact(JSON.stringify(pluginDocument));
+  click('Plan');
+  await settle();
+  const blockers = host.querySelector('[data-testid="plan-blockers"]')!;
+  expect(blockers.textContent?.replace(/\s+/g, ' ')).toContain(
+    `Plugin build ${digest} (pinned by Reference account) is not installed here: install and approve it on the Plugins page`
+  );
+  expect(blockers.querySelector('a')?.getAttribute('href')).toMatch(
+    /\/plugins$/
+  );
+  expect(host.textContent).not.toContain('Apply');
+});
+
+it('says an unconfined plugin build needs the deployment to enable its tier', async () => {
+  vi.mocked(planConfiguration).mockResolvedValue({
+    digest: 'abc123',
+    actions: [],
+    conflicts: [],
+    blockers: [
+      {
+        kind: 'plugin',
+        key: digest,
+        action: 'blocker',
+        detail: 'plugin_unconfined_disabled'
+      }
+    ]
+  });
+  render();
+  pasteArtifact(JSON.stringify(pluginDocument));
+  click('Plan');
+  await settle();
+  const blockers = host.querySelector('[data-testid="plan-blockers"]')!;
+  expect(blockers.textContent?.replace(/\s+/g, ' ')).toContain(
+    `Plugin build ${digest} (pinned by Reference account) is unconfined, and this deployment does not enable unconfined plugins`
+  );
+  expect(host.textContent).not.toContain('Apply');
+});
+
+it('lists the credential slots a grant backs for enrollment after applying', async () => {
+  vi.mocked(planConfiguration).mockResolvedValue({
+    digest: 'abc123',
+    actions: [
+      {
+        kind: 'provider',
+        key: 'Reference account',
+        action: 'create',
+        detail: 'draft'
+      },
+      {
+        kind: 'credential',
+        key: 'Reference account/default',
+        action: 'enroll',
+        detail: 'grant_enrollment_required'
+      }
+    ],
+    conflicts: [],
+    blockers: []
+  });
+  render();
+  pasteArtifact(JSON.stringify(pluginDocument));
+  click('Plan');
+  await settle();
+  const enrollments = host.querySelector(
+    '[data-testid="plan-grant-enrollments"]'
+  )!;
+  expect(enrollments.textContent).toBe('Reference account/default');
+  expect(
+    host.querySelector('[data-testid="plan-actions"]')?.textContent
+  ).not.toContain('Reference account/default');
+  expect(
+    host.querySelector('#secret-Reference\\ account\\/default')
+  ).toBeNull();
+  expect(host.textContent).toContain('Apply');
+});
+
 it('reports an invalid artifact', async () => {
   render();
   pasteArtifact('{not json');

@@ -10,8 +10,8 @@ every capability they have, unless a deployment enables the experimental
 [authoring guide](plugin-authoring.md) covers writing one.
 
 This page covers installing, reviewing and approving plugins, creating
-providers from their profiles, enrolling grants, permitting unconfined
-plugins, and uninstalling them.
+providers from their profiles, enrolling grants, promoting plugin providers
+between installations, permitting unconfined plugins, and uninstalling them.
 
 ## Upstream terms of use
 
@@ -280,6 +280,19 @@ expires. A pasted credential can't be staged for a provider that authenticates
 with a grant, and activation refuses a credential slot whose version doesn't
 match the provider's authentication.
 
+## Configuration promotion
+
+[Configuration exports](configuration.md#configuration-promotion-artifacts)
+reference the plugin build each plugin provider pins by its digest, with the
+provider's profile and options, and carry neither the module nor grant
+material. To apply an export on another installation, install and approve the
+same build there, or permit it for an unconfined plugin on a deployment that
+enables the [tier](#unconfined-plugins-experimental): until then, the plan
+reports a `plugin` blocker for the digest. A static plugin credential binds through `secret_bindings` like any
+other secret. A credential slot a grant backs imports without a credential: the
+plan lists it for grant enrollment, and the imported provider activates once
+grant enrollment has given its serving slots credential versions.
+
 ## Uninstalling
 
 `DELETE /api/v1/plugins/{digest}`, with the current ETag in `If-Match`, deletes
@@ -430,6 +443,8 @@ removed after plugins were permitted:
   `422 plugin_unconfined_disabled`;
 - refuses to activate a provider revision that pins one, with
   `422 plugin_unconfined_disabled`;
+- blocks a configuration plan whose providers pin one with a `plugin` blocker,
+  `plugin_unconfined_disabled`, keyed by its digest;
 - serves none of their targets: a gateway plans them ineligible with reason
   `plugin_unconfined_disabled`, and a route with no other eligible target
   answers `503`.

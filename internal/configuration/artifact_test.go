@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,9 +16,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 type stubRows struct {
@@ -226,13 +230,13 @@ func TestValidateDocumentRejectsDuplicatesAndReferences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := testDocument()
 			tc.mutate(doc)
-			if err := testServer().validateDocument(t.Context(), nil, doc); err == nil {
+			if _, err := testServer().validateDocument(t.Context(), nil, doc); err == nil {
 				t.Fatalf("expected validation failure for %s", tc.name)
 			}
 		})
 	}
 	doc := testDocument()
-	if err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
+	if _, err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
 		t.Fatalf("valid document rejected: %v", err)
 	}
 }
@@ -264,7 +268,7 @@ func TestRouteFidelityOmissionIsStrictInDocuments(t *testing.T) {
 	legacy := testDocument()
 	legacy.Routes[0].Fidelity = json.RawMessage(`{"mode":"legacy"}`)
 	var problem *access.Problem
-	if err := testServer().validateDocument(t.Context(), nil, legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
+	if _, err := testServer().validateDocument(t.Context(), nil, legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
 		t.Fatalf("legacy fidelity was not a typed field error: %v", err)
 	}
 }
@@ -349,7 +353,7 @@ func TestValidateRejectsNonPortableAPIKeys(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	doc.Providers[0].Slots[0].Restrictions.AllowedAPIKeys = []string{"key-id"}
-	err := s.validateDocument(t.Context(), nil, doc)
+	_, err := s.validateDocument(t.Context(), nil, doc)
 	var problem *access.Problem
 	if !errors.As(err, &problem) || problem.Status != 422 || problem.Code != "non_portable_reference" {
 		t.Fatalf("expected 422 non_portable_reference, got %v", err)
@@ -389,14 +393,14 @@ func TestValidateDuplicateWhitespaceAlias(t *testing.T) {
 	alias := doc.Providers[0]
 	alias.Name = " ACME "
 	doc.Providers = append(doc.Providers, alias)
-	err := s.validateDocument(t.Context(), nil, doc)
+	_, err := s.validateDocument(t.Context(), nil, doc)
 	var problem *access.Problem
 	if !errors.As(err, &problem) || problem.Status != 422 {
 		t.Fatalf("expected duplicate identity rejection, got %v", err)
 	}
 	doc = testDocument()
 	doc.Projects = append(doc.Projects, ProjectEntry{Name: " EDGE "})
-	if err = s.validateDocument(t.Context(), nil, doc); err == nil {
+	if _, err = s.validateDocument(t.Context(), nil, doc); err == nil {
 		t.Fatal("expected duplicate project identity rejection")
 	}
 }
@@ -437,7 +441,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", false}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`)}},
@@ -456,5 +460,169 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	}
 	if !providerNoop || !routeNoop {
 		t.Fatalf("expected provider and route noop actions: %+v", result.Actions)
+	}
+}
+
+const pluginDigest = "5f2b7c0e9a41d3b6c8e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6"
+
+// pluginDocument declares acme as a provider of a plugin profile that
+// authenticates with authMode, with a second credential slot.
+func pluginDocument(authMode string) *Document {
+	doc := testDocument()
+	acme := &doc.Providers[0]
+	acme.Configuration = providers.Configuration{Kind: providers.KindPlugin, AuthMode: authMode, ProfileID: "reference-chat", ProfileRevision: pluginDigest}
+	acme.Slots = append(acme.Slots, SlotEntry{Name: "backup", Position: 1, Enabled: true, Weight: 1, CredentialRef: ptr(CredentialRef("acme", "backup"))})
+	doc.Pricing = nil
+	return doc
+}
+
+func TestPlanBlocksPluginProvidersUntilTheirPluginIsInstalled(t *testing.T) {
+	doc := pluginDocument(connectors.AuthStaticCredential)
+	other := doc.Providers[0]
+	other.Name = "acme-eu"
+	other.Slots = []SlotEntry{{Name: "default", IsDefault: true, Enabled: true, Weight: 1, CredentialRef: ptr(CredentialRef("acme-eu", "default"))}}
+	doc.Providers = append(doc.Providers, other)
+	result, err := testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil)
+	if err != nil {
+		t.Fatalf("an artifact pinning a plugin this installation lacks was refused: %v", err)
+	}
+	var blockers []planItem
+	for _, blocker := range result.Blockers {
+		if blocker.Kind == "plugin" {
+			blockers = append(blockers, blocker)
+		}
+	}
+	if want := []planItem{{Kind: "plugin", Key: pluginDigest, Action: "blocker", Detail: "plugin_not_installed"}}; !reflect.DeepEqual(blockers, want) {
+		t.Fatalf("plugin blockers %+v, want one for the digest both providers pin", blockers)
+	}
+
+	// Only the plugin waits for this installation: a malformed reference to
+	// it is invalid anywhere.
+	doc = pluginDocument(connectors.AuthStaticCredential)
+	doc.Providers[0].Configuration.ProfileRevision = "not-a-digest"
+	var problem *access.Problem
+	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil); !errors.As(err, &problem) || problem.Field != "configuration.profile_revision" {
+		t.Fatalf("a malformed plugin reference was not refused: %v", err)
+	}
+}
+
+// An unconfined plugin build is usable only where the deployment enables the
+// unconfined tier: elsewhere it blocks the plan as a build the installation
+// lacks does, until the operator enables the tier.
+func TestPlanBlocksUnconfinedPluginProvidersWhileTheTierIsDisabled(t *testing.T) {
+	manifest, _ := json.Marshal(abi.Manifest{Name: "reference", Version: "1.0.0", Origins: []string{"https://api.reference.example"}, Profiles: []abi.Profile{{
+		ID: "reference-chat", Label: "Reference Chat", Dialect: "openai-chat",
+		Hosting: abi.Hosting{Address: "https://api.reference.example/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}},
+	}}})
+	q := mapQueryer{t: t, stub: []queryStub{{match: "FROM olp.plugins WHERE", row: []any{manifest, true, "reference", nil}}}}
+	server := testServer()
+	result, err := server.plan(t.Context(), q, pluginDocument(connectors.AuthStaticCredential), nil, nil)
+	if err != nil {
+		t.Fatalf("an artifact pinning an unconfined plugin was refused with the tier disabled: %v", err)
+	}
+	if !slices.Contains(result.Blockers, planItem{Kind: "plugin", Key: pluginDigest, Action: "blocker", Detail: "plugin_unconfined_disabled"}) {
+		t.Fatalf("an unconfined plugin with the tier disabled did not block the plan: %+v", result.Blockers)
+	}
+
+	server.Unconfined = plugins.NewUnconfined(t.TempDir(), plugins.DefaultLimits, slog.New(slog.DiscardHandler))
+	if result, err = server.plan(t.Context(), q, pluginDocument(connectors.AuthStaticCredential), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, blocker := range result.Blockers {
+		if blocker.Kind == "plugin" {
+			t.Fatalf("a permitted unconfined plugin blocked the plan with the tier enabled: %+v", blocker)
+		}
+	}
+}
+
+func TestPlanMarksGrantSlotsForGrantEnrollment(t *testing.T) {
+	doc := pluginDocument(connectors.AuthGrant)
+	result, err := testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"acme/primary", "acme/backup"} {
+		if !slices.Contains(result.Actions, planItem{Kind: "credential", Key: ref, Action: "enroll", Detail: "grant_enrollment_required"}) {
+			t.Fatalf("%s is not marked for grant enrollment: %+v", ref, result.Actions)
+		}
+	}
+	for _, blocker := range result.Blockers {
+		if blocker.Kind == "credential" {
+			t.Fatalf("a grant slot needs a secret binding: %+v", blocker)
+		}
+	}
+
+	// A grant the destination slot already holds serves on.
+	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
+	stubs := []queryStub{
+		{match: "FROM olp.providers WHERE", row: []any{configuration}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", true}, {"provider-id", "backup", "backup-id", "static-id", false}}},
+		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
+	}
+	result, err = testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/primary", Action: "reuse"}) ||
+		!slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/backup", Action: "enroll", Detail: "grant_enrollment_required"}) {
+		t.Fatalf("only a held grant is reused: %+v", result.Actions)
+	}
+
+	// Grant enrollment is the only source of a grant slot's credential.
+	var problem *access.Problem
+	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, map[string]string{"acme/backup": "pasted"}, nil); !errors.As(err, &problem) || problem.Field != "secret_bindings.acme/backup" {
+		t.Fatalf("a grant slot took a secret binding: %v", err)
+	}
+	doc.Providers[0].Slots[1].CredentialRef = nil
+	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, nil, nil); !errors.As(err, &problem) || problem.Field != "providers.0.slots.1.credential_ref" {
+		t.Fatalf("a grant slot without its credential reference was accepted: %v", err)
+	}
+}
+
+func TestPlanRequiresABindingForAStaticSlotHoldingAGrant(t *testing.T) {
+	doc := pluginDocument(connectors.AuthStaticCredential)
+	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
+	stubs := []queryStub{
+		{match: "FROM olp.providers WHERE", row: []any{configuration}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", true}}},
+		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
+	}
+	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(result.Blockers, planItem{Kind: "credential", Key: "acme/primary", Action: "blocker", Detail: "secret_binding_required"}) {
+		t.Fatalf("a static credential slot reused a grant: %+v", result.Blockers)
+	}
+}
+
+// Exports never carry a grant, so they reference every grant slot's
+// credential: importing and exporting again before any grant enrollment
+// reproduces the artifact.
+func TestExportsReferenceEveryCredentialSlotAGrantBacks(t *testing.T) {
+	doc := pluginDocument(connectors.AuthGrant)
+	configuration, _ := json.Marshal(doc.Providers[0].Configuration)
+	capabilities, _ := json.Marshal([]map[string]any{
+		{"operation": "generation", "surface": "openai", "mode": "unary", "source": "declared"},
+		{"operation": "generation", "surface": "openai", "mode": "streaming", "source": "declared"},
+	})
+	restrictions := []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`)
+	stubs := []queryStub{
+		{match: "FROM olp.providers WHERE", row: []any{configuration}},
+		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, false}, {"provider-id", "backup", "backup-id", nil, false}}},
+		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, nil, restrictions, []byte(`{}`)}, {"backup", false, 1, true, 0, 1, nil, restrictions, []byte(`{}`)}}},
+		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
+		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
+	}
+	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(result.Actions, planItem{Kind: "provider", Key: "acme", Action: "noop"}) ||
+		!slices.Contains(result.Actions, planItem{Kind: "credential", Key: "acme/backup", Action: "enroll", Detail: "grant_enrollment_required"}) {
+		t.Fatalf("an imported grant provider awaiting enrollment changed: %+v", result.Actions)
 	}
 }
