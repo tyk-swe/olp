@@ -518,8 +518,9 @@ standard output or standard error is logged a line at a time as well, including
 the Go runtime's panic output.
 
 OLP redacts every secret value it handed the call, and bounds a call's output to
-16 KiB, and each message or attribute to 2 KiB, so a plugin can log freely
-without leaking what OLP gave it or flooding the log.
+16 KiB, counting 64 bytes for each record besides its text, and each message or
+attribute to 2 KiB, so a plugin can log freely without leaking what OLP gave it
+or flooding the log.
 
 ## Testing
 

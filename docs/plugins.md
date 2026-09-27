@@ -447,7 +447,7 @@ Plugin calls run on instances of the module within these limits:
 | Instances of a module at once | 4 |
 | Time per call, including waiting for and instantiating an instance | 10 seconds |
 | Message from the plugin | 1 MiB |
-| Log output per call | 16 KiB, 2 KiB per message or attribute |
+| Log output per call | 16 KiB, counting 64 bytes per record besides its text; 2 KiB per message or attribute |
 
 The runtime runs WebAssembly 2.0 without reference types, so a module has at
 most one table, which never grows. Before compiling a module, OLP refuses one
