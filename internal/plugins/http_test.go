@@ -176,6 +176,69 @@ func TestReferencePluginEnrollsAGrant(t *testing.T) {
 	}
 }
 
+// The reference plugin enrolls a grant by device authorization (RFC 8628):
+// grant_start requests a device authorization from the authority, and
+// grant_poll reports the authority's answers as the codes OLP expects until
+// the operator approves the device.
+func TestReferencePluginPollsADeviceAuthorization(t *testing.T) {
+	t.Parallel()
+	authority := testutil.NewOAuthServer(t)
+	r := newTestRuntime(t, DefaultLimits, nil)
+	m, err := r.Load(t.Context(), testutil.BuildPlugin(t, "./sdk/plugin/reference", "-X=main.authority="+authority.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(t.Context())
+	grant := &HTTP{Origins: []string{"https://api.example.com", authority.URL}, Client: loopbackClient(t)}
+	start := func() abi.GrantAuthorization {
+		var authorization abi.GrantAuthorization
+		if err := m.Call(t.Context(), Call{Method: abi.MethodGrantStart, Params: abi.GrantStart{Profile: "reference-device-chat"}, HTTP: grant}, &authorization); err != nil {
+			t.Fatal(err)
+		}
+		return authorization
+	}
+	poll := func(authorization abi.GrantAuthorization) (abi.Grant, error) {
+		var enrolled abi.Grant
+		err := m.Call(t.Context(), Call{Method: abi.MethodGrantPoll, Params: abi.GrantPoll{Profile: "reference-device-chat", Session: authorization.Session}, HTTP: grant}, &enrolled)
+		return enrolled, err
+	}
+
+	approved := start()
+	device := approved.Device
+	if approved.URL != "" || device == nil || device.VerificationURL != authority.URL+"/device" || device.UserCode == "" ||
+		device.ExpiresIn != 600 || device.Interval != int64(testutil.DeviceInterval/time.Second) {
+		t.Fatalf("device authorization %+v", approved)
+	}
+	// Until the operator approves, the authority says to keep polling, and
+	// to slow down when polled again within its interval.
+	for _, code := range []string{abi.CodeAuthorizationPending, abi.CodeSlowDown} {
+		if _, err = poll(approved); !reported(err, code) {
+			t.Fatalf("want %s, got %v", code, err)
+		}
+	}
+	testutil.DecideDevice(t, device.VerificationURL, device.UserCode, "approve")
+	enrolled, err := poll(approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewRequest("GET", "/", nil)
+	upstream.Header.Set("Authorization", "Bearer "+enrolled.AccessToken)
+	if identity, ok := authority.Authorized(upstream); !ok || enrolled.Principal != identity.Subject || enrolled.Facts["account"] != identity.Account || enrolled.RefreshToken == "" {
+		t.Fatalf("enrolled %+v", enrolled)
+	}
+
+	denied := start()
+	testutil.DecideDevice(t, denied.Device.VerificationURL, denied.Device.UserCode, "deny")
+	if _, err = poll(denied); !reported(err, abi.CodeAccessDenied) {
+		t.Fatalf("polled a denied device: %v", err)
+	}
+	expired := start()
+	authority.ExpireDevices()
+	if _, err = poll(expired); !reported(err, abi.CodeExpiredToken) {
+		t.Fatalf("polled an expired device: %v", err)
+	}
+}
+
 func reported(err error, code string) bool {
 	reported, ok := errors.AsType[*abi.Error](err)
 	return ok && reported.Code == code

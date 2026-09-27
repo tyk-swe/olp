@@ -261,7 +261,7 @@
         <strong>Grant enrollment</strong><span
           >This profile authenticates with a grant instead of a pasted
           credential. {signInNext
-            ? 'After saving, sign in to the upstream account on the authorization page the plugin builds, and paste back what it returns.'
+            ? 'After saving, sign in to the upstream account as the plugin directs: paste back what its authorization page returns, or approve its device code.'
             : 'The draft holds a grant from an earlier sign-in.'} OLP keeps the grant
           encrypted; the console never sees it.</span
         >

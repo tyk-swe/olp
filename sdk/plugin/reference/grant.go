@@ -30,7 +30,10 @@ type session struct {
 	Verifier string `json:"verifier"`
 }
 
-func (reference) StartGrant(context.Context, plugin.GrantStart) (plugin.GrantAuthorization, error) {
+func (reference) StartGrant(_ context.Context, start plugin.GrantStart) (plugin.GrantAuthorization, error) {
+	if start.Profile == deviceProfile {
+		return startDeviceAuthorization()
+	}
 	s := session{State: random(), Verifier: random()}
 	challenge := sha256.Sum256([]byte(s.Verifier))
 	query := url.Values{
@@ -50,14 +53,19 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 	if err != nil {
 		return plugin.Grant{}, err
 	}
+	return token(url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}})
+}
+
+// token requests a grant from the authority's token endpoint and asks the
+// authority who signed in.
+func token(form url.Values) (plugin.Grant, error) {
 	var issued struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int64  `json:"expires_in"`
 		Account      string `json:"account"`
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}
-	if err = call("POST", authority+"/token", form, "", &issued); err != nil {
+	if err := call("POST", authority+"/token", form, "", &issued); err != nil {
 		return plugin.Grant{}, err
 	}
 	// The token response names the account; who signed in is the
@@ -65,7 +73,7 @@ func (reference) ExchangeGrant(_ context.Context, exchange plugin.GrantExchange)
 	var user struct {
 		Subject string `json:"sub"`
 	}
-	if err = call("GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
+	if err := call("GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
 		return plugin.Grant{}, err
 	}
 	return plugin.Grant{
@@ -98,7 +106,9 @@ func authorizationCode(input, state string) (string, error) {
 }
 
 // call sends a request to the authority through OLP and decodes its JSON
-// reply. A refusal fails with the OAuth error code the authority reported.
+// reply. A refusal fails with the OAuth error code the authority reported,
+// such as a device authorization's authorization_pending, which is the code
+// OLP expects.
 func call(method, address string, form url.Values, bearer string, reply any) error {
 	request := plugin.HTTPRequest{Method: method, URL: address, Header: map[string][]string{"Accept": {"application/json"}}}
 	if form != nil {

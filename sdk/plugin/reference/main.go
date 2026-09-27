@@ -1,13 +1,14 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares six profiles at a fictional upstream, and the origins that
+// declares seven profiles at a fictional upstream, and the origins that
 // upstream and its authority use: one serves the OpenAI Chat Completions
 // dialect with the API key in a header, the upstream's model listing and
 // failure classification; one serves Gemini generateContent inside the
 // upstream's own envelope; one serves Chat Completions signing each request
 // with the API key; one serves Chat Completions at a workspace the operator
 // names; one serves Chat Completions for accounts that sign in through the
-// upstream's authority, whose grants the plugin enrolls; and one serves OpenAI
-// Responses where the upstream serves only streaming requests.
+// upstream's authority, whose grants the plugin enrolls; one serves OpenAI
+// Responses where the upstream serves only streaming requests; and one serves
+// Chat Completions for accounts that approve a device authorization instead.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -110,7 +111,7 @@ func (reference) Manifest() plugin.Manifest {
 				Address: upstream,
 				Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 			},
-		}, streamingProfile(api, headers)},
+		}, streamingProfile(api, headers), deviceChat()},
 	}
 }
 

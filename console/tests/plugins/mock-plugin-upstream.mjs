@@ -13,7 +13,10 @@ import { createServer } from 'node:http';
 // server running the authorization code flow with PKCE (S256): /authorize
 // signs the operator in at once and redirects to the loopback callback with a
 // code, /token exchanges each code once for the verifier that matches its
-// challenge, and /userinfo names the account's subject.
+// challenge, and /userinfo names the account's subject. It also runs the
+// device authorization grant (RFC 8628): /device/code issues a user code,
+// which the operator approves or denies on the /device page, while /token
+// answers polls for the device code with authorization_pending until then.
 const host = '127.0.0.1';
 const port = 4190;
 const origin = `http://${host}:${port}`;
@@ -27,7 +30,9 @@ const usage = { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12 };
 const recorded = [];
 const unexpected = [];
 const codes = new Map();
+const devices = new Map();
 const accessTokens = new Set();
+const deviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 
 function json(response, status, value) {
   const body = JSON.stringify(value);
@@ -76,6 +81,85 @@ function secret() {
   return randomBytes(24).toString('base64url');
 }
 
+function html(response, status, body) {
+  response.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store'
+  });
+  response.end(
+    `<!doctype html><html lang="en"><title>Reference sign-in</title><body>${body}</body></html>`
+  );
+}
+
+function issueTokens(response) {
+  const accessToken = secret();
+  accessTokens.add(accessToken);
+  return json(response, 200, {
+    access_token: accessToken,
+    refresh_token: secret(),
+    token_type: 'Bearer',
+    expires_in: 3600,
+    account: identity.account
+  });
+}
+
+// The verification page, where the operator enters the user code and
+// approves or denies the device.
+const verificationPage = `<h1>Connect a device</h1>
+<form method="post" action="/oauth/device">
+<label>User code <input name="user_code" autocomplete="off"></label>
+<button name="decision" value="approve">Approve</button>
+<button name="decision" value="deny">Deny</button>
+</form>`;
+
+async function deviceAuthorization(request, response, url) {
+  const method = request.method ?? 'GET';
+  if (method === 'POST' && url.pathname === '/oauth/device/code') {
+    const form = new URLSearchParams(await readText(request));
+    if (!form.get('client_id'))
+      return oauthError(response, 400, 'invalid_request', 'no client');
+    const deviceCode = secret();
+    const userCode = randomBytes(4).toString('hex').toUpperCase();
+    devices.set(deviceCode, {
+      clientId: form.get('client_id'),
+      userCode: `${userCode.slice(0, 4)}-${userCode.slice(4)}`,
+      decision: ''
+    });
+    return json(response, 200, {
+      device_code: deviceCode,
+      user_code: devices.get(deviceCode).userCode,
+      verification_uri: `${origin}/oauth/device`,
+      expires_in: 600,
+      interval: 1
+    });
+  }
+  if (method === 'GET') return html(response, 200, verificationPage);
+  const form = new URLSearchParams(await readText(request));
+  const device = [...devices.values()].find(
+    (candidate) => candidate.userCode === form.get('user_code')
+  );
+  if (!device || !['approve', 'deny'].includes(form.get('decision') ?? ''))
+    return html(response, 400, '<p>Unknown user code.</p>');
+  device.decision = form.get('decision');
+  return html(
+    response,
+    200,
+    `<p>Device ${device.decision === 'approve' ? 'approved' : 'denied'}.</p>`
+  );
+}
+
+function pollDevice(response, form) {
+  const device = devices.get(form.get('device_code') ?? '');
+  if (!device || device.clientId !== form.get('client_id'))
+    return oauthError(response, 400, 'invalid_grant', 'unknown device');
+  if (device.decision === 'deny')
+    return oauthError(response, 400, 'access_denied', 'denied');
+  if (device.decision !== 'approve')
+    return oauthError(response, 400, 'authorization_pending', 'pending');
+  devices.delete(form.get('device_code'));
+  return issueTokens(response);
+}
+
 async function authority(request, response, url) {
   const method = request.method ?? 'GET';
   if (method === 'GET' && url.pathname === '/oauth/authorize') {
@@ -105,8 +189,12 @@ async function authority(request, response, url) {
     response.end();
     return;
   }
+  if (url.pathname.startsWith('/oauth/device'))
+    return deviceAuthorization(request, response, url);
   if (method === 'POST' && url.pathname === '/oauth/token') {
     const form = new URLSearchParams(await readText(request));
+    if (form.get('grant_type') === deviceGrantType)
+      return pollDevice(response, form);
     const code = codes.get(form.get('code') ?? '');
     codes.delete(form.get('code') ?? '');
     const verified = createHash('sha256')
@@ -120,15 +208,7 @@ async function authority(request, response, url) {
       code.challenge !== verified
     )
       return oauthError(response, 400, 'invalid_grant', 'code refused');
-    const accessToken = secret();
-    accessTokens.add(accessToken);
-    return json(response, 200, {
-      access_token: accessToken,
-      refresh_token: secret(),
-      token_type: 'Bearer',
-      expires_in: 3600,
-      account: identity.account
-    });
+    return issueTokens(response);
   }
   if (method === 'GET' && url.pathname === '/oauth/userinfo') {
     const token = (request.headers.authorization ?? '').replace(/^Bearer /, '');
@@ -193,6 +273,7 @@ const server = createServer(async (request, response) => {
     recorded.length = 0;
     unexpected.length = 0;
     codes.clear();
+    devices.clear();
     accessTokens.clear();
     response.writeHead(204, { 'cache-control': 'no-store' });
     response.end();

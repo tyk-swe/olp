@@ -2826,15 +2826,45 @@
         ],
         "type": "object"
       },
+      "GrantDeviceAuthorization": {
+        "additionalProperties": false,
+        "description": "A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.",
+        "properties": {
+          "interval": {
+            "description": "How many seconds to wait between status requests.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "user_code": {
+            "description": "The code the operator enters at the verification URL.",
+            "type": "string"
+          },
+          "verification_url": {
+            "description": "Where the operator enters the user code, at one of the plugin's approved origins.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verification_url",
+          "user_code",
+          "interval"
+        ],
+        "type": "object"
+      },
       "GrantEnrollment": {
         "additionalProperties": false,
-        "description": "A grant enrollment in progress. The operator opens the authorization URL, signs in upstream, and continues the enrollment with what the upstream returns before it expires. It is continued once, from any control replica.",
+        "description": "A grant enrollment in progress, with either an authorization URL or a device authorization. With an authorization URL, the operator opens it, signs in upstream, and continues the enrollment with what the upstream returns before it expires; it is continued once. With a device authorization, the operator approves the device upstream while status requests poll the enrollment until it completes, is denied or expires. Any control replica serves either.",
         "properties": {
           "authorization_url": {
             "description": "The plugin's authorization request, at one of its approved origins.",
             "type": "string"
           },
+          "device": {
+            "$ref": "#/components/schemas/GrantDeviceAuthorization"
+          },
           "expires_at": {
+            "description": "When the enrollment expires: 10 minutes after it starts, or when a device authorization's user code expires, within 30 minutes.",
             "format": "date-time",
             "type": "string"
           },
@@ -2856,7 +2886,6 @@
           "id",
           "provider_id",
           "slot_id",
-          "authorization_url",
           "expires_at"
         ],
         "type": "object"
@@ -2894,6 +2923,36 @@
           "credential_id",
           "credential_version",
           "principal"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollmentStatus": {
+        "additionalProperties": false,
+        "description": "Where a grant enrollment by device authorization stands.",
+        "properties": {
+          "completion": {
+            "$ref": "#/components/schemas/GrantEnrollmentCompletion",
+            "description": "The credential version the grant created, once completed."
+          },
+          "interval": {
+            "description": "How many seconds to wait before the next status request, while pending. The upstream may ask OLP to slow down, which lengthens it.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "description": "`pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.",
+            "enum": [
+              "pending",
+              "completed",
+              "denied",
+              "expired"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },
@@ -18658,7 +18717,7 @@
     },
     "/api/v1/providers/{provider_id}/grant-enrollments": {
       "post": {
-        "description": "Starts grant enrollment for a provider draft whose plugin profile authenticates with a grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy.",
+        "description": "Starts grant enrollment for a provider draft whose plugin profile authenticates with a grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream, or starts a device authorization, whose verification URL and user code the operator approves upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy.",
         "operationId": "start_grant_enrollment",
         "parameters": [
           {
@@ -18805,7 +18864,7 @@
     },
     "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue": {
       "post": {
-        "description": "Continues a grant enrollment with what the upstream returned: the plugin exchanges the pasted callback URL or code for a grant. OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. A grant enrollment is continued once, by the principal that started it, before it expires.",
+        "description": "Continues a grant enrollment that has an authorization URL with what the upstream returned: the plugin exchanges the pasted callback URL or code for a grant. OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. A grant enrollment is continued once, by the principal that started it, before it expires.",
         "operationId": "continue_grant_enrollment",
         "parameters": [
           {
@@ -18887,6 +18946,83 @@
               }
             },
             "description": "What was pasted back answers another authorization request (grant_state_mismatch), the plugin could not enroll a grant (grant_enrollment_failed), or its plugin is unusable (plugin_*)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll": {
+      "post": {
+        "description": "Reports where a grant enrollment by device authorization stands. Control runs no background jobs, so status requests drive polling: one made once the interval has passed since the last poll runs one plugin poll step, which honours the upstream's slow-down, and any control replica serves the next. Once the operator approves the device upstream, OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. Polling stops when the enrollment completes, is denied, expires or is cancelled. Only the principal that started the enrollment polls it.",
+        "operationId": "poll_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentStatus"
+                }
+              }
+            },
+            "description": "Where the grant enrollment stands"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment by device authorization not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An earlier poll failed, which ended the grant enrollment (grant_enrollment_used), or the provider's plugin profile or credential slot changed meanwhile (grant_enrollment_stale)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The plugin could not enroll a grant (grant_enrollment_failed), or its plugin is unusable (plugin_*); either ends the grant enrollment"
           }
         },
         "security": [

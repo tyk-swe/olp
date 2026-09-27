@@ -333,6 +333,30 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for GrantEnrollmentStatusStatus.
+const (
+	GrantEnrollmentStatusStatusCompleted GrantEnrollmentStatusStatus = "completed"
+	GrantEnrollmentStatusStatusDenied    GrantEnrollmentStatusStatus = "denied"
+	GrantEnrollmentStatusStatusExpired   GrantEnrollmentStatusStatus = "expired"
+	GrantEnrollmentStatusStatusPending   GrantEnrollmentStatusStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the GrantEnrollmentStatusStatus enum.
+func (e GrantEnrollmentStatusStatus) Valid() bool {
+	switch e {
+	case GrantEnrollmentStatusStatusCompleted:
+		return true
+	case GrantEnrollmentStatusStatusDenied:
+		return true
+	case GrantEnrollmentStatusStatusExpired:
+		return true
+	case GrantEnrollmentStatusStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InspectedPartKind.
 const (
 	InspectedPartKindAudio      InspectedPartKind = "audio"
@@ -2100,13 +2124,30 @@ type EnrollPasswordRequest struct {
 	NewPassword *string `json:"new_password,omitempty"`
 }
 
-// GrantEnrollment A grant enrollment in progress. The operator opens the authorization URL, signs in upstream, and continues the enrollment with what the upstream returns before it expires. It is continued once, from any control replica.
+// GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
+type GrantDeviceAuthorization struct {
+	// Interval How many seconds to wait between status requests.
+	Interval int32 `json:"interval"`
+
+	// UserCode The code the operator enters at the verification URL.
+	UserCode string `json:"user_code"`
+
+	// VerificationUrl Where the operator enters the user code, at one of the plugin's approved origins.
+	VerificationUrl string `json:"verification_url"`
+}
+
+// GrantEnrollment A grant enrollment in progress, with either an authorization URL or a device authorization. With an authorization URL, the operator opens it, signs in upstream, and continues the enrollment with what the upstream returns before it expires; it is continued once. With a device authorization, the operator approves the device upstream while status requests poll the enrollment until it completes, is denied or expires. Any control replica serves either.
 type GrantEnrollment struct {
 	// AuthorizationUrl The plugin's authorization request, at one of its approved origins.
-	AuthorizationUrl string             `json:"authorization_url"`
-	ExpiresAt        time.Time          `json:"expires_at"`
-	Id               openapi_types.UUID `json:"id"`
-	ProviderId       openapi_types.UUID `json:"provider_id"`
+	AuthorizationUrl *string `json:"authorization_url,omitempty"`
+
+	// Device A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
+	Device *GrantDeviceAuthorization `json:"device,omitempty"`
+
+	// ExpiresAt When the enrollment expires: 10 minutes after it starts, or when a device authorization's user code expires, within 30 minutes.
+	ExpiresAt  time.Time          `json:"expires_at"`
+	Id         openapi_types.UUID `json:"id"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
 
 	// SlotId The credential slot the grant will back: the provider's default slot.
 	SlotId openapi_types.UUID `json:"slot_id"`
@@ -2124,6 +2165,21 @@ type GrantEnrollmentCompletion struct {
 	Principal  string             `json:"principal"`
 	ProviderId openapi_types.UUID `json:"provider_id"`
 }
+
+// GrantEnrollmentStatus Where a grant enrollment by device authorization stands.
+type GrantEnrollmentStatus struct {
+	// Completion The credential version the grant created, once completed.
+	Completion *GrantEnrollmentCompletion `json:"completion,omitempty"`
+
+	// Interval How many seconds to wait before the next status request, while pending. The upstream may ask OLP to slow down, which lengthens it.
+	Interval *int32 `json:"interval,omitempty"`
+
+	// Status `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
+	Status GrantEnrollmentStatusStatus `json:"status"`
+}
+
+// GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
+type GrantEnrollmentStatusStatus string
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {

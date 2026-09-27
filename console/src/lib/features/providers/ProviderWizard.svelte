@@ -109,6 +109,7 @@
             bind:input={wizard.grantInput}
             busy={wizard.busy}
             onContinue={wizard.continueGrantEnrollment}
+            onPoll={wizard.pollGrantEnrollment}
             onCancel={wizard.cancelGrantEnrollment}
           />{/if}
       {/if}

@@ -13,7 +13,8 @@
 //
 // The SDK implements the ABI in package abi, so a plugin only implements
 // Plugin, Signer if a profile declares signing, and GrantEnroller if its
-// profiles authenticate with a grant. OLP runs the module confined: it reaches
+// profiles authenticate with a grant, with GrantPoller if it enrolls grants by
+// device authorization. OLP runs the module confined: it reaches
 // nothing but the capabilities OLP grants, which are a clock, randomness, Log
 // and, for grant enrollment steps, Fetch. See docs/plugin-authoring.md in the
 // OpenLLMProxy repository.
@@ -73,10 +74,12 @@ type GrantAuthentication = abi.GrantAuthentication
 
 // Grant enrollment steps' parameters and results.
 type (
-	GrantStart         = abi.GrantStart
-	GrantAuthorization = abi.GrantAuthorization
-	GrantExchange      = abi.GrantExchange
-	Grant              = abi.Grant
+	GrantStart          = abi.GrantStart
+	GrantAuthorization  = abi.GrantAuthorization
+	DeviceAuthorization = abi.DeviceAuthorization
+	GrantExchange       = abi.GrantExchange
+	GrantPoll           = abi.GrantPoll
+	Grant               = abi.Grant
 )
 
 // Error is a failure a plugin reports to OLP with a code of its own.
@@ -120,6 +123,19 @@ type GrantEnroller interface {
 	ExchangeGrant(ctx context.Context, exchange GrantExchange) (Grant, error)
 }
 
+// GrantPoller is implemented by a GrantEnroller whose StartGrant returns a
+// device authorization. While the operator approves the device upstream, OLP
+// polls it, on behalf of the enrolling provider and with Fetch, waiting the
+// device authorization's interval between polls.
+type GrantPoller interface {
+	// PollGrant returns the grant once the operator approved the device.
+	// Until then it reports an *Error with code abi.CodeAuthorizationPending,
+	// or abi.CodeSlowDown when the upstream asks OLP to poll less often, and
+	// with abi.CodeAccessDenied or abi.CodeExpiredToken when the operator
+	// denied the device authorization or it expired.
+	PollGrant(ctx context.Context, poll GrantPoll) (Grant, error)
+}
+
 var registered Plugin
 
 // methods serve the methods OLP calls, each given the call's context and
@@ -130,6 +146,7 @@ var methods = map[string]func(ctx context.Context, params json.RawMessage) (any,
 	abi.MethodSign:          sign,
 	abi.MethodGrantStart:    enrollment(abi.MethodGrantStart, GrantEnroller.StartGrant),
 	abi.MethodGrantExchange: enrollment(abi.MethodGrantExchange, GrantEnroller.ExchangeGrant),
+	abi.MethodGrantPoll:     enrollment(abi.MethodGrantPoll, GrantPoller.PollGrant),
 }
 
 type providerKey struct{}
@@ -206,10 +223,11 @@ func sign(ctx context.Context, params json.RawMessage) (any, error) {
 	return signer.Sign(ctx, request)
 }
 
-// enrollment serves a grant enrollment step with the plugin's GrantEnroller.
-func enrollment[P, R any](method string, step func(GrantEnroller, context.Context, P) (R, error)) func(context.Context, json.RawMessage) (any, error) {
+// enrollment serves a grant enrollment step with the plugin's implementation
+// of the step's interface E, GrantEnroller or GrantPoller.
+func enrollment[E, P, R any](method string, step func(E, context.Context, P) (R, error)) func(context.Context, json.RawMessage) (any, error) {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		enroller, ok := registered.(GrantEnroller)
+		enroller, ok := registered.(E)
 		if !ok {
 			return nil, unknownMethod(method)
 		}

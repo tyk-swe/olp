@@ -10,6 +10,8 @@ type Schemas = components['schemas'];
 export type GrantEnrollment = Schemas['GrantEnrollment'];
 /** The credential version a completed grant enrollment staged on the draft. */
 export type GrantEnrollmentCompletion = Schemas['GrantEnrollmentCompletion'];
+/** Where a grant enrollment by device authorization stands. */
+export type GrantEnrollmentStatus = Schemas['GrantEnrollmentStatus'];
 
 /** Starts grant enrollment for the provider draft the operator sees. */
 export async function startGrantEnrollment(
@@ -42,6 +44,25 @@ export async function continueGrantEnrollment(
         }
       },
       body: { input }
+    }
+  );
+  return result(response.data, response.error, response.response);
+}
+
+/** Asks where a grant enrollment by device authorization stands. Once its
+ * interval has passed, the request polls the upstream through the plugin. */
+export async function pollGrantEnrollment(
+  enrollment: Pick<GrantEnrollment, 'id' | 'provider_id'>
+): Promise<GrantEnrollmentStatus> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll',
+    {
+      params: {
+        path: {
+          provider_id: enrollment.provider_id,
+          enrollment_id: enrollment.id
+        }
+      }
     }
   );
   return result(response.data, response.error, response.response);
