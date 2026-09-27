@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -22,7 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, log *slog.Logger) {
+func registerManagement(mux *http.ServeMux, control *access.Server, policy *egress.Policy, limiter *limits.Limiter, rt *runtime.Manager, gw *gateway.Server, mediaJobs *media.Service, cache *observability.Cache, pluginRuntime *plugins.Runtime, log *slog.Logger) {
 	control.Egress = policy
 	control.Register(mux)
 	catalogue := providers.New(control, policy)
@@ -39,6 +40,7 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	(&resources.Management{Access: control, Pool: control.Pool}).Register(mux)
 	(&management.Overview{Access: control}).Register(mux)
 	(&observability.Management{Access: control, Cache: cache, Pool: control.Pool}).Register(mux)
+	(&plugins.Management{Access: control, Runtime: pluginRuntime}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.

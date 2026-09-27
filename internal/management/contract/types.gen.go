@@ -2584,6 +2584,64 @@ type PlaygroundUsage struct {
 	TotalTokens       int64                    `json:"total_tokens"`
 }
 
+// Plugin An installed provider plugin: its module digest and the manifest it declared at install.
+type Plugin struct {
+	// AbiVersion Plugin ABI version the module was built for.
+	AbiVersion int32 `json:"abi_version"`
+
+	// ApprovedAt When an owner approved the declared origins; null while the plugin awaits approval and can't be used.
+	ApprovedAt      nullable.Nullable[time.Time]          `json:"approved_at"`
+	ApprovedBy      nullable.Nullable[openapi_types.UUID] `json:"approved_by"`
+	ApprovedByEmail nullable.Nullable[string]             `json:"approved_by_email"`
+
+	// Digest Lowercase hexadecimal SHA-256 digest of the module, which identifies the plugin.
+	Digest           string             `json:"digest"`
+	Etag             openapi_types.UUID `json:"etag"`
+	InstalledAt      time.Time          `json:"installed_at"`
+	InstalledBy      openapi_types.UUID `json:"installed_by"`
+	InstalledByEmail string             `json:"installed_by_email"`
+
+	// Manifest What a plugin declared at install. It never changes for a digest.
+	Manifest PluginManifest `json:"manifest"`
+
+	// SizeBytes Size of the module.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// PluginApprovalRequest defines model for PluginApprovalRequest.
+type PluginApprovalRequest struct {
+	// Origins Exactly the origins the plugin declares, in any order.
+	Origins []string `json:"origins"`
+}
+
+// PluginListResponse defines model for PluginListResponse.
+type PluginListResponse struct {
+	Items []Plugin `json:"items"`
+}
+
+// PluginManifest What a plugin declared at install. It never changes for a digest.
+type PluginManifest struct {
+	Description *string `json:"description,omitempty"`
+
+	// Name Identifies the plugin across its versions; several digests of one plugin may be installed side by side.
+	Name string `json:"name"`
+
+	// Origins The only origins the plugin may reach once an owner approves them, as scheme://host[:port].
+	Origins  []string        `json:"origins"`
+	Profiles []PluginProfile `json:"profiles"`
+
+	// Version The author's label for this build.
+	Version string `json:"version"`
+}
+
+// PluginProfile A provider profile the plugin supplies around a built-in dialect.
+type PluginProfile struct {
+	// Dialect The built-in dialect the profile serves.
+	Dialect string `json:"dialect"`
+	Id      string `json:"id"`
+	Label   string `json:"label"`
+}
+
 // PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
 type PolicyDecision struct {
 	Action  string `json:"action"`
@@ -4453,6 +4511,18 @@ type BeginLoginParams struct {
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
 }
 
+// UninstallPluginParams defines parameters for UninstallPlugin.
+type UninstallPluginParams struct {
+	// IfMatch Current plugin ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ApprovePluginParams defines parameters for ApprovePlugin.
+type ApprovePluginParams struct {
+	// IfMatch Current plugin ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // ListPricingRevisionsParams defines parameters for ListPricingRevisions.
 type ListPricingRevisionsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -5023,6 +5093,9 @@ type ExecutePlaygroundJSONRequestBody = PlaygroundRequest
 
 // StreamPlaygroundJSONRequestBody defines body for StreamPlayground for application/json ContentType.
 type StreamPlaygroundJSONRequestBody = PlaygroundRequest
+
+// ApprovePluginJSONRequestBody defines body for ApprovePlugin for application/json ContentType.
+type ApprovePluginJSONRequestBody = PluginApprovalRequest
 
 // CreatePricingRevisionJSONRequestBody defines body for CreatePricingRevision for application/json ContentType.
 type CreatePricingRevisionJSONRequestBody = PricingRevisionRequest

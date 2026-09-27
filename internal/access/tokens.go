@@ -60,7 +60,10 @@ func validManagementToken(input managementTokenInput) error {
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
 const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
-func (s *Server) ownerPrincipal(r *http.Request, q Queryer) (Principal, error) {
+// OwnerPrincipal authorizes installation administration that only an owner
+// signed in with a user session may perform, such as managing management
+// tokens and provider plugins. Management tokens never qualify.
+func (s *Server) OwnerPrincipal(r *http.Request, q Queryer) (Principal, error) {
 	p, err := s.Principal(r, q, "access")
 	if err != nil {
 		return p, err
@@ -72,7 +75,7 @@ func (s *Server) ownerPrincipal(r *http.Request, q Queryer) (Principal, error) {
 }
 
 func (s *Server) managementTokens(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.OwnerPrincipal(r, s.Pool); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -88,7 +91,7 @@ func (s *Server) managementTokens(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) managementToken(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.OwnerPrincipal(r, s.Pool); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "management_token_id")
@@ -111,7 +114,7 @@ func (s *Server) createManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.OwnerPrincipal(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -172,7 +175,7 @@ func (s *Server) revokeManagementToken(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.OwnerPrincipal(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
