@@ -184,20 +184,23 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	// A stored replay returns the plaintext secret, so the caller must still
-	// reach the target project before it is accepted.
-	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return Reply{}, err
-	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
 	}
 	if replayed != nil {
+		// The stored reply carries the plaintext secret, so the caller must
+		// still reach the target project to receive it.
+		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
+			return Reply{}, err
+		}
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
 	if err := validateKey(input, true); err != nil {
+		return Reply{}, err
+	}
+	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
 	if input.BudgetGroupID != nil {
