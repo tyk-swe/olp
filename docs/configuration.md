@@ -297,7 +297,10 @@ or bypasses its policy checks.
 unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
 credential references), cross-project targets, bindings for refs the artifact
-does not declare, and secrets over 64 KiB. Plan reports
+does not declare, and secrets over 64 KiB. A plugin provider pins its plugin
+profile as a saved draft does: `plugin_not_installed`, `plugin_not_approved`
+and `plugin_profile_unknown` refuse the artifact, and its endpoint follows from
+the profile's address and the provider's plugin options. Plan reports
 `secret_binding_required` blockers for credential refs that do not already
 resolve to a current same-named slot credential on the destination.
 

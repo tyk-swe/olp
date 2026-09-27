@@ -341,6 +341,7 @@
       {run}
       onTouch={touch}
       dirty={sync.dirty}
+      issues={validationIssues}
       onSave={() => saveProvider(current)}
       onProviderChanged={providerChanged}
       onRefetchProvider={refetchProvider}

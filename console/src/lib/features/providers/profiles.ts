@@ -21,7 +21,9 @@ export type FieldSchema = {
   format?: string;
   minimum?: number;
   maximum?: number;
+  minLength?: number;
   maxLength?: number;
+  pattern?: string;
   enum?: unknown[];
   properties?: Record<string, FieldSchema>;
   additionalProperties?: boolean | FieldSchema;
@@ -103,6 +105,30 @@ export async function getConfigurationSchemas(
 export function schemaProperties(schema: unknown): Record<string, FieldSchema> {
   if (!nativeObject(schema) || !nativeObject(schema.properties)) return {};
   return schema.properties as Record<string, FieldSchema>;
+}
+/** One option a plugin profile declares, as the provider wizard edits it. */
+export type PluginOptionField = {
+  name: string;
+  schema: FieldSchema;
+  required: boolean;
+};
+/**
+ * The options a plugin profile declares, in declared order, from the JSON
+ * Schema of a provider's option values in its catalogue entry.
+ */
+export function pluginOptionFields(
+  profile: Pick<ProviderProfile, 'options_schema'> | undefined
+): PluginOptionField[] {
+  const schema = profile?.options_schema;
+  const required =
+    nativeObject(schema) && Array.isArray(schema.required)
+      ? schema.required
+      : [];
+  return Object.entries(schemaProperties(schema)).map(([name, field]) => ({
+    name,
+    schema: field,
+    required: required.includes(name)
+  }));
 }
 export function operationFields(
   profile: ProviderProfile,

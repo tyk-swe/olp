@@ -19,8 +19,10 @@ import (
 type Config struct {
 	Network *egress.ConnectionOptions
 	// Plugin is the plugin profile a plugin provider pins as its profile
-	// revision, or nil for any other provider.
+	// revision, or nil for any other provider. PluginOptions holds the
+	// provider's values for the options that profile declares, by name.
 	Plugin                                                                                *PluginProfile
+	PluginOptions                                                                         map[string]string
 	ProfileID, ProfileRevision                                                            string
 	SemanticHeaders                                                                       map[string]string
 	QuerySettings                                                                         map[string]string

@@ -68,6 +68,20 @@ const (
 type Request struct {
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params,omitempty"`
+	// Provider is the provider a call from OLP serves, for a method OLP calls
+	// on behalf of one. Calls about the plugin itself, such as manifest, and
+	// capability requests carry none.
+	Provider *Provider `json:"provider,omitempty"`
+}
+
+// Provider is the provider a call serves: the profile it uses and the values
+// its operator set for the profile's options.
+type Provider struct {
+	// Profile is the ID of the profile the provider uses.
+	Profile string `json:"profile"`
+	// Options holds the provider's option values by option name. An optional
+	// option the operator left unset is absent.
+	Options map[string]string `json:"options"`
 }
 
 // Response answers a Request with either a result or an error.
@@ -107,6 +121,10 @@ type Profile struct {
 	// Dialect names the built-in dialect the profile serves, such as
 	// openai-chat. A plugin never defines a dialect.
 	Dialect string `json:"dialect"`
+	// Options are the non-secret settings each provider using the profile
+	// sets, such as an account ID, a region or a project, in the order the
+	// provider wizard shows them.
+	Options []Option `json:"options,omitempty"`
 	// Hosting places the dialect's requests at the upstream.
 	Hosting Hosting `json:"hosting"`
 	// Signing declares the profile's signing hook: OLP calls MethodSign once
@@ -115,21 +133,46 @@ type Profile struct {
 	Signing bool `json:"signing,omitempty"`
 }
 
+// Option is a non-secret setting a profile declares, whose value the operator
+// sets on each provider using the profile. Hosting templates reference a
+// required option as {options.<name>}, and every call OLP makes on behalf of
+// a provider carries its values (Request.Provider). Values are text of 1–256
+// characters without control characters.
+type Option struct {
+	// Name identifies the option: 1–64 lowercase letters, digits and
+	// underscores, starting with a letter.
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// Description helps the operator choose a value.
+	Description string `json:"description,omitempty"`
+	// Optional options may be left unset. Templates can't reference them.
+	Optional bool `json:"optional,omitempty"`
+	// Enum lists the only values the option takes.
+	Enum []string `json:"enum,omitempty"`
+	// Pattern is a regular expression in RE2 syntax that values match, as
+	// a JSON Schema pattern: it matches anywhere unless anchored with ^ and
+	// $. An option declares an enum or a pattern, not both.
+	Pattern string `json:"pattern,omitempty"`
+}
+
 // Hosting is a profile's hosting adaptation: where and how the dialect's
 // requests reach the upstream, how the upstream lists its models and how its
 // failures are classified. It is a declaration OLP runs itself, so no plugin
 // code runs per request.
 //
-// Header and query parameter values are templates. The placeholder
-// {credential} stands for the provider's static credential, such as
-// "Token {credential}"; braces appear nowhere else.
+// The address and the header and query parameter values are templates.
+// Placeholders stand for a provider's values: {credential} for its static
+// credential, such as "Token {credential}", and {options.<name>} for one of
+// the profile's required options. Braces appear nowhere else.
 //
 // A profile with an envelope or rewrites changes the dialect's bodies, so it
 // serves only transformed routes.
 type Hosting struct {
 	// Address is the upstream's base URL, which the dialect's paths extend,
 	// such as https://api.example.com/v1 for /chat/completions. Its origin is
-	// one of the manifest's Origins.
+	// one of the manifest's Origins. Options may appear in its path, such as
+	// https://api.example.com/accounts/{options.account}/v1; the credential
+	// never does.
 	Address string `json:"address"`
 	// Headers are the declared request headers, by name.
 	Headers map[string]string `json:"headers,omitempty"`

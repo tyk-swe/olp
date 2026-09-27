@@ -42,14 +42,22 @@ test('an owner installs, approves and uninstalls a provider plugin', async ({
     'Installed reference 0.1.0.'
   );
   await expect(plugin.locator('.badge')).toHaveText('Pending approval');
-  // One profile places the credential, and one signs requests with it.
-  for (const id of ['reference-chat', 'reference-signed-chat']) {
+  // One profile places the credential, one signs requests with it, and one
+  // places the provider's workspace option in its address.
+  for (const [id, address] of [
+    ['reference-chat', 'https://api.example.com/v1'],
+    ['reference-signed-chat', 'https://api.example.com/v1'],
+    [
+      'reference-workspace-chat',
+      'https://api.example.com/v1/workspaces/{options.workspace}'
+    ]
+  ] as const) {
     const profile = plugin.getByRole('row', { name: id });
     await expect(
-      profile.getByRole('cell', { name: 'openai-chat' })
+      profile.getByRole('cell', { name: 'openai-chat', exact: true })
     ).toBeVisible();
     await expect(
-      profile.getByRole('cell', { name: 'https://api.example.com/v1' })
+      profile.getByRole('cell', { name: address, exact: true })
     ).toBeVisible();
   }
   await expect(

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -68,6 +69,24 @@ func TestServeRefusesASigningProfileWithoutASigner(t *testing.T) {
 	}
 	if response := serveWith(t, signing{manifestOnly: manifestOnly(declared)}, `{"method":"manifest"}`); response.Error != nil {
 		t.Fatalf("manifest response %+v", response)
+	}
+}
+
+// A method OLP calls on behalf of a provider finds the provider's profile and
+// option values in its context; any other call's context has none.
+func TestServeHandsMethodsTheProviderTheyServe(t *testing.T) {
+	methods["provider_method"] = func(ctx context.Context, _ json.RawMessage) (any, error) {
+		provider, ok := ProviderOf(ctx)
+		return map[string]any{"ok": ok, "provider": provider}, nil
+	}
+	t.Cleanup(func() { delete(methods, "provider_method") })
+	for request, want := range map[string]string{
+		`{"method":"provider_method","provider":{"profile":"acme-chat","options":{"account":"acme"}}}`: `{"ok":true,"provider":{"profile":"acme-chat","options":{"account":"acme"}}}`,
+		`{"method":"provider_method"}`: `{"ok":false,"provider":{"profile":"","options":null}}`,
+	} {
+		if response := serveWith(t, manifestOnly{}, request); response.Error != nil || string(response.Result) != want {
+			t.Fatalf("%s: response %s %v", request, response.Result, response.Error)
+		}
 	}
 }
 

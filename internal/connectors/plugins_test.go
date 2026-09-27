@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -39,7 +41,23 @@ func pluginConfig(t *testing.T, manifest abi.Manifest) Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Config{Plugin: plugin, Kind: KindPlugin, AuthMode: AuthStaticCredential, ProfileID: manifest.Profiles[0].ID, ProfileRevision: pluginDigest, Endpoint: plugin.Address()}
+	return Config{Plugin: plugin, Kind: KindPlugin, AuthMode: AuthStaticCredential, ProfileID: manifest.Profiles[0].ID, ProfileRevision: pluginDigest, Endpoint: plugin.Address(nil)}
+}
+
+// optionsManifest declares a profile whose hosting adaptation uses options.
+func optionsManifest() abi.Manifest {
+	manifest := pluginManifest()
+	manifest.Profiles[0].Options = []abi.Option{
+		{Name: "account", Label: "Account", Description: "The Acme account that serves requests."},
+		{Name: "region", Label: "Region", Enum: []string{"us", "eu"}},
+		{Name: "team", Label: "Team", Optional: true, Pattern: "^[a-z]+$"},
+	}
+	manifest.Profiles[0].Hosting = abi.Hosting{
+		Address: "https://api.acme.example/accounts/{options.account}/v2",
+		Headers: map[string]string{"Authorization": "Token {credential}", "X-Acme-Region": "{options.region}"},
+		Query:   map[string]string{"placement": "{options.region}-{options.account}"},
+	}
+	return manifest
 }
 
 func TestPluginProfileHostingPlacesTheStaticCredential(t *testing.T) {
@@ -136,7 +154,7 @@ func TestPluginProfileSurvivesPublication(t *testing.T) {
 	if err = json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if err = decoded.ValidateProfile(); err != nil || decoded.Plugin.Address() != c.Plugin.Address() {
+	if err = decoded.ValidateProfile(); err != nil || decoded.Plugin.Address(nil) != c.Plugin.Address(nil) {
 		t.Fatalf("decoded %s: %v", encoded, err)
 	}
 	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
@@ -246,7 +264,10 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 	}{
 		"bedrock dialect":     {func(p *abi.Profile) { p.Dialect = "bedrock-converse" }, "dialect"},
 		"no address":          {func(p *abi.Profile) { p.Hosting.Address = "" }, "hosting.address"},
-		"address placeholder": {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/{credential}" }, "hosting.address"},
+		"address credential":  {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/{credential}" }, "hosting.address"},
+		"address option host": {func(p *abi.Profile) { p.Hosting.Address = "https://{options.account}.acme.example/v2" }, "hosting.address"},
+		"address stray brace": {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/{v2" }, "hosting.address"},
+		"undeclared option":   {func(p *abi.Profile) { p.Hosting.Headers["X-Acme-Client"] = "{options.account}" }, "hosting.headers.X-Acme-Client"},
 		"address query":       {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/v2?key=x" }, "hosting.address"},
 		"address credentials": {func(p *abi.Profile) { p.Hosting.Address = "https://user:pass@api.acme.example/v2" }, "hosting.address"},
 		"address scheme":      {func(p *abi.Profile) { p.Hosting.Address = "wss://api.acme.example/v2" }, "hosting.address"},
@@ -287,6 +308,157 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := pluginManifest().Profiles[0]
+			tc.mutate(&p)
+			refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(p))
+			if !ok || refusal.Field != tc.field {
+				t.Fatalf("want a refusal of %s, got %v", tc.field, refusal)
+			}
+		})
+	}
+}
+
+func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
+	c := pluginConfig(t, optionsManifest())
+	c.PluginOptions = map[string]string{"account": "acme/prod", "region": "eu"}
+	c.Endpoint = c.Plugin.Address(c.PluginOptions)
+	if err := c.Validate(&egress.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	// Each value fills its part of one path segment, whatever it contains.
+	endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
+	if err != nil || endpoint != "https://api.acme.example/accounts/acme%2Fprod/v2/chat/completions" {
+		t.Fatalf("addressed %q: %v", endpoint, err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, endpoint, nil)
+	sensitive, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, c, []byte("secret"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("Authorization") != "Token secret" || req.Header.Get("X-Acme-Region") != "eu" || req.URL.Query().Get("placement") != "eu-acme/prod" {
+		t.Fatalf("placed %v %q", req.Header, req.URL.RawQuery)
+	}
+	if req.URL.EscapedPath() != "/accounts/acme%2Fprod/v2/chat/completions" {
+		t.Fatalf("placed the request at %s", req.URL.EscapedPath())
+	}
+	if !slices.Equal(sensitive, []string{"secret", "Token secret"}) {
+		t.Fatalf("redacts %q; options are not secret", sensitive)
+	}
+	moved := c
+	moved.PluginOptions = map[string]string{"account": "other", "region": "eu"}
+	if moved.Validate(&egress.Policy{}) == nil {
+		t.Fatal("the endpoint kept the address of other options")
+	}
+	// Published snapshots carry the options with the profile.
+	encoded, _ := json.Marshal(c)
+	var decoded Config
+	if err = json.Unmarshal(encoded, &decoded); err != nil || decoded.Validate(&egress.Policy{}) != nil || !maps.Equal(decoded.PluginOptions, c.PluginOptions) {
+		t.Fatalf("decoded %s: %v", encoded, err)
+	}
+}
+
+func TestPluginOptionValuesFollowTheirDeclaration(t *testing.T) {
+	plugin, err := NewPluginProfile(pluginDigest, optionsManifest(), "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := map[string]string{"account": "acme", "region": "us"}
+	if err := plugin.ValidateOptions(valid); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		change map[string]string
+		option string
+	}{
+		"undeclared":        {map[string]string{"colour": "blue"}, "colour"},
+		"required unset":    {map[string]string{"account": ""}, "account"},
+		"long":              {map[string]string{"account": strings.Repeat("a", 257)}, "account"},
+		"control character": {map[string]string{"account": "acme\n"}, "account"},
+		"outside the enum":  {map[string]string{"region": "ap"}, "region"},
+		"pattern mismatch":  {map[string]string{"team": "Blue Team"}, "team"},
+		"dot segment":       {map[string]string{"account": ".."}, "account"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			values := maps.Clone(valid)
+			for option, value := range tc.change {
+				if value == "" {
+					delete(values, option)
+				} else {
+					values[option] = value
+				}
+			}
+			refusal, ok := errors.AsType[*OptionError](plugin.ValidateOptions(values))
+			if !ok || refusal.Option != tc.option {
+				t.Fatalf("want a refusal of %s, got %v", tc.option, refusal)
+			}
+		})
+	}
+	valid["team"] = "blue"
+	if err := plugin.ValidateOptions(valid); err != nil {
+		t.Fatalf("refused an optional option: %v", err)
+	}
+	builtin := Config{Kind: "openai", AuthMode: "api_key", Endpoint: "https://api.openai.com/v1", PluginOptions: map[string]string{"account": "acme"}}
+	if builtin.ValidateProfile() == nil {
+		t.Fatal("a provider without a plugin profile took plugin options")
+	}
+}
+
+func TestPluginProfileCataloguesItsOptionsSchema(t *testing.T) {
+	plugin, err := NewPluginProfile(pluginDigest, optionsManifest(), "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"additionalProperties":false,"properties":{` +
+		`"account":{"description":"The Acme account that serves requests.","maxLength":256,"minLength":1,"title":"Account","type":"string"},` +
+		`"region":{"enum":["us","eu"],"maxLength":256,"minLength":1,"title":"Region","type":"string"},` +
+		`"team":{"maxLength":256,"minLength":1,"pattern":"^[a-z]+$","title":"Team","type":"string"}},` +
+		`"required":["account","region"],"type":"object"}`
+	if got := string(plugin.Profile().OptionsSchema); got != want {
+		t.Fatalf("options schema %s", got)
+	}
+	// Properties keep the declared order, which the provider wizard shows.
+	reordered := optionsManifest()
+	options := reordered.Profiles[0].Options
+	options[0], options[2] = options[2], options[0]
+	plugin, err = NewPluginProfile(pluginDigest, reordered, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema := string(plugin.Profile().OptionsSchema); strings.Index(schema, `"team"`) > strings.Index(schema, `"account"`) {
+		t.Fatalf("options schema lost the declared order: %s", schema)
+	}
+	for _, builtin := range Profiles() {
+		if builtin.OptionsSchema != nil {
+			t.Fatalf("built-in %s declares options", builtin.ID)
+		}
+	}
+}
+
+func TestPluginOptionDeclarationsAreValidated(t *testing.T) {
+	if err := ValidatePluginProfile(optionsManifest().Profiles[0]); err != nil {
+		t.Fatal(err)
+	}
+	many := make([]abi.Option, 17)
+	for i := range many {
+		many[i] = abi.Option{Name: fmt.Sprintf("option_%d", i), Label: "Option", Optional: true}
+	}
+	for name, tc := range map[string]struct {
+		mutate func(*abi.Profile)
+		field  string
+	}{
+		"too many options":      {func(p *abi.Profile) { p.Options = append(p.Options, many...) }, "options"},
+		"malformed name":        {func(p *abi.Profile) { p.Options[2].Name = "Team" }, "options[2].name"},
+		"duplicate name":        {func(p *abi.Profile) { p.Options[2].Name = "region" }, "options[2].name"},
+		"no label":              {func(p *abi.Profile) { p.Options[0].Label = "" }, "options[0].label"},
+		"long description":      {func(p *abi.Profile) { p.Options[0].Description = strings.Repeat("d", 501) }, "options[0].description"},
+		"enum and pattern":      {func(p *abi.Profile) { p.Options[1].Pattern = "^[a-z]+$" }, "options[1].pattern"},
+		"duplicate enum value":  {func(p *abi.Profile) { p.Options[1].Enum = []string{"us", "us"} }, "options[1].enum[1]"},
+		"invalid pattern":       {func(p *abi.Profile) { p.Options[2].Pattern = "(" }, "options[2].pattern"},
+		"optional in template":  {func(p *abi.Profile) { p.Hosting.Headers["X-Acme-Team"] = "{options.team}" }, "hosting.headers.X-Acme-Team"},
+		"optional in address":   {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/teams/{options.team}" }, "hosting.address"},
+		"undeclared in address": {func(p *abi.Profile) { p.Hosting.Address = "https://api.acme.example/{options.project}" }, "hosting.address"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := optionsManifest().Profiles[0]
 			tc.mutate(&p)
 			refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(p))
 			if !ok || refusal.Field != tc.field {

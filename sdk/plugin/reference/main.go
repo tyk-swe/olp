@@ -1,9 +1,10 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
-// declares three profiles at a fictional upstream, and the origins that
+// declares four profiles at a fictional upstream, and the origins that
 // upstream uses: one serves the OpenAI Chat Completions dialect with the API
 // key in a header, the upstream's model listing and failure classification;
-// one serves Gemini generateContent inside the upstream's own envelope; and
-// one serves Chat Completions signing each request with the API key.
+// one serves Gemini generateContent inside the upstream's own envelope; one
+// serves Chat Completions signing each request with the API key; and one
+// serves Chat Completions at a workspace the operator names.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -84,6 +85,18 @@ func (reference) Manifest() plugin.Manifest {
 			// the API key, which never travels itself.
 			Hosting: plugin.Hosting{Address: upstream, Headers: map[string]string{"X-Reference-Client": "olp"}},
 			Signing: true,
+		}, {
+			ID: "reference-workspace-chat", Label: "Reference workspace Chat Completions", Dialect: "openai-chat",
+			// Each workspace has its own API under the upstream's, which the
+			// provider's workspace option places.
+			Options: []plugin.Option{{
+				Name: "workspace", Label: "Workspace", Description: "The upstream workspace that serves this provider.",
+				Pattern: "^[a-z0-9][a-z0-9-]{0,39}$",
+			}},
+			Hosting: plugin.Hosting{
+				Address: upstream + "/workspaces/{options.workspace}",
+				Headers: headers,
+			},
 		}},
 	}
 }

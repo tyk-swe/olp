@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -33,18 +34,20 @@ import (
 
 const pluginCredential = "reference-static-secret"
 
-// pluginUpstream is the fictional upstream the reference plugin's profile
-// places requests at: an OpenAI Chat Completions server that takes its key as
-// a token in the Authorization header and wants clients to identify
-// themselves. It lists its models on two pages, answers a request to spend the
-// quota with its own quota_exhausted code on a 400, and records the headers of
-// every request and the page token of every listing.
+// pluginUpstream is the fictional upstream the reference plugin's profiles
+// place requests at: an OpenAI Chat Completions server, with an API per
+// workspace too, that takes its key as a token in the Authorization header
+// and wants clients to identify themselves. It lists its models on two pages,
+// answers a request to spend the quota with its own quota_exhausted code on a
+// 400, and records the headers and path of every request and the page token of
+// every listing.
 type pluginUpstream struct {
 	*httptest.Server
 	mu          sync.Mutex
 	credentials []string
 	requests    []http.Header
 	listings    []string
+	paths       []string
 }
 
 // The pluginUpstream's models besides vendorModel, and the prompts it rejects.
@@ -61,6 +64,7 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		u.requests = append(u.requests, r.Header.Clone())
+		u.paths = append(u.paths, r.URL.Path)
 		u.mu.Unlock()
 		token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Token ")
 		if !found || !slices.Contains(u.credentials, token) || r.Header.Get("X-Reference-Client") != "olp" {
@@ -80,7 +84,7 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel}, map[string]any{"id": pluginLargeModel}}, "next_page_token": "page-2"})
 			return
 		}
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+		if r.Method != http.MethodPost || !pluginUpstreamPath.MatchString(r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -122,6 +126,8 @@ func newPluginUpstream(t *testing.T, credentials ...string) *pluginUpstream {
 	return u
 }
 
+var pluginUpstreamPath = regexp.MustCompile(`^/v1(/workspaces/[a-z0-9-]+)?/chat/completions$`)
+
 func (u *pluginUpstream) received() []http.Header {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -134,6 +140,13 @@ func (u *pluginUpstream) listed() []string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return slices.Clone(u.listings)
+}
+
+// receivedPaths returns the path of every request, in order.
+func (u *pluginUpstream) receivedPaths() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return slices.Clone(u.paths)
 }
 
 // installReferencePlugin builds the reference plugin against the upstream,

@@ -76,13 +76,22 @@ func parseEnvelope(declared *abi.Envelope) (*envelope, error) {
 		case name == declared.Request:
 			return nil, &ProfileError{Field: field, Message: "This member carries the dialect's body."}
 		}
-		value, err := parseValue(field, declared.Fields[name], modelValue)
+		value, err := parseValue(field, declared.Fields[name], envelopePlaceholder)
 		if err != nil {
 			return nil, err
 		}
 		parsed.fields[name] = value
 	}
 	return parsed, nil
+}
+
+// envelopePlaceholder admits what envelope fields may reference: the model,
+// and never the credential, which stays out of bodies.
+func envelopePlaceholder(name string) error {
+	if name != modelValue {
+		return fmt.Errorf("OLP has no placeholder {%s} in an envelope field; use {model}.", name)
+	}
+	return nil
 }
 
 // wrap places a dialect request body in the envelope, with its fields

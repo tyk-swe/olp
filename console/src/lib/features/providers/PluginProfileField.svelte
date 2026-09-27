@@ -1,9 +1,12 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
+  import type { FieldIssue } from '$lib/api/http';
   import { shortDigest } from '$lib/features/plugins/api';
+  import NativeValueField from './NativeValueField.svelte';
   import {
     listProviderProfiles,
+    pluginOptionFields,
     pluginProfileGroups,
     type ProviderProfilePlugin
   } from './profiles';
@@ -16,11 +19,14 @@
     values,
     idPrefix,
     disabled = false,
+    issues = [],
     onChange
   }: {
     values: ProviderEditValues;
     idPrefix: string;
     disabled?: boolean;
+    /** Field issues the server reported, shown at the options they name. */
+    issues?: FieldIssue[];
     onChange?: () => void;
   } = $props();
 
@@ -39,6 +45,24 @@
         `${profile.id}@${profile.revision}` === pinned
     )
   );
+
+  const options = $derived(pluginOptionFields(selected));
+
+  /** The server's issue with an option's value, if any. */
+  function optionIssue(name: string) {
+    return (
+      issues.find(
+        (issue) =>
+          issue.field === `configuration.options.plugin_options.${name}`
+      )?.message ?? ''
+    );
+  }
+
+  /** Options may place the address, which the server sets again on save. */
+  function changeOption() {
+    values.endpoint = '';
+    onChange?.();
+  }
 
   /** Names a plugin build: its name, version and short digest. */
   function build(plugin: ProviderProfilePlugin) {
@@ -126,6 +150,29 @@
         </div>{/if}
     </dl>
   </section>{/if}
+{#if values.document && options.length}<fieldset
+    class="plugin-options full"
+    disabled={disabled || !values.document.fieldsAvailable}
+  >
+    <legend>Profile options</legend>
+    <p class="plugin-note">
+      The profile places these settings in the upstream address, headers and
+      query parameters it declares, and hands them to the plugin. They are not
+      secret.
+    </p>
+    <div class="form-grid">
+      {#each options as option (option.name)}<NativeValueField
+          draft={values.document}
+          path={['options', 'plugin_options', option.name]}
+          label={option.schema.title ?? option.name}
+          id={`${idPrefix}-option-${option.name}`}
+          schema={option.schema}
+          required={option.required}
+          problem={optionIssue(option.name)}
+          onChange={changeOption}
+        />{/each}
+    </div>
+  </fieldset>{/if}
 
 <style>
   .full {
@@ -168,5 +215,16 @@
   }
   .plugin-pin .digest {
     grid-column: 1 / -1;
+  }
+  .plugin-options {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .plugin-options legend {
+    margin-bottom: 0.5rem;
+    font-weight: 500;
   }
 </style>

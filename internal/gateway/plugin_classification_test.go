@@ -36,7 +36,7 @@ func (h *harness) declarePlugin(classification ...abi.FailureRule) {
 		}
 		if provider.Slots[0].ID == h.slotA {
 			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
-			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = "acme-chat", digest, plugin.Address()
+			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = "acme-chat", digest, plugin.Address(nil)
 			h.rt.release.Snapshot.Providers[id] = provider
 		}
 	}

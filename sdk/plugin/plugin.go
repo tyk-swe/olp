@@ -19,6 +19,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,14 @@ type Pagination = abi.Pagination
 // FailureRule classifies the upstream failures it matches.
 type FailureRule = abi.FailureRule
 
+// Option is a non-secret setting a profile declares, which each provider
+// using the profile sets.
+type Option = abi.Option
+
+// Provider is the provider a call serves: the profile it uses and its option
+// values.
+type Provider = abi.Provider
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 
@@ -86,6 +95,24 @@ type Signer interface {
 
 var registered Plugin
 
+// methods serve the methods OLP calls, each given the call's context and
+// parameters. A method whose optional interface the plugin lacks reports
+// abi.CodeUnknownMethod.
+var methods = map[string]func(ctx context.Context, params json.RawMessage) (any, error){
+	abi.MethodManifest: manifest,
+	abi.MethodSign:     sign,
+}
+
+type providerKey struct{}
+
+// ProviderOf returns the provider the call ctx serves, for a method OLP calls
+// on behalf of a provider: the profile the provider uses and the values its
+// operator set for the profile's options. ok is false for any other call.
+func ProviderOf(ctx context.Context) (provider Provider, ok bool) {
+	provider, ok = ctx.Value(providerKey{}).(Provider)
+	return provider, ok
+}
+
 // Register makes p the plugin this module serves. Call it once, from init.
 func Register(p Plugin) {
 	if registered != nil {
@@ -110,33 +137,44 @@ func serve(message []byte) (response []byte) {
 	if registered == nil {
 		return respond(nil, &abi.Error{Code: abi.CodeInternal, Message: "The module registered no plugin."})
 	}
-	switch request.Method {
-	case abi.MethodManifest:
-		return manifest()
-	case abi.MethodSign:
-		signer, ok := registered.(Signer)
-		if !ok {
-			break
-		}
-		var params SignRequest
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return respond(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."})
-		}
-		result, err := signer.Sign(params)
-		return respond(result, reported(err))
+	method, ok := methods[request.Method]
+	if !ok {
+		return respond(nil, unknownMethod(request.Method))
 	}
-	return respond(nil, &abi.Error{Code: abi.CodeUnknownMethod, Message: "The plugin does not implement " + request.Method + "."})
+	ctx := context.Background()
+	if request.Provider != nil {
+		ctx = context.WithValue(ctx, providerKey{}, *request.Provider)
+	}
+	result, err := method(ctx, request.Params)
+	return respond(result, reported(err))
 }
 
 // manifest answers the manifest call. A profile that declares signing needs a
 // Signer, so a plugin that declares one without implementing it reports no
 // manifest, and OLP refuses to install it.
-func manifest() []byte {
+func manifest(context.Context, json.RawMessage) (any, error) {
 	m := registered.Manifest()
 	if _, signs := registered.(Signer); !signs && slices.ContainsFunc(m.Profiles, func(p Profile) bool { return p.Signing }) {
-		return respond(nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile declares signing, but the plugin does not implement Signer."})
+		return nil, &abi.Error{Code: abi.CodeInternal, Message: "A profile declares signing, but the plugin does not implement Signer."}
 	}
-	return respond(m, nil)
+	return m, nil
+}
+
+// sign answers the sign call with the plugin's Signer.
+func sign(_ context.Context, params json.RawMessage) (any, error) {
+	signer, ok := registered.(Signer)
+	if !ok {
+		return nil, unknownMethod(abi.MethodSign)
+	}
+	var request SignRequest
+	if err := json.Unmarshal(params, &request); err != nil {
+		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."}
+	}
+	return signer.Sign(request)
+}
+
+func unknownMethod(method string) *abi.Error {
+	return &abi.Error{Code: abi.CodeUnknownMethod, Message: "The plugin does not implement " + method + "."}
 }
 
 // reported is err as the plugin reports it across the ABI: an *Error as it

@@ -1,5 +1,5 @@
 import { ConfigurationDraft } from './configurationDraft.svelte';
-import type { NativeValue } from '$lib/json/nativeJson';
+import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
 import type { Provider } from './api';
 import type {
   CreateProviderInput,
@@ -12,7 +12,11 @@ import type {
   ProviderKindCapability,
   ProviderPreset
 } from '$lib/features/providers/models';
-import { declaresModels, type ProviderProfile } from './profiles';
+import {
+  declaresModels,
+  pluginOptionFields,
+  type ProviderProfile
+} from './profiles';
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {
@@ -291,15 +295,27 @@ export function requiresProbeModel(
 /**
  * Pins a plugin profile: its identity and the digest of the plugin build that
  * supplies it. A plugin provider's endpoint is that profile's address, which
- * the server sets, so any address of a previous pin is cleared.
+ * the server sets, so any address of a previous pin is cleared. Option values
+ * carry over to the options the new profile also declares.
  */
 export function selectPluginProfile(
   values: ProviderEditValues,
-  profile: Pick<ProviderProfile, 'id' | 'revision'> | undefined
+  profile:
+    Pick<ProviderProfile, 'id' | 'revision' | 'options_schema'> | undefined
 ): void {
   values.profileId = profile?.id ?? '';
   values.profileRevision = profile?.revision ?? '';
   values.endpoint = '';
+  const options = values.document?.at(['options', 'plugin_options']);
+  if (!nativeObject(options)) return;
+  const declared = pluginOptionFields(profile).map((option) => option.name);
+  const kept = Object.entries(options).filter(([name]) =>
+    declared.includes(name)
+  );
+  values.document?.set(
+    ['options', 'plugin_options'],
+    kept.length ? Object.fromEntries(kept) : undefined
+  );
 }
 
 export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {

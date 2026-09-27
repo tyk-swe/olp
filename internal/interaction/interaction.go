@@ -138,6 +138,7 @@ func copyConfig(config connectors.Config) (connectors.Config, error) {
 	out := config
 	out.SemanticHeaders = maps.Clone(config.SemanticHeaders)
 	out.QuerySettings = maps.Clone(config.QuerySettings)
+	out.PluginOptions = maps.Clone(config.PluginOptions)
 	out.CredentialHeaders = slices.Clone(config.CredentialHeaders)
 	out.Models = copyValues(config.Models)
 	out.OperationDefaults = copyDefaults(config.OperationDefaults)

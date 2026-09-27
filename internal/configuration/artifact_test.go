@@ -226,13 +226,13 @@ func TestValidateDocumentRejectsDuplicatesAndReferences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := testDocument()
 			tc.mutate(doc)
-			if err := testServer().validateDocument(doc); err == nil {
+			if err := testServer().validateDocument(t.Context(), nil, doc); err == nil {
 				t.Fatalf("expected validation failure for %s", tc.name)
 			}
 		})
 	}
 	doc := testDocument()
-	if err := testServer().validateDocument(doc); err != nil {
+	if err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
 		t.Fatalf("valid document rejected: %v", err)
 	}
 }
@@ -264,7 +264,7 @@ func TestRouteFidelityOmissionIsStrictInDocuments(t *testing.T) {
 	legacy := testDocument()
 	legacy.Routes[0].Fidelity = json.RawMessage(`{"mode":"legacy"}`)
 	var problem *access.Problem
-	if err := testServer().validateDocument(legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
+	if err := testServer().validateDocument(t.Context(), nil, legacy); !errors.As(err, &problem) || problem.Field != "routes.0.fidelity" {
 		t.Fatalf("legacy fidelity was not a typed field error: %v", err)
 	}
 }
@@ -349,7 +349,7 @@ func TestValidateRejectsNonPortableAPIKeys(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	doc.Providers[0].Slots[0].Restrictions.AllowedAPIKeys = []string{"key-id"}
-	err := s.validateDocument(doc)
+	err := s.validateDocument(t.Context(), nil, doc)
 	var problem *access.Problem
 	if !errors.As(err, &problem) || problem.Status != 422 || problem.Code != "non_portable_reference" {
 		t.Fatalf("expected 422 non_portable_reference, got %v", err)
@@ -389,14 +389,14 @@ func TestValidateDuplicateWhitespaceAlias(t *testing.T) {
 	alias := doc.Providers[0]
 	alias.Name = " ACME "
 	doc.Providers = append(doc.Providers, alias)
-	err := s.validateDocument(doc)
+	err := s.validateDocument(t.Context(), nil, doc)
 	var problem *access.Problem
 	if !errors.As(err, &problem) || problem.Status != 422 {
 		t.Fatalf("expected duplicate identity rejection, got %v", err)
 	}
 	doc = testDocument()
 	doc.Projects = append(doc.Projects, ProjectEntry{Name: " EDGE "})
-	if err = s.validateDocument(doc); err == nil {
+	if err = s.validateDocument(t.Context(), nil, doc); err == nil {
 		t.Fatal("expected duplicate project identity rejection")
 	}
 }

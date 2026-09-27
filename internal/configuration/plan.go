@@ -264,7 +264,7 @@ func normalizeDocument(doc *Document) {
 	}
 }
 
-func (s *Server) validateDocument(doc *Document) error {
+func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) error {
 	if doc.APIVersion != APIVersion {
 		return access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
@@ -289,7 +289,13 @@ func (s *Server) validateDocument(doc *Document) error {
 	seen = map[string]bool{}
 	refs := map[string]bool{}
 	totalModels := 0
-	for i, p := range doc.Providers {
+	for i := range doc.Providers {
+		// Applying stores the entry's configuration, so a plugin provider
+		// pins its plugin profile there and takes its address.
+		if err := doc.Providers[i].Configuration.Pin(ctx, q); err != nil {
+			return err
+		}
+		p := doc.Providers[i]
 		prefix := "providers." + strconv.Itoa(i)
 		if err := access.ValidText(prefix+".name", p.Name, 100); err != nil {
 			return err
@@ -525,7 +531,7 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 }
 
 func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings map[string]string, expected *string) (*planResult, error) {
-	if err := s.validateDocument(doc); err != nil {
+	if err := s.validateDocument(ctx, q, doc); err != nil {
 		return nil, err
 	}
 	if err := validateBindings(doc, bindings); err != nil {

@@ -103,7 +103,7 @@ func TestPluginProfileRewritesThePreparedRequestOutsideItsEnvelope(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-gemini", ProfileRevision: digest, Endpoint: plugin.Address()}
+	cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-gemini", ProfileRevision: digest, Endpoint: plugin.Address(nil)}
 	request, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"route","messages":[{"role":"user","content":"hi"}],"seed":7,"n":2,"max_tokens":16}`))
 	if err != nil {
 		t.Fatal(err)

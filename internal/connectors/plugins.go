@@ -1,7 +1,9 @@
 package connectors
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -57,6 +60,8 @@ type PluginProfile struct {
 	profile  Profile
 	hosting  hosting
 	declared abi.Profile
+	// patterns are the compiled patterns of the options that declare one.
+	patterns map[string]*regexp.Regexp
 }
 
 // NewPluginProfile returns the profile id that a plugin's manifest declares,
@@ -105,6 +110,10 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 	if !ok {
 		return nil, &ProfileError{Field: "dialect", Message: "Serve one of the dialects plugin profiles can serve: " + strings.Join(pluginDialects, ", ") + "."}
 	}
+	patterns, err := parseOptions(declared.Options)
+	if err != nil {
+		return nil, err
+	}
 	placed, err := parseHosting(declared, base)
 	if err != nil {
 		return nil, err
@@ -116,14 +125,14 @@ func newPluginProfile(plugin Plugin, declared abi.Profile) (*PluginProfile, erro
 		// Semantic headers and query settings belong to the dialect, so the
 		// provider configures them as it would for the dialect's direct hosting.
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
-		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil,
+		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil, OptionsSchema: optionsSchema(declared.Options),
 		// An adaptation that changes only authorization, address and declared
 		// headers serves strict routes. An envelope or rewrite changes the
 		// dialect's bodies, so the profile serves transformed routes only.
 		Strict: placed.envelope == nil && len(placed.rewrites) == 0,
 	}
 	completeProfileMetadata(&p)
-	return &PluginProfile{profile: p, hosting: placed, declared: declared}, nil
+	return &PluginProfile{profile: p, hosting: placed, declared: declared, patterns: patterns}, nil
 }
 
 // dialectProfile returns the built-in profile that hosts a plugin dialect
@@ -146,8 +155,54 @@ func dialectProfile(dialect string) (Profile, bool) {
 // Profile returns the profile's catalogue metadata.
 func (p *PluginProfile) Profile() Profile { return cloneProfile(p.profile) }
 
-// Address is the upstream's base URL, which is a plugin provider's endpoint.
-func (p *PluginProfile) Address() string { return p.declared.Hosting.Address }
+// Address is the upstream's base URL with a provider's options in its path,
+// which is the provider's endpoint. Each value fills one path segment or part
+// of one.
+func (p *PluginProfile) Address(options map[string]string) string {
+	escaped := map[string]string{}
+	for name, value := range options {
+		escaped[optionPlaceholder+name] = url.PathEscape(value)
+	}
+	return p.hosting.address.render(escaped)
+}
+
+// An OptionError locates what is wrong with a provider's value for an option
+// its plugin profile declares.
+type OptionError struct {
+	// Option names the option.
+	Option  string
+	Message string
+}
+
+func (e *OptionError) Error() string { return "option " + e.Option + ": " + e.Message }
+
+// ValidateOptions reports what is wrong with a provider's option values, as an
+// *OptionError naming the option: every value is for an option the profile
+// declares, and every option that is not optional has one.
+func (p *PluginProfile) ValidateOptions(values map[string]string) error {
+	for _, name := range slices.Sorted(maps.Keys(values)) {
+		if !slices.ContainsFunc(p.declared.Options, func(option abi.Option) bool { return option.Name == name }) {
+			return &OptionError{Option: name, Message: "The profile declares no option with this name."}
+		}
+	}
+	for _, option := range p.declared.Options {
+		value, set := values[option.Name]
+		switch {
+		case !set && !option.Optional:
+			return &OptionError{Option: option.Name, Message: "Set " + option.Label + "; the profile requires it."}
+		case !set:
+		case !validOptionValue(value):
+			return &OptionError{Option: option.Name, Message: "Use 1–256 characters without control characters."}
+		case len(option.Enum) > 0 && !slices.Contains(option.Enum, value):
+			return &OptionError{Option: option.Name, Message: "Choose one of " + strings.Join(option.Enum, ", ") + "."}
+		case option.Pattern != "" && !p.patterns[option.Name].MatchString(value):
+			return &OptionError{Option: option.Name, Message: "Use a value matching " + option.Pattern + "."}
+		case (value == "." || value == "..") && p.hosting.address.uses(optionPlaceholder+option.Name):
+			return &OptionError{Option: option.Name, Message: "Use a value other than . or .., which would move the address."}
+		}
+	}
+	return nil
+}
 
 // pluginProfileJSON is how a PluginProfile travels in published snapshots:
 // what the plugin declared, which OLP validates again when it reads it.
@@ -175,6 +230,7 @@ func (p *PluginProfile) UnmarshalJSON(data []byte) error {
 
 // hosting is a parsed hosting adaptation.
 type hosting struct {
+	address        template
 	headers        map[string]template
 	query          map[string]template
 	envelope       *envelope
@@ -182,17 +238,131 @@ type hosting struct {
 	classification []upstream.Rule
 }
 
-// credentialValue names the static credential in templates.
-const credentialValue = "credential"
+// Templates name a provider's values: credentialValue is its static
+// credential, and optionPlaceholder prefixes the name of one of its options.
+const (
+	credentialValue   = "credential"
+	optionPlaceholder = "options."
+)
 
-var queryName = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
+var (
+	queryName  = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
+	optionName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+)
+
+// parseOptions checks the options a profile declares and compiles their
+// patterns.
+func parseOptions(declared []abi.Option) (map[string]*regexp.Regexp, error) {
+	if len(declared) > 16 {
+		return nil, &ProfileError{Field: "options", Message: "Declare at most 16 options."}
+	}
+	patterns := map[string]*regexp.Regexp{}
+	for i, option := range declared {
+		field := fmt.Sprintf("options[%d]", i)
+		switch {
+		case !optionName.MatchString(option.Name):
+			return nil, &ProfileError{Field: field + ".name", Message: "Name the option with 1–64 lowercase letters, digits and underscores, starting with a letter."}
+		case slices.ContainsFunc(declared[:i], func(prior abi.Option) bool { return prior.Name == option.Name }):
+			return nil, &ProfileError{Field: field + ".name", Message: "Declare each option once."}
+		case !plainText(option.Label, 1, 100):
+			return nil, &ProfileError{Field: field + ".label", Message: "Label the option with 1–100 characters, without control characters."}
+		case !plainText(option.Description, 0, 500):
+			return nil, &ProfileError{Field: field + ".description", Message: "Describe the option in at most 500 characters, without control characters."}
+		case len(option.Enum) > 0 && option.Pattern != "":
+			return nil, &ProfileError{Field: field + ".pattern", Message: "Declare an enum or a pattern, not both: the enum already fixes the values."}
+		case len(option.Enum) > 64:
+			return nil, &ProfileError{Field: field + ".enum", Message: "List at most 64 values."}
+		}
+		for j, value := range option.Enum {
+			if !validOptionValue(value) || slices.Contains(option.Enum[:j], value) {
+				return nil, &ProfileError{Field: fmt.Sprintf("%s.enum[%d]", field, j), Message: "List distinct values of 1–256 characters without control characters."}
+			}
+		}
+		if option.Pattern == "" {
+			continue
+		}
+		pattern, err := regexp.Compile(option.Pattern)
+		if err != nil || len(option.Pattern) > 512 {
+			return nil, &ProfileError{Field: field + ".pattern", Message: "Use a regular expression of at most 512 characters in RE2 syntax."}
+		}
+		patterns[option.Name] = pattern
+	}
+	return patterns, nil
+}
+
+// validOptionValue reports whether value is one an option may take.
+func validOptionValue(value string) bool { return plainText(value, 1, 256) }
+
+func plainText(text string, least, most int) bool {
+	n := utf8.RuneCountInString(text)
+	return utf8.ValidString(text) && n >= least && n <= most && !strings.ContainsFunc(text, unicode.IsControl)
+}
+
+// optionsSchema describes a profile's options as the JSON Schema of a
+// provider's option values, with the options in declared order.
+func optionsSchema(declared []abi.Option) json.RawMessage {
+	var properties bytes.Buffer
+	required := []string{}
+	properties.WriteByte('{')
+	for i, option := range declared {
+		schema := map[string]any{"type": "string", "title": option.Label, "minLength": 1, "maxLength": 256}
+		if option.Description != "" {
+			schema["description"] = option.Description
+		}
+		if len(option.Enum) > 0 {
+			schema["enum"] = option.Enum
+		}
+		if option.Pattern != "" {
+			schema["pattern"] = option.Pattern
+		}
+		if !option.Optional {
+			required = append(required, option.Name)
+		}
+		name, _ := json.Marshal(option.Name)
+		value, _ := json.Marshal(schema)
+		if i > 0 {
+			properties.WriteByte(',')
+		}
+		properties.Write(name)
+		properties.WriteByte(':')
+		properties.Write(value)
+	}
+	properties.WriteByte('}')
+	schema, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": json.RawMessage(properties.Bytes())})
+	return schema
+}
+
+// placeholders returns what a profile's templates may reference: the static
+// credential, and the options the profile requires, so that every placed
+// value is set.
+func placeholders(options []abi.Option) func(name string) error {
+	return func(name string) error {
+		if name == credentialValue {
+			return nil
+		}
+		option, ok := strings.CutPrefix(name, optionPlaceholder)
+		if !ok {
+			return fmt.Errorf("OLP has no placeholder {%s}; use {credential} or {options.<name>}.", name)
+		}
+		i := slices.IndexFunc(options, func(declared abi.Option) bool { return declared.Name == option })
+		switch {
+		case i < 0:
+			return fmt.Errorf("The profile declares no option %s.", option)
+		case options[i].Optional:
+			return fmt.Errorf("Option %s is optional, so templates can't reference it.", option)
+		}
+		return nil
+	}
+}
 
 func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	declaredHosting := declared.Hosting
-	if err := validateAddress(declaredHosting.Address); err != nil {
+	known := placeholders(declared.Options)
+	address, err := parseAddress(declaredHosting.Address, known)
+	if err != nil {
 		return hosting{}, err
 	}
-	placed := hosting{headers: map[string]template{}, query: map[string]template{}}
+	placed := hosting{address: address, headers: map[string]template{}, query: map[string]template{}}
 	if len(declaredHosting.Headers) > 16 {
 		return hosting{}, &ProfileError{Field: "hosting.headers", Message: "Declare at most 16 headers."}
 	}
@@ -208,7 +378,7 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 		if _, duplicate := placed.headers[canonical]; duplicate {
 			return hosting{}, &ProfileError{Field: field, Message: "Declare each header once."}
 		}
-		value, err := parseValue(field, declaredHosting.Headers[name], credentialValue)
+		value, err := parseValue(field, declaredHosting.Headers[name], known)
 		if err != nil {
 			return hosting{}, err
 		}
@@ -228,7 +398,7 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 			// Gemini addresses streaming with alt=sse.
 			return hosting{}, &ProfileError{Field: field, Message: "The dialect addresses its operations with this query parameter."}
 		}
-		value, err := parseValue(field, declaredHosting.Query[name], credentialValue)
+		value, err := parseValue(field, declaredHosting.Query[name], known)
 		if err != nil {
 			return hosting{}, err
 		}
@@ -240,7 +410,6 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	if err := validateDiscovery(declaredHosting); err != nil {
 		return hosting{}, err
 	}
-	var err error
 	if placed.classification, err = parseClassification(declaredHosting.Classification); err != nil {
 		return hosting{}, err
 	}
@@ -253,21 +422,30 @@ func parseHosting(declared abi.Profile, base Profile) (hosting, error) {
 	return placed, nil
 }
 
-func validateAddress(address string) error {
-	invalid := &ProfileError{Field: "hosting.address", Message: "Declare the address as an http or https URL without placeholders, credentials, query or fragment, such as https://api.example.com/v1."}
-	if len(address) > 2048 || strings.ContainsAny(address, "{}") {
-		return invalid
+// parseAddress reads the address template. Options may fill its path, so its
+// origin is fixed at install; the credential never appears in it.
+func parseAddress(text string, known func(name string) error) (template, error) {
+	address, err := parseTemplate(text, func(name string) error {
+		if name == credentialValue {
+			return errors.New("The address can't carry the credential; place it with {credential} in a header or query parameter.")
+		}
+		return known(name)
+	})
+	if err != nil {
+		return template{}, &ProfileError{Field: "hosting.address", Message: err.Error()}
 	}
-	u, err := url.Parse(address)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(address, "#") {
-		return invalid
+	// Go's URL parser refuses braces everywhere but the path.
+	u, err := url.Parse(text)
+	if len(text) > 2048 || err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(text, "#") {
+		return template{}, &ProfileError{Field: "hosting.address", Message: "Declare the address as an http or https URL without credentials, query or fragment, such as https://api.example.com/v1. Options may appear in its path, such as {options.account}."}
 	}
-	return nil
+	return address, nil
 }
 
-// parseValue reads a template whose placeholders name only the given values.
-func parseValue(field, text string, placeholders ...string) (template, error) {
-	value, err := parseTemplate(text, placeholders)
+// parseValue reads a template whose placeholders each name a value that known
+// admits.
+func parseValue(field, text string, known func(name string) error) (template, error) {
+	value, err := parseTemplate(text, known)
 	if err != nil {
 		return template{}, &ProfileError{Field: field, Message: err.Error()}
 	}
@@ -291,13 +469,24 @@ func (h hosting) uses(name string) bool {
 	return false
 }
 
+// templateValues are what a provider's hosting templates are filled from: its
+// static credential and its option values, by placeholder name.
+func templateValues(credential []byte, options map[string]string) map[string]string {
+	values := map[string]string{credentialValue: string(credential)}
+	for name, value := range options {
+		values[optionPlaceholder+name] = value
+	}
+	return values
+}
+
 // place fills the declared headers and query parameters from the static
-// credential. It returns the placed values that carry the credential.
-func (p *PluginProfile) place(req *http.Request, credential []byte) ([]string, error) {
+// credential and the provider's options. It returns the placed values that
+// carry the credential.
+func (p *PluginProfile) place(req *http.Request, credential []byte, options map[string]string) ([]string, error) {
 	if len(credential) == 0 || strings.ContainsAny(string(credential), "\r\n\x00") {
 		return nil, ErrCredentialRejected
 	}
-	values := map[string]string{credentialValue: string(credential)}
+	values := templateValues(credential, options)
 	var sensitive []string
 	for name, value := range p.hosting.headers {
 		placed := value.render(values)
@@ -335,19 +524,20 @@ type template struct {
 
 var placeholder = regexp.MustCompile(`\{([^{}]*)\}`)
 
-// parseTemplate reads a template whose placeholders name known values.
-func parseTemplate(text string, known []string) (template, error) {
+// parseTemplate reads a template whose placeholders each name a value that
+// known admits, or says why it does not.
+func parseTemplate(text string, known func(name string) error) (template, error) {
 	parsed := template{text: text}
 	literal := placeholder.ReplaceAllStringFunc(text, func(match string) string {
 		parsed.names = append(parsed.names, match[1:len(match)-1])
 		return ""
 	})
 	if strings.ContainsAny(literal, "{}") {
-		return template{}, fmt.Errorf("Use braces only around a placeholder, such as {%s}.", known[0])
+		return template{}, errors.New("Use braces only around a placeholder.")
 	}
 	for _, name := range parsed.names {
-		if !slices.Contains(known, name) {
-			return template{}, fmt.Errorf("OLP has no placeholder {%s} here; use {%s}.", name, strings.Join(known, "}, {"))
+		if err := known(name); err != nil {
+			return template{}, err
 		}
 	}
 	return parsed, nil

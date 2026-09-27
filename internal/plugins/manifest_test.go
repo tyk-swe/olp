@@ -16,8 +16,8 @@ func validManifest() abi.Manifest {
 		Version: "1.2.0+build.7",
 		Origins: []string{"https://api.acme.example", "http://127.0.0.1:8080", "https://[::1]:8443"},
 		Profiles: []abi.Profile{
-			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{
-				Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
+			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Options: []abi.Option{{Name: "account", Label: "Account"}}, Hosting: abi.Hosting{
+				Address: "https://api.acme.example/accounts/{options.account}/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
 				Discovery:      &abi.Discovery{Path: "/models", Models: "data", ID: "id"},
 				Classification: []abi.FailureRule{{Status: 400, Code: "insufficient_quota", Class: abi.ClassRateLimited}},
 			}},
@@ -81,6 +81,9 @@ func TestManifestValidation(t *testing.T) {
 		"unknown failure class": {func(m *abi.Manifest) {
 			m.Profiles[0].Hosting.Classification[0].Class = "quota"
 		}, CodeManifestInvalid, "manifest.profiles[0].hosting.classification[0].class"},
+		"option name":       {func(m *abi.Manifest) { m.Profiles[0].Options[0].Name = "Account" }, CodeManifestInvalid, "manifest.profiles[0].options[0].name"},
+		"undeclared option": {func(m *abi.Manifest) { m.Profiles[1].Hosting.Query["account"] = "{options.account}" }, CodeManifestInvalid, "manifest.profiles[1].hosting.query.account"},
+		"option origin":     {func(m *abi.Manifest) { m.Profiles[0].Hosting.Address = "https://{options.account}.acme.example/v1" }, CodeManifestInvalid, "manifest.profiles[0].hosting.address"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()

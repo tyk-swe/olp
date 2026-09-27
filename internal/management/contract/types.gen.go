@@ -1783,6 +1783,9 @@ type ConnectionOptions struct {
 	OperationDefaults *map[string]ProviderOperationDefaults `json:"operation_defaults,omitempty"`
 	ParameterDefaults *map[string]interface{}               `json:"parameter_defaults,omitempty"`
 
+	// PluginOptions A plugin provider's values for the options its plugin profile declares, by option name, which the profile's options_schema describes. Hosting templates and plugin calls for the provider use them. An empty value leaves an option unset.
+	PluginOptions *map[string]string `json:"plugin_options,omitempty"`
+
 	// QuerySettings Profile-allowlisted semantic query settings; cannot replace operation addressing or authentication.
 	QuerySettings *map[string]string `json:"query_settings,omitempty"`
 
@@ -2710,9 +2713,9 @@ type PluginFailureRule struct {
 // PluginFailureRuleClass credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
 type PluginFailureRuleClass string
 
-// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential and {options.<name>} for its value of one of the profile's required options. A profile with an envelope or rewrites serves transformed routes only.
 type PluginHosting struct {
-	// Address Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.
+	// Address Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place.
 	Address string `json:"address"`
 
 	// Classification Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.
@@ -2754,6 +2757,24 @@ type PluginManifest struct {
 	Version string `json:"version"`
 }
 
+// PluginOption A non-secret setting a plugin profile declares, such as an account ID, a region or a project, whose value the operator sets on each provider using the profile. Values are text of 1-256 characters without control characters.
+type PluginOption struct {
+	Description *string `json:"description,omitempty"`
+
+	// Enum The only values the option takes.
+	Enum  *[]string `json:"enum,omitempty"`
+	Label string    `json:"label"`
+
+	// Name Identifies the option in provider configuration and as {options.<name>} in hosting templates.
+	Name string `json:"name"`
+
+	// Optional Whether a provider may leave the option unset. Hosting templates reference only options that are not optional.
+	Optional *bool `json:"optional,omitempty"`
+
+	// Pattern A regular expression in RE2 syntax that values match; anchor it with ^ and $ to match whole values.
+	Pattern *string `json:"pattern,omitempty"`
+}
+
 // PluginPagination How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.
 type PluginPagination struct {
 	// Cursor The top-level field of a page that holds the next page's cursor.
@@ -2771,10 +2792,13 @@ type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
 
-	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. The address and header and query values are templates in which {credential} stands for the provider's static credential and {options.<name>} for its value of one of the profile's required options. A profile with an envelope or rewrites serves transformed routes only.
 	Hosting PluginHosting `json:"hosting"`
 	Id      string        `json:"id"`
 	Label   string        `json:"label"`
+
+	// Options Non-secret settings each provider using the profile sets, in the order the provider wizard shows them.
+	Options *[]PluginOption `json:"options,omitempty"`
 
 	// Signing Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.
 	Signing *bool `json:"signing,omitempty"`
@@ -3089,7 +3113,7 @@ type ProviderConfiguration struct {
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
 	Deployment   nullable.Nullable[string] `json:"deployment,omitempty"`
 
-	// Endpoint Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address.
+	// Endpoint Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address, with the provider's plugin options in place.
 	Endpoint nullable.Nullable[string] `json:"endpoint,omitempty"`
 
 	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
@@ -3320,6 +3344,9 @@ type ProviderProfile struct {
 	OperationDialects map[string]string `json:"operation_dialects"`
 	Operations        []string          `json:"operations"`
 
+	// OptionsSchema A plugin profile's options, as the JSON Schema of a provider's plugin_options: a string property per option, in declared order, with required options listed in required. Absent for a built-in profile.
+	OptionsSchema *map[string]interface{} `json:"options_schema,omitempty"`
+
 	// Plugin The installed provider plugin that supplies a profile.
 	Plugin          *ProviderProfilePlugin `json:"plugin,omitempty"`
 	QuerySettings   []string               `json:"query_settings"`
@@ -3409,7 +3436,10 @@ type ProviderRevisionDiffResponse struct {
 	NetworkConfigurationChanged bool     `json:"network_configuration_changed"`
 
 	// PluginChanged The revisions pin different provider plugin digests, or only one pins a plugin.
-	PluginChanged                bool  `json:"plugin_changed"`
+	PluginChanged bool `json:"plugin_changed"`
+
+	// PluginOptionsChanged The revisions set different values for the plugin profile's options.
+	PluginOptionsChanged         bool  `json:"plugin_options_changed"`
 	ProfileChanged               bool  `json:"profile_changed"`
 	SemanticConfigurationChanged bool  `json:"semantic_configuration_changed"`
 	ServingBindingChanged        bool  `json:"serving_binding_changed"`

@@ -77,7 +77,7 @@ test('an operator connects a provider through an approved plugin profile', async
   await expect(
     plugin
       .getByRole('row', { name: 'reference-chat' })
-      .getByRole('cell', { name: upstream.address })
+      .getByRole('cell', { name: upstream.address, exact: true })
   ).toBeVisible();
   await plugin.getByRole('button', { name: 'Review and approve' }).click();
   await plugin

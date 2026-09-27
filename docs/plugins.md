@@ -49,12 +49,12 @@ side, so a new build can be installed and reviewed before anything moves to it.
 `GET /api/v1/plugins` and the Plugins page show each installed digest with what
 its manifest declares:
 
-- **profiles**, each naming the built-in dialect it serves and its hosting
-  adaptation: the address its requests go to, at one of the plugin's origins,
-  the headers and query parameters it declares, any model listing and failure
-  classification, and any envelope and rewrites of the dialect's bodies. A
-  profile whose manifest entry has `signing: true` also runs the plugin's
-  signing hook on every request;
+- **profiles**, each naming the built-in dialect it serves, the options its
+  providers set, and its hosting adaptation: the address its requests go to,
+  at one of the plugin's origins, the headers and query parameters it
+  declares, any model listing and failure classification, and any envelope and
+  rewrites of the dialect's bodies. A profile whose manifest entry has
+  `signing: true` also runs the plugin's signing hook on every request;
 - **origins**, the only `scheme://host[:port]` origins the plugin may ever
   reach.
 
@@ -88,14 +88,14 @@ authenticates with a static credential:
 Pinning needs an installed plugin whose origins an owner approved:
 `plugin_not_installed`, `plugin_not_approved` and `plugin_profile_unknown`
 refuse the draft otherwise. The provider's endpoint is the profile's address,
-which OLP sets.
+with the provider's options in place, which OLP sets.
 
 OLP runs the profile's hosting adaptation itself. It fills the declared headers
-and query parameters from the static credential, such as
-`Authorization: Token {credential}`, and sends the request over OLP's own
-transport, with the provider's network options and the egress policy. The
-credential is stored like any credential version, and every value that carries
-it is redacted wherever upstream text is recorded.
+and query parameters from the static credential and the provider's
+[options](#options), such as `Authorization: Token {credential}`, and sends the
+request over OLP's own transport, with the provider's network options and the
+egress policy. The credential is stored like any credential version, and every
+value that carries it is redacted wherever upstream text is recorded.
 
 A profile may also declare an envelope and rewrites for an upstream that speaks
 the dialect inside a JSON object of its own, or needs request members set or
@@ -110,7 +110,7 @@ declarations.
 
 No built-in kind's defaults apply to a plugin provider:
 
-- **Endpoint:** the profile's address.
+- **Endpoint:** the profile's address, with the provider's options in place.
 - **Discovery:** only the profile's declared model listing, if it declares one.
   The probe and discover flows then list the upstream's models, following its
   pages, as for built-in kinds, and the catalogue entry reports
@@ -148,7 +148,38 @@ carry over.
 A gateway serving from [mounted connectors](configuration.md#mounted-connectors)
 mounts a plugin provider's static credential with `credential_file`. The
 mounted `configuration` must match the published revision, including its
-`profile_revision` and endpoint.
+`profile_revision`, endpoint and plugin options.
+
+### Options
+
+A plugin profile may declare options: non-secret settings each provider using
+it sets, such as an account ID, a region or a project. The profile's catalogue
+entry describes them in `options_schema`, the JSON Schema of the provider's
+values, and the provider wizard shows them in the Connection stage once the
+profile is chosen. A provider sets them in `options.plugin_options`:
+
+```json
+{
+  "kind": "plugin",
+  "auth_mode": "static_credential",
+  "profile_id": "reference-workspace-chat",
+  "profile_revision": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "options": { "plugin_options": { "workspace": "acme" } }
+}
+```
+
+OLP validates the values against the declaration when the draft is saved and
+refuses a missing required option, an undeclared one, or a value outside its
+enum or pattern with `validation_failed`, naming the option as
+`configuration.options.plugin_options.<name>`. An empty value leaves an option
+unset. The hosting adaptation places the values in the address, headers and
+query parameters it declares, and every call OLP makes to the plugin on behalf
+of the provider carries them.
+
+Options are part of the provider's configuration like any other setting:
+changing them is a draft change whose certification starts over, the revision
+diff reports `plugin_options_changed`, and configuration exports and imports
+carry them. They are not secret.
 
 ### Signing hooks
 

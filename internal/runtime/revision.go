@@ -55,6 +55,7 @@ type Configuration struct {
 		Limits            *Limits                          `json:"limits"`
 		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 		VendorID          string                           `json:"vendor_id"`
+		PluginOptions     map[string]string                `json:"plugin_options,omitempty"`
 	} `json:"options"`
 }
 
@@ -112,7 +113,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	provider := Provider{
 		ID: revision.ID, RevisionID: revision.RevisionID, Name: revision.Name,
 		Enabled: revision.State == "active", ProjectID: revision.ProjectID,
-		Network: cfg.Options.Network, Plugin: plugin,
+		Network: cfg.Options.Network, Plugin: plugin, PluginOptions: cfg.Options.PluginOptions,
 		ProfileID: cfg.ProfileID, ProfileRevision: cfg.ProfileRevision,
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
