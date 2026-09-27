@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -82,7 +83,7 @@ func (h *HTTP) request(ctx context.Context, r abi.HTTPRequest) (*http.Request, *
 	if err != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" || target.User != nil || target.Fragment != "" {
 		return invalid("Send the request to an absolute http or https URL without credentials or a fragment.")
 	}
-	if origin := Origin(target); !slices.Contains(h.Origins, origin) {
+	if origin := connectors.Origin(target); !slices.Contains(h.Origins, origin) {
 		return nil, &abi.Error{Code: abi.CodeOriginNotApproved, Message: "The plugin may reach only the origins an owner approved, and " + origin + " is not one of them."}
 	}
 	if len(r.Body) > maxHTTPBody {
@@ -104,14 +105,4 @@ func (h *HTTP) request(ctx context.Context, r abi.HTTPRequest) (*http.Request, *
 		}
 	}
 	return req, nil
-}
-
-// Origin returns a URL's origin in the canonical form manifests declare:
-// lowercase, without the scheme's default port.
-func Origin(u *url.URL) string {
-	scheme, host := strings.ToLower(u.Scheme), strings.ToLower(u.Host)
-	if port := u.Port(); scheme == "https" && port == "443" || scheme == "http" && port == "80" {
-		host = strings.TrimSuffix(host, ":"+port)
-	}
-	return scheme + "://" + host
 }

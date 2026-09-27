@@ -694,18 +694,54 @@ func (p *PluginProfile) place(req *http.Request, secret []byte, options map[stri
 	return sensitive, nil
 }
 
-// rebase moves a request addressed from the provider's endpoint, at
-// grantBase, to the base URL a grant's fact holds: an http or https URL
-// without credentials, query or fragment, at one of the plugin's approved
-// origins, written the same way. A grant whose base URL is elsewhere can't
-// serve, so nothing is sent.
-func (p *PluginProfile) rebase(req *http.Request, value string) error {
+// PlacesGrant reports why the profile can't place requests with a grant
+// that reports facts, if it can't: when a grant fact begins the profile's
+// address, it must hold a base URL at one of the plugin's approved origins.
+func (p *PluginProfile) PlacesGrant(facts map[string]string) error {
+	if p.hosting.base == "" {
+		return nil
+	}
+	_, err := p.baseURL(facts[p.hosting.base])
+	return err
+}
+
+// baseURL reads the base URL a grant's fact holds, which begins the profile's
+// address: an http or https URL without credentials, query or fragment, at
+// one of the plugin's approved origins. It returns the URL at its origin's
+// canonical form.
+func (p *PluginProfile) baseURL(value string) (*url.URL, error) {
 	base, err := url.Parse(value)
 	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
-		return fmt.Errorf("%w: grant fact %s holds no base URL", ErrCredentialRejected, p.hosting.base)
+		return nil, fmt.Errorf("grant fact %s holds no base URL", p.hosting.base)
 	}
-	if origin := base.Scheme + "://" + base.Host; !slices.Contains(p.origins, origin) {
-		return fmt.Errorf("%w: grant fact %s places requests at %s, which is not one of the plugin's approved origins", ErrCredentialRejected, p.hosting.base, origin)
+	origin := Origin(base)
+	if !slices.Contains(p.origins, origin) {
+		return nil, fmt.Errorf("grant fact %s places requests at %s, which is not one of the plugin's approved origins", p.hosting.base, origin)
+	}
+	base.Host = strings.TrimPrefix(origin, base.Scheme+"://")
+	return base, nil
+}
+
+// Origin returns a URL's origin in the canonical form plugin manifests
+// declare: lowercase, without the scheme's default port. Every URL a plugin
+// reaches, or places requests at, is compared with the plugin's approved
+// origins in this form.
+func Origin(u *url.URL) string {
+	scheme, host := strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+	if port := u.Port(); scheme == "https" && port == "443" || scheme == "http" && port == "80" {
+		host = strings.TrimSuffix(host, ":"+port)
+	}
+	return scheme + "://" + host
+}
+
+// rebase moves a request addressed from the provider's endpoint, at
+// grantBase, to the base URL a grant's fact holds. A grant whose base URL is
+// not at one of the plugin's approved origins can't serve, so nothing is
+// sent.
+func (p *PluginProfile) rebase(req *http.Request, value string) error {
+	base, err := p.baseURL(value)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrCredentialRejected, err)
 	}
 	if req.URL.Scheme+"://"+req.URL.Host != grantBase {
 		return errors.New("the request is not addressed from the provider's endpoint")

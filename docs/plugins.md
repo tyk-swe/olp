@@ -128,7 +128,10 @@ No built-in kind's defaults apply to a plugin provider:
   A grant profile whose address begins with a grant fact has
   `https://grant.invalid` as its endpoint's origin, a name that never
   resolves: OLP sends each request to the base URL of the serving credential
-  version's grant instead, only at one of the plugin's approved origins.
+  version's grant instead, only at one of the plugin's approved origins,
+  compared in their canonical form (lowercase, without the scheme's default
+  port). Grant enrollment refuses a grant whose base URL is elsewhere with
+  `grant_enrollment_failed`.
 - **Discovery:** only the profile's declared model listing, if it declares one.
   The probe and discover flows then list the upstream's models, following its
   pages, as for built-in kinds, and the catalogue entry reports

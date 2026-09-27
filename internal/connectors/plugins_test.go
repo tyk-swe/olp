@@ -632,6 +632,10 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 		"https://api.acme.example":           "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 		"https://eu.acme.example/regions/1/": "https://eu.acme.example/regions/1/v2/eu/chat/completions?placement=eu-acct&project=p",
 		"https://eu.acme.example/a%2Fb":      "https://eu.acme.example/a%2Fb/v2/eu/chat/completions?placement=eu-acct&project=p",
+		// Origins compare as manifests declare them: lowercase, without the
+		// scheme's default port.
+		"https://API.acme.example":      "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
+		"HTTPS://api.acme.example:443/": "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 	} {
 		for _, c := range []Config{c, published} {
 			endpoint, err := c.URL(openai.FamilyChat, "acme-large", false)
@@ -651,8 +655,8 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 
 	for base, reason := range map[string]string{
 		"https://evil.example/v2":          "grant fact api_base places requests at https://evil.example, which is not one of the plugin's approved origins",
-		"https://API.acme.example":         "grant fact api_base places requests at https://API.acme.example, which is not one of the plugin's approved origins",
-		"https://api.acme.example:443":     "grant fact api_base places requests at https://api.acme.example:443, which is not one of the plugin's approved origins",
+		"https://api.acme.example:8443":    "grant fact api_base places requests at https://api.acme.example:8443, which is not one of the plugin's approved origins",
+		"http://api.acme.example":          "grant fact api_base places requests at http://api.acme.example, which is not one of the plugin's approved origins",
 		"":                                 "grant fact api_base holds no base URL",
 		"api.acme.example/v2":              "grant fact api_base holds no base URL",
 		"https://user@api.acme.example/v2": "grant fact api_base holds no base URL",

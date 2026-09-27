@@ -319,8 +319,8 @@ func TestPluginHTTPTakesTheProviderNetworkPath(t *testing.T) {
 
 // A grant fact can address a provider: the reference plugin's grant profile
 // sends each account's requests to the API base URL its token response
-// names. A base URL outside the plugin's approved origins sends nothing, and
-// says why.
+// names. Grant enrollment refuses a base URL outside the plugin's approved
+// origins, and says why.
 func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -332,12 +332,10 @@ func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 	elsewhere := newGrantUpstream(t, authority)
 	authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-elsewhere", APIBase: elsewhere.URL + "/v1"})
 	enrollment := startGrantEnrollment(t, h, owner, path)
-	continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
-	if probe["succeeded"] != false || !strings.Contains(probe["detail"].(string), "places requests at "+elsewhere.URL+", which is not one of the plugin's approved origins") ||
+	refusal := continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 422)
+	if problemCode(t, refusal) != "grant_enrollment_failed" || !strings.Contains(refusal["detail"].(string), "places requests at "+elsewhere.URL+", which is not one of the plugin's approved origins") ||
 		len(elsewhere.received()) != 0 || len(upstream.received()) != 0 {
-		t.Fatalf("probed a grant whose API is at an unapproved origin: %v", probe)
+		t.Fatalf("enrolled a grant whose API is at an unapproved origin: %v", refusal)
 	}
 
 	// An account on a regional API, at the upstream's approved origin, is
@@ -345,7 +343,7 @@ func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 	authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-eu", APIBase: upstream.URL + "/regions/eu/v1"})
 	enrollment = startGrantEnrollment(t, h, owner, path)
 	completed := continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
-	if completed["credential_version"] != float64(2) {
+	if completed["credential_version"] != float64(1) {
 		t.Fatalf("completed %v", completed)
 	}
 	certifyPluginProvider(t, h, owner, path)
