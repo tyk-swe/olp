@@ -75,11 +75,13 @@ type AttemptFact struct {
 	CredentialID       string
 	CredentialVersion  int
 	Mode               string // unary or streaming
-	Status             int    // upstream HTTP status; 0 when none was received
-	Class              string // success or a failure class from the retry taxonomy
-	Committed          bool
-	StartedAt          time.Time
-	Duration           time.Duration
+	// Carried reports that a plugin carried the attempt's upstream traffic.
+	Carried   bool
+	Status    int    // upstream HTTP status; 0 when none was received
+	Class     string // success or a failure class from the retry taxonomy
+	Committed bool
+	StartedAt time.Time
+	Duration  time.Duration
 	// FirstByte is the time from the start of the attempt until the upstream
 	// response status was received. It is nil when no response arrived.
 	FirstByte *time.Duration

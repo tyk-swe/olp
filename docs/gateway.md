@@ -130,7 +130,9 @@ Bedrock advertised event lengths are checked before SDK allocation, and the SDK
 still verifies event CRCs.
 
 Provider health is tracked per gateway: five counted failures within 30 seconds
-open a provider's circuit for 30 seconds. One half-open probe may proceed;
+open a provider's circuit for 30 seconds. Connection, timeout, protocol and
+upstream server failures count; so do ambiguous ones of a strict interaction
+or of traffic a plugin carries. One half-open probe may proceed;
 credential-only failure releases it without penalizing siblings. A credential
 rejection cools that credential version for 60 seconds; a rate limit cools the
 logical slot across rotation for the upstream `Retry-After` (10 seconds when

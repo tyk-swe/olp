@@ -612,8 +612,11 @@ profile reports `transport: plugin`.
   open, fails over to the route's next target like a connection failure. OLP
   treats any other failure, and a server error the upstream answered with, as
   an unknown outcome: the attempt is `ambiguous` and the request fails with
-  `502 ambiguous_upstream_result`, without failing over. A rejection the
-  upstream stated, such as a `429`, is classified as for any provider.
+  `502 ambiguous_upstream_result`, without failing over. Such failures still
+  count towards the provider's circuit, as connection and server failures do,
+  so a plugin that keeps failing after it sends opens it and later requests go
+  to the route's other targets. A rejection the upstream stated, such as a
+  `429`, is classified as for any provider.
 - When the caller goes away or the attempt times out, OLP cancels the request,
   and the plugin stops it upstream.
 - OLP holds at most 8 MiB of a response the plugin streams faster than the

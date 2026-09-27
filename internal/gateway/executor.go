@@ -471,9 +471,10 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
 	cfg := provider.Connector()
+	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
-	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || cfg.CarriedByPlugin(), Declared: cfg.Classification()}}
+	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried, Declared: cfg.Classification()}}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
