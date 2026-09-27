@@ -116,6 +116,10 @@ type Provider struct {
 	// Limits is the quota shared by every slot of this connection.
 	Limits *Limits `json:"limits,omitempty"`
 	Slots  []Slot  `json:"slots,omitempty"`
+	// ObservedPrincipal is the upstream principal every slot of a provider
+	// authenticated by a grant observes, which its serving identity carries;
+	// empty for any other provider.
+	ObservedPrincipal string `json:"observed_principal,omitempty"`
 }
 
 // Target is one route attempt candidate.
@@ -286,5 +290,5 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -49,9 +50,18 @@ type inspectedServing struct {
 	ProviderRevisionID    string `json:"provider_revision_id"`
 	Model                 string `json:"model"`
 	PrincipalDeclared     bool   `json:"principal_declared"`
+	PrincipalObserved     bool   `json:"principal_observed"`
 	SnapshotDeclared      bool   `json:"snapshot_declared"`
 	RegionDeclared        bool   `json:"region_declared"`
 	ResourceScopeDeclared bool   `json:"resource_scope_declared"`
+}
+
+// inspectServing reports which facts a target's serving identity carries,
+// never their values. Its principal is observed when grant enrollment reported
+// it for the provider, which replaces any a serving binding declares.
+func inspectServing(provider runtime.Provider, serving oif.ServingIdentity) *inspectedServing {
+	observed := provider.ObservedPrincipal != ""
+	return &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "" && !observed, PrincipalObserved: observed, SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
 }
 
 type inspectedDisposition struct {
@@ -251,8 +261,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
 		result.Representation = "oif"
 		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
-		serving := plan.Serving()
-		result.Serving = &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "", SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
+		result.Serving = inspectServing(provider, plan.Serving())
 		result.Evidence = append([]string{}, receipt.Evidence...)
 		result.Obligations = &inspectedObligations{
 			Delivery: obligations.Delivery, Lifetime: obligations.Lifetime, Continuation: obligations.Continuation, Retry: obligations.Retry,

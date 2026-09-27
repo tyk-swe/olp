@@ -282,6 +282,26 @@ func TestNativeStateOmissionAndResourceAffinityAreExplicit(t *testing.T) {
 	assertReason(t, err, "resource_affinity")
 }
 
+// The principal grant enrollment observed is the serving identity's, in place
+// of one a serving binding declares, so work bound to one upstream account is
+// refused on another as on any other serving identity change.
+func TestObservedPrincipalIsPartOfServingIdentity(t *testing.T) {
+	config := configuration(t, "openai-chat")
+	config.Provider.Bindings = map[string]connectors.Binding{"native-model": {PrincipalID: "declared-account"}}
+	source := request(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"hello"}]}`)
+	if declared := bind(t, template(t, config), source, Context{}).Serving(); declared.PrincipalID != "declared-account" {
+		t.Fatalf("declared serving identity %+v", declared)
+	}
+	config.Provider.ObservedPrincipal = "operator@example.com"
+	enrolled := bind(t, template(t, config), source, Context{}).Serving()
+	if enrolled.PrincipalID != "operator@example.com" {
+		t.Fatalf("observed serving identity %+v", enrolled)
+	}
+	config.Provider.ObservedPrincipal = "another@example.com"
+	_, err := template(t, config).Bind(source, Context{RequiredServing: &enrolled})
+	assertReason(t, err, "resource_affinity")
+}
+
 func TestNativeCloudAnthropicRevisionHeaderBindsToBody(t *testing.T) {
 	for _, id := range []string{"vertex-anthropic", "bedrock-anthropic-invoke"} {
 		t.Run(id, func(t *testing.T) {

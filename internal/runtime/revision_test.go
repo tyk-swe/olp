@@ -113,6 +113,20 @@ func TestDecodeProviderRevisionCertifiedCapabilitiesAndCredentialSlots(t *testin
 	}
 }
 
+// A revision records the principal its slots observe, which the serving
+// provider carries into the connector configuration serving identity reads.
+func TestDecodeProviderRevisionCarriesTheObservedPrincipal(t *testing.T) {
+	provider, err := DecodeProviderRevision(ProviderRevision{
+		ID: "provider", RevisionID: "revision", State: "active", Configuration: []byte(`{"kind":"openai"}`), Models: []byte(`[]`),
+		Slots: []byte(`[
+			{"id":"retired","enabled":false,"weight":1,"credential_id":"revoked-grant","credential_version":1},
+			{"id":"primary","enabled":true,"weight":1,"credential_id":"current-grant","credential_version":2,"default":true,"observed_principal":"operator@example.com"}]`),
+	})
+	if err != nil || provider.ObservedPrincipal != "operator@example.com" || provider.Connector().ServingPrincipal("any-model") != "operator@example.com" {
+		t.Fatalf("provider %+v: %v", provider, err)
+	}
+}
+
 func TestDecodeRevisionSerializationAndPublicationLimits(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`} {
 		provider, err := DecodeProviderRevision(ProviderRevision{ID: "provider", RevisionID: "revision", State: "active", Configuration: []byte(`{"kind":"openai","options":{"limits":{}}}`), Models: []byte(raw), Slots: []byte(raw)})

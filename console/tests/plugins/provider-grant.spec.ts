@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Page } from '@playwright/test';
 import { expect, test } from '../playwright';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 
@@ -32,6 +33,21 @@ type Recorded = {
 
 let module = '';
 let digest = '';
+
+/** Signs in upstream in another tab, as the operator would with the
+ * authorization URL, and returns the loopback callback URL the authority sends
+ * the browser to, where nothing listens: the operator copies it from the
+ * address bar. */
+async function signInUpstream(page: Page, authorizationURL: string) {
+  const upstreamTab = await page.context().newPage();
+  const returned = upstreamTab.waitForRequest((sent) =>
+    sent.url().startsWith(`${loopback}?`)
+  );
+  await upstreamTab.goto(authorizationURL).catch(() => undefined);
+  const callback = (await returned).url();
+  await upstreamTab.close();
+  return callback;
+}
 
 test.beforeAll(() => {
   module = join(mkdtempSync(join(tmpdir(), 'olp-plugin-')), 'reference.wasm');
@@ -127,16 +143,7 @@ test('an operator connects a provider by signing in to an upstream account', asy
     fullPage: true
   });
 
-  // The authority returns the browser to a loopback address where nothing
-  // listens; the operator copies the callback URL from the address bar.
-  const upstreamTab = await page.context().newPage();
-  const returned = upstreamTab.waitForRequest((sent) =>
-    sent.url().startsWith(`${loopback}?`)
-  );
-  await upstreamTab.goto(authorizationURL).catch(() => undefined);
-  const callback = (await returned).url();
-  await upstreamTab.close();
-
+  const callback = await signInUpstream(page, authorizationURL);
   await enrollment
     .getByLabel('Paste back the callback URL or code the upstream returned')
     .fill(callback);
@@ -184,4 +191,61 @@ test('an operator connects a provider by signing in to an upstream account', asy
     expect(call.headers.authorization).toMatch(/^Bearer /);
     expect(call.headers['x-reference-account']).toBe(upstream.account);
   }
+
+  // The credential version records the account the grant authorizes.
+  await page.getByRole('link', { name: 'View provider', exact: true }).click();
+  const versions = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Credential versions' })
+  });
+  await expect(
+    versions.getByText(`Observed principal ${upstream.subject}`)
+  ).toBeVisible();
+
+  // Later, the operator re-enrolls the default slot's grant from the
+  // credential pool by signing in to the same account again: a new credential
+  // version that activates as a credential rotation.
+  const pool = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Credential pool', exact: true })
+  });
+  const defaultSlot = pool
+    .getByRole('listitem')
+    .filter({ has: page.getByText('default', { exact: true }) });
+  await defaultSlot.getByRole('button', { name: 'Re-enroll grant' }).click();
+  const reenrollment = pool.getByRole('region', { name: 'Sign in upstream' });
+  const reauthorization = (await reenrollment
+    .getByRole('link', { name: 'Open authorization page' })
+    .getAttribute('href'))!;
+  await reenrollment
+    .getByLabel('Paste back the callback URL or code the upstream returned')
+    .fill(await signInUpstream(page, reauthorization));
+  await reenrollment.getByRole('button', { name: 'Continue' }).click();
+  await expect(
+    pool.getByText(
+      `default: grant enrolled for ${upstream.subject} as credential version 2, pending activation.`
+    )
+  ).toBeVisible();
+  await expect(
+    versions
+      .getByRole('listitem')
+      .filter({ hasText: 'Version 2' })
+      .getByText('pending activation')
+  ).toBeVisible();
+  await defaultSlot.getByRole('button', { name: 'Validate access' }).click();
+  await expect(
+    pool.getByText('default: model access validated.')
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Test completed draft' }).click();
+  await page.getByRole('button', { name: 'Activate changes' }).click();
+  await expect(page.getByText(/Activated in runtime generation/)).toBeVisible();
+  await pool.screenshot({ path: info.outputPath('provider-grant-pool.png') });
+
+  const comparison = page.locator('[aria-label="Compare provider revisions"]');
+  await comparison.getByLabel('From').selectOption({ label: 'Revision 1' });
+  await comparison.getByLabel('To').selectOption({ label: 'Revision 2' });
+  await comparison.getByRole('button', { name: 'Compare' }).click();
+  const diff = page.getByRole('region', {
+    name: 'Provider revision 1 to 2 diff'
+  });
+  await expect(diff).toContainText('Credential version changed');
+  await expect(diff).not.toContainText('serving identity');
 });

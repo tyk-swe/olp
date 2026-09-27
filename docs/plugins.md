@@ -251,7 +251,7 @@ Through the management API, which needs the `configure` scope:
 
 | Operation | Request |
 | --- | --- |
-| Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`; returns the enrollment's `id`, `authorization_url` and `expires_at`. |
+| Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`, and optionally `{"slot_id": "<credential slot>"}` for a slot other than the default; returns the enrollment's `id`, `slot_id`, `authorization_url` and `expires_at`. |
 | Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL or code>"}`; returns the new `credential_id`, `credential_version` and observed `principal`. |
 | Cancel | `DELETE /api/v1/providers/{id}/grant-enrollments/{enrollment_id}` |
 
@@ -285,6 +285,34 @@ expires. A pasted credential can't be staged for a provider that authenticates
 with a grant, and activation refuses a credential slot whose version doesn't
 match the provider's authentication.
 
+### Re-enrolling and the observed principal
+
+The provider page's credential pool re-enrolls a slot's grant: **Re-enroll
+grant** runs the same grant enrollment for that slot (the API's `slot_id`), and
+the new grant becomes a new credential version staged on the slot, pending
+activation like a rotation. Validate the slot's model access, then test and
+activate the provider.
+
+The observed principal is part of the provider's serving identity, in place of
+any principal a serving binding declares
+([ADR 0006](adr/0006-grants-beneath-immutable-credentials.md)):
+
+- Every credential slot of a provider revision observes the same principal.
+  Activation refuses slots whose credential versions observe different
+  principals with `principal_mismatch`, naming each slot's; a revoked version
+  counts for none. Re-enroll those slots with one account.
+- Re-enrolling the same account is a credential rotation: the revision diff
+  shows `credential_changed`, and the serving identity is unchanged.
+- Enrolling a different account is a serving identity change: the revision
+  diff also shows `serving_binding_changed`, and continuations bound to the old
+  principal are treated as for any other serving identity change.
+- Within an inference request, a strict route fails over among the slots of a
+  provider, which all serve its principal, and the route inspector reports the
+  principal as observed.
+
+To pool several upstream accounts, create a provider for each and list them as
+targets of one route.
+
 ## Configuration promotion
 
 [Configuration exports](configuration.md#configuration-promotion-artifacts)
@@ -296,7 +324,8 @@ enables the [tier](#unconfined-plugins-experimental): until then, the plan
 reports a `plugin` blocker for the digest. A static plugin credential binds through `secret_bindings` like any
 other secret. A credential slot a grant backs imports without a credential: the
 plan lists it for grant enrollment, and the imported provider activates once
-grant enrollment has given its serving slots credential versions.
+grant enrollment, the credential pool's **Enroll grant** on each slot, has given
+its serving slots credential versions.
 
 ## Uninstalling
 

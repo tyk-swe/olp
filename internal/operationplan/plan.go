@@ -104,7 +104,7 @@ func Compile(config Config) (*Template, error) {
 		return nil, fail("target_capability", "/limits", "bounded_buffering", "The operation response limit is invalid.")
 	}
 	binding := config.Provider.Bindings[config.Model]
-	serving := oif.ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: config.Provider.Model(config.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: binding.PrincipalID, Snapshot: binding.Snapshot, Region: config.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
+	serving := oif.ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: config.Provider.Model(config.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: config.Provider.ServingPrincipal(config.Model), Snapshot: binding.Snapshot, Region: config.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}

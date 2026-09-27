@@ -159,6 +159,47 @@ func TestStrictKnownRejectionCannotSubstituteServingEnvironment(t *testing.T) {
 	}
 }
 
+// Every slot of a provider revision observes the principal grant enrollment
+// observed, so a strict request fails over to another slot of the provider
+// and stays with that account; without a known principal the first admitted
+// slot pins the request.
+func TestStrictFailoverAcrossSlotsKeepsTheObservedPrincipal(t *testing.T) {
+	for _, principal := range []string{"", "operator@example.com"} {
+		t.Run("principal="+principal, func(t *testing.T) {
+			h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+				for id, provider := range snapshot.Providers {
+					if provider.Name == "a" {
+						backup := provider.Slots[0]
+						backup.ID, backup.Name, backup.Priority = uuid.NewString(), "backup", 1
+						provider.Slots = append(provider.Slots, backup)
+						provider.ObservedPrincipal = principal
+						snapshot.Providers[id] = provider
+					}
+				}
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				if h.mock.count("a") == 1 {
+					status(http.StatusTooManyRequests, `{"error":{"message":"busy"}}`)(w, r)
+					return
+				}
+				completion(modelA, answerText)(w, r)
+			})
+			resp, body := h.chat(fullKey, nil)
+			attempts := h.sink.last(t).Attempts
+			if principal == "" {
+				if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 1 || h.mock.count("b") != 0 || len(attempts) != 1 {
+					t.Fatalf("an unknown principal did not pin the slot: %d %v attempts %+v", resp.StatusCode, body, attempts)
+				}
+				return
+			}
+			if resp.StatusCode != http.StatusOK || h.mock.count("a") != 2 || h.mock.count("b") != 0 || len(attempts) != 2 ||
+				attempts[0].ProviderID != attempts[1].ProviderID || attempts[0].SlotID == attempts[1].SlotID {
+				t.Fatalf("failover within the observed principal: %d %v attempts %+v", resp.StatusCode, body, attempts)
+			}
+		})
+	}
+}
+
 func TestStrictRevokedCandidateDoesNotEstablishServingBaselineOrSpendBudget(t *testing.T) {
 	credentialID := uuid.NewString()
 	h := strictHarness(t, func(snapshot *runtime.Snapshot) {

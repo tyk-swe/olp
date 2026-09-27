@@ -11,9 +11,11 @@ export type GrantEnrollment = Schemas['GrantEnrollment'];
 /** The credential version a completed grant enrollment staged on the draft. */
 export type GrantEnrollmentCompletion = Schemas['GrantEnrollmentCompletion'];
 
-/** Starts grant enrollment for the provider draft the operator sees. */
+/** Starts grant enrollment for the provider draft the operator sees, for its
+ * default credential slot or, to re-enroll a slot's grant, the slot named. */
 export async function startGrantEnrollment(
-  provider: Pick<Provider, 'id' | 'etag'>
+  provider: Pick<Provider, 'id' | 'etag'>,
+  slotId?: string
 ): Promise<GrantEnrollment> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/grant-enrollments',
@@ -21,7 +23,8 @@ export async function startGrantEnrollment(
       params: {
         path: { provider_id: provider.id },
         header: { 'If-Match': provider.etag }
-      }
+      },
+      body: slotId ? { slot_id: slotId } : undefined
     }
   );
   return result(response.data, response.error, response.response);
