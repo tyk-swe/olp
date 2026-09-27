@@ -37,7 +37,8 @@ func (s *Server) vendors(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) inventory(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
@@ -71,7 +72,8 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
 		AND ($3::boolean IS NULL OR m.enabled=$3) AND ($4='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(m.capabilities) c WHERE c->>'surface'=$4))
-		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1)
+		AND ($6 OR p.project_id=ANY($7::uuid[]))
+		ORDER BY m.id DESC LIMIT $5`, page.Before, search, enabled, surface, page.Limit+1, principal.AllProjects, principal.ProjectIDs())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -102,9 +104,15 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 	}), nil
 }
 
+// generations lists installation-wide runtime releases, which span every
+// project and name their publishers, so it requires installation reach.
 func (s *Server) generations(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
+	}
+	if !principal.AllProjects {
+		return access.Reply{}, access.Forbidden()
 	}
 	page, err := access.Page(r)
 	if err != nil {

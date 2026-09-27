@@ -20327,6 +20327,7 @@
     },
     "/api/v1/runtime-generations": {
       "get": {
+        "description": "Runtime generations span every project and name their publishers, so listing them requires an installation-wide access scope.",
         "operationId": "list_runtime_generations",
         "parameters": [
           {

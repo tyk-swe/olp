@@ -19,7 +19,11 @@
   import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';
   import ReadinessPanels from '$lib/features/runtime/health/ReadinessPanels.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
 
+  // Runtime generations span every project, so only installation-wide members
+  // can read them.
+  const access = useRole();
   const generationPagination = $state(emptyCursorHistory());
   const epochPagination = $state(emptyCursorHistory());
   const refetchInterval = 15_000;
@@ -52,6 +56,7 @@
     queryKey: healthKeys.generations(generationPagination.cursor),
     queryFn: () => listRuntimeGenerations(generationPagination.cursor),
     placeholderData: (previous) => previous,
+    enabled: access.globalScope,
     refetchInterval
   }));
   const epochs = createQuery(() => ({
@@ -62,7 +67,11 @@
     refetchInterval
   }));
 
-  const panels = [readiness, providers, persistence, generations, epochs];
+  const panels = $derived(
+    access.globalScope
+      ? [readiness, providers, persistence, generations, epochs]
+      : [readiness, providers, persistence, epochs]
+  );
   const fetching = $derived(panels.some((panel) => panel.isFetching));
   const checkedAt = $derived.by(() => {
     const stamps = panels
@@ -122,7 +131,9 @@
   <GatewayEpochsPanel {epochs} pagination={epochPagination} {readiness} />
 
   <ProviderHealthPanel {providers} bind:windowMinutes />
+{/if}
 
+{#if readiness.data && access.globalScope}
   <section class="section" aria-labelledby="runtime-title">
     <div class="section-heading">
       <div>
