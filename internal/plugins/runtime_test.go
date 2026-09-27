@@ -228,3 +228,17 @@ func TestCallsCarryTheProviderTheyServe(t *testing.T) {
 		}
 	}
 }
+
+// A runtime closed while a Host prepares a plugin, as a process stops, fails
+// the load rather than the process.
+func TestLoadingOnAClosedRuntimeFails(t *testing.T) {
+	t.Parallel()
+	module := fixture(t, "well-behaved")
+	r := newTestRuntime(t, DefaultLimits, nil)
+	if err := r.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Load(t.Context(), module); !errors.Is(err, errClosedRuntime) {
+		t.Fatalf("loading on a closed runtime returned %v", err)
+	}
+}

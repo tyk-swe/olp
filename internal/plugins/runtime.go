@@ -82,6 +82,11 @@ type Runtime struct {
 	engine wazero.Runtime
 	limits Limits
 	log    *slog.Logger
+	// mu orders loading modules before closing the runtime: wazero does not
+	// guard compiling against a runtime closed meanwhile, such as by a
+	// process stopping while a Host prepares a plugin.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewRuntime starts a runtime whose plugin calls run on engine, stay within
@@ -117,8 +122,17 @@ func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Log
 	return r, nil
 }
 
-// Close releases the runtime and every module compiled in it.
-func (r *Runtime) Close(ctx context.Context) error { return r.engine.Close(ctx) }
+// Close releases the runtime and every module compiled in it, once loads under
+// way end. Loading fails afterwards.
+func (r *Runtime) Close(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	return r.engine.Close(ctx)
+}
+
+// errClosedRuntime fails loading a module on a runtime that was closed.
+var errClosedRuntime = errors.New("the plugin runtime is closed")
 
 // Module is a compiled plugin module built for the ABI this runtime serves.
 // Its calls share a pool of instances, which Limits.Instances bounds: a call
@@ -147,6 +161,11 @@ type instance struct {
 // Load compiles a module and checks that it is a provider plugin built for
 // this ABI version.
 func (r *Runtime) Load(ctx context.Context, module []byte) (*Module, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed {
+		return nil, errClosedRuntime
+	}
 	sum := sha256.Sum256(module)
 	declared, err := declare(module)
 	if err != nil {
