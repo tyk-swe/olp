@@ -66,7 +66,8 @@ _Avoid_: Trusted plugin (every plugin is operator-chosen; confinement differs).
 
 **Hosting adaptation**:
 A provider plugin's declared placement of a built-in dialect at an upstream:
-its address, headers, envelope and declared rewrites of the dialect body.
+its address, headers, envelope and declared rewrites of the dialect body, with
+the upstream's model discovery and failure classification.
 
 **Grant enrollment**:
 The operator's authorization of an upstream account through a provider plugin,

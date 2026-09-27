@@ -71,7 +71,9 @@ upstream call path, including media workers and provider probes, reports its
 evidence to the `internal/upstream` classifier: whether the request reached the
 upstream, the status and error it stated, and any interruption or transport
 failure. The classifier derives the failure class and upstream acceptance, so a
-transport other than net/http is classified the same way. Protocol
+transport other than net/http is classified the same way. A plugin profile's
+declared classification rules, which the connector config carries, take
+precedence over the built-in rules for the failures they match. Protocol
 codecs live in `internal/protocols/`. Independent key-authority refresh prevents
 a failed activation from retaining revoked access.
 

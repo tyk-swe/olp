@@ -51,7 +51,7 @@ const pluginSpec: ProviderKindCapability = {
       credential: 'required'
     }
   ],
-  fields: [{ field: 'model', label: 'Probe model', required: true }],
+  fields: [],
   presets: []
 };
 
@@ -254,6 +254,51 @@ describe('provider wizard with a plugin profile', () => {
     });
   });
 
+  it('discovers the models of a profile that declares discovery, without a probe model', async () => {
+    client.setQueryData(
+      ['provider-profiles'],
+      [openAiChat, { ...referenceChat, model_discovery: true }]
+    );
+    const saved: Provider = { ...pluginProvider, id: 'provider-new' };
+    vi.mocked(createProvider).mockResolvedValue(saved.id);
+    vi.mocked(listProviderModelPage).mockResolvedValue({
+      provider: saved,
+      items: [],
+      nextCursor: null
+    });
+    vi.mocked(probeProvider).mockResolvedValue({
+      succeeded: true,
+      detail: 'Reached the upstream; 3 models listed.',
+      probe_type: 'models',
+      discovered_models: 3
+    } as ProviderProbe);
+    render();
+    await settle();
+
+    choosePluginKind();
+    choose(
+      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
+      `reference-chat@${digest}`
+    );
+    expect(host.querySelector('label[for="initial-model"]')?.textContent).toBe(
+      'Seed model (optional)'
+    );
+    type('#provider-name', 'Reference upstream');
+    type('#provider-secret', 'reference-secret');
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(createProvider).toHaveBeenCalledOnce());
+    expect(vi.mocked(createProvider).mock.calls[0]![0].model).toBeUndefined();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(
+        host.querySelector('#discovery-heading')?.textContent?.trim()
+      ).toBe('Discover upstream models');
+    });
+    expect(host.querySelector('#manual-models-wizard')).toBeNull();
+  });
+
   it('points to the Plugins page when no approved plugin offers a profile', async () => {
     client.setQueryData(['provider-profiles'], [openAiChat]);
     render();
@@ -304,5 +349,28 @@ describe('provider detail', () => {
     expect(host.querySelector('#detail-endpoint')).toBeNull();
     expect(host.querySelector('#detail-profile')).toBeNull();
     expect(host.textContent).toContain('Recheck declared models');
+  });
+
+  it('runs upstream discovery for a plugin profile that declares it', async () => {
+    client.setQueryData(
+      ['provider-profiles'],
+      [openAiChat, { ...referenceChat, model_discovery: true }]
+    );
+    client.setQueryData(providerKeys.models(pluginProvider.id), {
+      provider: pluginProvider,
+      items: [],
+      nextCursor: null
+    });
+    vi.mocked(listProviderModelPage).mockResolvedValue({
+      provider: pluginProvider,
+      items: [],
+      nextCursor: null
+    });
+    render(pluginProvider.id);
+    await settle();
+
+    expect(host.textContent).toContain('Run upstream discovery');
+    expect(host.textContent).not.toContain('Recheck declared models');
+    expect(host.querySelector('#manual-models-detail')).toBeNull();
   });
 });

@@ -55,6 +55,29 @@ export function pluginProfileGroups(
   return [...groups.values()];
 }
 
+/**
+ * Whether operators declare a provider's models instead of discovering them:
+ * a plugin provider whose profile declares no model discovery. A profile the
+ * catalogue does not (yet) list counts as declaring none.
+ */
+export function declaresModels(
+  configuration: {
+    kind: string;
+    profile_id?: string | null;
+    profile_revision?: string | null;
+  },
+  profiles: readonly ProviderProfile[] | undefined
+): boolean {
+  if (configuration.kind !== 'plugin') return false;
+  const profile = profiles?.find(
+    (candidate) =>
+      candidate.kind === 'plugin' &&
+      candidate.id === configuration.profile_id &&
+      candidate.revision === configuration.profile_revision
+  );
+  return !profile?.model_discovery;
+}
+
 /** The client surface that speaks a generation dialect natively. */
 export function dialectSurface(
   dialect: string | undefined

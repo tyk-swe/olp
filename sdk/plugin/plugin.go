@@ -46,6 +46,15 @@ const (
 	RewriteDelete  = abi.RewriteDelete
 )
 
+// Discovery is an upstream's model listing, which OLP reads.
+type Discovery = abi.Discovery
+
+// Pagination is how an upstream's model listing continues across pages.
+type Pagination = abi.Pagination
+
+// FailureRule classifies the upstream failures it matches.
+type FailureRule = abi.FailureRule
+
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 

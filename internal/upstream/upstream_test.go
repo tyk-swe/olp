@@ -130,6 +130,64 @@ func TestClassifyInBandErrors(t *testing.T) {
 	}
 }
 
+func TestDeclaredClassificationPrecedesTheBuiltInRules(t *testing.T) {
+	declared := Classifier{ContextWindow: true, Declared: []Rule{
+		{Status: 400, Code: "insufficient_quota", Class: RateLimit},
+		{Status: 400, Type: "billing_error", Class: Credential},
+		{Status: 503, Class: ClientError},
+		{Code: "account_suspended", Class: Credential},
+		{Type: "quota_exceeded", Class: RateLimit},
+		{Status: 400, Type: "busy", Class: ServerError},
+		{Code: "context_length_exceeded", Class: ClientError},
+		{Status: 409, Code: "busy", Class: ServerError},
+	}}
+	stated := func(errorType, code string) *openai.UpstreamError {
+		return &openai.UpstreamError{Type: errorType, Code: code, Message: "declared"}
+	}
+	for _, tc := range []struct {
+		name     string
+		evidence Evidence
+		want     Class
+	}{
+		{"declared status and code", Evidence{Reached: true, Status: 400, Error: stated("invalid_request_error", "insufficient_quota")}, RateLimit},
+		{"declared status and type", Evidence{Reached: true, Status: 400, Error: stated("billing_error", "")}, Credential},
+		{"declared status alone", Evidence{Reached: true, Status: 503}, ClientError},
+		{"code declared for any status", Evidence{Reached: true, Status: 429, Error: stated("", "account_suspended")}, Credential},
+		{"code declared for in-band errors too", Evidence{Reached: true, Accepted: true, Error: stated("", "account_suspended")}, Credential},
+		{"declared in-band type", Evidence{Reached: true, Accepted: true, Error: stated("quota_exceeded", "")}, RateLimit},
+		{"declared in-band type after commit", Evidence{Reached: true, Accepted: true, Committed: true, Error: stated("quota_exceeded", "")}, RateLimit},
+		{"a status rule never matches in-band", Evidence{Reached: true, Accepted: true, Error: stated("busy", "")}, ServerError},
+		{"declaration outranks a context rejection", Evidence{Reached: true, Status: 400, Error: stated("", "context_length_exceeded")}, ClientError},
+		{"values match exactly", Evidence{Reached: true, Status: 400, Error: stated("invalid_request_error", "Insufficient_Quota")}, ClientError},
+		{"undeclared code of a declared status", Evidence{Reached: true, Status: 400, Error: stated("invalid_request_error", "invalid_value")}, ClientError},
+		{"undeclared status", Evidence{Reached: true, Status: 401}, Credential},
+		{"undeclared in-band error", Evidence{Reached: true, Accepted: true, Error: stated("rate_limit_error", "")}, RateLimit},
+		{"a code rule needs a stated error", Evidence{Reached: true, Status: 409}, ClientError},
+		{"interruption outranks a declaration", Evidence{Reached: true, Status: 503, Interrupted: context.Canceled}, Cancelled},
+		{"transport failures state nothing", Evidence{Reached: true, Err: errors.New("connection reset")}, Connect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := declared.Classify(tc.evidence); got.Class != tc.want || got.Acceptance != tc.evidence.Acceptance() {
+				t.Fatalf("outcome %+v, want class %q", got, tc.want)
+			}
+		})
+	}
+	first := Classifier{Declared: []Rule{{Status: 400, Code: "busy", Class: Credential}, {Status: 400, Class: RateLimit}}}
+	if got := first.Classify(Evidence{Status: 400, Error: stated("", "busy")}).Class; got != Credential {
+		t.Fatalf("the first matching rule did not decide: %q", got)
+	}
+	if got := first.Classify(Evidence{Status: 400, Error: stated("", "other")}).Class; got != RateLimit {
+		t.Fatalf("a later matching rule did not decide: %q", got)
+	}
+	once := Classifier{AtMostOnce: true, Declared: []Rule{{Status: 400, Class: ServerError}, {Type: "busy", Class: ServerError}}}
+	if got := once.Classify(Evidence{Reached: true, Status: 400}); got != (Outcome{ServerError, Terminal}) {
+		t.Fatalf("a retryable rejection the upstream settled %+v", got)
+	}
+	if got := once.Classify(Evidence{Reached: true, Accepted: true, Error: stated("busy", "")}); got != (Outcome{Ambiguous, Accepted}) {
+		t.Fatalf("a retryable in-band failure of accepted work %+v", got)
+	}
+}
+
 func TestClassifyInterruptionsAndTransportFailures(t *testing.T) {
 	malformed := &openai.ProtocolError{Detail: "malformed event"}
 	for _, tc := range []struct {

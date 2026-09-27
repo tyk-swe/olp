@@ -109,8 +109,9 @@ type Profile struct {
 }
 
 // Hosting is a profile's hosting adaptation: where and how the dialect's
-// requests reach the upstream. It is a declaration OLP runs itself, so no
-// plugin code runs per request.
+// requests reach the upstream, how the upstream lists its models and how its
+// failures are classified. It is a declaration OLP runs itself, so no plugin
+// code runs per request.
 //
 // Header and query parameter values are templates. The placeholder
 // {credential} stands for the provider's static credential, such as
@@ -134,6 +135,13 @@ type Hosting struct {
 	// Rewrites change the dialect's request body, in order, before the
 	// envelope wraps it.
 	Rewrites []Rewrite `json:"rewrites,omitempty"`
+	// Discovery declares how the upstream lists its models. Without it,
+	// operators declare the models of a provider using the profile.
+	Discovery *Discovery `json:"discovery,omitempty"`
+	// Classification declares the failure class of upstream failures, in
+	// order: the first rule that matches a failure decides its class. OLP's
+	// built-in rules classify every failure no rule matches.
+	Classification []FailureRule `json:"classification,omitempty"`
 }
 
 // Envelope is the upstream's own JSON object around the dialect's bodies, such
@@ -185,6 +193,72 @@ const CredentialPlaceholder = "{credential}"
 // ModelPlaceholder is the template placeholder for the upstream model a
 // request is for.
 const ModelPlaceholder = "{model}"
+
+// Discovery is an upstream's model listing: OLP GETs Path, placed like every
+// request, and reads a JSON object whose Models field holds an array of model
+// objects, each with its ID in its ID field. Field names are top-level names,
+// such as data and id.
+type Discovery struct {
+	// Path is the listing's path, which extends the address, such as /models.
+	Path string `json:"path"`
+	// Models names the listing's field that holds the array of models.
+	Models string `json:"models"`
+	// ID names the field of a model that holds its ID.
+	ID string `json:"id"`
+	// Pagination, when declared, follows a listing across pages.
+	Pagination *Pagination `json:"pagination,omitempty"`
+}
+
+// Pagination is how a listing continues: a page's Cursor field holds the
+// cursor of the next page, which OLP sends back in the Parameter query
+// parameter. A page without a cursor is the last.
+type Pagination struct {
+	// Parameter is the query parameter that carries the cursor, such as
+	// page_token.
+	Parameter string `json:"parameter"`
+	// Cursor names the page's field that holds the next page's cursor, such
+	// as next_page_token.
+	Cursor string `json:"cursor"`
+	// More, when declared, names the page's boolean field that reports
+	// whether another page follows, such as has_more. A page whose More is
+	// not true is then the last, whatever its cursor.
+	More string `json:"more,omitempty"`
+}
+
+// A FailureRule classifies the upstream failures it matches. A failure is an
+// unsuccessful response, with the error its body states, or an error stated
+// in-band, such as a stream's error event. A rule matches a failure when every
+// value it declares matches exactly, and it declares at least one.
+type FailureRule struct {
+	// Status matches an unsuccessful response's HTTP status, from 400 to 599.
+	// A rule with a status never matches an in-band error.
+	Status int `json:"status,omitempty"`
+	// Code matches the code of the error the failure states.
+	Code string `json:"code,omitempty"`
+	// Type matches the type of the error the failure states.
+	Type string `json:"type,omitempty"`
+	// Class is the failure class of the failures the rule matches: one of
+	// the Class constants.
+	Class string `json:"class"`
+}
+
+// Failure classes a FailureRule declares. They govern whether a request fails
+// over to another attempt and what cools down.
+const (
+	// ClassCredential: the upstream refused the credential. The credential
+	// version cools down and the request fails over.
+	ClassCredential = "credential"
+	// ClassRateLimited: the upstream is limiting the credential, such as an
+	// exhausted quota. Its slot cools down, for the upstream's Retry-After
+	// when it sends one, and the request fails over.
+	ClassRateLimited = "rate_limited"
+	// ClassRetryable: another attempt may succeed. The request fails over
+	// unless the upstream may have performed work that must not be repeated.
+	ClassRetryable = "retryable"
+	// ClassTerminal: the request itself was refused. It does not fail over,
+	// and the caller receives the upstream's rejection.
+	ClassTerminal = "terminal"
+)
 
 // LogRecord is the parameter of CapabilityLog.
 type LogRecord struct {

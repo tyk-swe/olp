@@ -29,7 +29,9 @@ built-in dialect's generation operation at the address its plugin declares,
 shares that dialect's revision and semantic headers and query settings, and
 authenticates with a static credential its declared headers and query
 parameters place. A plugin profile that also envelopes or rewrites the dialect's
-bodies is not `strict`.
+bodies is not `strict`. Its entry reports `model_discovery: true` when the
+plugin declares the upstream's model listing; otherwise operators declare its
+providers' models.
 
 | Profile | Native generation address / contract |
 | --- | --- |

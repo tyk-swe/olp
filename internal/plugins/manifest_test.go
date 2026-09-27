@@ -16,7 +16,11 @@ func validManifest() abi.Manifest {
 		Version: "1.2.0+build.7",
 		Origins: []string{"https://api.acme.example", "http://127.0.0.1:8080", "https://[::1]:8443"},
 		Profiles: []abi.Profile{
-			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}}},
+			{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{
+				Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
+				Discovery:      &abi.Discovery{Path: "/models", Models: "data", ID: "id"},
+				Classification: []abi.FailureRule{{Status: 400, Code: "insufficient_quota", Class: abi.ClassRateLimited}},
+			}},
 			{ID: "acme-messages", Label: "Acme Messages", Dialect: "anthropic-messages", Hosting: abi.Hosting{Address: "http://127.0.0.1:8080", Query: map[string]string{"key": "{credential}"}}},
 		},
 	}
@@ -73,6 +77,10 @@ func TestManifestValidation(t *testing.T) {
 		"bound rewrite": {func(m *abi.Manifest) {
 			m.Profiles[1].Hosting.Rewrites = []abi.Rewrite{{Op: "set", Path: "/metadata/user_id", Value: json.RawMessage(`"olp"`)}, {Op: "delete", Path: "/stream"}}
 		}, CodeManifestInvalid, "manifest.profiles[1].hosting.rewrites[1].path"},
+		"listing path": {func(m *abi.Manifest) { m.Profiles[0].Hosting.Discovery.Path = "https://other.example/models" }, CodeManifestInvalid, "manifest.profiles[0].hosting.discovery.path"},
+		"unknown failure class": {func(m *abi.Manifest) {
+			m.Profiles[0].Hosting.Classification[0].Class = "quota"
+		}, CodeManifestInvalid, "manifest.profiles[0].hosting.classification[0].class"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
@@ -93,11 +101,14 @@ func TestManifestDecodingRefusesUnknownDeclarations(t *testing.T) {
 	if decoded, err := decodeManifest(data); err != nil || !reflect.DeepEqual(decoded, declared) {
 		t.Fatalf("decoded %+v: %v", decoded, err)
 	}
-	extended := strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1)
-	_, err = decodeManifest([]byte(extended))
-	wantError(t, err, CodeManifestInvalid, "manifest")
-	_, err = decodeManifest([]byte(strings.Replace(string(data), `"response":"response"`, `"response":"response","events":"response"`, 1)))
-	wantError(t, err, CodeManifestInvalid, "manifest")
+	for _, extended := range []string{
+		strings.Replace(string(data), `"profiles":`, `"signing":true,"profiles":`, 1),
+		strings.Replace(string(data), `"response":"response"`, `"response":"response","events":"response"`, 1),
+		strings.Replace(string(data), `"class":`, `"retry_after":5,"class":`, 1),
+	} {
+		_, err = decodeManifest([]byte(extended))
+		wantError(t, err, CodeManifestInvalid, "manifest")
+	}
 	_, err = decodeManifest([]byte(`{"name":"` + strings.Repeat("a", maxManifestBytes) + `"}`))
 	wantError(t, err, CodeManifestInvalid, "manifest")
 }

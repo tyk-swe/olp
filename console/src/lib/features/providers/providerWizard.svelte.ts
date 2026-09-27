@@ -30,6 +30,7 @@ import {
   type CapabilityCertification
 } from '$lib/features/providers/models';
 import { rotateProviderCredential } from '$lib/features/providers/credentials';
+import type { ProviderProfile } from '$lib/features/providers/profiles';
 import {
   authOptionsFor,
   buildCreateProviderInput,
@@ -162,7 +163,11 @@ export class ProviderWizardState {
     const issue = validateProviderDraft(current, spec, {
       // The first pass stored a write-only credential; the field is cleared
       // afterwards and must not be demanded again on a re-save.
-      credentialAlreadyStored: Boolean(existing)
+      credentialAlreadyStored: Boolean(existing),
+      // The connection form loads the profile catalogue.
+      profiles: this.queryClient.getQueryData<ProviderProfile[]>([
+        'provider-profiles'
+      ])
     });
     if (issue) {
       this.errorMessage = issue;

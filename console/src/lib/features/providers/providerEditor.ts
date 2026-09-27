@@ -12,7 +12,7 @@ import type {
   ProviderKindCapability,
   ProviderPreset
 } from '$lib/features/providers/models';
-import type { ProviderProfile } from './profiles';
+import { declaresModels, type ProviderProfile } from './profiles';
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {
@@ -265,13 +265,26 @@ const UNLISTED_VENDORS = ['voyage', 'perplexity', 'cohere'];
 /**
  * Whether creating the draft needs a probe model: the connection test
  * certifies a declared model when the upstream publishes no model list, as
- * for kinds that require one, such as plugin providers, and some reviewed
- * vendors.
+ * for kinds that require one, some reviewed vendors, and plugin profiles that
+ * declare no model discovery.
  */
 export function requiresProbeModel(
-  draft: Pick<ProviderDraft, 'presetId'>,
-  spec: ProviderKindCapability
+  draft: Pick<
+    ProviderDraft,
+    'kind' | 'presetId' | 'profileId' | 'profileRevision'
+  >,
+  spec: ProviderKindCapability,
+  profiles?: readonly ProviderProfile[]
 ): boolean {
+  if (draft.kind === 'plugin')
+    return declaresModels(
+      {
+        kind: draft.kind,
+        profile_id: draft.profileId,
+        profile_revision: draft.profileRevision
+      },
+      profiles
+    );
   return requiresSeedModel(spec) || UNLISTED_VENDORS.includes(draft.presetId);
 }
 
@@ -312,7 +325,11 @@ export function hasApiVersion(spec: ProviderKindCapability): boolean {
 export function validateProviderDraft(
   draft: ProviderDraft,
   spec: ProviderKindCapability,
-  options: { credentialAlreadyStored?: boolean } = {}
+  options: {
+    credentialAlreadyStored?: boolean;
+    /** The profile catalogue, which says whether a plugin profile discovers models. */
+    profiles?: readonly ProviderProfile[];
+  } = {}
 ): string | null {
   const values: Record<string, string> = {
     endpoint: draft.endpoint,
@@ -338,7 +355,7 @@ export function validateProviderDraft(
     missing.unshift('plugin profile');
   if (!draft.name.trim()) missing.unshift('name');
   if (
-    requiresProbeModel(draft, spec) &&
+    requiresProbeModel(draft, spec, options.profiles) &&
     !requiresSeedModel(spec) &&
     !draft.model.trim()
   )

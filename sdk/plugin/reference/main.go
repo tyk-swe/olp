@@ -1,6 +1,7 @@
 // Command reference is the reference provider plugin built on the Go SDK. It
 // declares two profiles at a fictional upstream, and the origins that upstream
-// uses: one serves the OpenAI Chat Completions dialect, and one serves Gemini
+// uses: one serves the OpenAI Chat Completions dialect, with the upstream's
+// model listing and failure classification, and one serves Gemini
 // generateContent inside the upstream's own envelope.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
@@ -11,6 +12,7 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 // upstream is the fictional upstream's API base URL. Tests link the plugin
@@ -40,7 +42,16 @@ func (reference) Manifest() plugin.Manifest {
 		Origins:     []string{origin, "https://login.example.com"},
 		Profiles: []plugin.Profile{{
 			ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat",
-			Hosting: plugin.Hosting{Address: upstream, Headers: headers},
+			Hosting: plugin.Hosting{
+				Address: upstream,
+				Headers: headers,
+				// It lists its models a page at a time.
+				Discovery: &plugin.Discovery{Path: "/models", Models: "data", ID: "id",
+					Pagination: &plugin.Pagination{Parameter: "page_token", Cursor: "next_page_token"}},
+				// It answers an exhausted quota with its own code on a 400,
+				// which is a rate limit rather than a rejected request.
+				Classification: []plugin.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
+			},
 		}, {
 			ID: "reference-gemini", Label: "Reference Gemini, enveloped", Dialect: "gemini-generate-content",
 			// The upstream also serves Gemini generateContent, wrapping each

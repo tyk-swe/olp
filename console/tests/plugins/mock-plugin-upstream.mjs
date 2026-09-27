@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
 
 // The upstream the reference plugin's profile places requests at when a
-// journey links it against this server. It speaks OpenAI Chat Completions but
-// authenticates the way the reference plugin declares: a token in the
+// journey links it against this server. It speaks OpenAI Chat Completions and
+// lists its model on two pages, the way the reference plugin declares
+// discovery, and authenticates the way it declares: a token in the
 // Authorization header and a client header. It records every request so the
 // journey can prove the hosting adaptation placed both.
 const host = '127.0.0.1';
@@ -115,6 +116,15 @@ const server = createServer(async (request, response) => {
       'invalid_api_key',
       'incorrect provider credential'
     );
+  }
+  if (method === 'GET' && url.pathname === '/v1/models') {
+    if (url.searchParams.get('page_token') === 'page-2')
+      return json(response, 200, { object: 'list', data: [] });
+    return json(response, 200, {
+      object: 'list',
+      data: [{ id: model, object: 'model' }],
+      next_page_token: 'page-2'
+    });
   }
   if (method !== 'POST' || url.pathname !== '/v1/chat/completions') {
     unexpected.push(`${method} ${url.pathname}`);

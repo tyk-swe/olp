@@ -4299,11 +4299,22 @@
       },
       "PluginHosting": {
         "additionalProperties": false,
-        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.",
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, and any envelope and rewrites of the dialect's bodies. Header and query values are templates in which {credential} stands for the provider's static credential. A profile with an envelope or rewrites serves transformed routes only.",
         "properties": {
           "address": {
             "description": "Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.",
             "type": "string"
+          },
+          "classification": {
+            "description": "Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.",
+            "items": {
+              "$ref": "#/components/schemas/PluginFailureRule"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "discovery": {
+            "$ref": "#/components/schemas/PluginDiscovery"
           },
           "envelope": {
             "$ref": "#/components/schemas/PluginEnvelope"
@@ -4390,6 +4401,103 @@
         "required": [
           "op",
           "path"
+        ],
+        "type": "object"
+      },
+      "PluginDiscovery": {
+        "additionalProperties": false,
+        "description": "The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.",
+        "properties": {
+          "id": {
+            "description": "The field of each model object that holds its ID.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "models": {
+            "description": "The top-level field of the listing that holds the array of model objects.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PluginPagination"
+          },
+          "path": {
+            "description": "The listing's path, which extends the address, such as /models.",
+            "maxLength": 512,
+            "pattern": "^(/[A-Za-z0-9._~!$'()*+,;=:@-]+)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "models",
+          "id"
+        ],
+        "type": "object"
+      },
+      "PluginFailureRule": {
+        "additionalProperties": false,
+        "description": "Classifies the upstream failures it matches: unsuccessful responses by status and the error their body states, and errors stated in-band, such as a stream's error event, by code and type. It matches when every value it declares matches exactly, and declares at least one.",
+        "properties": {
+          "class": {
+            "description": "credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.",
+            "enum": [
+              "credential",
+              "rate_limited",
+              "retryable",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "code": {
+            "description": "The stated error's code.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "status": {
+            "description": "The unsuccessful response's HTTP status. A rule with a status never matches an in-band error.",
+            "maximum": 599,
+            "minimum": 400,
+            "type": "integer"
+          },
+          "type": {
+            "description": "The stated error's type.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "class"
+        ],
+        "type": "object"
+      },
+      "PluginPagination": {
+        "additionalProperties": false,
+        "description": "How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.",
+        "properties": {
+          "cursor": {
+            "description": "The top-level field of a page that holds the next page's cursor.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "more": {
+            "description": "The top-level boolean field of a page that reports whether another page follows.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The query parameter that carries the cursor.",
+            "pattern": "^[A-Za-z0-9._~-]{1,128}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter",
+          "cursor"
         ],
         "type": "object"
       },
@@ -6227,6 +6335,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "model_discovery": {
+            "description": "Whether a plugin profile declares the upstream's model listing. Without it, operators declare the models of a provider using the profile. A built-in profile's provider kind decides its discovery, and it omits this field.",
+            "type": "boolean"
           },
           "plugin": {
             "$ref": "#/components/schemas/ProviderProfilePlugin"

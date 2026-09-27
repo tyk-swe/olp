@@ -73,6 +73,8 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		Origins:     []string{"https://api.example.com", "https://login.example.com"},
 		Profiles: []abi.Profile{{ID: "reference-chat", Label: "Reference Chat Completions", Dialect: "openai-chat", Hosting: abi.Hosting{
 			Address: "https://api.example.com/v1", Headers: headers,
+			Discovery:      &abi.Discovery{Path: "/models", Models: "data", ID: "id", Pagination: &abi.Pagination{Parameter: "page_token", Cursor: "next_page_token"}},
+			Classification: []abi.FailureRule{{Status: 400, Code: "quota_exhausted", Class: abi.ClassRateLimited}},
 		}}, {ID: "reference-gemini", Label: "Reference Gemini, enveloped", Dialect: "gemini-generate-content", Hosting: abi.Hosting{
 			Address: "https://api.example.com/enveloped/v1beta", Headers: headers,
 			Envelope: &abi.Envelope{Request: "request", Fields: map[string]string{"model": "{model}"}, Response: "response"},

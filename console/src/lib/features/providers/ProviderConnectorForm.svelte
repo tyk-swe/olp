@@ -7,6 +7,7 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
   import { listProviderVendors } from '$lib/features/providers/api';
+  import { listProviderProfiles } from '$lib/features/providers/profiles';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
     emptyProviderOptions,
@@ -68,7 +69,13 @@
   const credentialRequired = $derived(
     requiresCredential(selectedSpec, draft.authMode)
   );
-  const seedModelRequired = $derived(requiresProbeModel(draft, selectedSpec));
+  const profiles = createQuery(() => ({
+    queryKey: ['provider-profiles'],
+    queryFn: ({ signal }) => listProviderProfiles(signal)
+  }));
+  const seedModelRequired = $derived(
+    requiresProbeModel(draft, selectedSpec, profiles.data)
+  );
   const plugin = $derived(draft.kind === 'plugin');
   const selectedPreset = $derived(
     selectedSpec.presets.find((preset) => preset.id === draft.presetId)
@@ -222,8 +229,8 @@
           : 'gpt-5.4'}
         required={seedModelRequired}
       /><small id="initial-model-help"
-        >{plugin
-          ? 'Plugin providers have no model discovery: the connection test certifies this declared model.'
+        >{plugin && seedModelRequired
+          ? 'This plugin profile declares no model discovery: the connection test certifies this declared model.'
           : seedModelRequired
             ? 'This provider needs an explicit model to test credentials.'
             : 'Used for the initial connector probe; upstream discovery follows.'}</small
