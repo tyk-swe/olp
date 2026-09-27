@@ -105,6 +105,13 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 					get(p.PublicOrigin, "/api/v1/openapi.json", 404)
 					get(p.PublicOrigin, "/", 404)
 				}
+				// Every inference prefix is reserved from the console, whether
+				// or not this process serves inference.
+				for _, path := range []string{"/native/openai/models/x", "/bedrock/model/x/converse", "/ws/other", "/gemini/unknown"} {
+					if body := get(p.PublicOrigin, path, 404); strings.Contains(string(body), "<html") {
+						t.Fatalf("%s reached the console: %s", path, body)
+					}
+				}
 				if mode == "control" {
 					get(p.PublicOrigin, "/v1/models", 404)
 				} else {

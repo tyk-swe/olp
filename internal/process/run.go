@@ -31,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -103,21 +104,21 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		public.Handle("/", assets)
 		public.Handle("/health", assets)
 	}
-	// These prefixes must never fall through to the SPA, in any public mode.
-	// When inference is enabled the gateway registers its own, more specific
-	// handlers under /v1/, /anthropic/, and /gemini/; anything left over is
-	// answered honestly instead of reaching the console.
-	for _, prefix := range []string{"/api/", "/v1/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
+	// Reserved prefixes must never fall through to the SPA, in any public
+	// mode. When inference is enabled the gateway answers its catch-all
+	// prefixes itself and registers more specific handlers under the others;
+	// anything left over is answered honestly instead of reaching the console.
+	for _, reserved := range surface.Reserved() {
 		handler := http.HandlerFunc(http.NotFound)
 		if c.Mode.Inference() {
-			switch prefix {
-			case "/v1/":
+			if reserved.GatewayCatchAll {
 				continue
-			case "/anthropic/", "/gemini/":
+			}
+			if reserved.Surface.Inference {
 				handler = management.NotFound
 			}
 		}
-		public.Handle(prefix, handler)
+		public.Handle(reserved.Path, handler)
 	}
 	startup, cancelStartup := context.WithTimeout(ctx, c.StartupTimeout)
 	defer cancelStartup()

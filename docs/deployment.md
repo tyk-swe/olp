@@ -89,7 +89,7 @@ disconnects:
 
 | Prefix | Service |
 | --- | --- |
-| `/v1`, `/v1beta`, `/anthropic`, `/gemini` | gateway |
+| `/v1`, `/v1beta`, `/native`, `/anthropic`, `/gemini`, `/bedrock`, `/ws` | gateway |
 | `/api`, `/`, and console deep links | control |
 
 Example values:
@@ -120,12 +120,13 @@ small installations; MFA for that surface is deferred until a deployment
 requests it. For Gateway API or a mesh, leave chart Ingress disabled and
 reproduce the same routing table. Disable buffering for SSE and do not lower
 request-size or idle-timeout bounds. Enable WebSocket upgrades for
-`/v1/realtime` when realtime is used.
+`/v1/realtime` and the Gemini Live paths under `/gemini/ws` and `/ws` when they
+are used.
 
-The checked-in chart Ingress routes the prefixes above but does not include
-`/bedrock`. Add an edge route for `/bedrock` to the gateway service before using
-native Bedrock clients. Vite also lacks this prefix and WebSocket proxying; use
-the Go listener directly for those local clients.
+The checked-in chart Ingress routes exactly these prefixes, which
+`internal/surface` also reserves from the console and admits from the
+inference pool. Vite does not proxy WebSockets; use the Go listener directly
+for local realtime and Gemini Live clients.
 
 ## Observability and capacity
 

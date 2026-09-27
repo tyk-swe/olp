@@ -28,6 +28,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |
 | Configuration, connections, startup, shutdown | `internal/config/`, `internal/process/`, `internal/database/` |
 | HTTP middleware, development origin, body limits | `internal/process/` |
+| Public path surfaces: admission pools, console-reserved prefixes, edge routes | `internal/surface/` |
 | Outbound networking and secrets | `internal/egress/`, `internal/secrets/` |
 | Metrics, traces, readiness, worker health | `internal/observability/` |
 

@@ -7,20 +7,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/surface"
 )
 
+// requestSurface names the inference API a gateway request speaks.
 func requestSurface(r *http.Request) string {
-	if strings.HasPrefix(r.URL.Path, "/bedrock/") {
-		return "bedrock"
-	}
-	if strings.HasPrefix(r.URL.Path, "/anthropic/") {
-		return "anthropic"
-	}
-	if strings.HasPrefix(r.URL.Path, "/gemini/") {
-		return "gemini"
-	}
-	if strings.HasPrefix(r.URL.Path, "/ws/google.ai.generativelanguage.") {
-		return "gemini"
+	if classified := surface.Of(r.URL.Path); classified.Inference {
+		return classified.Name
 	}
 	return "openai"
 }
