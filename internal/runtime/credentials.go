@@ -56,11 +56,15 @@ func (m *Manager) Eligibility(credentialID string) Eligibility {
 }
 
 // Secret serves an eligible credential version from the release that
-// installed it. A version the release does not name, such as a historical
-// revision's, is read from the secret authority.
+// installed it, or with its grant's current access token when it has a grant.
+// A version the release does not name, such as a historical revision's, is
+// read from the secret authority.
 func (m *Manager) Secret(ctx context.Context, release *Release, credentialID string) ([]byte, error) {
 	if err := m.eligible(credentialID); err != nil {
 		return nil, err
+	}
+	if secret, ok := m.grantSecret(credentialID); ok {
+		return secret, nil
 	}
 	if secret, ok := release.Credential(credentialID); ok {
 		return secret, nil

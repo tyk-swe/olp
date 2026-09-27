@@ -149,6 +149,45 @@ func TestServeRunsGrantEnrollmentSteps(t *testing.T) {
 	}
 }
 
+// refresher is a plugin whose grants carry a rotating refresh token.
+type refresher struct{ enroller }
+
+// RefreshGrant rotates the refresh token for the provider's account, whose
+// facts the grant keeps.
+func (refresher) RefreshGrant(ctx context.Context, refresh GrantRefresh) (Grant, error) {
+	provider, ok := ProviderOf(ctx)
+	switch {
+	case !ok:
+		return Grant{}, errors.New("the call serves no provider")
+	case refresh.RefreshToken != "rt-1":
+		return Grant{}, &Error{Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"}
+	}
+	return Grant{AccessToken: "at-2 " + provider.Options["account"] + " " + refresh.Facts["account"], RefreshToken: "rt-2", ExpiresIn: 3600}, nil
+}
+
+// A GrantRefresher refreshes the grants of the provider it serves, and
+// reports a grant the upstream no longer refreshes as invalid_grant.
+func TestServeRefreshesGrants(t *testing.T) {
+	response := serveWith(t, refresher{}, `{"method":"grant_refresh","params":{"profile":"acme-account","refresh_token":"rt-1","facts":{"account":"7"}},"provider":{"profile":"acme-account","options":{"account":"acme"}}}`)
+	var grant Grant
+	if response.Error != nil || json.Unmarshal(response.Result, &grant) != nil || grant.AccessToken != "at-2 acme 7" || grant.RefreshToken != "rt-2" || grant.ExpiresIn != 3600 {
+		t.Fatalf("grant_refresh response %+v", response)
+	}
+	for request, want := range map[string]abi.Error{
+		`{"method":"grant_refresh","params":{"refresh_token":"rt-1"}}`:                                       {Code: abi.CodeInternal, Message: "the call serves no provider"},
+		`{"method":"grant_refresh","params":{"refresh_token":"rt-0"},"provider":{"profile":"acme-account"}}`: {Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"},
+		`{"method":"grant_refresh","params":{"refresh_token":7}}`:                                            {Code: abi.CodeInvalidRequest, Message: "A grant_refresh call carries the grant to refresh."},
+	} {
+		if response := serveWith(t, refresher{}, request); response.Error == nil || *response.Error != want {
+			t.Errorf("%s: %+v", request, response.Error)
+		}
+	}
+	// A plugin whose grants carry no refresh token refreshes none.
+	if response := serveWith(t, enroller{}, `{"method":"grant_refresh","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
+		t.Fatalf("a plugin without grant refresh answered %+v", response)
+	}
+}
+
 // A plugin can't declare a profile that authenticates with a grant without a
 // GrantEnroller: it reports no manifest, so OLP never installs it.
 func TestServeRefusesAGrantProfileWithoutAGrantEnroller(t *testing.T) {

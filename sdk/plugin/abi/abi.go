@@ -65,6 +65,12 @@ const (
 	// what the operator pasted back is exchanged for, on behalf of the
 	// enrolling provider (Request.Provider). It may use CapabilityHTTP.
 	MethodGrantExchange = "grant_exchange"
+	// MethodGrantRefresh takes a GrantRefresh and returns the Grant it
+	// refreshes to. OLP's workers call it ahead of the grant's access token's
+	// expiry, and early when the upstream refused the access token, on behalf
+	// of the provider the grant's credential version belongs to
+	// (Request.Provider). It may use CapabilityHTTP.
+	MethodGrantRefresh = "grant_refresh"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -73,8 +79,9 @@ const (
 	// CapabilityLog takes a LogRecord and returns no result.
 	CapabilityLog = "log"
 	// CapabilityHTTP takes an HTTPRequest and returns its HTTPResponse. OLP
-	// grants it to grant enrollment steps, and sends the request only to the
-	// plugin's approved origins, over the provider's network path.
+	// grants it to grant enrollment steps and grant refresh, and sends the
+	// request only to the plugin's approved origins, over the provider's
+	// network path.
 	CapabilityHTTP = "http"
 )
 
@@ -92,6 +99,11 @@ const (
 	// CodeHTTPFailed: OLP could not complete an HTTP request, such as one
 	// the egress policy refuses or one that timed out.
 	CodeHTTPFailed = "http_failed"
+	// CodeInvalidGrant: the grant can no longer be refreshed, such as when
+	// the upstream revoked its refresh token or let it expire. OLP stops
+	// refreshing the grant. A refresh failure with any other code is
+	// transient, and OLP retries it.
+	CodeInvalidGrant = "invalid_grant"
 )
 
 // Request is one call, from OLP to a plugin or from a plugin to OLP.
@@ -428,20 +440,34 @@ type GrantExchange struct {
 }
 
 // Grant is rotating upstream authorization a plugin obtained, which OLP holds
-// beneath a new credential version.
+// beneath a new credential version, or what a refresh renewed it to.
 type Grant struct {
 	// AccessToken is what OLP's gateways authenticate requests with.
 	AccessToken string `json:"access_token"`
 	// RefreshToken, if the upstream issued one, renews the access token.
-	// Gateways never receive it.
+	// Gateways never receive it. A refresh leaves it empty to keep the
+	// grant's current refresh token.
 	RefreshToken string `json:"refresh_token,omitempty"`
 	// ExpiresIn is how many seconds the access token lasts, or 0 when the
 	// upstream did not say.
 	ExpiresIn int64 `json:"expires_in,omitempty"`
 	// Principal identifies the upstream account the grant authorizes, such as
-	// its user ID: the observed principal.
+	// its user ID: the observed principal. A refresh that does not observe
+	// the principal leaves it empty.
 	Principal string `json:"principal"`
-	// Facts holds a value for each grant fact the profile declares.
+	// Facts holds a value for each grant fact the profile declares. A
+	// refresh may leave them out: the grant keeps the facts its enrollment
+	// reported.
+	Facts map[string]string `json:"facts,omitempty"`
+}
+
+// GrantRefresh is the parameter of MethodGrantRefresh.
+type GrantRefresh struct {
+	// Profile is the ID of the profile the grant was enrolled for.
+	Profile string `json:"profile"`
+	// RefreshToken is the grant's current refresh token.
+	RefreshToken string `json:"refresh_token"`
+	// Facts are the grant facts the grant's enrollment reported.
 	Facts map[string]string `json:"facts,omitempty"`
 }
 

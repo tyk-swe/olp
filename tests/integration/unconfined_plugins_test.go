@@ -146,10 +146,11 @@ func TestOwnerPermitsAnUnconfinedPluginThatSignsRequests(t *testing.T) {
 	}
 }
 
-// An unconfined plugin enrolls grants as a confined one does: its grant steps
-// run in its subprocess, and reach its authority through OLP's http
-// capability, which OLP grants to the call each step serves.
-func TestUnconfinedPluginEnrollsAGrant(t *testing.T) {
+// An unconfined plugin enrolls and refreshes grants as a confined one does:
+// its grant steps, and a worker's refresh, run in its subprocess, and reach
+// its authority through OLP's http capability, which OLP grants to the call
+// each serves.
+func TestUnconfinedPluginEnrollsAndRefreshesAGrant(t *testing.T) {
 	base := newAccessHarness(t)
 	owner := base.owner()
 	authority := testutil.NewOAuthServer(t)
@@ -169,5 +170,15 @@ func TestUnconfinedPluginEnrollsAGrant(t *testing.T) {
 	completed := continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
 	if completed["principal"] != "operator@reference.example" || completed["credential_version"] != float64(1) {
 		t.Fatalf("completed %v", completed)
+	}
+
+	credentialID := completed["credential_id"].(string)
+	enrolled := len(authority.Issued())
+	dueNow(t, h, credentialID)
+	if !pass(t, grantRefresher(t, h)) {
+		t.Fatal("the due grant was not refreshed")
+	}
+	if grant := readGrant(t, h, credentialID); grant.generation != 2 || grant.failures != 0 || len(authority.Issued()) != enrolled+2 {
+		t.Fatalf("refreshed grant %+v, issued %d tokens", grant, len(authority.Issued())-enrolled)
 	}
 }

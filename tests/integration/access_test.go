@@ -93,6 +93,9 @@ type accessHarness struct {
 	Runtime   *runtime.Manager
 	Gateway   *gateway.Server
 	Media     *media.Service
+	// UnconfinedDir is the deployment's unconfined plugin directory, which
+	// enables unconfined plugins when set.
+	UnconfinedDir string
 }
 
 func newAccessHarness(t *testing.T) *accessHarness {
@@ -161,6 +164,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	pluginHost := plugins.NewHost(pluginRuntime, unconfined, pool)
 	t.Cleanup(func() { pluginHost.Close(context.Background()) })
 	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost, UnconfinedPlugins: unconfined != nil}, log)
+	rt.GrantRefreshed = gw.GrantRefreshed
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +211,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs}
+	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs, unconfinedDir}
 }
 
 // do performs one management request as the browser and returns the response

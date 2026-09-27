@@ -69,11 +69,8 @@ func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest 
 			return "", 0, err
 		}
 	}
-	var expires *time.Time
-	if grant.ExpiresIn > 0 {
-		expires = new(time.Now().Add(time.Duration(grant.ExpiresIn) * time.Second))
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.provider_grants(credential_id,refresh_token_id,expires_at) VALUES($1,$2,$3)", id, refresh, expires)
+	expires, refreshAt := schedule(time.Now(), grant.ExpiresIn, refresh != nil)
+	_, err = tx.Exec(ctx, "INSERT INTO olp.provider_grants(credential_id,refresh_token_id,expires_at,refresh_at) VALUES($1,$2,$3,$4)", id, refresh, expires, refreshAt)
 	return id, version, err
 }
 
@@ -81,14 +78,10 @@ func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest 
 // hold and place, and gives it an empty fact set when the profile declares
 // none.
 func validate(declared *abi.GrantAuthentication, grant *abi.Grant) error {
-	switch {
-	case grant.AccessToken == "" || len(grant.AccessToken) > maxToken || strings.ContainsAny(grant.AccessToken, "\r\n\x00"):
-		return fmt.Errorf("its access token is empty, exceeds 16 KiB or can't be sent in a header")
-	case len(grant.RefreshToken) > maxToken:
-		return fmt.Errorf("its refresh token exceeds 16 KiB")
-	case grant.ExpiresIn < 0 || grant.ExpiresIn > maxExpiresIn:
-		return fmt.Errorf("its expiry is not a number of seconds up to ten years")
-	case !text(grant.Principal, 1, maxPrincipal):
+	if err := validateTokens(*grant); err != nil {
+		return err
+	}
+	if !text(grant.Principal, 1, maxPrincipal) {
 		return fmt.Errorf("it names no observed principal of at most %d bytes without control characters", maxPrincipal)
 	}
 	if grant.Facts == nil {
@@ -106,6 +99,20 @@ func validate(declared *abi.GrantAuthentication, grant *abi.Grant) error {
 		if _, reported := grant.Facts[name]; !reported {
 			return fmt.Errorf("it does not report grant fact %q, which the profile declares", name)
 		}
+	}
+	return nil
+}
+
+// validateTokens checks that OLP can hold a grant's tokens and place its
+// access token in a header.
+func validateTokens(grant abi.Grant) error {
+	switch {
+	case grant.AccessToken == "" || len(grant.AccessToken) > maxToken || strings.ContainsAny(grant.AccessToken, "\r\n\x00"):
+		return fmt.Errorf("its access token is empty, exceeds 16 KiB or can't be sent in a header")
+	case len(grant.RefreshToken) > maxToken:
+		return fmt.Errorf("its refresh token exceeds 16 KiB")
+	case grant.ExpiresIn < 0 || grant.ExpiresIn > maxExpiresIn:
+		return fmt.Errorf("its expiry is not a number of seconds up to ten years")
 	}
 	return nil
 }

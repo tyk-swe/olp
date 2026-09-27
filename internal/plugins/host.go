@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -17,12 +18,13 @@ const loadTimeout = 2 * time.Minute
 
 // Host runs the code of installed plugins, by digest, for the processes that
 // serve providers: a plugin profile's signing hook runs once per upstream
-// request. A confined plugin's module is loaded from the database on its
-// first call and kept compiled, with its pool of instances, for the calls
-// after it, so no request compiles anything; an unconfined plugin's process
-// likewise keeps running between calls. A Host keeps the code of the plugins
-// it called most recently, and runs only plugins that Usable admits. It is
-// safe for concurrent use.
+// request, and a grant's refresh in a worker ahead of its access token's
+// expiry. A confined plugin's module is loaded from the database on its first
+// call and kept compiled, with its pool of instances, for the calls after it,
+// so no request compiles anything; an unconfined plugin's process likewise
+// keeps running between calls. A Host keeps the code of the plugins it called
+// most recently, and runs only plugins that Usable admits. It is safe for
+// concurrent use.
 type Host struct {
 	runtime    *Runtime
 	unconfined *Unconfined
@@ -70,6 +72,20 @@ func (h *Host) Sign(ctx context.Context, digest string, provider abi.Provider, r
 func (h *Host) Manifest(ctx context.Context, digest string) (abi.Manifest, error) {
 	installed, err := usable(ctx, h.db, h.unconfined, digest, false)
 	return installed.Manifest, err
+}
+
+// RefreshGrant runs the grant refresh of the plugin with digest for a grant
+// of provider, granting it HTTP to the plugin's approved origins through
+// client, the provider's network path, and redacting secrets from what the
+// plugin logs and reports.
+func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Provider, refresh abi.GrantRefresh, client *http.Client, secrets []string) (abi.Grant, error) {
+	var grant abi.Grant
+	manifest, err := h.Manifest(ctx, digest)
+	if err != nil {
+		return grant, err
+	}
+	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: manifest.Origins, Client: client}}, &grant)
+	return grant, err
 }
 
 // Call serves call, of any ABI method, on the code of the plugin with digest

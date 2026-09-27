@@ -18,7 +18,8 @@ import (
 // PKCE (RFC 7636). It returns the operator's browser to a loopback address
 // where nothing listens, so the operator pastes the callback URL from the
 // address bar into OLP; or, for an operator on another machine, it displays
-// the code as code#state to paste instead.
+// the code as code#state to paste instead. Its refresh tokens rotate: each
+// renews the access token once, and the token response carries the next.
 const (
 	clientID = "olp-reference"
 	redirect = "http://127.0.0.1:1455/callback"
@@ -50,6 +51,21 @@ func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchang
 	if err != nil {
 		return plugin.Grant{}, err
 	}
+	return issue(ctx, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}, upstream)
+}
+
+// RefreshGrant spends the grant's refresh token for the next one. The
+// authority refuses a spent or revoked refresh token with invalid_grant, which
+// OLP takes as the end of the grant. The account keeps the API its grant
+// names unless the token response names another.
+func (reference) RefreshGrant(ctx context.Context, refresh plugin.GrantRefresh) (plugin.Grant, error) {
+	return issue(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh.RefreshToken}, "client_id": {clientID}}, refresh.Facts["api_base"])
+}
+
+// issue asks the authority's token endpoint for a grant, and the authority
+// who the grant authorizes. The grant addresses the API base URL the token
+// response names, else apiBase.
+func issue(ctx context.Context, form url.Values, apiBase string) (plugin.Grant, error) {
 	var issued struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
@@ -57,8 +73,7 @@ func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchang
 		Account      string `json:"account"`
 		APIBase      string `json:"api_base"`
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "code_verifier": {s.Verifier}}
-	if err = call(ctx, "POST", authority+"/token", form, "", &issued); err != nil {
+	if err := call(ctx, "POST", authority+"/token", form, "", &issued); err != nil {
 		return plugin.Grant{}, err
 	}
 	// The token response names the account; who signed in is the
@@ -66,13 +81,14 @@ func (reference) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchang
 	var user struct {
 		Subject string `json:"sub"`
 	}
-	if err = call(ctx, "GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
+	if err := call(ctx, "GET", authority+"/userinfo", nil, issued.AccessToken, &user); err != nil {
 		return plugin.Grant{}, err
 	}
 	// An account on a regional API has its base URL named by the token
-	// response; every other account uses the shared API.
+	// response; a new grant for any other account uses the shared API, and a
+	// refreshed grant keeps its own.
 	if issued.APIBase == "" {
-		issued.APIBase = upstream
+		issued.APIBase = apiBase
 	}
 	return plugin.Grant{
 		AccessToken: issued.AccessToken, RefreshToken: issued.RefreshToken, ExpiresIn: issued.ExpiresIn,

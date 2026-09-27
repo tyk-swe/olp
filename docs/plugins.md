@@ -194,8 +194,9 @@ enum or pattern with `validation_failed`, naming the option as
 `configuration.options.plugin_options.<name>`. An empty value leaves an option
 unset. The hosting adaptation places the values in the address, headers,
 query parameters and envelope fields it declares, and every call OLP makes to
-the plugin on behalf of the provider, such as its signing hook or its
-[grant enrollment](#grant-enrollment) steps, carries them.
+the plugin on behalf of the provider, such as its signing hook, its
+[grant enrollment](#grant-enrollment) steps or its
+[grant refresh](#grant-refresh), carries them.
 
 Options are part of the provider's configuration like any other setting:
 changing them is a draft change whose certification starts over, the revision
@@ -280,10 +281,41 @@ upstream account or the base URL of the API that serves it, which
 token's expiry. The grant itself, its access token and refresh token, is
 encrypted beneath the version and never leaves OLP. Gateways receive only the
 access token, through the credential source; the refresh token is stored under
-a secret purpose that gateway code never reads. The access token serves until it
-expires. A pasted credential can't be staged for a provider that authenticates
-with a grant, and activation refuses a credential slot whose version doesn't
-match the provider's authentication.
+a secret purpose that gateway code never reads. A pasted credential can't be
+staged for a provider that authenticates with a grant, and activation refuses a
+credential slot whose version doesn't match the provider's authentication.
+
+## Grant refresh
+
+Workers refresh each grant that has a refresh token through its plugin, a
+quarter of the access token's lifetime before it expires and at most ten
+minutes before. The refresh runs on behalf of the provider as its active
+revision configures it, or its draft before the first activation, with its
+options and over its network path; its HTTP reaches only the plugin's approved
+origins. A per-grant PostgreSQL advisory lock keeps the refresh to one worker,
+so a refresh token that rotates is spent once however many workers run.
+
+A refresh advances the grant beneath the same credential version: the new
+access token replaces the old one, and the grant's generation advances. The
+version keeps its observed principal and grant facts, so the refreshed token
+serves the same account at the same base URL.
+Gateways compare generations on every authority poll, every five seconds, and
+reload only the access tokens that changed: no release is published and no API
+key is reloaded.
+
+When the upstream refuses a grant's access token, as a credential failure, the
+credential version cools down like any other and the gateway asks workers to
+refresh the grant at once. Once the gateway serves the refreshed token, the
+cooldown ends and the slot serves again. An upstream that doesn't say when its
+access tokens expire gets a refresh only this way.
+
+A refresh that fails is retried after 30 seconds, doubling with each failure
+up to ten minutes, while the version keeps serving its last access token. A
+plugin reports a grant the upstream will no longer refresh, such as one whose
+refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
+a refresh that authorizes another account than the grant's, or a plugin that
+implements no refresh: OLP discards the refresh token, records why, and
+refreshes the grant no more. Enroll a grant again to replace it.
 
 ### Re-enrolling and the observed principal
 
@@ -358,18 +390,19 @@ and returns it for later calls. A call that exceeds a limit fails with
 leaves nothing behind; the OLP process is unaffected.
 
 Installing reads a manifest once, on wazero's interpreter, which is ready
-soonest. Signing hooks run on modules compiled to machine code, which take
-longer to prepare but then sign about ten times faster; `BenchmarkSign` in
-`internal/plugins` measures both.
+soonest, and a worker process refreshes grants on it too. Signing hooks run on
+modules compiled to machine code, which take longer to prepare but then sign
+about ten times faster; `BenchmarkSign` in `internal/plugins` measures both.
 
 The runtime grants a plugin a clock, randomness and logging, and nothing else:
-no filesystem, environment or arguments. Grant enrollment steps are also granted
-HTTP, which reaches only the plugin's approved origins, over the provider's
-network path (its proxy, trust roots and network credential) and the egress
-policy; a redirect comes back to the plugin rather than being followed. What a
-plugin logs, including its standard output and standard error, reaches OLP's
-log with the secret values of the call redacted, attributed by `plugin_digest`
-and `plugin_method`.
+no filesystem, environment or arguments. Grant enrollment steps and grant
+refresh are also granted HTTP, which reaches only the plugin's approved
+origins, over the provider's network path (its proxy, trust roots and network
+credential) and the egress policy; a redirect comes back to the plugin rather
+than being followed. What a plugin logs, including its standard output and
+standard error, reaches OLP's log with the secret values of the call redacted,
+such as the refresh token a grant refresh receives, attributed by
+`plugin_digest` and `plugin_method`.
 
 ## Unconfined plugins (experimental)
 
@@ -390,7 +423,8 @@ Only a deployment setting enables the tier, never the management API:
 `config.unconfinedPluginDir`, Compose `OLP_UNCONFINED_PLUGIN_DIR`) names the
 absolute directory of the image that holds the executables. Set it for every
 process: control reviews and permits plugins and runs them for probes and
-certification, and gateways run them for traffic.
+certification, gateways run them for traffic, and workers run them to refresh
+grants.
 
 The release image holds no plugins, so build an image that adds them. It is
 distroless, so build each plugin as a static executable:
@@ -447,7 +481,7 @@ directory, after checking that the executable still has the permitted digest
 (`plugin_executable_changed` otherwise). One subprocess then serves every call
 the process makes to the plugin, concurrently, and keeps running between them.
 Every call the confined runtime serves works through it, such as a profile's
-signing hook or a grant enrollment step.
+signing hook, a grant enrollment step or a grant refresh.
 
 - A call is answered within 10 seconds, including starting the subprocess, or
   fails with `plugin_timed_out`. A plugin that leaves a call unanswered that
@@ -481,7 +515,9 @@ removed after plugins were permitted:
   `plugin_unconfined_disabled`, keyed by its digest;
 - serves none of their targets: a gateway plans them ineligible with reason
   `plugin_unconfined_disabled`, and a route with no other eligible target
-  answers `503`.
+  answers `503`;
+- refreshes none of their grants: a worker records each refresh as failed with
+  `plugin_unconfined_disabled` and retries it with backoff.
 
 Permissions stay recorded, so enabling the tier again restores them.
 

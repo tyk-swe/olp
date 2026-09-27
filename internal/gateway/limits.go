@@ -373,6 +373,19 @@ func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runti
 	}
 }
 
+// endCredentialCooldown ends a credential version's shared cooldown before it
+// runs out, for every replica.
+func (a *Admission) endCredentialCooldown(ctx context.Context, providerID, credentialID string) {
+	if !a.ready() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationTimeout)
+	defer cancel()
+	if err := a.limiter.Cooldown(ctx, limits.CredentialScope(providerID, &credentialID), 0); err != nil {
+		a.logger().Warn("shared cooldown not ended", "provider_id", providerID, "credential_id", credentialID, "error", err.Error())
+	}
+}
+
 // cooling reports whether another replica put this credential or slot in a
 // cooldown. A store that cannot answer must not take every slot out of
 // service, so an unreadable cooldown is treated as absent and logged.

@@ -238,8 +238,8 @@ func awaitWorkerPlane(t *testing.T, since time.Time) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	wanted := []string{"budget_alert_delivery", "cost_reconciliation", "maintenance", "media_reconciliation", "request_metadata_consumer",
-		"request_metadata_gateway_epoch_detection"}
+	wanted := []string{"budget_alert_delivery", "cost_reconciliation", "grant_refresh", "maintenance", "media_reconciliation",
+		"request_metadata_consumer", "request_metadata_gateway_epoch_detection"}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		rows, err := pool.Query(t.Context(),
