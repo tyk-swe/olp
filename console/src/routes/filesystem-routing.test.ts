@@ -19,6 +19,7 @@ const consolePages = [
   ['(console)/providers/+page.svelte', 'ProviderList'],
   ['(console)/providers/new/+page.svelte', 'ProviderWizard'],
   ['(console)/providers/[providerId]/+page.svelte', 'ProviderDetail'],
+  ['(console)/plugins/+page.svelte', 'PluginsPage'],
   ['(console)/models/+page.svelte', 'ModelsPage'],
   ['(console)/routes/+page.svelte', 'RouteList'],
   ['(console)/routes/new/+page.svelte', 'RouteDraftEditor'],

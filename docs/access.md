@@ -115,7 +115,9 @@ credential are non-browser traffic: they do not send Origin or CSRF proofs and
 are authenticated by token digest, expiry, and revocation. Every other bearer or
 cookie request keeps the full browser defenses. Token administration itself —
 create, list, read, revoke — is always session-owner-only; no management token
-can manage tokens. Revocation and expiry take effect immediately and audit
+can manage tokens. Installing, approving and uninstalling
+[provider plugins](plugins.md) is session-owner-only in the same way, while any
+role or token with `read` can list plugins and their declarations. Revocation and expiry take effect immediately and audit
 records attribute machine actions to the token rather than to a member.
 
 Omitting `project_ids` creates an all-projects token. An explicit list limits

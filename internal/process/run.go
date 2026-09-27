@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -263,7 +264,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
 			control.NotificationsActive = limiter != nil
-			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, log)
+			pluginRuntime, err := plugins.NewRuntime(startup, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer pluginRuntime.Close(context.Background())
+			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, pluginRuntime, log)
 		}
 	}
 	if err := startup.Err(); err != nil {

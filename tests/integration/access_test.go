@@ -33,6 +33,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -173,6 +174,12 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 		},
 	}).Register(mux)
 	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.DefaultLimits, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
+	(&plugins.Management{Access: server, Runtime: pluginRuntime}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
 	gw.Register(mux)
@@ -182,11 +189,12 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 }
 
 // do performs one management request as the browser and returns the response
-// with its fully read body.
+// with its fully read body. A []byte body is sent as it is; any other body is
+// sent as JSON.
 func (h *accessHarness) do(b *browser, method, path string, body any, headers map[string]string) (*http.Response, []byte) {
 	h.t.Helper()
-	var data []byte
-	if body != nil {
+	data, bytesBody := body.([]byte)
+	if body != nil && !bytesBody {
 		var err error
 		data, err = json.Marshal(body)
 		if err != nil {

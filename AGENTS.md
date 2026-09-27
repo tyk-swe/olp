@@ -5,6 +5,7 @@
 OpenLLMProxy combines a Go gateway with a client-only SvelteKit console.
 
 - `internal/`: backend feature packages (`access/`, `providers/`, `routes/`, `gateway/`, `media/`, `observability/`); keep types, SQL, handlers and workflows together. `cmd/olp` is the binary entrypoint; `openapi/management.json` owns the management contract and `openapi/document.go` embeds it.
+- `sdk/plugin/`: the public Go SDK for provider plugins, with the plugin ABI in `sdk/plugin/abi/` (shared with `internal/plugins`) and the reference plugin in `sdk/plugin/reference/`.
 - `console/src/lib/features/`: matching console features; shared UI lives in `console/src/lib/components/`, pages in `console/src/routes/`, and static assets in `console/static/`.
 - `tests/fixtures/`: language-neutral protocol corpus; `tests/integration/`: process and service suites; `tests/sdk*`: official SDK qualification; `console/tests/`: browser journeys.
 - `internal/database/migrations/`: forward-only, sequential SQL migrations; `deploy/`: Compose and Helm configuration; `scripts/`: automation; `docs/`: architecture and operations guides.

@@ -1,0 +1,94 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import AxeBuilder from '@axe-core/playwright';
+import { expect, test } from '../playwright';
+import { signInGatewayOwner as signIn } from '../gateway/signIn';
+
+let module = '';
+
+// The journey installs the reference plugin, built from the SDK exactly as a
+// plugin author would build it.
+test.beforeAll(() => {
+  module = join(mkdtempSync(join(tmpdir(), 'olp-plugin-')), 'reference.wasm');
+  execFileSync(
+    'go',
+    ['build', '-buildmode=c-shared', '-o', module, './sdk/plugin/reference'],
+    {
+      cwd: fileURLToPath(new URL('../../..', import.meta.url)),
+      env: { ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', CGO_ENABLED: '0' },
+      stdio: 'inherit'
+    }
+  );
+});
+
+test('an owner installs, approves and uninstalls a provider plugin', async ({
+  page
+}, info) => {
+  await signIn(page);
+  await page.goto('/plugins');
+  await expect(
+    page.getByRole('heading', { name: 'Plugins', exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No plugins installed' })
+  ).toBeVisible();
+
+  await page.getByLabel('Plugin module (.wasm)').setInputFiles(module);
+  await page.getByRole('button', { name: 'Install plugin' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Installed reference 0.1.0.'
+  );
+  const plugin = page.getByRole('article', { name: 'reference 0.1.0' });
+  await expect(plugin.locator('.badge')).toHaveText('Pending approval');
+  await expect(
+    plugin.getByRole('cell', { name: 'reference-chat' })
+  ).toBeVisible();
+  await expect(plugin.getByRole('cell', { name: 'openai-chat' })).toBeVisible();
+  await expect(
+    plugin
+      .getByRole('region', { name: 'Declared origins' })
+      .getByRole('listitem')
+  ).toHaveText(['https://api.example.com', 'https://login.example.com']);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('plugins-pending.png'),
+    fullPage: true
+  });
+
+  // Installing the same digest again changes nothing.
+  await page.getByLabel('Plugin module (.wasm)').setInputFiles(module);
+  await page.getByRole('button', { name: 'Install plugin' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'reference 0.1.0 is already installed; nothing changed.'
+  );
+  await expect(page.getByRole('article')).toHaveCount(1);
+
+  await plugin.getByRole('button', { name: 'Review and approve' }).click();
+  const approval = plugin.getByRole('region', {
+    name: 'Approve these origins?'
+  });
+  await expect(approval.getByRole('listitem')).toHaveText([
+    'https://api.example.com',
+    'https://login.example.com'
+  ]);
+  await approval.getByRole('button', { name: 'Approve origins' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Approved reference 0.1.0.'
+  );
+  await expect(plugin.locator('.badge')).toHaveText('Approved');
+  await expect(
+    plugin.getByRole('button', { name: 'Review and approve' })
+  ).toHaveCount(0);
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await plugin.getByRole('button', { name: 'Uninstall' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Uninstalled reference 0.1.0.'
+  );
+  await expect(
+    page.getByRole('heading', { name: 'No plugins installed' })
+  ).toBeVisible();
+});

@@ -14,7 +14,7 @@ const projectFields = `'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.crea
 const projectFrom = " FROM olp.projects p JOIN olp.users u ON u.id=p.created_by"
 
 func (s *Server) projects(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.OwnerPrincipal(r, s.Pool); err != nil {
 		return Reply{}, err
 	}
 	p, err := Page(r)
@@ -30,7 +30,7 @@ func (s *Server) projects(r *http.Request) (Reply, error) {
 }
 
 func (s *Server) project(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.OwnerPrincipal(r, s.Pool); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "project_id")
@@ -60,7 +60,7 @@ func (s *Server) createProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.OwnerPrincipal(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -121,7 +121,7 @@ func (s *Server) updateProject(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.OwnerPrincipal(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -156,7 +156,7 @@ const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u
 const projectMemberFrom = " FROM olp.project_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.users a ON a.id=m.added_by"
 
 func (s *Server) projectMembers(r *http.Request) (Reply, error) {
-	if _, err := s.ownerPrincipal(r, s.Pool); err != nil {
+	if _, err := s.OwnerPrincipal(r, s.Pool); err != nil {
 		return Reply{}, err
 	}
 	id, err := IDParam(r, "project_id")
@@ -247,7 +247,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.ownerPrincipal(r, tx)
+	p, err := s.OwnerPrincipal(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

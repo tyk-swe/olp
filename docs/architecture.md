@@ -1,12 +1,14 @@
 # Architecture and change map
 
-The Go module owns production code under `internal/`; `cmd/olp` starts the CLI.
+The Go module owns production code under `internal/` and the public provider
+plugin SDK under `sdk/`; `cmd/olp` starts the CLI.
 The console mirrors feature ownership under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Change | Start here |
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
+| Provider plugin install, approval, confined runtime and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
 | Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |

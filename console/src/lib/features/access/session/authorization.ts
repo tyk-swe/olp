@@ -20,7 +20,8 @@ const CAPABILITY_VALUES = [
   'playground.use',
   'settings.read',
   'settings.update',
-  'pricing.update'
+  'pricing.update',
+  'plugins.manage'
 ] as const;
 export type Capability = (typeof CAPABILITY_VALUES)[number];
 

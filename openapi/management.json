@@ -4337,6 +4337,174 @@
         ],
         "type": "object"
       },
+      "Plugin": {
+        "additionalProperties": false,
+        "description": "An installed provider plugin: its module digest and the manifest it declared at install.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the module was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "approved_at": {
+            "description": "When an owner approved the declared origins; null while the plugin awaits approval and can't be used.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the module, which identifies the plugin.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "installed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "installed_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "installed_by_email": {
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "size_bytes": {
+            "description": "Size of the module.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "manifest",
+          "installed_by",
+          "installed_by_email",
+          "installed_at",
+          "approved_by",
+          "approved_by_email",
+          "approved_at",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "PluginApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "origins": {
+            "description": "Exactly the origins the plugin declares, in any order.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "origins"
+        ],
+        "type": "object"
+      },
+      "PluginListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Plugin"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "PluginManifest": {
+        "additionalProperties": false,
+        "description": "What a plugin declared at install. It never changes for a digest.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifies the plugin across its versions; several digests of one plugin may be installed side by side.",
+            "type": "string"
+          },
+          "origins": {
+            "description": "The only origins the plugin may reach once an owner approves them, as scheme://host[:port].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/PluginProfile"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "version": {
+            "description": "The author's label for this build.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "origins",
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "PluginProfile": {
+        "additionalProperties": false,
+        "description": "A provider profile the plugin supplies around a built-in dialect.",
+        "properties": {
+          "dialect": {
+            "description": "The built-in dialect the profile serves.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "dialect"
+        ],
+        "type": "object"
+      },
       "PriceCeiling": {
         "additionalProperties": false,
         "properties": {
@@ -14204,6 +14372,507 @@
         ],
         "tags": [
           "playground"
+        ]
+      }
+    },
+    "/api/v1/plugins": {
+      "get": {
+        "description": "Lists installed provider plugins with the profiles and origins each declares. Any role with read access may list them.",
+        "operationId": "list_plugins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Installed plugins, by name and newest install first"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "managementToken": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Installs a provider plugin from its WebAssembly module. OLP instantiates the module within the plugin memory and time limits, reads its manifest and stores the module by its SHA-256 digest. The plugin can't be used until an owner approves its declared origins. Installing an installed digest changes nothing.",
+        "operationId": "install_plugin",
+        "requestBody": {
+          "content": {
+            "application/wasm": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The plugin module, at most 32 MiB",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "The digest was already installed; nothing changed",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin installed; it awaits approval of its declared origins",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Path of the installed plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The module exceeds 32 MiB"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not application/wasm"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin refused: plugin_module_invalid (not a plugin OLP can run), plugin_abi_unsupported (built for another ABI version), plugin_manifest_invalid, plugin_dialect_unknown (a profile names a dialect OLP doesn't have), plugin_timed_out or plugin_failed (the module exceeded its limits), or plugin_limit (64 digests are installed)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}": {
+      "delete": {
+        "description": "Uninstalls a provider plugin and deletes its module.",
+        "operationId": "uninstall_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Plugin uninstalled"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "get": {
+        "operationId": "get_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Installed plugin",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "managementToken": []
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}/approve": {
+      "post": {
+        "description": "Approves the origins a plugin declares, after which it can be used. The request lists exactly the declared origins, so an approval covers only what the owner reviewed.",
+        "operationId": "approve_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin approved",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest or request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin already approved"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The origins differ from those the plugin declares (plugin_origins_mismatch)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "plugins"
         ]
       }
     },
