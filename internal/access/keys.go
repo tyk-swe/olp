@@ -1,10 +1,7 @@
 package access
 
 import (
-	"context"
-	"crypto/hmac"
 	"encoding/json"
-	"errors"
 	"maps"
 	"net/http"
 	"regexp"
@@ -485,22 +482,6 @@ type Authority struct {
 	ExpiresAt, RevokedAt        *time.Time
 }
 
-func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority, error) {
-	var a Authority
-	parts := strings.Split(secret, "_")
-	if len(parts) != 3 || parts[0] != "olp" {
-		return a, errors.New("invalid API key")
-	}
-	var digest, data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id WHERE k.lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &digest, &data, &a.ExpiresAt, &a.RevokedAt, &a.BudgetGroupID, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit)
-	if err != nil || !hmac.Equal(digest, s.Auth.Digest("api_key", secret)) {
-		return a, errors.New("invalid API key")
-	}
-	if err = json.Unmarshal(data, &a.Policy); err != nil {
-		return a, err
-	}
-	return a, nil
-}
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {
 	if (a.ProjectID == nil) != (projectID == nil) || (a.ProjectID != nil && *a.ProjectID != *projectID) {
 		return false

@@ -355,7 +355,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if record["requests_per_minute"] != nil || record["allowed_routes"].([]any)[0] != "private" {
 		t.Fatal("patch did not preserve omitted values and clear explicit null")
 	}
-	authority, err := h.Server.LookupAuthority(t.Context(), first["secret"].(string))
+	authority, err := h.authority(first["secret"].(string))
 	if err != nil || !authority.Allows("models_read", "private", nil, time.Now()) || authority.Allows("inference", "private", nil, time.Now()) {
 		t.Fatal("invalid authority", err)
 	}
@@ -366,14 +366,14 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	if rotated["secret"] != replayed["secret"] {
 		t.Fatal("rotation replay differs")
 	}
-	if _, err = h.Server.LookupAuthority(t.Context(), first["secret"].(string)); err == nil {
+	if _, err = h.authority(first["secret"].(string)); err == nil {
 		t.Fatal("old key survived rotation")
 	}
 	record = h.want(owner, "GET", path, nil, nil, 200)
 	revocation := etagHeader(record)
 	revocation["Idempotency-Key"] = "revoke-one"
 	h.want(owner, "POST", path+"/revoke", nil, revocation, 200)
-	authority, err = h.Server.LookupAuthority(t.Context(), rotated["secret"].(string))
+	authority, err = h.authority(rotated["secret"].(string))
 	if err != nil || authority.Allows("models_read", "private", nil, time.Now()) {
 		t.Fatal("revoked key admitted", err)
 	}

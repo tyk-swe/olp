@@ -496,7 +496,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(authenticationError("missing_authorization", "Provide an Authorization bearer API key."))
 		return
 	}
-	authority, e := s.authenticate(r, "inference")
+	authority, e := s.authorizeKey(token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -720,14 +720,6 @@ func realtimeUpgrade(r *http.Request) bool {
 	}
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key")))
 	return err == nil && len(key) == 16
-}
-
-func bearerToken(r *http.Request) string {
-	header := r.Header.Get("Authorization")
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return ""
-	}
-	return strings.TrimSpace(header[7:])
 }
 
 func realtimeURL(p *pin) (string, *Error) {

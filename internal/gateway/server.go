@@ -266,46 +266,6 @@ func (s *Server) release(ctx context.Context) {
 	s.admission.Release()
 }
 
-// authenticate resolves the bearer key against the pinned authority and
-// checks the scope the endpoint needs.
-func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, *Error) {
-	header := r.Header.Get("Authorization")
-	if header == "" {
-		switch requestSurface(r) {
-		case "anthropic":
-			if key := r.Header.Get("X-Api-Key"); key != "" {
-				header = "Bearer " + key
-			}
-		case "gemini":
-			key := r.Header.Get("X-Goog-Api-Key")
-			if key == "" {
-				key = r.URL.Query().Get("key")
-			}
-			if key != "" {
-				header = "Bearer " + key
-			}
-		}
-	}
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return access.Authority{}, authenticationError("invalid_api_key", "Provide an API key as a bearer token in the Authorization header.")
-	}
-	token := strings.TrimSpace(header[7:])
-	authority, err := s.Runtime.Authenticate(token)
-	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
-		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
-	case err != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "Incorrect API key provided.")
-	case authority.RevokedAt != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has been revoked.")
-	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(s.now()):
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has expired.")
-	case !slices.Contains(authority.Policy.Scopes, scope):
-		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
-	}
-	return authority, nil
-}
-
 // readBody bounds both the encoded and decoded body before parsing.
 func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -679,14 +639,8 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
 		if x.family.Surface() == "gemini" {
-			if keys, present := x.semanticQuery["key"]; present {
-				if len(keys) != 1 || keys[0] == "" {
-					param := "key"
-					return invalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
-				}
-				// Authentication already resolved the gateway key. It is neither
-				// native semantics nor an upstream query/default/receipt value.
-				delete(x.semanticQuery, "key")
+			if e := x.dropQueryKey(); e != nil {
+				return e
 			}
 		}
 	}

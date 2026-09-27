@@ -96,7 +96,7 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 		}
 		// Read durable authority as int64, independently of the HTTP harness's
 		// floating-point JSON decoder.
-		authority, err := h.Server.LookupAuthority(t.Context(), secret)
+		authority, err := h.authority(secret)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 	h.want(owner, "PATCH", path, map[string]any{
 		"daily_cost_limit": nil, "monthly_cost_limit": nil, "tokens_per_minute": nil,
 	}, etagHeader(record), 200)
-	authority, err := h.Server.LookupAuthority(t.Context(), secret)
+	authority, err := h.authority(secret)
 	if err != nil {
 		t.Fatal(err)
 	}
