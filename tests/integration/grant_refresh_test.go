@@ -290,9 +290,17 @@ func TestAnUpstreamCredentialFailureRefreshesTheGrantEarly(t *testing.T) {
 	if !pass(t, grantRefresher(t, h)) {
 		t.Fatal("the requested refresh did not run")
 	}
+	// The poll serves the refreshed token, and ends the cooldown apart from
+	// the poll.
 	h.refresh()
-	if status := chat(t, h, key); status != 200 {
-		t.Fatalf("after the refresh, the slot answered %d", status)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		status := chat(t, h, key)
+		if status == 200 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the refresh, the slot answered %d", status)
+		}
 	}
 }
 

@@ -106,7 +106,7 @@ type Manager struct {
 
 	// GrantRefreshed, when set before Start, is told of each credential
 	// version of the installed release whose grant a poll found refreshed,
-	// with the provider it belongs to.
+	// with the provider it belongs to, apart from the poll.
 	GrantRefreshed func(providerID, credentialID string)
 
 	mu        sync.RWMutex
@@ -120,6 +120,10 @@ type Manager struct {
 	// whose access token each asked workers to refresh early.
 	grants           map[string]servedGrant
 	refreshRequested map[string]int64
+	// refreshedGrants holds the refreshed grants, by credential version and
+	// provider, that the notifier telling GrantRefreshed has yet to tell of;
+	// it is non-nil while the notifier runs.
+	refreshedGrants map[string]string
 
 	stop chan struct{}
 	wg   sync.WaitGroup
