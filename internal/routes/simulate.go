@@ -170,7 +170,7 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if mediaRequest != nil {
 		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
 	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialEligibility: eligibility, Accept: accept, Effective: effective}
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins, Accept: accept, Effective: effective}
 	if key.reason != "" {
 		options.Accept = nil
 		options.Effective = nil
@@ -294,7 +294,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialEligibility: eligibility}
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins}
 	options.TokenDemand, err = tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
 		return access.Reply{}, err

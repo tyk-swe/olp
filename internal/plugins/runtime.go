@@ -169,8 +169,13 @@ func (r *Runtime) Inspect(ctx context.Context, module []byte) (abi.Manifest, err
 		return abi.Manifest{}, err
 	}
 	defer m.Close(context.WithoutCancel(ctx))
+	return inspect(ctx, m)
+}
+
+// inspect reads the manifest a plugin's code declares and validates it.
+func inspect(ctx context.Context, plugin code) (abi.Manifest, error) {
 	var raw json.RawMessage
-	if err = m.Call(ctx, Call{Method: abi.MethodManifest}, &raw); err != nil {
+	if err := plugin.Call(ctx, Call{Method: abi.MethodManifest}, &raw); err != nil {
 		if reported, ok := errors.AsType[*abi.Error](err); ok {
 			return abi.Manifest{}, refuse(CodeManifestInvalid, "The plugin reported no manifest: "+reported.Message)
 		}
@@ -236,7 +241,11 @@ type Call struct {
 // and its instance is discarded, so it leaves nothing behind; a failure the
 // plugin reports is an *abi.Error.
 func (m *Module) Call(ctx context.Context, call Call, result any) error {
-	request, err := call.request()
+	var request []byte
+	message, err := call.request()
+	if err == nil {
+		request, err = json.Marshal(message)
+	}
 	if err != nil {
 		return err
 	}
@@ -257,29 +266,31 @@ func (m *Module) Call(ctx context.Context, call Call, result any) error {
 		if err = json.Unmarshal(data, &response); err != nil {
 			return refuse(CodeFailed, "The plugin answered with something other than a JSON response.")
 		}
-		if response.Error != nil {
-			out := callOutput(ctx)
-			return &abi.Error{Code: out.redact(response.Error.Code), Message: out.redact(response.Error.Message)}
-		}
-		if result == nil {
-			return nil
-		}
-		decoder := json.NewDecoder(bytes.NewReader(response.Result))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(result); err != nil {
-			return refuse(CodeFailed, "The plugin's result does not match the "+call.Method+" result.")
-		}
-		return nil
+		return decodeResult(callOutput(ctx), call.Method, response, result)
 	})
 }
 
-// request encodes the call as the request the plugin serves.
-func (c Call) request() ([]byte, error) {
+// request is the request the plugin serves for the call.
+func (c Call) request() (abi.Request, error) {
 	params, err := json.Marshal(c.Params)
-	if err != nil {
-		return nil, err
+	return abi.Request{Method: c.Method, Params: params, Provider: c.Provider}, err
+}
+
+// decodeResult decodes the plugin's response to a call of method into
+// result, or returns the failure the plugin reported, redacted by out.
+func decodeResult(out *output, method string, response abi.Response, result any) error {
+	if response.Error != nil {
+		return &abi.Error{Code: out.redact(response.Error.Code), Message: out.redact(response.Error.Message)}
 	}
-	return json.Marshal(abi.Request{Method: c.Method, Params: params, Provider: c.Provider})
+	if result == nil {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(response.Result))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(result); err != nil {
+		return refuse(CodeFailed, "The plugin's result does not match the "+method+" result.")
+	}
+	return nil
 }
 
 // run serves one call on an instance within the runtime's limits.
@@ -393,7 +404,23 @@ func hostCall(ctx context.Context, instance api.Module, stack []uint64) {
 		panic(refuse(CodeFailed, "The plugin passed OLP a buffer outside its memory."))
 	case len(message) > maxMessage || json.Unmarshal(message, &request) != nil:
 		response.Error = &abi.Error{Code: abi.CodeInvalidRequest, Message: "Capability requests are JSON calls of at most 1 MiB."}
-	case request.Method == abi.CapabilityLog:
+	default:
+		response = capability(ctx, request)
+	}
+	data, _ := json.Marshal(response)
+	ptr, err := lend(ctx, instance, data)
+	if err != nil {
+		panic(err)
+	}
+	stack[0] = abi.Pack(ptr, uint32(len(data)))
+}
+
+// capability serves one capability request from plugin code serving the call
+// ctx belongs to, whatever runs the code.
+func capability(ctx context.Context, request abi.Request) abi.Response {
+	var response abi.Response
+	switch request.Method {
+	case abi.CapabilityLog:
 		var record abi.LogRecord
 		if json.Unmarshal(request.Params, &record) != nil {
 			response.Error = &abi.Error{Code: abi.CodeInvalidRequest, Message: "A log request carries a log record."}
@@ -403,12 +430,7 @@ func hostCall(ctx context.Context, instance api.Module, stack []uint64) {
 	default:
 		response.Error = &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + request.Method + "."}
 	}
-	data, _ := json.Marshal(response)
-	ptr, err := lend(ctx, instance, data)
-	if err != nil {
-		panic(err)
-	}
-	stack[0] = abi.Pack(ptr, uint32(len(data)))
+	return response
 }
 
 // lend writes a message into a buffer the plugin allocates for it.

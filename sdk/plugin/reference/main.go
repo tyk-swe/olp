@@ -123,4 +123,4 @@ func (reference) Sign(_ context.Context, r plugin.SignRequest) (plugin.SignResul
 
 func init() { plugin.Register(reference{}) }
 
-func main() {}
+func main() { plugin.Serve() }

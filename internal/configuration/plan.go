@@ -292,7 +292,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	for i := range doc.Providers {
 		// Applying stores the entry's configuration, so a plugin provider
 		// pins its plugin profile there and takes its address.
-		if err := doc.Providers[i].Configuration.Pin(ctx, q); err != nil {
+		if err := doc.Providers[i].Configuration.Pin(ctx, q, s.Unconfined); err != nil {
 			return err
 		}
 		p := doc.Providers[i]

@@ -14,8 +14,17 @@
 // The SDK implements the ABI in package abi, so a plugin only implements
 // Plugin, and Signer if a profile declares signing. OLP runs the module
 // confined: it reaches nothing but the capabilities OLP grants, which are a
-// clock, randomness and Log. See docs/plugin-authoring.md in the OpenLLMProxy
-// repository.
+// clock, randomness and Log.
+//
+// A deployment that enables the experimental unconfined tier may run the same
+// plugin as an unconfined plugin instead: a native executable in its image,
+// with the operating system's privileges, which serves OLP's calls over
+// standard input and output. Build it natively, calling Serve from main:
+//
+//	func main() { plugin.Serve() }
+//
+// A WASI reactor never runs main, so the same source builds either way. See
+// docs/plugin-authoring.md in the OpenLLMProxy repository.
 package plugin
 
 import (
@@ -122,32 +131,39 @@ func Register(p Plugin) {
 	registered = p
 }
 
-// serve answers one request from OLP. It never panics: a panicking plugin
-// reports an internal error instead of stopping the module.
-func serve(message []byte) (response []byte) {
+// serve answers one request message from OLP, which carries no call context
+// of its own.
+func serve(message []byte) []byte {
+	var request abi.Request
+	response := answer(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The request is not a JSON call."})
+	if json.Unmarshal(message, &request) == nil {
+		response = handle(context.Background(), request)
+	}
+	data, _ := json.Marshal(response)
+	return data
+}
+
+// handle answers one request from OLP in the context of its call. It never
+// panics: a panicking plugin reports an internal error instead of stopping.
+func handle(ctx context.Context, request abi.Request) (response abi.Response) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			Log.Error("plugin panicked", "panic", fmt.Sprint(recovered))
-			response = respond(nil, &abi.Error{Code: abi.CodeInternal, Message: "The plugin panicked."})
+			Log.ErrorContext(ctx, "plugin panicked", "panic", fmt.Sprint(recovered))
+			response = answer(nil, &abi.Error{Code: abi.CodeInternal, Message: "The plugin panicked."})
 		}
 	}()
-	var request abi.Request
-	if err := json.Unmarshal(message, &request); err != nil {
-		return respond(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The request is not a JSON call."})
-	}
 	if registered == nil {
-		return respond(nil, &abi.Error{Code: abi.CodeInternal, Message: "The module registered no plugin."})
+		return answer(nil, &abi.Error{Code: abi.CodeInternal, Message: "The module registered no plugin."})
 	}
 	method, ok := methods[request.Method]
 	if !ok {
-		return respond(nil, unknownMethod(request.Method))
+		return answer(nil, unknownMethod(request.Method))
 	}
-	ctx := context.Background()
 	if request.Provider != nil {
 		ctx = context.WithValue(ctx, providerKey{}, *request.Provider)
 	}
 	result, err := method(ctx, request.Params)
-	return respond(result, reported(err))
+	return answer(result, reported(err))
 }
 
 // manifest answers the manifest call. A profile that declares signing needs a
@@ -190,7 +206,7 @@ func reported(err error) *abi.Error {
 	return &abi.Error{Code: abi.CodeInternal, Message: err.Error()}
 }
 
-func respond(result any, failure *abi.Error) []byte {
+func answer(result any, failure *abi.Error) abi.Response {
 	response := abi.Response{Error: failure}
 	if failure == nil {
 		data, err := json.Marshal(result)
@@ -199,24 +215,17 @@ func respond(result any, failure *abi.Error) []byte {
 		}
 		response.Result = data
 	}
-	data, _ := json.Marshal(response)
-	return data
+	return response
 }
 
-// callHost uses an OLP capability and returns its result.
-func callHost(capability string, params any) (json.RawMessage, error) {
+// callHost uses an OLP capability for the call ctx belongs to and returns
+// its result.
+func callHost(ctx context.Context, capability string, params any) (json.RawMessage, error) {
 	data, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
-	request, err := json.Marshal(abi.Request{Method: capability, Params: data})
-	if err != nil {
-		return nil, err
-	}
-	var response abi.Response
-	if err = json.Unmarshal(hostCall(request), &response); err != nil {
-		return nil, err
-	}
+	response := hostCall(ctx, abi.Request{Method: capability, Params: data})
 	if response.Error != nil {
 		return nil, response.Error
 	}

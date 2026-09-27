@@ -76,18 +76,18 @@ type PublishedTarget struct {
 
 // ProviderRevision contains scanned metadata and the stored documents of one
 // provider revision. The caller selects the revision and its current state,
-// and the manifest of the plugin a plugin provider's revision pins, which
-// PluginManifestColumn selects.
+// and the plugin a plugin provider's revision pins, which PluginColumn
+// selects.
 type ProviderRevision struct {
 	ID, RevisionID, Name, State  string
 	ProjectID                    *string
 	Configuration, Models, Slots []byte
-	PluginManifest               []byte
+	Plugin                       []byte
 }
 
-// PluginManifestColumn selects the manifest of the plugin that the provider
-// revision r pins, or NULL. A pinned plugin stays installed.
-const PluginManifestColumn = "(SELECT pl.manifest FROM olp.plugins pl WHERE r.configuration->>'kind'='plugin' AND pl.digest=r.configuration->>'profile_revision')"
+// PluginColumn selects the plugin that the provider revision r pins, as a
+// connectors.InstalledPlugin, or NULL. A pinned plugin stays installed.
+const PluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE r.configuration->>'kind'='plugin' AND pl.digest=r.configuration->>'profile_revision')"
 
 // DecodeProviderRevision reconstructs a serving provider without consulting
 // current authority or normalizing stored limits. Publication owns empty-limit
@@ -105,7 +105,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	}
 	var plugin *connectors.PluginProfile
 	if err == nil && cfg.Kind == connectors.KindPlugin {
-		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.PluginManifest, cfg.ProfileID)
+		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.Plugin, cfg.ProfileID)
 	}
 	if err != nil {
 		return Provider{}, fmt.Errorf("provider %s revision: %w", revision.ID, err)

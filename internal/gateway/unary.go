@@ -134,7 +134,7 @@ func (s *Server) prepareUnary(x *execution) *Error {
 		}
 	}
 	var incompatible error
-	options := runtime.SelectionOptions{KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
+	options := runtime.SelectionOptions{KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			_, err := x.unaryPlan(&p, t.ProviderModel)
 			if err != nil {

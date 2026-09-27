@@ -23,9 +23,9 @@ func pluginConfiguration(t *testing.T, server *httptest.Server, hosting abi.Host
 	t.Helper()
 	hosting.Address = server.URL + "/v1"
 	hosting.Headers = map[string]string{"Authorization": "Token {credential}"}
-	manifest, err := json.Marshal(abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{server.URL}, Profiles: []abi.Profile{{
+	manifest, err := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{server.URL}, Profiles: []abi.Profile{{
 		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: hosting,
-	}}})
+	}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

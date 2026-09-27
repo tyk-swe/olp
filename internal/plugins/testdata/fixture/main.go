@@ -5,7 +5,8 @@
 //	go build -buildmode=c-shared -ldflags=-X=main.behaviour=loop ...
 //
 // Its profile signs requests, and the credential of a request sets how, so
-// one build serves every signing test.
+// one build serves every signing test. It builds natively too, as an
+// unconfined plugin.
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
 )
@@ -56,17 +58,19 @@ func (fixture) Manifest() plugin.Manifest {
 	return m
 }
 
-// calls counts the requests this instance of the module has signed.
-var calls int
+// calls counts the requests this instance of the module, or this process,
+// has signed.
+var calls atomic.Int64
 
 // Sign signs as the credential's prefix up to a colon says: "loop" never
-// returns, "allocate" exhausts memory, "fail" reports a failure holding the
-// credential, "log" logs the credential, "header:Name" returns that header,
+// returns, "allocate" exhausts memory, "exit" stops the plugin, "fail" reports
+// a failure holding the credential, "log" logs the credential, "wait" returns
+// once its call is cancelled, "header:Name" returns that header,
 // and "option:name" returns X-Fixture-Option, the provider's profile and value
 // of that option. Anything else returns X-Fixture-Signature and
 // X-Fixture-Calls, this instance's count of signed requests.
 func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResult, error) {
-	calls++
+	called := calls.Add(1)
 	behaviour, rest, _ := strings.Cut(r.Credential, ":")
 	switch behaviour {
 	case "loop":
@@ -77,10 +81,15 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 		for {
 			held = append(held, make([]byte, 1<<20))
 		}
+	case "exit":
+		os.Exit(3)
 	case "fail":
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_failed", Message: "signing with " + r.Credential + " failed"}
 	case "log":
-		plugin.Log.Info("signing with "+r.Credential, "url", r.URL)
+		plugin.Log.InfoContext(ctx, "signing with "+r.Credential, "url", r.URL)
+	case "wait":
+		<-ctx.Done()
+		return plugin.SignResult{}, &plugin.Error{Code: "fixture_cancelled", Message: "the call was cancelled"}
 	case "header":
 		return plugin.SignResult{Headers: map[string]string{rest: "fixture"}}, nil
 	case "option":
@@ -92,10 +101,10 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 	}
 	return plugin.SignResult{Headers: map[string]string{
 		"X-Fixture-Signature": r.Method + " " + r.URL + " " + strconv.Itoa(len(r.Body)),
-		"X-Fixture-Calls":     strconv.Itoa(calls),
+		"X-Fixture-Calls":     strconv.FormatInt(called, 10),
 	}}, nil
 }
 
 func init() { plugin.Register(fixture{}) }
 
-func main() {}
+func main() { plugin.Serve() }

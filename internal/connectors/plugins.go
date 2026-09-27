@@ -44,11 +44,14 @@ func PluginDialects() []string { return slices.Clone(pluginDialects) }
 
 // Plugin identifies the provider plugin that supplies a profile.
 type Plugin struct {
-	// Digest is the SHA-256 of the plugin's module, which a provider pins as
-	// its profile revision.
+	// Digest is the SHA-256 of the plugin's module, or of an unconfined
+	// plugin's executable, which a provider pins as its profile revision.
 	Digest  string `json:"digest"`
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	// Unconfined is set for an unconfined plugin, which runs with native
+	// privileges where the deployment enables the unconfined tier.
+	Unconfined bool `json:"unconfined,omitempty"`
 }
 
 // A PluginProfile is a provider profile a provider plugin declares: a
@@ -64,29 +67,51 @@ type PluginProfile struct {
 	patterns map[string]*regexp.Regexp
 }
 
-// NewPluginProfile returns the profile id that a plugin's manifest declares,
-// identified by the digest of the plugin's module.
+// NewPluginProfile returns the profile id that a confined plugin's manifest
+// declares, identified by the digest of the plugin's module.
 func NewPluginProfile(digest string, manifest abi.Manifest, id string) (*PluginProfile, error) {
+	return declaredProfile(Plugin{Digest: digest}, manifest, id)
+}
+
+// NewUnconfinedPluginProfile returns the profile id that an unconfined
+// plugin's manifest declares, identified by the digest of its executable.
+func NewUnconfinedPluginProfile(digest string, manifest abi.Manifest, id string) (*PluginProfile, error) {
+	return declaredProfile(Plugin{Digest: digest, Unconfined: true}, manifest, id)
+}
+
+func declaredProfile(plugin Plugin, manifest abi.Manifest, id string) (*PluginProfile, error) {
+	plugin.Name, plugin.Version = manifest.Name, manifest.Version
 	for _, declared := range manifest.Profiles {
 		if declared.ID == id {
-			return newPluginProfile(Plugin{Digest: digest, Name: manifest.Name, Version: manifest.Version}, declared)
+			return newPluginProfile(plugin, declared)
 		}
 	}
 	return nil, fmt.Errorf("plugin %s declares no profile %q", manifest.Name, id)
 }
 
-// DecodePluginProfile returns the profile id that a plugin's stored manifest
-// declares, identified by the digest of the plugin's module.
-func DecodePluginProfile(digest string, manifest []byte, id string) (*PluginProfile, error) {
-	if manifest == nil {
+// An InstalledPlugin is what OLP holds of an installed plugin that its
+// profiles are read from: the manifest it declared and its tier.
+type InstalledPlugin struct {
+	Manifest   abi.Manifest `json:"manifest"`
+	Unconfined bool         `json:"unconfined"`
+}
+
+// DecodePluginProfile returns the profile id of the installed plugin with
+// digest, from its InstalledPlugin JSON; installed is nil when no plugin
+// with the digest is installed.
+func DecodePluginProfile(digest string, installed []byte, id string) (*PluginProfile, error) {
+	if installed == nil {
 		return nil, fmt.Errorf("plugin %s is not installed", digest)
 	}
-	var declared abi.Manifest
-	if err := json.Unmarshal(manifest, &declared); err != nil {
+	var plugin InstalledPlugin
+	if err := json.Unmarshal(installed, &plugin); err != nil {
 		return nil, err
 	}
-	return NewPluginProfile(digest, declared, id)
+	return declaredProfile(Plugin{Digest: digest, Unconfined: plugin.Unconfined}, plugin.Manifest, id)
 }
+
+// Unconfined reports whether an unconfined plugin supplies the profile.
+func (p *PluginProfile) Unconfined() bool { return p.profile.Plugin.Unconfined }
 
 // ValidatePluginProfile reports what is wrong with a profile a plugin
 // declares, as a *ProfileError locating the offending value.

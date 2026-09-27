@@ -12,6 +12,11 @@ import (
 // from every record and bounds how much one call may log, so a plugin may log
 // freely without leaking what OLP gave it. Anything the module writes to
 // standard output or standard error is logged the same way.
+//
+// An unconfined plugin serves calls concurrently, so it logs with the call's
+// context, such as Log.InfoContext(ctx, …), for OLP to attribute a record to
+// its call. OLP redacts a record without one, and what the plugin writes to
+// standard error, of the secret values of every call it is serving.
 var Log = slog.New(hostHandler{})
 
 // hostHandler sends records to OLP's log capability. Attribute values travel
@@ -23,8 +28,8 @@ type hostHandler struct {
 
 func (hostHandler) Enabled(context.Context, slog.Level) bool { return true }
 
-func (h hostHandler) Handle(_ context.Context, r slog.Record) error {
-	_, err := callHost(abi.CapabilityLog, h.record(r))
+func (h hostHandler) Handle(ctx context.Context, r slog.Record) error {
+	_, err := callHost(ctx, abi.CapabilityLog, h.record(r))
 	return err
 }
 

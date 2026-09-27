@@ -28,8 +28,12 @@ type SelectionOptions struct {
 	// CredentialEligibility excludes credential versions that may not serve;
 	// a provider's ineligible network credential names its reason.
 	CredentialEligibility func(credentialID string) Eligibility
-	Accept                func(Provider, Target) error
-	Effective             func(Provider, Target) ([]string, *TokenDemand)
+	// UnconfinedPlugins is set where the deployment enables unconfined
+	// plugins. Elsewhere, targets of providers whose plugin is unconfined
+	// are ineligible.
+	UnconfinedPlugins bool
+	Accept            func(Provider, Target) error
+	Effective         func(Provider, Target) ([]string, *TokenDemand)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -129,6 +133,8 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			reason = "target_unknown"
 		case !provider.Enabled:
 			reason = "provider_not_active"
+		case provider.Plugin != nil && provider.Plugin.Unconfined() && !options.UnconfinedPlugins:
+			reason = "plugin_unconfined_disabled"
 		case !provider.Supports(target.ProviderModel, operation, surface, mode):
 			reason = "capability_not_certified"
 		}

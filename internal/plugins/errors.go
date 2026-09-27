@@ -24,6 +24,18 @@ const (
 	CodeProfileUnknown = "plugin_profile_unknown"
 	// CodePinned: provider revisions pin the plugin, so it stays installed.
 	CodePinned = "plugin_pinned"
+	// CodeUnconfinedDisabled: the plugin is unconfined, and the deployment
+	// does not enable unconfined plugins.
+	CodeUnconfinedDisabled = "plugin_unconfined_disabled"
+	// CodeExecutableUnknown: the unconfined plugin directory holds no
+	// executable with the name.
+	CodeExecutableUnknown = "plugin_executable_unknown"
+	// CodeExecutableInvalid: the executable could not be started, or does
+	// not speak the plugin ABI over standard input and output.
+	CodeExecutableInvalid = "plugin_executable_invalid"
+	// CodeExecutableChanged: the executable no longer has the digest it was
+	// reviewed or permitted with.
+	CodeExecutableChanged = "plugin_executable_changed"
 )
 
 // Error is why OLP refused a plugin module or a plugin call failed. Failures a

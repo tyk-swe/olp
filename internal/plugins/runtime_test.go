@@ -203,13 +203,9 @@ func TestCallsCarryTheProviderTheyServe(t *testing.T) {
 		{Method: "provider_method", Params: map[string]string{"step": "1"}, Provider: provider},
 		{Method: abi.MethodManifest},
 	} {
-		data, err := call.request()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var request abi.Request
-		if err = json.Unmarshal(data, &request); err != nil || request.Method != call.Method || !reflect.DeepEqual(request.Provider, call.Provider) {
-			t.Fatalf("call %+v became request %s", call, data)
+		request, err := call.request()
+		if err != nil || request.Method != call.Method || !reflect.DeepEqual(request.Provider, call.Provider) {
+			t.Fatalf("call %+v became request %+v: %v", call, request, err)
 		}
 	}
 }

@@ -32,11 +32,14 @@ const maxInstalled = 64
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Management serves provider plugin administration on the management API.
-// Only an owner with a user session installs, approves and uninstalls
-// plugins; any role that may read management state lists them.
+// Only an owner with a user session installs, approves, permits and
+// uninstalls plugins; any role that may read management state lists them.
 type Management struct {
 	Access  *access.Server
 	Runtime *Runtime
+	// Unconfined is the deployment's unconfined tier, or nil where it does
+	// not enable one. No API path lists or permits unconfined plugins then.
+	Unconfined *Unconfined
 }
 
 // Register mounts the plugin operations on the management surface.
@@ -47,13 +50,17 @@ func (s *Management) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/plugins/{plugin_digest}", s.Access.Handle(s.get))
 	mux.HandleFunc("POST /api/v1/plugins/{plugin_digest}/approve", s.Access.Handle(s.approve))
 	mux.HandleFunc("DELETE /api/v1/plugins/{plugin_digest}", s.Access.Handle(s.uninstall))
+	mux.HandleFunc("GET /api/v1/unconfined-plugins", s.Access.Handle(s.executables))
+	// Running an executable to read its manifest can take seconds.
+	mux.HandleFunc("GET /api/v1/unconfined-plugins/{executable}", s.Access.HandleTimeout(64<<10, time.Minute, s.review))
+	mux.HandleFunc("POST /api/v1/unconfined-plugins/{executable}/permit", s.Access.HandleTimeout(64<<10, time.Minute, s.permit))
 }
 
 func (s *Management) list(r *http.Request) (access.Reply, error) {
 	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest")
+	rows, err := s.Access.Pool.Query(r.Context(), selectPlugin+" WHERE $1 OR p.executable IS NULL ORDER BY p.manifest->>'name', p.installed_at DESC, p.digest", s.Unconfined != nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -66,7 +73,7 @@ func (s *Management) list(r *http.Request) (access.Reply, error) {
 		}
 		items = append(items, item)
 	}
-	return access.OK(contract.PluginListResponse{Items: items}), rows.Err()
+	return access.OK(contract.PluginListResponse{Items: items, UnconfinedPluginsEnabled: s.Unconfined != nil}), rows.Err()
 }
 
 func (s *Management) get(r *http.Request) (access.Reply, error) {
@@ -77,8 +84,18 @@ func (s *Management) get(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	plugin, err := loadPlugin(r.Context(), s.Access.Pool, digest)
+	plugin, err := s.load(r.Context(), s.Access.Pool, digest)
 	return access.Detail(plugin, plugin.Etag.String()), err
+}
+
+// load reads an installed plugin that the deployment lets the API show: an
+// unconfined plugin only where the unconfined tier is enabled.
+func (s *Management) load(ctx context.Context, q access.Queryer, digest string) (contract.Plugin, error) {
+	plugin, err := loadPlugin(ctx, q, digest)
+	if err == nil && plugin.Executable.IsSpecified() && !plugin.Executable.IsNull() && s.Unconfined == nil {
+		return contract.Plugin{}, pgx.ErrNoRows
+	}
+	return plugin, err
 }
 
 func (s *Management) install(r *http.Request) (access.Reply, error) {
@@ -102,11 +119,8 @@ func (s *Management) install(r *http.Request) (access.Reply, error) {
 		return access.Detail(installed, installed.Etag.String()), err
 	}
 	manifest, err := s.Runtime.Inspect(r.Context(), module)
-	if refusal, ok := errors.AsType[*Error](err); ok {
-		return access.Reply{}, &access.Problem{Status: http.StatusUnprocessableEntity, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
-	}
 	if err != nil {
-		return access.Reply{}, err
+		return access.Reply{}, problem(err)
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -128,8 +142,8 @@ func (s *Management) install(r *http.Request) (access.Reply, error) {
 	if count >= maxInstalled {
 		return access.Reply{}, access.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 	}
-	tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (digest) DO NOTHING",
-		digest, abi.Version, data, module, access.NewID(), p.ID)
+	tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
+		digest, abi.Version, data, module, len(module), access.NewID(), p.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -165,7 +179,7 @@ func (s *Management) approve(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	plugin, err := loadPlugin(r.Context(), tx, digest)
+	plugin, err := s.load(r.Context(), tx, digest)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -205,10 +219,11 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var etag string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.plugins WHERE digest=$1", digest).Scan(&etag); err != nil {
+	plugin, err := s.load(r.Context(), tx, digest)
+	if err != nil {
 		return access.Reply{}, err
 	}
+	etag := plugin.Etag.String()
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
 	}
@@ -254,6 +269,22 @@ func pinningProviders(ctx context.Context, q access.Queryer, digest string) (str
 		listed += fmt.Sprintf(" and %d more providers", len(names)-shown)
 	}
 	return listed, nil
+}
+
+// problem is the problem a refusal of a plugin becomes.
+func problem(err error) error {
+	refusal, ok := errors.AsType[*Error](err)
+	if !ok {
+		return err
+	}
+	status := http.StatusUnprocessableEntity
+	switch refusal.Code {
+	case CodeExecutableUnknown:
+		status = http.StatusNotFound
+	case CodeExecutableChanged:
+		status = http.StatusConflict
+	}
+	return &access.Problem{Status: status, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
 }
 
 func digestParam(r *http.Request) (string, error) {
