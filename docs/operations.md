@@ -68,7 +68,8 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   restart and hand off between workers.
 - **Grant refresh:** every five seconds, refreshes the
   [grants](plugins.md#grant-refresh) that are due through their plugins, each
-  under its own advisory lock so a rotating refresh token is spent once.
+  under its own advisory lock so a rotating refresh token is spent once. A
+  refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without

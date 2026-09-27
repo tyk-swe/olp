@@ -314,8 +314,33 @@ up to ten minutes, while the version keeps serving its last access token. A
 plugin reports a grant the upstream will no longer refresh, such as one whose
 refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
 a refresh that authorizes another account than the grant's, or a plugin that
-implements no refresh: OLP discards the refresh token, records why, and
-refreshes the grant no more. Enroll a grant again to replace it.
+implements no refresh: the grant lapses.
+
+### Lapsed grants
+
+A lapsed grant can no longer be refreshed. OLP discards its refresh token,
+records why, and refreshes it no more, and key authority advances, so within
+one authority poll every gateway stops serving the grant's credential version,
+even while its last access token would still work upstream:
+
+- The version's credential slots are ineligible rather than cooling down for a
+  minute. Planning skips each one with reason `credential_lapsed`, without
+  spending the route's attempt budget, and names a target whose every slot
+  lapsed with the same reason, so traffic fails over to the route's other
+  targets.
+- A credential failure on a lapsed grant requests no refresh.
+- Audit records `provider.grant.lapse` with the credential version as
+  resource and the worker as actor: no user, user agent `olp-worker`.
+- `GET /api/v1/providers/{id}/credentials` shows `grant.lapsed_at`, and the
+  credential slot list's health shows `lapsed`. The console marks the version
+  **grant lapsed** and the slot **Grant lapsed**, with **Re-enroll grant** as
+  the slot's call to action.
+- Probing or validating a lapsed version, or binding one to a slot, is refused
+  with `422 credential_lapsed`.
+
+Lapse is terminal: only a new grant enrollment replaces the grant. Re-enroll
+the slot's grant from the credential pool, validate it, then activate the
+provider to restore service.
 
 ### Re-enrolling and the observed principal
 
@@ -331,8 +356,9 @@ any principal a serving binding declares
 
 - Every credential slot of a provider revision observes the same principal.
   Activation refuses slots whose credential versions observe different
-  principals with `principal_mismatch`, naming each slot's; a revoked version
-  counts for none. Re-enroll those slots with one account.
+  principals with `principal_mismatch`, naming each slot's; a revoked version,
+  or one whose grant lapsed, counts for none. Re-enroll those slots with one
+  account.
 - Re-enrolling the same account is a credential rotation: the revision diff
   shows `credential_changed`, and the serving identity is unchanged.
 - Enrolling a different account is a serving identity change: the revision
@@ -536,7 +562,8 @@ Audit records `plugin.install`, `plugin.approve`, `plugin.permit` and
 repeated upload of an installed digest records nothing. It records
 `provider.grant.enroll` for every continuation that reaches the plugin: a
 success with the new credential version as resource, a failure with the
-provider. Audit never records what was pasted back or obtained.
+provider, and `provider.grant.lapse` when a grant [lapses](#lapsed-grants).
+Audit never records what was pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'

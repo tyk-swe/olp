@@ -55,13 +55,16 @@ func TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions(
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "inference", "scopes": []string{"inference"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": "key"}, 201)
 	h.refresh()
+	// Slot restrictions leave no credential to try; a revoked credential
+	// version is skipped, and plans name why.
+	ineligible := "no_eligible_credentials"
 	checkDecision := func(decision map[string]any, eligible bool) {
 		t.Helper()
 		var attempt, reason any
 		if eligible {
 			attempt = float64(1)
 		} else {
-			reason = "no_eligible_credentials"
+			reason = ineligible
 		}
 		if decision["eligible"] != eligible || decision["attempt"] != attempt || decision["reason"] != reason {
 			t.Fatalf("simulation eligibility=%t: %v", eligible, decision)
@@ -129,5 +132,6 @@ func TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions(
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, map[string]string{"Idempotency-Key": "revoke"}), 200)
 	h.refresh()
+	ineligible = "credential_revoked"
 	check(false, false)
 }

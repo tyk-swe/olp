@@ -91,7 +91,8 @@ const grant = {
   plugin_digest: digest,
   principal,
   facts: { account: 'acct-reference' },
-  expires_at: '2026-09-27T07:00:00Z'
+  expires_at: '2026-09-27T07:00:00Z',
+  lapsed_at: null
 };
 const firstVersion: ProviderCredential = {
   id: 'credential-1',
@@ -148,26 +149,34 @@ const slots = {
   health: {
     'slot-default': {
       revoked: false,
+      lapsed: false,
       active_credential_version_id: 'credential-1',
       cooling_down: null,
       validated_at: '2026-09-27T06:01:00Z',
       usage: null
     },
-    'slot-standby': { revoked: false, active_credential_version_id: null }
+    'slot-standby': {
+      revoked: false,
+      lapsed: false,
+      active_credential_version_id: null
+    }
   }
 };
 
+/** The credential pool the provider's slot list answers with. */
+let pooled: typeof slots;
 let host: HTMLElement;
 let client: QueryClient;
 let component: ReturnType<typeof mount> | undefined;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  pooled = slots;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (request: Request) =>
       new URL(request.url).pathname.endsWith('/credential-slots')
-        ? new Response(JSON.stringify(slots), {
+        ? new Response(JSON.stringify(pooled), {
             headers: { 'Content-Type': 'application/json' }
           })
         : new Response(JSON.stringify({ title: 'Not Found', status: 404 }), {
@@ -339,6 +348,53 @@ describe('grant re-enrollment in the credential pool', () => {
     expect(startGrantEnrollment).toHaveBeenCalledWith(
       expect.objectContaining({ id: provider.id }),
       'slot-standby'
+    );
+  });
+
+  it('shows a lapsed grant with its re-enroll action on the credential pool and versions', async () => {
+    const lapsedAt = '2026-09-27T06:45:00Z';
+    pooled = {
+      ...slots,
+      health: {
+        ...slots.health,
+        'slot-default': { ...slots.health['slot-default'], lapsed: true }
+      }
+    };
+    vi.mocked(listProviderCredentials).mockResolvedValue([
+      { ...firstVersion, grant: { ...grant, lapsed_at: lapsedAt } }
+    ]);
+    await openProvider();
+    expect(pool().textContent).toContain('Grant lapsed — re-enroll it');
+    // Re-enrolling is the lapsed slot's call to action, not the others'.
+    const reenroll = button(pool(), 'Re-enroll grant')!;
+    expect(reenroll.classList.contains('button-primary')).toBe(true);
+    expect(
+      button(pool(), 'Enroll grant')!.classList.contains('button-secondary')
+    ).toBe(true);
+    await vi.waitFor(() => {
+      flushSync();
+      expect(versions().textContent).toContain('grant lapsed');
+    });
+    expect(versions().textContent).not.toContain('runtime active');
+    expect(versions().textContent?.replace(/\s+/g, ' ')).toContain(
+      'it can no longer be refreshed, so it serves no more.'
+    );
+    const action = [...versions().querySelectorAll('a')].find(
+      (link) => link.textContent?.trim() === 'Re-enroll grant'
+    );
+    expect(action?.getAttribute('href')).toBe('#credential-pool-heading');
+    expect(host.querySelector('#credential-pool-heading')).toBe(
+      pool().querySelector('h2')
+    );
+
+    reenroll.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(panel()).not.toBeNull();
+    });
+    expect(startGrantEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: provider.id }),
+      'slot-default'
     );
   });
 });

@@ -863,7 +863,7 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 			return false, false, err
 		}
 	}
-	if _, err = AdvanceAuthority(r, tx); err != nil {
+	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return false, false, err
 	}
 	err = Audit(r.Context(), tx, r, "", "user.role_sync_oidc", "user", userID, "success")

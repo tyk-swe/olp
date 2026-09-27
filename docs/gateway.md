@@ -53,18 +53,22 @@ revision. A stored resource is served only under the fidelity it was created
 with, and its owner can always list, delete or cancel it; see
 [route fidelity](provider-routing.md#route-fidelity).
 
-Key authority (API keys, expiry, revocation, and revoked credential versions) is
-polled every five seconds independently of release installation. Authority older
+Key authority (API keys, expiry, revocation, and credential versions that are
+revoked or whose [grant lapsed](plugins.md#lapsed-grants)) is polled every five
+seconds independently of release installation. Authority older
 than 60 seconds, measured from the start of the last successful read with a
 monotonic clock, is stale: new requests are rejected with
 `503 authority_unavailable` while requests
 already admitted keep the snapshot and policy they were pinned to. Ordinary
 streams may finish; realtime sessions recheck key authority every five seconds.
-Credential-version revocation applies to retained releases too: selection
-refuses a revoked version even when the request already pins it. Records of a
-refused credential version name why, `revoked` or `stale_authority`:
-`network_credential_<reason>` in plan decisions, `provider_credential_<reason>`
-when a realtime session ends, and `media_job_credential_<reason>` on media jobs.
+Credential-version revocation and grant lapse apply to retained releases too:
+selection refuses such a version even when the request already pins it, and
+skipping its slot spends no attempt. Records of a refused credential version
+name why, `revoked`, `lapsed` or `stale_authority`: `credential_<reason>` in
+the plan decisions of skipped credential slots (and of a target whose every slot
+was skipped for that reason), `network_credential_<reason>` for a network
+credential, `provider_credential_<reason>` when a realtime session ends, and
+`media_job_credential_<reason>` on media jobs.
 See [authority and replica tests](../tests/integration/replica_fleet_test.go).
 
 ## Request path

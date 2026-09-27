@@ -77,6 +77,7 @@ type grantState struct {
 	generation       int64
 	refreshToken     *string
 	expires, refresh *time.Time
+	lapsed           *time.Time
 	failures         int
 	failure          *string
 	refreshTokens    int
@@ -85,9 +86,9 @@ type grantState struct {
 func readGrant(t *testing.T, h *accessHarness, credentialID string) grantState {
 	t.Helper()
 	var g grantState
-	if err := h.Pool.QueryRow(t.Context(), `SELECT generation,refresh_token_id::text,expires_at,refresh_at,refresh_failures,refresh_failure,
+	if err := h.Pool.QueryRow(t.Context(), `SELECT generation,refresh_token_id::text,expires_at,refresh_at,lapsed_at,refresh_failures,refresh_failure,
 		(SELECT count(*) FROM olp.secrets s WHERE s.id=g.refresh_token_id AND s.purpose=$2) FROM olp.provider_grants g WHERE credential_id=$1`, credentialID, grants.RefreshPurpose).
-		Scan(&g.generation, &g.refreshToken, &g.expires, &g.refresh, &g.failures, &g.failure, &g.refreshTokens); err != nil {
+		Scan(&g.generation, &g.refreshToken, &g.expires, &g.refresh, &g.lapsed, &g.failures, &g.failure, &g.refreshTokens); err != nil {
 		t.Fatal(err)
 	}
 	return g
@@ -341,7 +342,7 @@ func TestGrantRefreshTakesTheProviderNetworkPathAndRetriesWithBackoff(t *testing
 	}
 	grant := readGrant(t, h, credentialID)
 	if grant.generation != 2 || grant.failures != 1 || grant.failure == nil || !strings.Contains(*grant.failure, abi.CodeHTTPFailed) ||
-		grant.refreshTokens != 1 || grant.refresh == nil || time.Until(*grant.refresh) < 20*time.Second {
+		grant.refreshTokens != 1 || grant.refresh == nil || time.Until(*grant.refresh) < 20*time.Second || grant.lapsed != nil {
 		t.Fatalf("after a transient failure the grant is %+v", grant)
 	}
 	if pass(t, refresher) {
@@ -349,10 +350,10 @@ func TestGrantRefreshTakesTheProviderNetworkPathAndRetriesWithBackoff(t *testing
 	}
 }
 
-// A refresh the upstream refuses for good ends the grant's refresh: its
-// refresh token is discarded, why is recorded, and neither workers nor a
-// gateway's credential failure refresh it again. The grant is left for lapse.
-func TestPermanentRefreshFailureEndsTheGrantsRefresh(t *testing.T) {
+// A refresh the upstream refuses for good lapses the grant: its refresh token
+// is discarded, why is recorded, and neither workers nor a gateway's
+// credential failure refresh it again.
+func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
@@ -366,7 +367,7 @@ func TestPermanentRefreshFailureEndsTheGrantsRefresh(t *testing.T) {
 		t.Fatal("the failed refresh was not recorded")
 	}
 	grant := readGrant(t, h, credentialID)
-	if grant.generation != 1 || grant.refreshToken != nil || grant.refresh != nil || grant.failures != 1 || grant.failure == nil || !strings.Contains(*grant.failure, "invalid_grant") {
+	if grant.generation != 1 || grant.refreshToken != nil || grant.refresh != nil || grant.lapsed == nil || grant.failures != 1 || grant.failure == nil || !strings.Contains(*grant.failure, "invalid_grant") {
 		t.Fatalf("after a permanent failure the grant is %+v", grant)
 	}
 	var tokens int

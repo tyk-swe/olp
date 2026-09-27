@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
 )
 
 // Eligibility is whether a credential version may serve and, when it may not,
@@ -17,6 +19,9 @@ const (
 	Eligible Eligibility = ""
 	// Revoked marks a credential version an operator revoked.
 	Revoked Eligibility = "revoked"
+	// Lapsed marks a credential version whose grant lapsed: it can no longer
+	// be refreshed, and only a new grant enrollment replaces it.
+	Lapsed Eligibility = "lapsed"
 	// StaleAuthority withholds every credential version: the last authority
 	// read is too old to vouch for any of them.
 	StaleAuthority Eligibility = "stale_authority"
@@ -49,10 +54,34 @@ func (m *Manager) Eligibility(credentialID string) Eligibility {
 	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
 		return StaleAuthority
 	}
-	if _, revoked := m.authority.revoked[credentialID]; revoked {
-		return Revoked
+	return m.authority.ineligible[credentialID]
+}
+
+// ReadIneligible reads which credential versions and network credentials may
+// not serve, and why, as key authority records it: an operator revoked them,
+// which prevails, or a credential version's grant lapsed. It reads those among
+// ids, or all of them when ids is nil.
+func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[string]Eligibility, error) {
+	rows, err := q.Query(ctx, `SELECT c.id::text,CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' ELSE 'lapsed' END
+		FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
+		WHERE (c.revoked_at IS NOT NULL OR g.lapsed_at IS NOT NULL) AND ($1::uuid[] IS NULL OR c.id=ANY($1))
+		UNION ALL SELECT id::text,'revoked' FROM olp.provider_network_credentials
+		WHERE revoked_at IS NOT NULL AND ($1::uuid[] IS NULL OR id=ANY($1))`, ids)
+	if err != nil {
+		return nil, err
 	}
-	return Eligible
+	ineligible := map[string]Eligibility{}
+	for rows.Next() {
+		var id string
+		var eligibility Eligibility
+		if err = rows.Scan(&id, &eligibility); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ineligible[id] = eligibility
+	}
+	rows.Close()
+	return ineligible, rows.Err()
 }
 
 // Secret serves an eligible credential version from the release that

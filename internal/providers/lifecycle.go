@@ -394,6 +394,7 @@ type slotRow struct {
 	CredentialVersion    *int
 	CredentialRevoked    bool
 	CredentialGrant      bool
+	CredentialLapsed     bool
 	CredentialPrincipal  string
 	Restrictions         slotRestrictions
 	Limits               Limits
@@ -408,7 +409,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,c.plugin_digest IS NOT NULL,coalesce(c.principal,''),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,c.plugin_digest IS NOT NULL,g.lapsed_at IS NOT NULL,coalesce(c.principal,''),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +419,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 		var row slotRow
 		var restrictions, limits []byte
 		var revoked, grant *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &grant, &row.CredentialPrincipal, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &grant, &row.CredentialLapsed, &row.CredentialPrincipal, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
@@ -449,10 +450,10 @@ func (row *slotRow) credentialFits(cfg *Configuration) error {
 }
 
 // observedPrincipal is the principal the slot observes: the one grant
-// enrollment observed for its credential version, unless that version is
-// revoked and serves no more.
+// enrollment observed for its credential version, unless that version serves
+// no more because it is revoked or its grant lapsed.
 func (row *slotRow) observedPrincipal() string {
-	if row.CredentialRevoked {
+	if row.CredentialRevoked || row.CredentialLapsed {
 		return ""
 	}
 	return row.CredentialPrincipal
