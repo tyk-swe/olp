@@ -54,6 +54,9 @@ type Standing struct {
 	// Credential is the credential version the grant created, once the
 	// enrollment Completed.
 	Credential Credential
+	// Ended is set on the one status request that ended the enrollment
+	// without polling, having found its device authorization Expired.
+	Ended bool
 }
 
 // A Credential is a credential version grant enrollment created.
@@ -95,9 +98,10 @@ func (e *Enrollment) authorizeDevice(manifest abi.Manifest, device abi.DeviceAut
 // interval having passed since the last one, it claims the poll, so no other
 // status request, on any control replica, polls meanwhile, and returns the
 // enrollment with its session state to Poll; the caller commits the claim
-// before running the plugin. Otherwise it returns where the enrollment stands.
-// An enrollment the operator continues with what the upstream returned is not
-// found.
+// before running the plugin. Otherwise it returns where the enrollment stands,
+// having ended one whose device authorization expired before any poll ended
+// it. An enrollment the operator continues with what the upstream returned is
+// not found.
 func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, principal string) (*Enrollment, Standing, error) {
 	e := Enrollment{ID: id, ProviderID: providerID, StartedBy: principal}
 	var interval int64
@@ -106,6 +110,9 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,poll_interval`, id, providerID, principal, seconds(pollLease)).
 		Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt, &interval)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if ended, err := expire(ctx, tx, providerID, id, principal); err != nil || ended {
+			return nil, Standing{Status: Expired, Ended: ended}, err
+		}
 		standing, err := stands(ctx, tx, providerID, id, principal)
 		return nil, standing, err
 	}
@@ -121,20 +128,34 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 	return &e, Standing{}, nil
 }
 
+// expire ends a device authorization that expired before any poll ended it,
+// recording that it expired and deleting its session state, and reports
+// whether it did. It does so once, for the status request that finds it
+// expired first.
+func expire(ctx context.Context, tx pgx.Tx, providerID, id, principal string) (bool, error) {
+	tag, err := tx.Exec(ctx, `UPDATE olp.grant_enrollments SET continued_at=now(),outcome='expired'
+		WHERE id=$1 AND provider_id=$2 AND started_by=$3 AND poll_interval IS NOT NULL AND continued_at IS NULL AND expires_at<=now()`, id, providerID, principal)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, sessionPurpose)
+	return true, err
+}
+
 // stands reads where a device authorization stands when no poll is due. One
 // that a failed poll ended is refused as used.
 func stands(ctx context.Context, q access.Queryer, providerID, id, principal string) (Standing, error) {
 	var (
-		s                  Standing
-		interval           int64
-		continued, expired bool
-		outcome            string
+		s         Standing
+		interval  int64
+		continued bool
+		outcome   string
 	)
-	err := q.QueryRow(ctx, `SELECT e.poll_interval,e.continued_at IS NOT NULL,e.expires_at<=now(),coalesce(e.outcome,''),
+	err := q.QueryRow(ctx, `SELECT e.poll_interval,e.continued_at IS NOT NULL,coalesce(e.outcome,''),
 			coalesce(c.id::text,''),coalesce(c.version,0),coalesce(c.principal,'')
 		FROM olp.grant_enrollments e LEFT JOIN olp.provider_credentials c ON c.id=e.credential_id
 		WHERE e.id=$1 AND e.provider_id=$2 AND e.started_by=$3 AND e.poll_interval IS NOT NULL`, id, providerID, principal).
-		Scan(&interval, &continued, &expired, &outcome, &s.Credential.ID, &s.Credential.Version, &s.Credential.Principal)
+		Scan(&interval, &continued, &outcome, &s.Credential.ID, &s.Credential.Version, &s.Credential.Principal)
 	switch {
 	case err != nil:
 		return s, err
@@ -142,8 +163,6 @@ func stands(ctx context.Context, q access.Queryer, providerID, id, principal str
 		s.Status = Status(outcome)
 	case continued:
 		return s, access.Fail(409, "grant_enrollment_used", "A poll of this device authorization failed, which ended the grant enrollment. Start another.")
-	case expired:
-		s.Status = Expired
 	default:
 		s.Status, s.Interval = Pending, time.Duration(interval)*time.Second
 	}
@@ -195,7 +214,7 @@ func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) 
 	case abi.CodeAccessDenied:
 		return Standing{Status: Denied}, e.settle(ctx, db, "continued_at=now(),outcome='denied'", true)
 	case abi.CodeExpiredToken:
-		return Standing{Status: Expired}, e.settle(ctx, db, "expires_at=least(expires_at,now())", true)
+		return Standing{Status: Expired}, e.settle(ctx, db, "continued_at=now(),outcome='expired'", true)
 	}
 	if err := e.settle(ctx, db, "continued_at=now()", true); err != nil {
 		return Standing{}, err

@@ -157,6 +157,8 @@ func TestDeviceAuthorizationGrantEnrollmentPollsUntilTheOperatorApproves(t *test
 // authority reports or by the enrollment's own expiry, and once the enrollment
 // is cancelled; a poll that fails ends it. Only the principal that started a
 // device authorization polls it, and it is never continued with pasted input.
+// Every way an enrollment ends without a grant, a start the plugin fails
+// included, is audited once.
 func TestDeviceAuthorizationGrantEnrollmentStopsWhenDeniedExpiredCancelledOrFailed(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -196,6 +198,7 @@ func TestDeviceAuthorizationGrantEnrollmentStopsWhenDeniedExpiredCancelledOrFail
 		t.Fatal(err)
 	}
 	wantEnded(lapsed, "expired")
+	wantEnded(lapsed, "expired")
 
 	cancelled := startGrantEnrollment(t, h, owner, path)
 	h.want(owner, "DELETE", path+"/grant-enrollments/"+cancelled["id"].(string), nil, nil, 204)
@@ -226,18 +229,25 @@ func TestDeviceAuthorizationGrantEnrollmentStopsWhenDeniedExpiredCancelledOrFail
 	if refusal = pollGrantEnrollment(h, owner, path, pending, 409); problemCode(t, refusal) != "grant_enrollment_used" {
 		t.Fatalf("polled an ended enrollment: %v", refusal)
 	}
+	// So does a start that can't reach the authority.
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	if refusal = h.want(owner, "POST", path+"/grant-enrollments", nil, etagHeader(detail), 422); problemCode(t, refusal) != "grant_enrollment_failed" {
+		t.Fatalf("a failed start: %v", refusal)
+	}
 
-	// Each outcome the plugin reported is audited as a failure, and the
-	// enrollments that ended hold no session state.
+	// Each way an enrollment ended without a grant is audited once, as a
+	// failure: denied, expired as the authority reported and by its own
+	// expiry, the failed poll and the failed start. The enrollments that
+	// ended hold no session state.
 	events := h.want(owner, "GET", "/api/v1/audit?action=provider.grant.enroll", nil, nil, 200)["items"].([]any)
 	for _, event := range events {
-		if event.(map[string]any)["outcome"] != "failure" {
+		if event.(map[string]any)["outcome"] != "failure" || event.(map[string]any)["resource_id"] != strings.TrimPrefix(path, "/api/v1/providers/") {
 			t.Fatalf("audit %v", events)
 		}
 	}
 	var sessions int
 	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose='grant_enrollment' AND id = ANY($1::uuid[])",
-		[]string{denied["id"].(string), expired["id"].(string), cancelled["id"].(string), pending["id"].(string)}).Scan(&sessions); err != nil || len(events) != 3 || sessions != 0 {
+		[]string{denied["id"].(string), expired["id"].(string), lapsed["id"].(string), cancelled["id"].(string), pending["id"].(string)}).Scan(&sessions); err != nil || len(events) != 5 || sessions != 0 {
 		t.Fatalf("%d audit events, %d session states of ended enrollments: %v", len(events), sessions, err)
 	}
 }

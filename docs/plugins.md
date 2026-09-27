@@ -693,13 +693,14 @@ Permissions stay recorded, so enabling the tier again restores them.
 Audit records `plugin.install`, `plugin.approve`, `plugin.permit` and
 `plugin.uninstall` with the owner as actor and the digest as resource. A
 repeated upload of an installed digest records nothing. It records
-`provider.grant.enroll` for every continuation that reaches the plugin, and for
-the poll that ends a device authorization: a success with the new credential
-version as resource, a failure, including a denied or expired device
-authorization, with the provider. It records `provider.grant.lapse` when a
-grant [lapses](#lapsed-grants), and `provider.grant.retire` when a worker
-[retires](#grant-refresh) a grant nothing uses. Audit never records what was
-pasted back or obtained.
+`provider.grant.enroll` for every start and continuation that reaches the
+plugin, and once for each device authorization that ends: a success with the
+new credential version as resource, a failure, including a start the plugin
+failed and a device authorization denied or expired, whether the upstream or
+OLP's own deadline expired it, with the provider. It records
+`provider.grant.lapse` when a grant [lapses](#lapsed-grants), and
+`provider.grant.retire` when a worker [retires](#grant-refresh) a grant nothing
+uses. Audit never records what was pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'

@@ -89,6 +89,9 @@ func (s *Server) startGrantEnrollment(r *http.Request) (access.Reply, error) {
 	// installation mutation lock; saving rechecks the draft.
 	enrollment, err := grants.Start(r.Context(), s.Plugins, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
 	if err != nil {
+		if audited := s.auditFailedGrantEnrollment(r, p.ID, id); audited != nil {
+			return access.Reply{}, audited
+		}
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -299,6 +302,13 @@ func (s *Server) pollGrantEnrollment(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	// A device authorization that expired before a poll ended it ends with
+	// the status request that finds it expired, which audits it once.
+	if standing.Ended {
+		if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
+			return access.Reply{}, err
+		}
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		return access.Reply{}, err
 	}
@@ -348,10 +358,10 @@ func grantStatus(current *record, standing grants.Standing) grantEnrollmentStatu
 	return status
 }
 
-// auditFailedGrantEnrollment records a continuation that failed, or a device
-// authorization's poll that ended it without a grant, in its own transaction
-// once the completion's rolled back. Like every audit record, it names the
-// principal and the provider, never what was pasted back.
+// auditFailedGrantEnrollment records a start or a continuation that failed,
+// or a device authorization's poll that ended it without a grant, in its own
+// transaction once the step's rolled back. Like every audit record, it names
+// the principal and the provider, never what was pasted back.
 func (s *Server) auditFailedGrantEnrollment(r *http.Request, actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
 	tx, err := s.Access.Pool.Begin(ctx)
