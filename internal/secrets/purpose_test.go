@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,14 +49,7 @@ func TestPurposeNamesNeverChange(t *testing.T) {
 // as a parameter instead of spelling one.
 func TestQueriesBindPurposes(t *testing.T) {
 	literal := regexp.MustCompile(`purpose\s*(=|IN)\s*\(?'`)
-	sources, err := filepath.Glob("../*/*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range sources {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
+	for _, name := range productionSources(t) {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -110,4 +104,26 @@ func TestSecurityDocumentListsEveryPurpose(t *testing.T) {
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// productionSources lists every non-test Go source under internal/ and cmd/,
+// at any depth.
+func productionSources(t *testing.T) []string {
+	t.Helper()
+	var sources []string
+	for _, root := range []string{"..", "../../cmd"} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err == nil && !entry.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+				sources = append(sources, path)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sources) < 100 {
+		t.Fatalf("found only %d sources", len(sources))
+	}
+	return sources
 }

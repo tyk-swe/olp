@@ -65,8 +65,10 @@
         >{/if}{#each writable as membership (membership.id)}<option
           value={membership.id}>{membership.name}</option
         >{/each}</select
-    >{#if !globalScope && !writable.length}<small
-        >Your project memberships are read-only. A project manager membership is
-        required to create resources.</small
+    >{#if !offerUnassigned && !writable.length}<small
+        >{#if globalScope}No project exists yet, and installation-wide resources
+          of this kind need an operator or owner.{:else}Your project memberships
+          are read-only. A project manager membership is required to create
+          resources.{/if}</small
       >{/if}{/if}
 </div>

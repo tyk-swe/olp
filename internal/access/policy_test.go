@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -260,13 +261,9 @@ func TestOperationsMatchTheContract(t *testing.T) {
 // kind elsewhere bypasses it, as the owner-only session checks once did.
 func TestPrincipalRolesAreDecidedOnlyByThePolicy(t *testing.T) {
 	comparison := regexp.MustCompile(`\b(p|principal)\.(Role\s*[!=]=\s*"|Kind\s*[!=]=\s*"(user|machine)")`)
-	sources, err := filepath.Glob("../*/*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range sources {
+	for _, name := range productionSources(t) {
 		base := filepath.Base(name)
-		if strings.HasSuffix(name, "_test.go") || filepath.Base(filepath.Dir(name)) == "access" && (base == "policy.go" || base == "principal.go") {
+		if filepath.Base(filepath.Dir(name)) == "access" && (base == "policy.go" || base == "principal.go") {
 			continue
 		}
 		source, err := os.ReadFile(name)
@@ -323,4 +320,26 @@ func TestSecurityDocumentDescribesThePolicy(t *testing.T) {
 			mark(r.installation), mark(r.delegable))
 	}
 	docRegion(t, "operations", table.String())
+}
+
+// productionSources lists every non-test Go source under internal/ and cmd/,
+// at any depth.
+func productionSources(t *testing.T) []string {
+	t.Helper()
+	var sources []string
+	for _, root := range []string{"..", "../../cmd"} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err == nil && !entry.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+				sources = append(sources, path)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sources) < 100 {
+		t.Fatalf("found only %d sources", len(sources))
+	}
+	return sources
 }

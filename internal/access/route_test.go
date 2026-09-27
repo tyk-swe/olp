@@ -32,14 +32,7 @@ func TestRoutesMountOnlyAsTheContractDeclares(t *testing.T) {
 // requirement; only the published contract itself is served that way.
 func TestManagementRoutesMountOnlyThroughAdmission(t *testing.T) {
 	bare := regexp.MustCompile(`HandleFunc\("(?:GET |POST |PUT |PATCH |DELETE )?/api/v1/[^"]+"`)
-	sources, err := filepath.Glob("../*/*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range sources {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
+	for _, name := range productionSources(t) {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

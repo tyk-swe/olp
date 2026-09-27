@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,7 +31,9 @@ var errUnknownPurpose = errors.New("an encrypted secret names an unknown purpose
 func (k *KeyRing) VerifyAll(ctx context.Context, q RowsQuerier, installation string) (map[int]int, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,purpose,key_version,ciphertext FROM olp.secrets ORDER BY id")
 	if err != nil {
-		return nil, errors.New("cannot inspect encrypted records")
+		// The database error names the failure, such as a missing grant, and
+		// carries no record material.
+		return nil, fmt.Errorf("cannot inspect encrypted records: %w", err)
 	}
 	defer rows.Close()
 	versions := map[int]int{}
