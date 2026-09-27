@@ -18,6 +18,10 @@ x-application-environment: &application-environment
   OLP_VALKEY_URL: ${OLP_VALKEY_URL:-redis://valkey:6379}
   OLP_PUBLIC_ORIGIN: ${OLP_PUBLIC_ORIGIN:-http://localhost:8080}
   OLP_LOCAL_LOGIN_ENABLED: ${OLP_LOCAL_LOGIN_ENABLED:-true}
+  # Experimental. The directory of OLP_IMAGE that holds unconfined plugin
+  # executables; setting it enables the unconfined plugin tier. Empty runs
+  # plugins confined only.
+  OLP_UNCONFINED_PLUGIN_DIR: ${OLP_UNCONFINED_PLUGIN_DIR:-}
   # Empty means forwarding headers are ignored. Set only to CIDRs of proxies
   # that append a trustworthy X-Forwarded-For chain.
   OLP_TRUSTED_PROXY_CIDRS: ${OLP_TRUSTED_PROXY_CIDRS:-}

@@ -183,6 +183,12 @@ config:
   publicOrigin: https://olp.example.com
   # Hide password sign-in when every operator authenticates through OIDC.
   localLoginEnabled: true
+  # Experimental. The absolute directory of the image that holds unconfined
+  # plugin executables, such as /opt/olp/plugins in an image built FROM this
+  # chart's. Setting it enables the unconfined plugin tier, whose plugins run
+  # with the privileges of OLP's processes once an owner permits each one;
+  # the management API can't enable it. Empty runs plugins confined only.
+  unconfinedPluginDir: ""
   databaseMaxConnections: 20
   # HTTP/2 connections receive GOAWAY at this age so clients rebalance.
   httpConnectionMaxAgeSeconds: 300

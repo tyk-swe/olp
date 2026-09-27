@@ -44,9 +44,12 @@ tests check handler/contract parity.
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
 revision metadata and stored JSON. Runtime publication and retained-resource
 resolution share these pure decoders. A plugin provider's revision decodes with
-the manifest of the plugin it pins (`PluginManifestColumn`), so snapshots carry
-its plugin profile and gateways read no manifest; a profile's signing hook runs
-on the module `plugins.Host` loads by digest. Their callers still own SQL,
+the plugin it pins (`PluginColumn`: its manifest and whether it is unconfined),
+so snapshots carry its plugin profile and gateways read no manifest; a
+profile's signing hook runs on the code `plugins.Host` loads by digest: a
+confined plugin's module on wazero, or an unconfined plugin's executable as a
+subprocess speaking the ABI over stdio, where the deployment enables the
+unconfined tier. Their callers still own SQL,
 transactions, authorization, credential checks, and operation eligibility. Publication alone
 drops empty provider limits; retained resources preserve the stored limits.
 
