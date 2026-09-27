@@ -67,7 +67,7 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation, optionally `Signing` and, if providers using it authenticate with a grant, its `Grant`. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`, and never a built-in profile's ID such as `openai-chat`), a `Label` of 1–100 characters, the `Dialect` it serves, the `Options` its providers set, its `Hosting` adaptation, optionally `Signing` and, if providers using it authenticate with a grant, its `Grant`. |
 
 A profile serves one of OLP's built-in dialects whose requests and events are
 plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,

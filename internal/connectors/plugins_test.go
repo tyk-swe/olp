@@ -367,6 +367,24 @@ func TestPluginProfileValidationLocatesTheOffendingValue(t *testing.T) {
 	}
 }
 
+// A plugin profile never takes a built-in profile's ID, on which OLP keys
+// behaviour, such as strict compilation leaving Gemini Interactions to its
+// own contract: install refuses it, and so does publishing a provider that
+// pins a plugin installed before.
+func TestPluginProfilesNeverTakeABuiltInProfileID(t *testing.T) {
+	for _, builtin := range Profiles() {
+		manifest := pluginManifest()
+		manifest.Profiles[0].ID = builtin.ID
+		if refusal, ok := errors.AsType[*ProfileError](ValidatePluginProfile(manifest.Profiles[0])); !ok || refusal.Field != "id" {
+			t.Fatalf("%s: want a refusal of id, got %v", builtin.ID, refusal)
+		}
+		installed, _ := json.Marshal(InstalledPlugin{Manifest: manifest})
+		if _, err := DecodePluginProfile(pluginDigest, installed, builtin.ID); err == nil {
+			t.Fatalf("published a plugin profile identified as the built-in %s", builtin.ID)
+		}
+	}
+}
+
 func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
 	c := pluginConfig(t, optionsManifest())
 	c.PluginOptions = map[string]string{"account": "acme/prod", "region": "eu"}

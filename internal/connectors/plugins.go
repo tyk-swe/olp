@@ -148,6 +148,11 @@ type ProfileError struct {
 func (e *ProfileError) Error() string { return e.Field + ": " + e.Message }
 
 func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*PluginProfile, error) {
+	// OLP keys some behaviour on built-in profile IDs, such as Gemini
+	// Interactions' own contract, which must never reach a plugin's profile.
+	if builtInProfile(declared.ID) {
+		return nil, &ProfileError{Field: "id", Message: fmt.Sprintf("Identify the profile with an ID of its own: %s is a built-in profile's.", declared.ID)}
+	}
 	base, ok := dialectProfile(declared.Dialect)
 	if !ok {
 		return nil, &ProfileError{Field: "dialect", Message: "Serve one of the dialects plugin profiles can serve: " + strings.Join(pluginDialects, ", ") + "."}
@@ -188,6 +193,14 @@ func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*P
 	}
 	completeProfileMetadata(&p)
 	return &PluginProfile{profile: p, hosting: placed, declared: declared, origins: slices.Clone(origins), patterns: patterns}, nil
+}
+
+// builtInProfile reports whether id identifies a built-in profile, which no
+// plugin profile may share.
+func builtInProfile(id string) bool {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
+	return slices.ContainsFunc(profileRegistry, func(p Profile) bool { return p.ID == id })
 }
 
 // dialectProfile returns the built-in profile that hosts a plugin dialect
