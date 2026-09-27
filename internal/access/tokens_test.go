@@ -131,7 +131,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	live := stubQueryer{tokenRow(digest, []string{"read", "configure"}, nil)}
 
 	r := machineRequest(secret, "GET")
-	p, err := s.Principal(r, live, Read)
+	p, err := authorize(s, r, live, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,19 +141,19 @@ func TestMachinePrincipalResolution(t *testing.T) {
 	if p.UserID() != "creator-uuid" {
 		t.Fatal("machine ownership should attribute the token creator")
 	}
-	if _, err = s.Principal(r, live, Usage); err == nil {
+	if _, err = authorize(s, r, live, Usage); err == nil {
 		t.Fatal("an unscoped operation must not authorize")
 	}
 	projectIDs, _ := json.Marshal([]string{"p1", "p2"})
 	projectScoped := stubQueryer{tokenRow(digest, []string{"read", "settings"}, map[int]any{tokenAllProjects: false, tokenProjectIDs: projectIDs})}
-	scoped, err := s.Principal(r, projectScoped, Read)
+	scoped, err := authorize(s, r, projectScoped, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if scoped.AllProjects || scoped.Projects["p1"] != "manager" || scoped.Projects["p2"] != "manager" {
 		t.Fatal("a project-scoped token must resolve manager-equivalent projects", scoped)
 	}
-	if _, err = s.Principal(r, projectScoped, Settings); err == nil {
+	if _, err = authorize(s, r, projectScoped, Settings); err == nil {
 		t.Fatal("a project-scoped token must not run installation operations")
 	}
 	for name, row := range map[string]pgx.Row{
@@ -167,7 +167,7 @@ func TestMachinePrincipalResolution(t *testing.T) {
 			if name == "mangled" {
 				attempt = "olpm_onlytwo"
 			}
-			if _, err := s.Principal(machineRequest(attempt, "GET"), stubQueryer{row}, Read); err == nil {
+			if _, err := authorize(s, machineRequest(attempt, "GET"), stubQueryer{row}, Read); err == nil {
 				t.Fatal("an invalid machine credential authorized")
 			}
 		})
@@ -180,7 +180,7 @@ func TestMachinePrincipalActsWithinCreatorAuthority(t *testing.T) {
 	digest := s.Auth.Digest("management_token", secret)
 	every := []string{"read", "access_read", "access", "settings", "configure", "keys", "playground", "usage"}
 	resolve := func(row stubRow, operation Operation) (Principal, error) {
-		return s.Principal(machineRequest(secret, "GET"), stubQueryer{row}, operation)
+		return authorize(s, machineRequest(secret, "GET"), stubQueryer{row}, operation)
 	}
 
 	// The stored liveness column folds in the creator's active and OIDC
@@ -250,7 +250,7 @@ func machineRequestHeader(header string) *http.Request {
 
 func TestMachineBearerSkipsBrowserDefensesOnly(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
+	server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
 		return OK(map[string]bool{"reached": true}), nil
 	}))
 	defer server.Close()
@@ -315,4 +315,13 @@ func TestProvisioningIdentifiers(t *testing.T) {
 	if _, err := provisioningID(r, "external_id", "external_id", 255); err == nil {
 		t.Fatal("accepted an oversized external identifier")
 	}
+}
+
+// authorize authenticates r and authorizes op, as a route admitting op would.
+func authorize(s *Server, r *http.Request, q Queryer, op Operation) (Principal, error) {
+	p, err := s.Authenticate(r, q)
+	if err != nil {
+		return p, err
+	}
+	return p, p.Authorize(op)
 }

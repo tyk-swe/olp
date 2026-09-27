@@ -55,16 +55,6 @@ func (req Requirement) Admits(p Principal) error {
 	return refusal
 }
 
-// mentions reports whether any alternative names op.
-func (req Requirement) mentions(op Operation) bool {
-	for _, alternative := range req.Alternatives {
-		if slices.Contains(alternative.Operations, op) {
-			return true
-		}
-	}
-	return false
-}
-
 // ContractRequirements parses and validates the security requirements of
 // every management operation in the embedded contract, keyed by ServeMux
 // pattern ("GET /api/v1/users/{user_id}").

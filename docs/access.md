@@ -168,6 +168,10 @@ recovery error that does not confirm whether the address exists.
 
 ## Mutation and audit boundaries
 
+Every management route is authorized before its handler runs, from the
+security requirement the [management contract](../openapi/management.json)
+declares for it; see
+[the decision](adr/0006-management-routes-are-authorized-from-the-contract.md).
 Protected writes reauthorize inside their feature transaction. Access mutations
 take the installation row lock so ownership checks and writes commit together;
 password hashing, OIDC discovery, and token verification run outside that lock.

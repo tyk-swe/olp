@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -142,16 +141,4 @@ func TestRouteAuthorizationMatrix(t *testing.T) {
 	}
 	out.WriteString("  }\n}\n")
 	golden(t, "authorization.golden.json", out.Bytes())
-}
-
-func TestHandlersMayAuthorizeOnlyDeclaredOperations(t *testing.T) {
-	r := httptest.NewRequest("GET", "/api/v1/providers", nil)
-	r.Pattern = "GET /api/v1/providers"
-	checkDeclared(r, Read)
-	defer func() {
-		if recover() == nil {
-			t.Fatal("an undeclared operation was not reported")
-		}
-	}()
-	checkDeclared(r, Settings)
 }

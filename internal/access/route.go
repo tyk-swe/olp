@@ -66,7 +66,7 @@ func declared(pattern string, public bool) Requirement {
 func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...RouteOption) {
 	req := declared(pattern, false)
 	o := options(opts)
-	mux.HandleFunc(pattern, s.HandleTimeout(o.maxBody, o.timeout, func(r *http.Request) (Reply, error) {
+	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, func(r *http.Request) (Reply, error) {
 		r, p, err := s.admitRoute(r, req)
 		if err != nil {
 			return Reply{}, err
@@ -79,7 +79,7 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 func (s *Server) Stream(mux *http.ServeMux, pattern string, h StreamHandler, opts ...RouteOption) {
 	req := declared(pattern, false)
 	o := options(opts)
-	mux.HandleFunc(pattern, s.HandleStream(o.maxBody, o.timeout, func(w http.ResponseWriter, r *http.Request) error {
+	mux.HandleFunc(pattern, s.serveStream(o.maxBody, o.timeout, func(w http.ResponseWriter, r *http.Request) error {
 		r, p, err := s.admitRoute(r, req)
 		if err != nil {
 			return err
@@ -92,7 +92,7 @@ func (s *Server) Stream(mux *http.ServeMux, pattern string, h StreamHandler, opt
 func (s *Server) Public(mux *http.ServeMux, pattern string, h PublicHandler, opts ...RouteOption) {
 	declared(pattern, true)
 	o := options(opts)
-	mux.HandleFunc(pattern, s.HandleTimeout(o.maxBody, o.timeout, h))
+	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, h))
 }
 
 // admitRoute authenticates the caller and checks the route requirement, carrying

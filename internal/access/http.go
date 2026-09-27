@@ -148,16 +148,6 @@ type Reply struct {
 func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
 func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
 
-func (s *Server) Handle(fn func(*http.Request) (Reply, error)) http.HandlerFunc {
-	return s.HandleWith(65536, fn)
-}
-
-// HandleWith is Handle with an explicit request-body limit for the few
-// operations whose documented payloads exceed the default.
-func (s *Server) HandleWith(maxBody int64, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
-	return s.HandleTimeout(maxBody, 15*time.Second, fn)
-}
-
 func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -187,9 +177,9 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	return r, cancel, nil
 }
 
-// HandleTimeout is HandleWith with an explicit request deadline for
-// operations that legitimately outlive the default management budget.
-func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
+// serve applies the management transport guards, runs fn, and writes its
+// Reply or problem.
+func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r, cancel, err := s.guard(w, r, maxBody, timeout)
 		defer cancel()
@@ -226,7 +216,9 @@ func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*ht
 	}
 }
 
-func (s *Server) HandleStream(maxBody int64, timeout time.Duration, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
+// serveStream is serve for a handler that writes its own response; a problem
+// is written only while nothing has been committed.
+func (s *Server) serveStream(maxBody int64, timeout time.Duration, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r, cancel, err := s.guard(w, r, maxBody, timeout)
 		defer cancel()

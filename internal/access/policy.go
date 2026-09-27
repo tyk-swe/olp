@@ -166,19 +166,6 @@ func (p Principal) Authorize(op Operation) error {
 	return nil
 }
 
-// AuthorizeInstallation is Authorize for an installation-wide use of op, such
-// as reading installation settings, which also needs an installation-wide
-// access scope.
-func (p Principal) AuthorizeInstallation(op Operation) error {
-	if err := p.Authorize(op); err != nil {
-		return err
-	}
-	if !p.AllProjects {
-		return Forbidden()
-	}
-	return nil
-}
-
 // Actor is who an audit record attributes an action to: a member, a
 // management token, or the installation itself.
 type Actor struct {
