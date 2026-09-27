@@ -243,6 +243,20 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 	if len(pinning) > 0 {
 		return access.Reply{}, access.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Move those providers to another plugin before uninstalling it.")
 	}
+	retired, err := retireGrants(r.Context(), tx, digest)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	for _, credentialID := range retired {
+		if err = access.Audit(r.Context(), tx, r, p.ID, "provider.grant.retire", "provider_credential", credentialID, "success"); err != nil {
+			return access.Reply{}, err
+		}
+	}
+	if len(retired) > 0 {
+		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
+			return access.Reply{}, err
+		}
+	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.plugins WHERE digest=$1", digest); err != nil {
 		return access.Reply{}, err
 	}
@@ -250,6 +264,40 @@ func (s *Management) uninstall(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+}
+
+// retireGrants retires, as a plugin build is uninstalled, the unrevoked
+// grants its grant enrollment created that have not lapsed, and returns their
+// credential versions. No draft or revision pins the build any more, and a
+// grant serves only a provider pinning the build that enrolled it, so nothing
+// can use them: like a worker retiring a grant no configuration uses (see
+// package grants), this deletes their refresh tokens and lapses them, without
+// notifying anyone, since nothing served them. A restored revision, or a
+// reinstalled build, serves their credential versions only after a new grant
+// enrollment.
+func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, error) {
+	rows, err := tx.Query(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND c.plugin_digest=$1 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
+		RETURNING g.credential_id::text, old.refresh_token_id::text`, digest)
+	if err != nil {
+		return nil, err
+	}
+	var retired, refreshTokens []string
+	var credentialID string
+	var refreshToken *string
+	_, err = pgx.ForEachRow(rows, []any{&credentialID, &refreshToken}, func() error {
+		retired = append(retired, credentialID)
+		if refreshToken != nil {
+			refreshTokens = append(refreshTokens, *refreshToken)
+		}
+		return nil
+	})
+	if err != nil || len(refreshTokens) == 0 {
+		return retired, err
+	}
+	// The purpose grants.RefreshPurpose names.
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose='provider_grant_refresh'", refreshTokens)
+	return retired, err
 }
 
 // pinningProviders names the providers whose draft or any published

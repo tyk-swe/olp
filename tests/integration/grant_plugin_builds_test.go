@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
@@ -124,5 +125,43 @@ func TestAGrantServesOnlyThePluginBuildThatEnrolledIt(t *testing.T) {
 	dueNow(t, h, reenrolled)
 	if !pass(t, refresher) || readGrant(t, h, reenrolled).generation != 2 {
 		t.Fatalf("the served grant was not refreshed: %+v", readGrant(t, h, reenrolled))
+	}
+}
+
+// Uninstalling a plugin retires the grants it enrolled: no provider pins it,
+// so none can serve them. Their refresh tokens are discarded at once and they
+// lapse, which the slots holding them show until each is enrolled again.
+// Nothing served them, so nobody is notified.
+func TestUninstallingAPluginRetiresTheGrantsItEnrolled(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	deliveries := subscribeToLapses(t, h, owner)
+	authority := testutil.NewOAuthServer(t)
+	upstream := newGrantUpstream(t, authority)
+	enrolling := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	upgrade := installReferencePlugin(t, h, owner, upstream, "0.2.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, enrolling, nil)
+	enrolled := enrollGrant(t, h, owner, path)
+	moveToBuild(t, h, owner, path, upgrade)
+
+	plugin := h.want(owner, "GET", "/api/v1/plugins/"+enrolling, nil, nil, 200)
+	h.want(owner, "DELETE", "/api/v1/plugins/"+enrolling, nil, etagHeader(plugin), 204)
+	if grant := readGrant(t, h, enrolled); grant.lapsed == nil || grant.refreshToken != nil || grant.refresh != nil {
+		t.Fatalf("the uninstalled build's grant is %+v", grant)
+	}
+	var tokens int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose=$1", grants.RefreshPurpose).Scan(&tokens); err != nil || tokens != 0 {
+		t.Fatalf("%d refresh tokens survived the uninstall: %v", tokens, err)
+	}
+	if events := retirements(t, h, owner); len(events) != 1 || events[0].(map[string]any)["resource_id"] != enrolled || events[0].(map[string]any)["actor_type"] != "user" {
+		t.Fatalf("audited retirements %v", events)
+	}
+	if n := deliveries(); n != 0 {
+		t.Fatalf("the retirement was notified %d times", n)
+	}
+	slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
+	slot := slots["items"].([]any)[0].(map[string]any)["id"].(string)
+	if health := slots["health"].(map[string]any)[slot].(map[string]any); health["lapsed"] != true {
+		t.Fatalf("slot health %v", health)
 	}
 }

@@ -477,6 +477,14 @@ its published revisions pins the digest. Published revisions never change, so a
 digest that a provider has published stays installed, which keeps every
 revision restorable and its retained resources servable.
 
+Uninstalling retires the grants the build enrolled, since a grant serves only
+the build that enrolled it and no provider pins that build any more: OLP
+deletes their refresh tokens and they lapse, as a worker
+[retires](#grant-refresh) a grant nothing uses, with no notification. A draft
+slot that still holds one shows **Grant lapsed** until its grant is enrolled
+again, and audit records `provider.grant.retire` for each, with the owner as
+actor.
+
 ## Confinement and limits
 
 Plugin calls run on instances of the module within these limits:
@@ -700,7 +708,8 @@ failed and a device authorization denied or expired, whether the upstream or
 OLP's own deadline expired it, with the provider. It records
 `provider.grant.lapse` when a grant [lapses](#lapsed-grants), and
 `provider.grant.retire` when a worker [retires](#grant-refresh) a grant nothing
-uses. Audit never records what was pasted back or obtained.
+uses, or an owner [uninstalls](#uninstalling) the plugin that enrolled it.
+Audit never records what was pasted back or obtained.
 
 Modules and manifests are stored in PostgreSQL in `olp.plugins`, so database
 [backups](operations.md#backup-and-restore) include them. Unconfined plugins'
