@@ -30,9 +30,13 @@ func (acme) Manifest() plugin.Manifest {
 		Name:    "acme",
 		Version: "1.0.0",
 		Origins: []string{"https://api.acme.example"},
-		Profiles: []plugin.Profile{
-			{ID: "acme-chat", Label: "Acme Chat Completions", Dialect: "openai-chat"},
-		},
+		Profiles: []plugin.Profile{{
+			ID: "acme-chat", Label: "Acme Chat Completions", Dialect: "openai-chat",
+			Hosting: plugin.Hosting{
+				Address: "https://api.acme.example/v1",
+				Headers: map[string]string{"Authorization": "Token {credential}"},
+			},
+		}},
 	}
 }
 
@@ -63,14 +67,34 @@ build to change it.
 | `Version` | 1–64 letters, digits, `.`, `-`, `_` and `+`. |
 | `Description` | Optional; at most 500 characters, no control characters. |
 | `Origins` | At most 16 distinct `http` or `https` origins in canonical form: lowercase, no path, credentials, query or default port, such as `https://api.acme.example` or `http://127.0.0.1:8080`. These are the only origins the plugin may ever reach, once an owner approves them. |
-| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters and the `Dialect` it serves. |
+| `Profiles` | 1–16 profiles, each with an `ID` unique in the plugin (same syntax as `Name`), a `Label` of 1–100 characters, the `Dialect` it serves and its `Hosting` adaptation. |
 
-A dialect is one of OLP's built-in dialects, as listed in the `dialect` field of
-`GET /api/v1/provider-profiles`: for example `openai-chat`, `openai-responses`,
-`anthropic-messages`, `gemini-generate-content` or `bedrock-converse`. A plugin
-never defines a dialect. OLP refuses a manifest that is invalid, names another
-dialect, or carries fields it does not know, with the offending field in the
-problem it returns.
+A profile serves one of OLP's built-in dialects whose requests and events are
+plain HTTP JSON and server-sent events: `openai-chat`, `openai-responses`,
+`anthropic-messages` or `gemini-generate-content`. A plugin never defines a
+dialect. OLP refuses a manifest that is invalid, names another dialect, or
+carries fields it does not know, with the offending field in the problem it
+returns.
+
+### Hosting adaptation
+
+A profile's `Hosting` declares where and how the dialect's requests reach the
+upstream. OLP runs it for every request of a provider using the profile; no
+plugin code runs per request. Providers using the profile authenticate with a
+static credential, which the adaptation places.
+
+| Field | Rule |
+| --- | --- |
+| `Address` | The upstream's base URL, which the dialect's paths extend: `https://api.acme.example/v1` receives `/chat/completions`. An `http` or `https` URL at one of the manifest's `Origins`, written the same way, without credentials, query, fragment or placeholders. It becomes the endpoint of every provider using the profile. |
+| `Headers` | At most 16 request headers by name. Hop-by-hop, framing, content negotiation, tracing and `X-OLP-` headers are OLP's, and the dialect's semantic headers, such as `Anthropic-Version` or `OpenAI-Beta`, are the provider's. |
+| `Query` | At most 16 query parameters of the address by name: 1–128 letters, digits, `.`, `_`, `~` and `-`, other than the dialect's semantic query settings and addressing, such as Gemini's `alt`. |
+
+Header and query values are templates of at most 2048 characters without
+control characters. `{credential}` stands for the provider's static credential,
+such as `Token {credential}`, and braces appear nowhere else. At least one value
+must place the credential. OLP refuses a credential it can't place in a header,
+such as one containing a line break, before sending anything, and redacts every
+value that carries the credential wherever it records upstream text.
 
 ## What a plugin can reach
 
@@ -145,7 +169,7 @@ and carries its parameters:
 A response carries either a result or an error:
 
 ```json
-{"result": {"name": "acme", "version": "1.0.0", "origins": [], "profiles": []}}
+{"result": {"name": "acme", "version": "1.0.0", "origins": ["https://api.acme.example"], "profiles": [{"id": "acme-chat", "label": "Acme Chat Completions", "dialect": "openai-chat", "hosting": {"address": "https://api.acme.example/v1", "headers": {"Authorization": "Token {credential}"}}}]}}
 {"error": {"code": "unknown_method", "message": "The plugin does not implement sign."}}
 ```
 

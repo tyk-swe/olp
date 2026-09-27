@@ -665,6 +665,7 @@ const (
 	ProviderAuthModeNone              ProviderAuthMode = "none"
 	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
 	ProviderAuthModeStatic            ProviderAuthMode = "static"
+	ProviderAuthModeStaticCredential  ProviderAuthMode = "static_credential"
 )
 
 // Valid indicates whether the value is a known member of the ProviderAuthMode enum.
@@ -687,6 +688,8 @@ func (e ProviderAuthMode) Valid() bool {
 	case ProviderAuthModeServiceAccount:
 		return true
 	case ProviderAuthModeStatic:
+		return true
+	case ProviderAuthModeStaticCredential:
 		return true
 	default:
 		return false
@@ -731,6 +734,7 @@ const (
 	ProviderKindGemini           ProviderKind = "gemini"
 	ProviderKindOpenai           ProviderKind = "openai"
 	ProviderKindOpenaiCompatible ProviderKind = "openai_compatible"
+	ProviderKindPlugin           ProviderKind = "plugin"
 	ProviderKindVertexAi         ProviderKind = "vertex_ai"
 )
 
@@ -748,6 +752,8 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindOpenai:
 		return true
 	case ProviderKindOpenaiCompatible:
+		return true
+	case ProviderKindPlugin:
 		return true
 	case ProviderKindVertexAi:
 		return true
@@ -2614,6 +2620,18 @@ type PluginApprovalRequest struct {
 	Origins []string `json:"origins"`
 }
 
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+type PluginHosting struct {
+	// Address Upstream base URL, at one of the plugin's origins; a provider using the profile has it as its endpoint.
+	Address string `json:"address"`
+
+	// Headers Declared request headers by name, with value templates.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Query Declared query parameters by name, with value templates.
+	Query *map[string]string `json:"query,omitempty"`
+}
+
 // PluginListResponse defines model for PluginListResponse.
 type PluginListResponse struct {
 	Items []Plugin `json:"items"`
@@ -2638,8 +2656,11 @@ type PluginManifest struct {
 type PluginProfile struct {
 	// Dialect The built-in dialect the profile serves.
 	Dialect string `json:"dialect"`
-	Id      string `json:"id"`
-	Label   string `json:"label"`
+
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, and the declared headers and query parameters. Their values are templates in which {credential} stands for the provider's static credential.
+	Hosting PluginHosting `json:"hosting"`
+	Id      string        `json:"id"`
+	Label   string        `json:"label"`
 }
 
 // PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
@@ -2688,12 +2709,16 @@ type PriceRequest struct {
 	Model                 string                    `json:"model"`
 
 	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
-	Operation        PriceOperation                        `json:"operation"`
-	OutputPerMillion nullable.Nullable[string]             `json:"output_per_million,omitempty"`
-	ProviderId       nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind     ProviderKind                          `json:"provider_kind"`
-	UnitPrice        nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId         nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	Operation        PriceOperation            `json:"operation"`
+	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
+
+	// ProviderId Scopes the price to one provider. A price for plugin providers names its provider: no kind-wide or vendor price applies to them.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // PriceResponse defines model for PriceResponse.
@@ -2719,9 +2744,11 @@ type PriceResponse struct {
 	Operation             string                                `json:"operation"`
 	OutputPerMillion      nullable.Nullable[string]             `json:"output_per_million,omitempty"`
 	ProviderId            nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind          ProviderKind                          `json:"provider_kind"`
-	UnitPrice             nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // PricingRevisionRequest defines model for PricingRevisionRequest.
@@ -2902,10 +2929,12 @@ type ProviderActivationResponse struct {
 type ProviderAuthCapabilityResponse struct {
 	Credential CredentialRequirement `json:"credential"`
 	Label      string                `json:"label"`
-	Mode       ProviderAuthMode      `json:"mode"`
+
+	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
+	Mode ProviderAuthMode `json:"mode"`
 }
 
-// ProviderAuthMode defines model for ProviderAuthMode.
+// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
 type ProviderAuthMode string
 
 // ProviderCapabilityOptionsResponse defines model for ProviderCapabilityOptionsResponse.
@@ -2913,24 +2942,32 @@ type ProviderCapabilityOptionsResponse struct {
 	// Capabilities Capability tuples with a safe server-owned certification path for this
 	// provider kind. Configuration validation may support additional future tuples.
 	Capabilities []CapabilityInput `json:"capabilities"`
-	ProviderKind ProviderKind      `json:"provider_kind"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
 }
 
 // ProviderConfiguration defines model for ProviderConfiguration.
 type ProviderConfiguration struct {
-	ApiVersion   nullable.Nullable[string] `json:"api_version,omitempty"`
+	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
+
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
 	Deployment   nullable.Nullable[string] `json:"deployment,omitempty"`
-	Endpoint     nullable.Nullable[string] `json:"endpoint,omitempty"`
-	Kind         ProviderKind              `json:"kind"`
-	Options      *ConnectionOptions        `json:"options,omitempty"`
+
+	// Endpoint Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address.
+	Endpoint nullable.Nullable[string] `json:"endpoint,omitempty"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind    ProviderKind       `json:"kind"`
+	Options *ConnectionOptions `json:"options,omitempty"`
 
 	// ProfileId Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.
 	ProfileId *string `json:"profile_id,omitempty"`
 
-	// ProfileRevision Immutable provider profile composition revision selected with profile_id.
+	// ProfileRevision Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.
 	ProfileRevision *string `json:"profile_revision,omitempty"`
 }
 
@@ -2978,21 +3015,23 @@ type ProviderFieldCapabilityResponse struct {
 
 // ProviderHealthItem defines model for ProviderHealthItem.
 type ProviderHealthItem struct {
-	AttemptCount        int64                        `json:"attempt_count"`
-	AverageLatencyMs    nullable.Nullable[float64]   `json:"average_latency_ms,omitempty"`
-	LastAttemptAt       nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
-	LastProbeAt         nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
-	LastProbeDetail     nullable.Nullable[string]    `json:"last_probe_detail,omitempty"`
-	LastProbeStatus     nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
-	ProviderId          openapi_types.UUID           `json:"provider_id"`
-	ProviderKind        ProviderKind                 `json:"provider_kind"`
-	ProviderName        string                       `json:"provider_name"`
-	ProviderState       string                       `json:"provider_state"`
-	RateLimitCount      int64                        `json:"rate_limit_count"`
-	ServerErrorCount    int64                        `json:"server_error_count"`
-	Status              string                       `json:"status"`
-	SuccessCount        int64                        `json:"success_count"`
-	TransportErrorCount int64                        `json:"transport_error_count"`
+	AttemptCount     int64                        `json:"attempt_count"`
+	AverageLatencyMs nullable.Nullable[float64]   `json:"average_latency_ms,omitempty"`
+	LastAttemptAt    nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
+	LastProbeAt      nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
+	LastProbeDetail  nullable.Nullable[string]    `json:"last_probe_detail,omitempty"`
+	LastProbeStatus  nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
+	ProviderId       openapi_types.UUID           `json:"provider_id"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind        ProviderKind `json:"provider_kind"`
+	ProviderName        string       `json:"provider_name"`
+	ProviderState       string       `json:"provider_state"`
+	RateLimitCount      int64        `json:"rate_limit_count"`
+	ServerErrorCount    int64        `json:"server_error_count"`
+	Status              string       `json:"status"`
+	SuccessCount        int64        `json:"success_count"`
+	TransportErrorCount int64        `json:"transport_error_count"`
 }
 
 // ProviderHealthResponse defines model for ProviderHealthResponse.
@@ -3002,7 +3041,7 @@ type ProviderHealthResponse struct {
 	WindowMinutes int32                     `json:"window_minutes"`
 }
 
-// ProviderKind defines model for ProviderKind.
+// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 type ProviderKind string
 
 // ProviderKindCapabilityListResponse defines model for ProviderKindCapabilityListResponse.
@@ -3012,12 +3051,16 @@ type ProviderKindCapabilityListResponse struct {
 
 // ProviderKindCapabilityResponse defines model for ProviderKindCapabilityResponse.
 type ProviderKindCapabilityResponse struct {
-	AuthModes       []ProviderAuthCapabilityResponse  `json:"auth_modes"`
+	AuthModes []ProviderAuthCapabilityResponse `json:"auth_modes"`
+
+	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
 	DefaultAuthMode ProviderAuthMode                  `json:"default_auth_mode"`
 	Description     string                            `json:"description"`
 	Fields          []ProviderFieldCapabilityResponse `json:"fields"`
-	Kind            ProviderKind                      `json:"kind"`
-	Label           string                            `json:"label"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind  ProviderKind `json:"kind"`
+	Label string       `json:"label"`
 
 	// Presets Reviewed onboarding presets. Empty for provider kinds without presets.
 	Presets []ProviderPresetResponse `json:"presets"`
@@ -3037,12 +3080,14 @@ type ProviderModelInventoryListResponse struct {
 
 // ProviderModelInventoryResponse defines model for ProviderModelInventoryResponse.
 type ProviderModelInventoryResponse struct {
-	Available    bool                  `json:"available"`
-	Metadata     ModelMetadata         `json:"metadata"`
-	Model        ProviderModelResponse `json:"model"`
-	ProviderId   openapi_types.UUID    `json:"provider_id"`
-	ProviderKind ProviderKind          `json:"provider_kind"`
-	ProviderName string                `json:"provider_name"`
+	Available  bool                  `json:"available"`
+	Metadata   ModelMetadata         `json:"metadata"`
+	Model      ProviderModelResponse `json:"model"`
+	ProviderId openapi_types.UUID    `json:"provider_id"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
+	ProviderName string       `json:"provider_name"`
 }
 
 // ProviderModelListResponse defines model for ProviderModelListResponse.
@@ -3105,6 +3150,7 @@ type ProviderOperationDefaults struct {
 
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places.
 	AuthMode           ProviderAuthMode `json:"auth_mode"`
 	Description        string           `json:"description"`
 	DocumentationLabel string           `json:"documentation_label"`
@@ -3121,7 +3167,7 @@ type ProviderPresetResponse struct {
 	Maintainer string `json:"maintainer"`
 }
 
-// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.
+// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.
 type ProviderProfile struct {
 	Authentication []string `json:"authentication"`
 
@@ -3138,15 +3184,29 @@ type ProviderProfile struct {
 	// OperationDialects Dialect identity for each supported operation.
 	OperationDialects map[string]string `json:"operation_dialects"`
 	Operations        []string          `json:"operations"`
-	QuerySettings     []string          `json:"query_settings"`
-	Revision          string            `json:"revision"`
-	SemanticHeaders   []string          `json:"semantic_headers"`
-	Transport         string            `json:"transport"`
+
+	// Plugin The installed provider plugin that supplies a profile.
+	Plugin          *ProviderProfilePlugin `json:"plugin,omitempty"`
+	QuerySettings   []string               `json:"query_settings"`
+	Revision        string                 `json:"revision"`
+	SemanticHeaders []string               `json:"semantic_headers"`
+
+	// Strict Whether the profile may serve strict routes: its hosting changes only authorization, address and headers, or is a qualified built-in binding.
+	Strict    bool   `json:"strict"`
+	Transport string `json:"transport"`
 }
 
 // ProviderProfileListResponse defines model for ProviderProfileListResponse.
 type ProviderProfileListResponse struct {
 	Items []ProviderProfile `json:"items"`
+}
+
+// ProviderProfilePlugin The installed provider plugin that supplies a profile.
+type ProviderProfilePlugin struct {
+	// Digest Lowercase hexadecimal SHA-256 digest of the plugin module, which is the profile revision.
+	Digest  string `json:"digest"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
@@ -3186,8 +3246,10 @@ type ProviderResourceListResponse struct {
 
 // ProviderResponse defines model for ProviderResponse.
 type ProviderResponse struct {
-	Etag  openapi_types.UUID        `json:"etag"`
-	Id    openapi_types.UUID        `json:"id"`
+	Etag openapi_types.UUID `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Kind  ProviderKind              `json:"kind"`
 	Model nullable.Nullable[string] `json:"model,omitempty"`
 	Name  string                    `json:"name"`
@@ -3196,24 +3258,27 @@ type ProviderResponse struct {
 
 // ProviderRevisionDiffResponse defines model for ProviderRevisionDiffResponse.
 type ProviderRevisionDiffResponse struct {
-	ApiVersionChanged            bool     `json:"api_version_changed"`
-	CapabilitiesAdded            []string `json:"capabilities_added"`
-	CapabilitiesRemoved          []string `json:"capabilities_removed"`
-	CloudContextChanged          bool     `json:"cloud_context_changed"`
-	ConnectorChanged             bool     `json:"connector_changed"`
-	CredentialChanged            bool     `json:"credential_changed"`
-	DeploymentChanged            bool     `json:"deployment_changed"`
-	EndpointChanged              bool     `json:"endpoint_changed"`
-	FromRevision                 int32    `json:"from_revision"`
-	ModelsAdded                  []string `json:"models_added"`
-	ModelsChanged                []string `json:"models_changed"`
-	ModelsRemoved                []string `json:"models_removed"`
-	NameChanged                  bool     `json:"name_changed"`
-	NetworkConfigurationChanged  bool     `json:"network_configuration_changed"`
-	ProfileChanged               bool     `json:"profile_changed"`
-	SemanticConfigurationChanged bool     `json:"semantic_configuration_changed"`
-	ServingBindingChanged        bool     `json:"serving_binding_changed"`
-	ToRevision                   int32    `json:"to_revision"`
+	ApiVersionChanged           bool     `json:"api_version_changed"`
+	CapabilitiesAdded           []string `json:"capabilities_added"`
+	CapabilitiesRemoved         []string `json:"capabilities_removed"`
+	CloudContextChanged         bool     `json:"cloud_context_changed"`
+	ConnectorChanged            bool     `json:"connector_changed"`
+	CredentialChanged           bool     `json:"credential_changed"`
+	DeploymentChanged           bool     `json:"deployment_changed"`
+	EndpointChanged             bool     `json:"endpoint_changed"`
+	FromRevision                int32    `json:"from_revision"`
+	ModelsAdded                 []string `json:"models_added"`
+	ModelsChanged               []string `json:"models_changed"`
+	ModelsRemoved               []string `json:"models_removed"`
+	NameChanged                 bool     `json:"name_changed"`
+	NetworkConfigurationChanged bool     `json:"network_configuration_changed"`
+
+	// PluginChanged The revisions pin different provider plugin digests, or only one pins a plugin.
+	PluginChanged                bool  `json:"plugin_changed"`
+	ProfileChanged               bool  `json:"profile_changed"`
+	SemanticConfigurationChanged bool  `json:"semantic_configuration_changed"`
+	ServingBindingChanged        bool  `json:"serving_binding_changed"`
+	ToRevision                   int32 `json:"to_revision"`
 }
 
 // ProviderRevisionListResponse defines model for ProviderRevisionListResponse.
@@ -3267,11 +3332,13 @@ type ProviderRevisionSummaryResponse struct {
 	// HistoricalCredentialVersion Historical metadata only. Restore never selects this credential.
 	HistoricalCredentialVersion nullable.Nullable[int32] `json:"historical_credential_version,omitempty"`
 	Id                          openapi_types.UUID       `json:"id"`
-	Kind                        ProviderKind             `json:"kind"`
-	ModelCount                  int64                    `json:"model_count"`
-	Name                        string                   `json:"name"`
-	ProviderId                  openapi_types.UUID       `json:"provider_id"`
-	Revision                    int32                    `json:"revision"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind       ProviderKind       `json:"kind"`
+	ModelCount int64              `json:"model_count"`
+	Name       string             `json:"name"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
+	Revision   int32              `json:"revision"`
 }
 
 // ProviderServingBinding Serving environment identity independent of credentials. A binding may select a model or Azure deployment, never both. Region must match the provider connection.
@@ -3295,10 +3362,12 @@ type ProviderSummaryResponse struct {
 	CreatedAt                time.Time                `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the provider.
-	CreatedByEmail    nullable.Nullable[string]    `json:"created_by_email,omitempty"`
-	EnabledModelCount int64                        `json:"enabled_model_count"`
-	Etag              openapi_types.UUID           `json:"etag"`
-	Id                openapi_types.UUID           `json:"id"`
+	CreatedByEmail    nullable.Nullable[string] `json:"created_by_email,omitempty"`
+	EnabledModelCount int64                     `json:"enabled_model_count"`
+	Etag              openapi_types.UUID        `json:"etag"`
+	Id                openapi_types.UUID        `json:"id"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Kind              ProviderKind                 `json:"kind"`
 	LastProbeAt       nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
 	LastProbeStatus   nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
@@ -4252,7 +4321,9 @@ type UserResponseAccessScope string
 
 // Vendor defines model for Vendor.
 type Vendor struct {
-	Authentication   []ProviderAuthMode        `json:"authentication"`
+	Authentication []ProviderAuthMode `json:"authentication"`
+
+	// Connector Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Connector        ProviderKind              `json:"connector"`
 	Discovery        bool                      `json:"discovery"`
 	DocumentationUrl string                    `json:"documentation_url"`

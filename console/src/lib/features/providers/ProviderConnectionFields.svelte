@@ -83,7 +83,8 @@
     <input id={`${idPrefix}-auth`} value={values.authMode} disabled />
   {/if}
 </div>
-{#if hasCustomEndpoint(spec) || values.profileId}
+<!-- A plugin provider's endpoint is its profile's address, which the server sets. -->
+{#if spec.kind !== 'plugin' && (hasCustomEndpoint(spec) || values.profileId)}
   <div class="form-field full">
     <label for={`${idPrefix}-endpoint`}
       >{spec.kind === 'azure_openai'

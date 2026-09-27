@@ -50,8 +50,13 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 			return nil, errors.New("duplicate mounted provider identifier")
 		}
 		entry.Configuration.Normalize()
-		if err = entry.Configuration.Validate(policy); err != nil {
-			return nil, err
+		// A plugin provider's profile comes from the plugin its published
+		// revision pins, and the gateway requires this configuration to match
+		// that revision: only the credential is mounted.
+		if entry.Configuration.Kind != KindPlugin {
+			if err = entry.Configuration.Validate(policy); err != nil {
+				return nil, err
+			}
 		}
 		required := entry.Configuration.CredentialRequired()
 		if required != (entry.CredentialFile != nil) {

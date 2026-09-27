@@ -28,7 +28,7 @@ const MaxRevisionPrices = 10000
 // the database CHECK, so an unknown kind is refused with a field error rather
 // than a constraint violation.
 var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock",
-	"azure_openai", "openai_compatible"}
+	"azure_openai", "openai_compatible", "plugin"}
 
 // priceOperations are the operations a price may be scoped to, and the
 // operations a usage filter may name.
@@ -274,6 +274,10 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 			return Price{}, access.Invalid("prices", "Use a valid provider identifier.")
 		}
 		entry.ProviderID = &id
+	} else if entry.ProviderKind == "plugin" {
+		// No list price applies to plugin providers, which may front any
+		// upstream on any terms; the operator prices each one.
+		return Price{}, access.Invalid("prices", "Scope a plugin provider's price to that provider.")
 	}
 	if entry.Model == "" || len(entry.Currency) != 3 || !currencyLetters(entry.Currency) {
 		return Price{}, access.Invalid("prices",

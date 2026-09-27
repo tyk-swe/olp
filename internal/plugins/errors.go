@@ -9,7 +9,8 @@ const (
 	CodeABIUnsupported = "plugin_abi_unsupported"
 	// CodeManifestInvalid: the module reported no valid manifest.
 	CodeManifestInvalid = "plugin_manifest_invalid"
-	// CodeDialectUnknown: a declared profile names a dialect OLP doesn't have.
+	// CodeDialectUnknown: a declared profile names a dialect plugin profiles
+	// can't serve.
 	CodeDialectUnknown = "plugin_dialect_unknown"
 	// CodeTimedOut: a plugin call exceeded its time limit.
 	CodeTimedOut = "plugin_timed_out"
@@ -19,6 +20,10 @@ const (
 	CodeNotInstalled = "plugin_not_installed"
 	// CodeNotApproved: an owner has not approved the plugin's origins yet.
 	CodeNotApproved = "plugin_not_approved"
+	// CodeProfileUnknown: the plugin declares no profile with the ID.
+	CodeProfileUnknown = "plugin_profile_unknown"
+	// CodePinned: provider revisions pin the plugin, so it stays installed.
+	CodePinned = "plugin_pinned"
 )
 
 // Error is why OLP refused a plugin module or a plugin call failed. Failures a

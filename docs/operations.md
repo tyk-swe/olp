@@ -258,6 +258,9 @@ overrides. A source is advisory: negotiated rates need publish-time overrides,
 because the published revision — not the raw source document — is what
 accounting prices against. Revisions record their source name and snapshot for
 provenance, and all entries share the installation's single pricing currency.
+No list price applies to a [plugin provider](plugins.md#providers-from-plugin-profiles):
+its attempts stay unpriced until a revision carries a price scoped to that
+provider, and a `plugin` price must name its `provider_id`.
 
 Shutdown stops the listeners and drains their handlers first, then closes
 metadata intake and gives the writer a bounded opportunity to flush the buffer.

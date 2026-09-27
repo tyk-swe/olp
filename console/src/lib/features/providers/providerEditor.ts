@@ -12,6 +12,7 @@ import type {
   ProviderKindCapability,
   ProviderPreset
 } from '$lib/features/providers/models';
+import type { ProviderProfile } from './profiles';
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {
@@ -258,6 +259,36 @@ export function requiresSeedModel(spec: ProviderKindCapability): boolean {
   return requiresField(spec, 'model');
 }
 
+/** Vendors that publish no model list, so their connection test needs a model. */
+const UNLISTED_VENDORS = ['voyage', 'perplexity', 'cohere'];
+
+/**
+ * Whether creating the draft needs a probe model: the connection test
+ * certifies a declared model when the upstream publishes no model list, as
+ * for kinds that require one, such as plugin providers, and some reviewed
+ * vendors.
+ */
+export function requiresProbeModel(
+  draft: Pick<ProviderDraft, 'presetId'>,
+  spec: ProviderKindCapability
+): boolean {
+  return requiresSeedModel(spec) || UNLISTED_VENDORS.includes(draft.presetId);
+}
+
+/**
+ * Pins a plugin profile: its identity and the digest of the plugin build that
+ * supplies it. A plugin provider's endpoint is that profile's address, which
+ * the server sets, so any address of a previous pin is cleared.
+ */
+export function selectPluginProfile(
+  values: ProviderEditValues,
+  profile: Pick<ProviderProfile, 'id' | 'revision'> | undefined
+): void {
+  values.profileId = profile?.id ?? '';
+  values.profileRevision = profile?.revision ?? '';
+  values.endpoint = '';
+}
+
 export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {
   return hasField(spec, 'endpoint');
 }
@@ -303,9 +334,12 @@ export function validateProviderDraft(
         !values[field.field]?.trim()
     )
     .map((field) => field.label.toLowerCase());
+  if (draft.kind === 'plugin' && !draft.profileId)
+    missing.unshift('plugin profile');
   if (!draft.name.trim()) missing.unshift('name');
   if (
-    ['voyage', 'perplexity', 'cohere'].includes(draft.presetId) &&
+    requiresProbeModel(draft, spec) &&
+    !requiresSeedModel(spec) &&
     !draft.model.trim()
   )
     missing.push('probe model');

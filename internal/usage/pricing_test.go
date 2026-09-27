@@ -73,6 +73,21 @@ func TestPriceValidationScopesAreUniqueButIndependent(t *testing.T) {
 	}
 }
 
+// No list price applies to plugin providers: only a price scoped to one of
+// them does.
+func TestPluginProviderPricesNameTheirProvider(t *testing.T) {
+	entry := samplePriceEntry()
+	entry.ProviderKind = "plugin"
+	if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); usageProblem(t, err).Status != 422 {
+		t.Fatal("a kind-wide plugin price was accepted")
+	}
+	provider := "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000"
+	entry.ProviderID = &provider
+	if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); err != nil {
+		t.Fatalf("a provider-scoped plugin price was rejected: %v", err)
+	}
+}
+
 func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
 	unknownVendor, mismatchedVendor := "nowhere", "acme"
 	badProvider := "not-a-uuid"

@@ -20,10 +20,12 @@ type fixture struct{}
 
 func (fixture) Manifest() plugin.Manifest {
 	m := plugin.Manifest{
-		Name:     "fixture",
-		Version:  "1.0.0",
-		Origins:  []string{"https://api.example.com"},
-		Profiles: []plugin.Profile{{ID: "fixture-chat", Label: "Fixture Chat", Dialect: "openai-chat"}},
+		Name:    "fixture",
+		Version: "1.0.0",
+		Origins: []string{"https://api.example.com"},
+		Profiles: []plugin.Profile{{ID: "fixture-chat", Label: "Fixture Chat", Dialect: "openai-chat", Hosting: plugin.Hosting{
+			Address: "https://api.example.com/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"},
+		}}},
 	}
 	switch behaviour {
 	case "unknown-dialect":

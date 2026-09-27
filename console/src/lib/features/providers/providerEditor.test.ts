@@ -26,7 +26,9 @@ import {
   providerStatus,
   providerStatusTone,
   requiresCredential,
+  requiresProbeModel,
   requiresSeedModel,
+  selectPluginProfile,
   selectProviderPreset,
   setProviderDraftKind,
   validateProviderDraft,
@@ -626,5 +628,61 @@ describe('probeSummary', () => {
         discovered_models: 1
       })
     ).toBe('Endpoint reachable · model listing probe · 1 model seen');
+  });
+});
+
+describe('plugin providers', () => {
+  const pluginSpec: ProviderKindCapability = {
+    kind: 'plugin',
+    label: 'Provider plugin',
+    description: 'A profile an installed provider plugin supplies.',
+    default_auth_mode: 'static_credential',
+    auth_modes: [
+      {
+        mode: 'static_credential',
+        label: 'Static credential',
+        credential: 'required'
+      }
+    ],
+    fields: [{ field: 'model', label: 'Probe model', required: true }],
+    presets: []
+  };
+  const digest = 'c'.repeat(64);
+
+  it('pins a plugin profile by its digest and leaves the address to the server', () => {
+    const draft = createProviderDraft(pluginSpec);
+    draft.endpoint = 'https://previous.example/v1';
+    selectPluginProfile(draft, { id: 'reference-chat', revision: digest });
+    draft.name = 'Reference';
+    draft.model = 'reference-model';
+    draft.credential = 'secret';
+    const input = buildCreateProviderInput(draft, pluginSpec);
+    expect(input.configuration).toMatchObject({
+      kind: 'plugin',
+      auth_mode: 'static_credential',
+      profile_id: 'reference-chat',
+      profile_revision: digest
+    });
+    expect(input.configuration.endpoint ?? null).toBeNull();
+    expect(input.credential).toBe('secret');
+    expect(input.model).toBe('reference-model');
+
+    selectPluginProfile(draft, undefined);
+    expect(draft.profileId).toBe('');
+    expect(draft.document?.at(['profile_id'])).toBeUndefined();
+  });
+
+  it('requires a plugin profile and a probe model, since plugins have no discovery', () => {
+    const draft = createProviderDraft(pluginSpec);
+    draft.name = 'Reference';
+    draft.credential = 'secret';
+    expect(requiresProbeModel(draft, pluginSpec)).toBe(true);
+    expect(requiresProbeModel({ presetId: '' }, openAiSpec)).toBe(false);
+    expect(validateProviderDraft(draft, pluginSpec)).toBe(
+      'Provider plugin requires plugin profile, probe model.'
+    );
+    selectPluginProfile(draft, { id: 'reference-chat', revision: digest });
+    draft.model = 'reference-model';
+    expect(validateProviderDraft(draft, pluginSpec)).toBeNull();
   });
 });

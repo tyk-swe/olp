@@ -41,7 +41,11 @@ const pending: Plugin = {
       {
         id: 'reference-chat',
         label: 'Reference Chat Completions',
-        dialect: 'openai-chat'
+        dialect: 'openai-chat',
+        hosting: {
+          address: 'https://api.example.com/v1',
+          headers: { Authorization: 'Token {credential}' }
+        }
       }
     ]
   },
@@ -135,6 +139,7 @@ it('installs an uploaded module and shows what it declares', async () => {
   expect(host.textContent).toContain('reference-chat');
   expect(host.textContent).toContain('openai-chat');
   expect(host.textContent).toContain('https://login.example.com');
+  expect(host.textContent).toContain('https://api.example.com/v1');
 });
 
 it('explains a typed refusal with the manifest field it concerns', async () => {
@@ -193,6 +198,27 @@ it('approves exactly the reviewed origins, then uninstalls', async () => {
   expect(confirm).toHaveBeenCalled();
   expect(uninstallPlugin).toHaveBeenCalledWith(approved);
   expect(host.textContent).toContain('No plugins installed');
+});
+
+it('explains an uninstall refused because providers pin the plugin', async () => {
+  vi.mocked(listPlugins).mockResolvedValue([approved]);
+  vi.mocked(uninstallPlugin).mockRejectedValue(
+    new ApiProblem({
+      type: 'https://openllmproxy.dev/problems/plugin_pinned',
+      title: 'Conflict',
+      status: 409,
+      detail:
+        'Providers Reference upstream pin this plugin in a draft or published revision.'
+    })
+  );
+  render();
+  await settle();
+  button('Uninstall').click();
+  await settle();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'Providers Reference upstream pin this plugin'
+  );
+  expect(host.querySelectorAll('article')).toHaveLength(1);
 });
 
 it('keeps an uninstall the owner cancels', async () => {

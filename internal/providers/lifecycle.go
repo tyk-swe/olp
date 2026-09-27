@@ -122,6 +122,9 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
+	if err = input.Configuration.pin(r.Context(), tx); err != nil {
+		return access.Reply{}, err
+	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
@@ -256,6 +259,9 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
+	if err = input.Configuration.pin(r.Context(), tx); err != nil {
+		return access.Reply{}, err
+	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
@@ -763,6 +769,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
 		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
+		"plugin_changed":                 a.pluginDigest() != b.pluginDigest(),
 		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
 		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings),
 		"name_changed":                   from.Name != to.Name,

@@ -252,10 +252,12 @@ other mode is refused with `422 validation_failed` on the `fidelity` field
 A strict route preserves execution, observation, permitted continuation and
 effects relative to the selected target's native invocation. Draft validation
 and activation compile an interaction contract for every target. A target on an
-Automatic provider (a provider without a provider profile) or one that needs
-translation fails with `422 target_capability`, and the detail tells you to
-declare the route transformed. Strict routes also refuse `redact` content-policy
-rules.
+Automatic provider (a provider without a provider profile), on a profile whose
+catalogue entry is not `strict`, or one that needs translation fails with
+`422 target_capability`, and the detail tells you to declare the route
+transformed. A [plugin profile](plugins.md#providers-from-plugin-profiles) that
+changes only authorization, address and declared headers is strict. Strict
+routes also refuse `redact` content-policy rules.
 
 Declare a route transformed to translate between dialects, redact content, use
 Automatic providers, use the console playground, or serve Bedrock InvokeModel.

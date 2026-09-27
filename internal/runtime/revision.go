@@ -74,12 +74,19 @@ type PublishedTarget struct {
 }
 
 // ProviderRevision contains scanned metadata and the stored documents of one
-// provider revision. The caller selects the revision and its current state.
+// provider revision. The caller selects the revision and its current state,
+// and the manifest of the plugin a plugin provider's revision pins, which
+// PluginManifestColumn selects.
 type ProviderRevision struct {
 	ID, RevisionID, Name, State  string
 	ProjectID                    *string
 	Configuration, Models, Slots []byte
+	PluginManifest               []byte
 }
+
+// PluginManifestColumn selects the manifest of the plugin that the provider
+// revision r pins, or NULL. A pinned plugin stays installed.
+const PluginManifestColumn = "(SELECT pl.manifest FROM olp.plugins pl WHERE r.configuration->>'kind'='plugin' AND pl.digest=r.configuration->>'profile_revision')"
 
 // DecodeProviderRevision reconstructs a serving provider without consulting
 // current authority or normalizing stored limits. Publication owns empty-limit
@@ -95,13 +102,17 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	if err == nil {
 		err = json.Unmarshal(revision.Slots, &slots)
 	}
+	var plugin *connectors.PluginProfile
+	if err == nil && cfg.Kind == connectors.KindPlugin {
+		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.PluginManifest, cfg.ProfileID)
+	}
 	if err != nil {
 		return Provider{}, fmt.Errorf("provider %s revision: %w", revision.ID, err)
 	}
 	provider := Provider{
 		ID: revision.ID, RevisionID: revision.RevisionID, Name: revision.Name,
 		Enabled: revision.State == "active", ProjectID: revision.ProjectID,
-		Network:   cfg.Options.Network,
+		Network: cfg.Options.Network, Plugin: plugin,
 		ProfileID: cfg.ProfileID, ProfileRevision: cfg.ProfileRevision,
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
