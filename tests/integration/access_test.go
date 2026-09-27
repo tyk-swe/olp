@@ -609,3 +609,23 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	}
 	_ = fmt.Sprintf("%s", database.ValkeyNamespace(first))
 }
+
+func TestSessionAdministrationRequiresInstallationOwner(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	ownerSessions := h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)["items"].([]any)
+	session := ownerSessions[0].(map[string]any)["id"].(string)
+	ownerID := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
+
+	assigned := h.invite(owner, "assigned-owner@example.com", "owner")
+	profile := h.want(assigned, "GET", "/api/v1/profile", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	h.want(assigned, "POST", "/api/v1/sessions", map[string]any{"email": "assigned-owner@example.com", "password": accessPassword}, nil, 201)
+	developer := h.invite(owner, "session-developer@example.com", "developer")
+
+	for _, caller := range []*browser{assigned, developer} {
+		h.want(caller, "GET", "/api/v1/sessions?user_id="+ownerID, nil, nil, 403)
+		h.want(caller, "DELETE", "/api/v1/sessions/"+session, nil, nil, 404)
+	}
+	h.want(owner, "GET", "/api/v1/sessions", nil, nil, 200)
+}

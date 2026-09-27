@@ -84,7 +84,8 @@ installation role. Global users can access all projects and unassigned resources
 within that role's permissions. Assigned users see only their member projects;
 project managers can write resources and project viewers can read them, subject
 to installation-role permissions. Assigned users cannot administer installation
-membership, OIDC, or global settings. Keep at least one manager per project.
+membership, other members' sessions, OIDC, or global settings. Keep at least one
+manager per project.
 
 Manage projects and membership through `/api/v1/projects` and
 `/api/v1/projects/{id}/members`. Providers, routes, and gateway keys carry a

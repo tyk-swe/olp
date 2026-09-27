@@ -123,7 +123,7 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if userID == "" {
 		userID = p.ID
 	}
-	if userID != p.ID && p.Role != "owner" {
+	if userID != p.ID && !manageOthersSessions(p) {
 		return Reply{}, Forbidden()
 	}
 	if _, err := ParseUUID(userID); err != nil {
@@ -140,6 +140,11 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	items, err := JSONRows(rows)
 	return ListReply(items, pagination), err
 }
+
+// manageOthersSessions reports whether p administers installation membership,
+// which only an owner with a global access scope does.
+func manageOthersSessions(p Principal) bool { return p.Role == "owner" && p.AllProjects }
+
 func (s *Server) logout(r *http.Request) (Reply, error)        { return s.deleteSession(r, true) }
 func (s *Server) revokeSession(r *http.Request) (Reply, error) { return s.deleteSession(r, false) }
 func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
@@ -167,8 +172,9 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", id).Scan(&userID); err != nil {
 		return Reply{}, err
 	}
-	if userID != p.ID && p.Role != "owner" {
-		return Reply{}, Forbidden()
+	// Another member's session is invisible to a caller who cannot manage it.
+	if userID != p.ID && !manageOthersSessions(p) {
+		return Reply{}, pgx.ErrNoRows
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
 		return Reply{}, err
