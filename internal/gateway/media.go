@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -577,16 +578,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		fact.Class = class
 		fact.Committed = f.committed
 		if fact.Interaction != nil {
-			switch {
-			case f.dispatched && f.status != 0:
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			case f.dispatched && fact.Status == http.StatusOK:
-				fact.Interaction.UpstreamState = usage.UpstreamAccepted
-			case f.dispatched:
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			default:
-				fact.Interaction.UpstreamState = usage.UpstreamNotSent
-			}
+			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status, Accepted: fact.Status == http.StatusOK}.Acceptance())
 			if f.committed {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}
@@ -710,29 +702,13 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	return fact, result, nil
 }
 
-// mediaClass maps a media transport failure onto the attempt taxonomy. An
-// ambiguous side-effecting failure never falls over.
+// mediaClass is the attempt class of a media transport failure. An ambiguous
+// side-effecting failure never falls over.
 func mediaClass(f *media.Failure) string {
 	if f.Ambiguous {
 		return classAmbiguous
 	}
-	switch f.Class {
-	case media.ClassTimeout:
-		return classTimeout
-	case media.ClassRateLimit:
-		return classRateLimit
-	case media.ClassUpstreamServer:
-		return classUpstreamServer
-	case media.ClassUpstreamClient:
-		return classUpstreamClient
-	case media.ClassCredential:
-		return classCredential
-	case media.ClassProtocol:
-		return classProtocol
-	case media.ClassCancelled:
-		return classCancelled
-	}
-	return classConnect
+	return string(f.Class)
 }
 
 // mediaUsage builds the accounting usage a media result carries.

@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -309,12 +310,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		fact.Class = class
 		fact.Committed = f.committed
 		if fact.Interaction != nil && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
-			switch {
-			case f.status > 0:
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			case f.dispatched:
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			}
+			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		// Stored-response lifecycle calls do not generate billable work.
@@ -360,14 +356,8 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	received := s.now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
@@ -398,18 +388,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if f.upstream != nil {
 		f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
 	}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode == http.StatusNotFound:
-		f.class = classUpstreamClient
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }
@@ -997,12 +978,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
-		if fact.Interaction != nil && f.dispatched {
-			if f.status > 0 {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			} else {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			}
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
@@ -1029,14 +1006,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	resp, err := client.Do(req)
 	if err != nil {
 		pipeR.CloseWithError(err)
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	// A provider may reply before consuming the entire multipart body. Close
 	// the read side so the writer cannot wait forever for a peer that has
@@ -1063,18 +1034,9 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw), dispatched: true}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode == http.StatusNotFound:
-		f.class = classUpstreamClient
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }

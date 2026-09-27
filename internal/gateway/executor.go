@@ -28,26 +28,28 @@ import (
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// Failure classes shared with the routing retry taxonomy fixture.
+// Failure classes shared with the routing retry taxonomy fixture. Upstream
+// exchanges are classified by internal/upstream.
 const (
 	classSuccess        = "success"
-	classConnect        = "connect"
-	classTimeout        = "timeout"
-	classRateLimit      = "rate_limit"
-	classUpstreamServer = "upstream_server"
-	classUpstreamClient = "upstream_client"
-	classCredential     = "credential"
-	classProtocol       = "protocol"
+	classConnect        = string(upstream.Connect)
+	classTimeout        = string(upstream.Timeout)
+	classRateLimit      = string(upstream.RateLimit)
+	classUpstreamServer = string(upstream.ServerError)
+	classUpstreamClient = string(upstream.ClientError)
+	classCredential     = string(upstream.Credential)
+	classProtocol       = string(upstream.Protocol)
 	classPolicy         = "policy"
-	classCancelled      = "cancelled"
+	classCancelled      = string(upstream.Cancelled)
 	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
 	// gateway cannot prove; it never fails over.
-	classAmbiguous         = "ambiguous"
+	classAmbiguous         = string(upstream.Ambiguous)
 	classLimitsUnavailable = "limits_unavailable"
-	classContextWindow     = "context_window"
+	classContextWindow     = string(upstream.ContextWindow)
 )
 
 // Canonical defaults retained by existing accounting fixtures.
@@ -334,50 +336,63 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 	return x.pinnedSlot != nil && slot.ID == x.pinnedSlot.ID && x.pinnedSecret != nil
 }
 
-// attemptState tracks why an attempt context ended.
+// attemptState tracks why an attempt context ended and what the attempt
+// established about its upstream exchange.
 type attemptState struct {
 	parent     context.Context
+	classifier upstream.Classifier
 	reason     atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
-	dispatched atomic.Bool
-	upstream   atomic.Int32 // 0 not sent, 1 outcome unknown, 2 accepted, 3 terminal
+	dispatched atomic.Bool  // request bytes may have reached the upstream
+	status     int          // the unsuccessful status the upstream answered with
+	accepted   bool         // the upstream answered with success
+	settled    bool         // the upstream's complete result arrived
 }
 
-// trace conservatively marks dispatch once writing has begun or a response
-// arrives. A body write failure does not prove that the upstream saw nothing;
-// only a failure before writing is safely refundable.
+// trace supplies the dispatch evidence of a net/http request.
 func (st *attemptState) trace() *httptrace.ClientTrace {
-	return &httptrace.ClientTrace{
-		// A failed body write can still leave work at the upstream.
-		WroteHeaders: func() { st.dispatched.Store(true); st.upstream.CompareAndSwap(0, 1) },
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				st.dispatched.Store(true)
-				st.upstream.CompareAndSwap(0, 1)
-			}
-		},
-		GotFirstResponseByte: func() { st.dispatched.Store(true); st.upstream.CompareAndSwap(0, 1) },
-	}
+	return upstream.Trace(&st.dispatched)
 }
 
+// evidence is what the attempt has established about its upstream exchange.
+func (st *attemptState) evidence() upstream.Evidence {
+	return upstream.Evidence{Reached: st.dispatched.Load(), Status: st.status, Accepted: st.accepted, Settled: st.settled}
+}
+
+// rejected records the unsuccessful status the upstream answered with and
+// classifies it together with the error its body stated.
+func (st *attemptState) rejected(status int, stated *openai.UpstreamError) string {
+	st.status = status
+	e := st.evidence()
+	e.Error = stated
+	return string(st.classifier.Classify(e).Class)
+}
+
+// classify classifies an exchange that err ended: an in-band error the
+// upstream stated, an interruption, or a broken or malformed transport.
 func (st *attemptState) classify(err error, committed bool) string {
+	e := st.evidence()
+	e.Committed = committed
+	if stated, ok := errors.AsType[*openai.UpstreamError](err); ok {
+		e.Error = stated
+	} else {
+		e.Interrupted, e.Err = st.interrupted(err), err
+	}
+	return string(st.classifier.Classify(e).Class)
+}
+
+// interrupted reports why the gateway ended the exchange: the caller's
+// cancellation or deadline, one of the attempt's own timers, or a failed
+// write to the client.
+func (st *attemptState) interrupted(err error) error {
 	switch {
 	case st.parent.Err() != nil:
-		if errors.Is(st.parent.Err(), context.DeadlineExceeded) {
-			return classTimeout
-		}
-		return classCancelled
+		return st.parent.Err()
 	case st.reason.Load() != 0:
-		return classTimeout
+		return context.DeadlineExceeded
 	case errors.Is(err, errClientWrite):
-		return classCancelled
-	case committed:
-		return classProtocol
+		return context.Canceled
 	}
-	var pe *openai.ProtocolError
-	if errors.As(err, &pe) || errors.Is(err, openai.ErrEventTooLarge) {
-		return classProtocol
-	}
-	return classConnect
+	return nil
 }
 
 func endpointPath(family openai.Family) string {
@@ -456,7 +471,7 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 // attempt performs one upstream call with one credential.
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
-	st := &attemptState{parent: ctx}
+	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil}}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -480,11 +495,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 
 		if fact.Interaction != nil {
 			f.noRetry = f.dispatched
-			fact.Interaction.UpstreamState = st.upstreamState()
-			if f.dispatched && st.upstream.Load() != 3 && (class == classConnect || class == classTimeout || class == classUpstreamServer) {
-				class = classAmbiguous
-				f.noRetry = true
-			}
+			fact.Interaction.UpstreamState = string(st.evidence().Acceptance())
 		}
 		f.class = class
 		fact.Class = class
@@ -590,28 +601,18 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.FirstByte = &received
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode < 500 {
-			st.upstream.Store(3)
-		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw)}
 		if f.upstream != nil {
 			f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
 		}
-		switch {
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return fail(classCredential, f)
-		case resp.StatusCode == http.StatusTooManyRequests:
+		class := st.rejected(resp.StatusCode, f.upstream)
+		if class == classRateLimit {
 			f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-			return fail(classRateLimit, f)
-		case resp.StatusCode >= 500:
-			return fail(classUpstreamServer, f)
-		case contextWindowError(f.upstream):
-			return fail(classContextWindow, f)
 		}
-		return fail(classUpstreamClient, f)
+		return fail(class, f)
 	}
-	st.upstream.Store(2)
+	st.accepted = true
 
 	var completion *openai.Completion
 	committed := false
@@ -711,7 +712,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				})
 			}
 			if err == nil {
-				st.upstream.Store(3)
+				st.settled = true
 				var state *interaction.Continuation
 				var delivery interaction.Delivery
 				state, delivery, err = projection.Complete(completion, x.continuation.resource.ID)
@@ -737,7 +738,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
 		}
 		if err == nil && strictResponseIncomplete {
-			st.upstream.Store(3)
+			st.settled = true
 			err = &openai.ProtocolError{Detail: "strict Responses stream ended incomplete"}
 		}
 	} else {
@@ -753,7 +754,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					fact.Usage = native.Usage
 				}
 				if err == nil {
-					st.upstream.Store(3)
+					st.settled = true
 					err = contract.ValidateResult(native.Native)
 				}
 				if err == nil && contract.ToolContinuation() {
@@ -809,14 +810,13 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		case errors.As(err, &ue):
 			f.upstream = ue
 			ue.Message = redactCredentials(ue.Message, credentialValues)
-			class, status := inBandFailure(ue, committed)
-			f.status = status
+			class := st.classify(err, committed)
+			f.status = inBandStatus(class)
 			return fail(class, f)
 		}
 		return fail(st.classify(err, committed), f)
 	}
 	fact.Class = classSuccess
-	st.upstream.Store(3)
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState = usage.UpstreamTerminal
 		if x.parsed.Stream {

@@ -1,6 +1,10 @@
 package usage
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/tyk-swe/olp/internal/upstream"
+)
 
 // InteractionEvidence is content-free execution evidence on the existing Attempt
 // record. Upstream acceptance, client observation and HTTP commitment are
@@ -13,10 +17,10 @@ type InteractionEvidence struct {
 }
 
 const (
-	UpstreamNotSent  = "not-sent"
-	UpstreamUnknown  = "outcome-unknown"
-	UpstreamAccepted = "accepted"
-	UpstreamTerminal = "terminal"
+	UpstreamNotSent  = string(upstream.NotSent)
+	UpstreamUnknown  = string(upstream.Unknown)
+	UpstreamAccepted = string(upstream.Accepted)
+	UpstreamTerminal = string(upstream.Terminal)
 	ClientUnobserved = "unobserved"
 	ClientPartial    = "partially-observed"
 	ClientActionable = "actionable"

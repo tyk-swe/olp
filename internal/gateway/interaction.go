@@ -3,21 +3,7 @@ package gateway
 import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/usage"
 )
-
-func (st *attemptState) upstreamState() string {
-	switch st.upstream.Load() {
-	case 1:
-		return usage.UpstreamUnknown
-	case 2:
-		return usage.UpstreamAccepted
-	case 3:
-		return usage.UpstreamTerminal
-	default:
-		return usage.UpstreamNotSent
-	}
-}
 
 // servingAllowed constrains later Attempts to the baseline selected by the
 // first admitted dispatch. A matching model alias never establishes equivalent
