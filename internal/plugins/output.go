@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -45,16 +46,27 @@ type output struct {
 func newOutput(log *slog.Logger, secrets []string) *output {
 	o := &output{log: log, budget: maxCallLog}
 	// Longer values first, so a secret containing another is redacted whole.
-	// Each is also matched as it appears inside a JSON string.
+	// Match URL components from HTTP errors and JSON strings from nested
+	// diagnostics, with either setting of the encoder's HTML escaping.
 	var values []string
 	for _, secret := range secrets {
 		if secret == "" {
 			continue
 		}
-		quoted, _ := json.Marshal(secret)
-		values = append(values, secret, string(quoted[1:len(quoted)-1]))
+		for _, value := range []string{secret, url.QueryEscape(secret), url.PathEscape(secret)} {
+			quoted, _ := json.Marshal(value)
+			var plain bytes.Buffer
+			encoder := json.NewEncoder(&plain)
+			encoder.SetEscapeHTML(false)
+			_ = encoder.Encode(value)
+			// Encoder adds a newline after the closing quote.
+			values = append(values, value, string(quoted[1:len(quoted)-1]), plain.String()[1:plain.Len()-2])
+		}
 	}
-	slices.SortStableFunc(values, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
+	slices.SortFunc(values, func(a, b string) int {
+		return cmp.Or(cmp.Compare(len(b), len(a)), strings.Compare(a, b))
+	})
+	values = slices.Compact(values)
 	pairs := make([]string, 0, 2*len(values))
 	for _, value := range values {
 		pairs = append(pairs, value, "[REDACTED]")

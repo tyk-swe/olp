@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -262,6 +263,26 @@ func TestGrantRefreshOutputReachesTheLogRedacted(t *testing.T) {
 	output := logged.String()
 	if strings.Contains(output, fixtureSecret) || !strings.Contains(output, `"msg":"refreshing with [REDACTED]"`) || !strings.Contains(output, `"plugin_method":"grant_refresh"`) {
 		t.Fatalf("grant refresh output %s", output)
+	}
+}
+
+func TestGrantRefreshHTTPFailureRedactsQueryCredentials(t *testing.T) {
+	var logged bytes.Buffer
+	host, table := newTestHost(t, Interpreted, DefaultLimits, slog.New(slog.NewJSONHandler(&logged, nil)), fixture(t, "well-behaved"))
+	authority := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	authority.Close() // A failed Fetch includes the requested URL in its error.
+	table.origins = []string{authority.URL}
+	secret := "refresh+token/with=escapes"
+	_, err := host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{
+		Profile: "fixture-chat", RefreshToken: "fetch:" + authority.URL + "/token?refresh_token=" + url.QueryEscape(secret),
+	}, authority.Client(), []string{secret})
+	if !reported(err, abi.CodeHTTPFailed) {
+		t.Fatalf("want an HTTP failure, got %v", err)
+	}
+	for _, diagnostic := range []string{err.Error(), logged.String()} {
+		if strings.Contains(diagnostic, secret) || strings.Contains(diagnostic, url.QueryEscape(secret)) || !strings.Contains(diagnostic, "[REDACTED]") {
+			t.Fatal("the refresh error or host log disclosed the query credential")
+		}
 	}
 }
 

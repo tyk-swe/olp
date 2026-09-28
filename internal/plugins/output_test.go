@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +41,38 @@ func TestOutputRedactsSecretsAsWrittenAndAsJSON(t *testing.T) {
 	lines := logLines(t, &logged)
 	if lines[0].Level != "DEBUG" || lines[0].Message != "raw [REDACTED]" || lines[0].Attrs["body"] != `"[REDACTED]"` {
 		t.Fatalf("unredacted record %+v", lines[0])
+	}
+}
+
+func TestOutputRedactsEncodedCredentials(t *testing.T) {
+	secret := `sk-"quoted"<secret>&+/= end`
+	var plainJSON bytes.Buffer
+	encoder := json.NewEncoder(&plainJSON)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string]string{"token": secret}); err != nil {
+		t.Fatal(err)
+	}
+	for name, message := range map[string]string{
+		"query":                      "https://authority.example/token?token=" + url.QueryEscape(secret),
+		"path":                       "https://authority.example/token/" + url.PathEscape(secret),
+		"JSON without HTML escaping": strings.TrimSpace(plainJSON.String()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logged bytes.Buffer
+			o := newOutput(slog.New(slog.NewJSONHandler(&logged, nil)), []string{secret})
+			o.record(abi.LogRecord{Message: message, Attrs: map[string]string{message: message}})
+			line := logLines(t, &logged)[0]
+			if !strings.Contains(line.Message, "[REDACTED]") || line.Message == message {
+				t.Fatal("the log message still contains the encoded credential")
+			}
+			if line.Attrs[line.Message] != line.Message {
+				t.Fatal("attribute names and values were not redacted together")
+			}
+			err := reportedFailure(o, abi.Response{Error: &abi.Error{Code: message, Message: message}})
+			if strings.Contains(err.Error(), message) || !strings.Contains(err.Error(), "[REDACTED]") {
+				t.Fatal("the reported failure still contains the encoded credential")
+			}
+		})
 	}
 }
 
