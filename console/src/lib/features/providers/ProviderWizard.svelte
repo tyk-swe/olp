@@ -8,6 +8,7 @@
   import ProviderCapabilityReviewStage from '$lib/features/providers/ProviderCapabilityReviewStage.svelte';
   import ProviderConnectorForm from '$lib/features/providers/ProviderConnectorForm.svelte';
   import ProviderDiscoveryStage from '$lib/features/providers/ProviderDiscoveryStage.svelte';
+  import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
   import ProviderValidationIssues from '$lib/features/providers/ProviderValidationIssues.svelte';
   import { ProviderWizardState } from '$lib/features/providers/providerWizard.svelte';
 
@@ -93,6 +94,8 @@
           selectedSpec={wizard.selectedSpec}
           busy={wizard.busy}
           lockKind={Boolean(wizard.wizardProvider)}
+          issues={wizard.validationIssues}
+          grantEnrolled={wizard.grantEnrolled}
           onSubmit={async (event) => {
             const root = (event.currentTarget as HTMLFormElement).closest(
               'main'
@@ -101,6 +104,14 @@
             if (root) await focusFormError(root);
           }}
         />
+        {#if wizard.grantEnrollment}<GrantEnrollmentPanel
+            enrollment={wizard.grantEnrollment}
+            bind:input={wizard.grantInput}
+            busy={wizard.busy}
+            onContinue={wizard.continueGrantEnrollment}
+            onPoll={wizard.pollGrantEnrollment}
+            onCancel={wizard.cancelGrantEnrollment}
+          />{/if}
       {/if}
     {:else if wizard.wizardStep === 2 && wizard.wizardProvider}
       <ProviderDiscoveryStage

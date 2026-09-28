@@ -55,12 +55,16 @@ var (
 	OIDCClientSecret     = SealPurpose{"oidc_client"}
 	OIDCFlow             = SealPurpose{"oidc_flow"}
 	MediaJobSource       = SealPurpose{"media_job_source"}
+	// ProviderGrantRefresh is a refresh token read only by control and workers.
+	ProviderGrantRefresh = SealPurpose{"provider_grant_refresh"}
+	// GrantEnrollment holds short-lived plugin enrollment state.
+	GrantEnrollment = SealPurpose{"grant_enrollment"}
 )
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

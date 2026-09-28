@@ -34,7 +34,7 @@ func (s *Server) certifyGeminiInteraction(ctx context.Context, cfg *Configuratio
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(status)
+		return statusError(cfg, status, result)
 	}
 	if mode == ModeUnary {
 		if _, err := geminilifecycle.ParseInteractionResponse(result, probeBodyLimit); err != nil {
@@ -88,7 +88,7 @@ func (s *Server) certifyGeminiLive(ctx context.Context, cfg *Configuration, cred
 	conn, response, err := websocket.Dial(ctx, req.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: req.Header})
 	if err != nil {
 		if response != nil {
-			return statusError(response.StatusCode)
+			return statusError(cfg, response.StatusCode, nil)
 		}
 		return classify(err)
 	}

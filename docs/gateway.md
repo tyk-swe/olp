@@ -53,16 +53,23 @@ revision. A stored resource is served only under the fidelity it was created
 with, and its owner can always list, delete or cancel it; see
 [route fidelity](provider-routing.md#route-fidelity).
 
-Key authority (API keys, expiry, revocation, and revoked credential versions) is
-polled every five seconds independently of release installation. Authority older
+Key authority (API keys, expiry, revocation, and credential versions that are
+revoked or whose [grant lapsed](plugins.md#lapsed-grants)) is polled every five
+seconds independently of release installation. Authority older
 than 60 seconds, measured from the start of the last successful read with a
 monotonic clock, is stale: new requests are rejected with
 `503 authority_unavailable` while requests
 already admitted keep the snapshot and policy they were pinned to. Ordinary
 streams may finish; realtime sessions recheck key authority every five seconds.
-Credential-version revocation applies to retained releases too: selection
-refuses a revoked version even when the request already pins it. See
-[authority and replica tests](../tests/integration/replica_fleet_test.go).
+Credential-version revocation and grant lapse apply to retained releases too:
+selection refuses such a version even when the request already pins it, and
+skipping its slot spends no attempt. Records of a refused credential version
+name why, `revoked`, `lapsed` or `stale_authority`: `credential_<reason>` in
+the plan decisions of skipped credential slots (and of a target whose every slot
+was skipped for that reason), `network_credential_<reason>` for a network
+credential, `provider_credential_<reason>` when a realtime session ends, and
+`media_job_credential_<reason>` on media jobs.
+See [authority and replica tests](../tests/integration/replica_fleet_test.go).
 
 ## Request path
 
@@ -123,7 +130,9 @@ Bedrock advertised event lengths are checked before SDK allocation, and the SDK
 still verifies event CRCs.
 
 Provider health is tracked per gateway: five counted failures within 30 seconds
-open a provider's circuit for 30 seconds. One half-open probe may proceed;
+open a provider's circuit for 30 seconds. Connection, timeout, protocol and
+upstream server failures count; so do ambiguous ones of a strict interaction
+or of traffic a plugin carries. One half-open probe may proceed;
 credential-only failure releases it without penalizing siblings. A credential
 rejection cools that credential version for 60 seconds; a rate limit cools the
 logical slot across rotation for the upstream `Retry-After` (10 seconds when
@@ -143,7 +152,7 @@ the response has been flushed.
 | 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
 | 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
 | 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted; or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
-| 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error` | Upstream or transport failures after the budget is spent. |
+| 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
 

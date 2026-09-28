@@ -13,7 +13,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,basics,gateway}/**/*.spec.ts',
+  testMatch: '**/{access,basics,gateway,plugins}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/access',
   workers: 1,
@@ -82,6 +82,11 @@ export default defineConfig({
     {
       command: 'node tests/gateway/mock-native-operations.mjs',
       url: 'http://127.0.0.1:4189/health',
+      reuseExistingServer: false
+    },
+    {
+      command: 'node tests/plugins/mock-plugin-upstream.mjs',
+      url: 'http://127.0.0.1:4190/health',
       reuseExistingServer: false
     },
     {

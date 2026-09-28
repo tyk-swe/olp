@@ -3,26 +3,14 @@ package gateway
 import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/usage"
 )
-
-func (st *attemptState) upstreamState() string {
-	switch st.upstream.Load() {
-	case 1:
-		return usage.UpstreamUnknown
-	case 2:
-		return usage.UpstreamAccepted
-	case 3:
-		return usage.UpstreamTerminal
-	default:
-		return usage.UpstreamNotSent
-	}
-}
 
 // servingAllowed constrains later Attempts to the baseline selected by the
 // first admitted dispatch. A matching model alias never establishes equivalent
-// accounts or serving environments. Unknown principal identity also pins the
-// credential slot; a secret refresh alone does not change a declared principal.
+// accounts or serving environments. A known principal, declared or observed by
+// grant enrollment, is the same for every slot of the provider revision, so
+// later attempts may use its other slots; an unknown principal pins the
+// credential slot. A secret refresh alone does not change a principal.
 func (x *execution) servingAllowed(provider *runtime.Provider, model string, slot runtime.Slot, selectBaseline bool) bool {
 	if !x.strict() {
 		return true

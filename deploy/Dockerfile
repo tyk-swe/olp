@@ -11,6 +11,7 @@ COPY go.mod go.sum package.json ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY sdk ./sdk
 COPY openapi ./openapi
 COPY deploy/native /out/native
 RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \

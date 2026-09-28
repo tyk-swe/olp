@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -34,9 +35,12 @@ func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply,
 		'id',c.id,'version',c.version,
 		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
 		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
-		'created_at',c.created_at,'revoked_at',c.revoked_at)
+		'created_at',c.created_at,'revoked_at',c.revoked_at,
+		'grant',CASE WHEN c.plugin_digest IS NOT NULL THEN jsonb_build_object(
+			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at,'lapsed_at',g.lapsed_at) END)
 		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
+		LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
 		WHERE c.provider_id=$1 AND c.id<$2 ORDER BY c.id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
@@ -98,6 +102,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	}
 	if !current.Configuration.CredentialRequired() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+	}
+	if current.Configuration.Grant() {
+		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
 	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
@@ -189,7 +196,8 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 }
 
 // revoke marks a credential version unusable everywhere: drafts, published
-// revisions, and gateways that learn it through the authority refresh.
+// revisions, and gateways that learn it through the authority refresh. It
+// ends the version's grant, if it has one.
 func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.credential.revoke", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
@@ -211,7 +219,10 @@ func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, erro
 		if err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := access.AdvanceAuthority(r, tx)
+		if err = grants.Revoke(ctx, tx, credentialID); err != nil {
+			return access.Reply{}, err
+		}
+		generation, err := access.AdvanceAuthority(ctx, tx)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -286,14 +297,24 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	if err != nil {
 		return access.Reply{}, err
 	}
+	var credentialIDs []string
+	for _, id := range activeCredentials {
+		if id != nil {
+			credentialIDs = append(credentialIDs, *id)
+		}
+	}
+	generations, err := runtime.ReadGrantGenerations(ctx, q, credentialIDs)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	items := make([]map[string]any, 0, len(slots))
 	health := map[string]any{}
 	for _, row := range slots {
 		items = append(items, slotJSON(row))
 		validated := row.validationTime(&current.Configuration, models)
-		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
+		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "lapsed": row.CredentialLapsed, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
 	}
-	connection := s.quotas(ctx, current.ID, slots, activeCredentials, health)
+	connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations, health)
 	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": connection}, current.SlotsETag), nil
 }
 
@@ -313,7 +334,7 @@ func quotaUsage(u limits.Usage) map[string]any {
 // the stored list is complete without them, so an unreachable or malformed
 // quota store is reported to the operator and shown to the console as unknown,
 // never as an idle zero and never as a failed request.
-func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, health map[string]any) any {
+func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64, health map[string]any) any {
 	if s.Quotas == nil {
 		return nil
 	}
@@ -337,7 +358,11 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 		// The cooldown is asked of the credential version the published
 		// revision dispatches with, because that is the scope the gateway
 		// penalises, and of the slot itself.
-		cooling, err := s.Quotas.Cooling(ctx, limits.CredentialScope(providerID, published[row.ID]), limits.SlotScope(row.ID))
+		var generation int64
+		if id := published[row.ID]; id != nil {
+			generation = generations[*id]
+		}
+		cooling, err := s.Quotas.Cooling(ctx, limits.CredentialScope(providerID, published[row.ID], generation), limits.SlotScope(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
@@ -498,14 +523,17 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		if !current.Configuration.CredentialRequired() {
 			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
+		if current.Configuration.Grant() {
+			return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+		}
 		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
 		if err != nil {
 			return access.Reply{}, err
 		}
 		credentialID = &stored
 	case input.Slot.CredentialVersionID != nil:
-		var revoked bool
-		err = tx.QueryRow(r.Context(), "SELECT revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked)
+		var revoked, lapsed bool
+		err = tx.QueryRow(r.Context(), "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked, &lapsed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return access.Reply{}, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
 		}
@@ -514,6 +542,9 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		}
 		if revoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "That credential version is revoked.")
+		}
+		if lapsed {
+			return access.Reply{}, access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
 		}
 		credentialID = input.Slot.CredentialVersionID
 	case existing != nil:
@@ -600,6 +631,12 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		}
 		if slot.CredentialRevoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "This slot references a revoked credential.")
+		}
+		if slot.CredentialLapsed {
+			return access.Reply{}, access.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
+		}
+		if err = slot.credentialFits(&current.Configuration); err != nil {
+			return access.Reply{}, err
 		}
 		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, secrets.ProviderCredential); err != nil {
 			return access.Reply{}, err

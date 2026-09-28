@@ -31,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/process"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -88,6 +89,9 @@ type accessHarness struct {
 	Runtime   *runtime.Manager
 	Gateway   *gateway.Server
 	Media     *media.Service
+	// UnconfinedDir is the deployment's unconfined plugin directory, which
+	// enables unconfined plugins when set.
+	UnconfinedDir string
 }
 
 func newAccessHarness(t *testing.T) *accessHarness {
@@ -105,12 +109,24 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newAccessHarnessAtInstallation(t, pool, dbURL, installation)
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, "")
+}
+
+// newUnconfinedHarness is newAccessHarnessOn for a deployment that enables
+// unconfined plugins, whose executables live in dir.
+func newUnconfinedHarness(t *testing.T, pool *pgxpool.Pool, dbURL, dir string) *accessHarness {
+	t.Helper()
+	installation, err := database.Installation(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, dir)
 }
 
 // newAccessHarnessAtInstallation composes the harness over an already migrated
-// database and its installation identity.
-func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation string) *accessHarness {
+// database and its installation identity. A deployment whose unconfinedDir
+// is set enables unconfined plugins.
+func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation, unconfinedDir string) *accessHarness {
 	t.Helper()
 	key := strings.Repeat("ab", 32)
 	ringJSON := `{"active_version":1,"keys":[{"version":1,"key":"` + key + `"}]}`
@@ -130,7 +146,21 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
-	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}, log)
+	// The race detector slows wazero's compiler tenfold, so the harness
+	// interprets plugins, for installing and for signing alike.
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
+	var unconfined *plugins.Unconfined
+	if unconfinedDir != "" {
+		unconfined = plugins.NewUnconfined(unconfinedDir, plugins.DefaultLimits, log)
+	}
+	pluginHost := plugins.NewHost(pluginRuntime, unconfined, pool)
+	t.Cleanup(func() { pluginHost.Close(context.Background()) })
+	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16, Signer: pluginHost, Carrier: pluginHost, UnconfinedPlugins: unconfined != nil}, log)
+	rt.GrantRefreshed = gw.GrantRefreshed
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
 	if err != nil {
 		t.Fatal(err)
@@ -142,30 +172,31 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 			Client: policy.Client(30 * time.Second), Auth: connectors.NewAuth(&policy), Egress: &policy,
 			Spool: spool, MaxResponseBytes: 1 << 20,
 		},
-		Revoked: rt.Revoked,
-		Log:     log,
+		Credentials: rt,
+		Log:         log,
 	}
 	gw.Media = &gateway.MediaDeps{
 		Jobs:      mediaJobs,
 		Admission: media.NewAdmissionState(media.MinCapacityBytes),
 	}
 	gw.Resources = resources.NewEncrypted(pool, installation, ring)
-	gw.Resolver = resources.NewResolver(pool, installation, ring)
+	gw.Resolver = resources.NewResolver(pool)
 	// The management API is composed exactly as a process composes it.
 	mux := http.NewServeMux()
-	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log}.Register(mux)
+	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined}.Register(mux)
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs}
+	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs, unconfinedDir}
 }
 
 // do performs one management request as the browser and returns the response
-// with its fully read body.
+// with its fully read body. A []byte body is sent as it is; any other body is
+// sent as JSON.
 func (h *accessHarness) do(b *browser, method, path string, body any, headers map[string]string) (*http.Response, []byte) {
 	h.t.Helper()
-	var data []byte
-	if body != nil {
+	data, bytesBody := body.([]byte)
+	if body != nil && !bytesBody {
 		var err error
 		data, err = json.Marshal(body)
 		if err != nil {

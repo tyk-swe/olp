@@ -39,12 +39,13 @@ bind.
 | `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS` | `4` | Inline base64 media items accepted per JSON request (1–64). |
 | `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES` | `1048576` | Decoded cap for one inline media item (1 KiB–64 MiB). |
 | `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES` | `2097152` | Decoded cap for all inline media in one request (1 KiB–64 MiB). |
-| `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest provider response body buffered for non-streaming operations (1 MiB–256 MiB). |
+| `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest provider response body buffered for non-streaming operations, including a stream aggregated for a non-streaming caller (1 MiB–256 MiB). |
 | `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
 | `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
 | `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
 | `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
+| `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can. |
 | `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
 | `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
@@ -251,7 +252,12 @@ into live-provider tests. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
 entry identifies a provider, uses the same nested `configuration` as the
 management API, and references an optional `credential_file`. Vertex entries
 also select a probe `model`. Credential files must have restricted permissions;
-ADC and the AWS default chain reject stored credentials.
+ADC and the AWS default chain reject stored credentials. A provider with a
+profile, including a [plugin provider](plugins.md#providers-from-plugin-profiles)
+and its static credential, mounts only secret material: its `configuration` must
+match the published revision. A provider that authenticates with a
+[grant](plugins.md#grant-enrollment) can't be mounted: its grant lives beneath a
+credential version in the database, which needs the master key.
 
 Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
 default credential slot and enforces its slot and connection limits. Releases
@@ -277,7 +283,11 @@ API keys, users, management tokens, usage, audit, request or media data,
 certification evidence, runtime IDs, or secret values. Slots that hold
 credential authority export a stable `credential_ref` of
 `provider-name/slot-name-or-default`; credentialless authentication modes export
-`null`. Slot `allowed_api_keys` restrictions are not portable — API keys are
+`null`. A plugin provider's configuration references the plugin build it pins by
+digest (`profile_revision`), never the module. Every slot of a provider that
+authenticates with a [grant](plugins.md#grant-enrollment) exports its
+`credential_ref`, enrolled or not, and no grant material: no tokens, observed
+principal or grant facts. Slot `allowed_api_keys` restrictions are not portable — API keys are
 installation-local — so export always emits an empty list and import rejects a
 non-empty one; re-establish them on the destination after creating keys.
 
@@ -295,9 +305,23 @@ or bypasses its policy checks.
 unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
 credential references), cross-project targets, bindings for refs the artifact
-does not declare, and secrets over 64 KiB. Plan reports
+does not declare, and secrets over 64 KiB. A plugin provider pins its plugin
+profile as a saved draft does, and its endpoint follows from the profile's
+address and the provider's plugin options. A plugin build the destination can't
+use is a `plugin` blocker keyed by its digest: `plugin_not_installed` or
+`plugin_not_approved` until an owner installs and approves that build, or
+`plugin_unconfined_disabled` for an unconfined build while the deployment does
+not enable unconfined plugins. Its providers are validated against the profile
+once it is usable. A profile the build does not declare
+(`plugin_profile_unknown`) refuses the artifact. Plan reports
 `secret_binding_required` blockers for credential refs that do not already
-resolve to a current same-named slot credential on the destination.
+resolve to a current same-named slot credential of the provider's
+authentication on the destination, static plugin credentials included. A slot a
+grant backs takes no secret binding: unless it already holds a grant that the
+plugin build the artifact pins enrolled on the destination, plan reports its
+ref as an `enroll` action
+(`grant_enrollment_required`), and after applying the provider activates only
+once a grant enrollment gives each slot it serves with a credential.
 
 `POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
 desired state in one installation-serialized transaction:
@@ -335,7 +359,9 @@ All three endpoints require the `configure` operation and an all-projects
 principal, so assigned users and project-scoped machine tokens receive 403;
 all-project machine tokens with `read` and `configure` scopes can automate
 export, plan, and apply. The console exposes the workflow to global
-owner/operator sessions under **Settings → Configuration promotion**.
+owner/operator sessions under **Settings → Configuration promotion**, which
+asks for the secret bindings a plan requires and forgets them whenever the
+artifact changes.
 
 ### Versioned provider profiles and per-connection networking
 

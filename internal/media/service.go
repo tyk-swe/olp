@@ -34,10 +34,10 @@ type Service struct {
 	Keys         *secrets.KeyRing
 	Installation string
 	Transport    *Transport
-	// Revoked reports whether a credential version was explicitly revoked as
-	// of the last authority read. A nil or stale authority must fail closed.
-	Revoked func(credentialID string) bool
-	Log     *slog.Logger
+	// Credentials serves the pinned credential versions' eligibility and
+	// secrets. Without it every credential fails closed.
+	Credentials runtime.Credentials
+	Log         *slog.Logger
 	// Gaps counts reconciliation steps that could not be checkpointed; the
 	// worker counter makes unattended retries observable.
 	Gaps *atomic.Uint64
@@ -265,40 +265,26 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 		if !credentialReferenced(&provider, credentialID) {
 			return nil, 0, "media_job_runtime_unavailable"
 		}
-		if s.Revoked == nil || s.Revoked(credentialID) {
-			return nil, 0, "media_job_credential_revoked"
+		if eligibility := s.eligibility(credentialID); eligibility != runtime.Eligible {
+			return nil, 0, "media_job_credential_" + string(eligibility)
 		}
-		if s.Keys == nil {
-			return nil, 0, "media_job_runtime_unavailable"
-		}
-		tx, err := s.Pool.Begin(ctx)
-		if err != nil {
-			return nil, 0, "media_job_runtime_unavailable"
-		}
-		secret, err = s.Keys.Read(ctx, tx, s.Installation, credentialID, secrets.ProviderCredential)
-		tx.Rollback(ctx)
+		var err error
+		secret, _, err = s.Credentials.Secret(ctx, nil, credentialID)
 		if err != nil || len(secret) == 0 {
 			return nil, 0, "media_job_runtime_unavailable"
 		}
-	} else if record.CredentialVersionID != nil && s.Revoked != nil && s.Revoked(*record.CredentialVersionID) {
-		return nil, 0, "media_job_credential_revoked"
+	} else if record.CredentialVersionID != nil {
+		if eligibility := s.eligibility(*record.CredentialVersionID); eligibility != runtime.Eligible {
+			return nil, 0, "media_job_credential_" + string(eligibility)
+		}
 	}
 	var networkSecret []byte
 	if config.Network != nil && config.Network.CredentialID != "" {
-		id := config.Network.CredentialID
-		if s.Revoked == nil || s.Revoked(id) || s.Keys == nil {
+		if s.Credentials == nil {
 			return nil, 0, "media_job_network_credential_unavailable"
 		}
-		tx, err := s.Pool.Begin(ctx)
-		if err != nil {
-			return nil, 0, "media_job_network_credential_unavailable"
-		}
-		defer tx.Rollback(ctx)
-		var valid bool
-		if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", id, provider.ID).Scan(&valid); err != nil || !valid {
-			return nil, 0, "media_job_network_credential_unavailable"
-		}
-		networkSecret, err = s.Keys.Read(ctx, tx, s.Installation, id, secrets.ProviderCredential)
+		var err error
+		networkSecret, err = s.Credentials.NetworkSecret(ctx, nil, provider.ID, config.Network.CredentialID)
 		if err != nil {
 			return nil, 0, "media_job_network_credential_unavailable"
 		}
@@ -309,6 +295,15 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	}
 	scope := provider.ID + "/" + provider.RevisionID + "/" + selected.ID + "/" + credentialID
 	return &JobTarget{Target: Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: scope}, Provider: provider, Slot: *selected}, routeTimeout, ""
+}
+
+// eligibility fails closed without a credential source: no authority vouches
+// for the credential version.
+func (s *Service) eligibility(credentialID string) runtime.Eligibility {
+	if s.Credentials == nil {
+		return runtime.StaleAuthority
+	}
+	return s.Credentials.Eligibility(credentialID)
 }
 
 // credentialReferenced reports whether the pinned provider entry still names

@@ -1,12 +1,15 @@
 # Architecture and change map
 
-The Go module owns production code under `internal/`; `cmd/olp` starts the CLI.
+The Go module owns production code under `internal/` and the public provider
+plugin SDK under `sdk/`; `cmd/olp` starts the CLI.
 The console mirrors feature ownership under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Change | Start here |
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `internal/providers/` and `console/src/lib/features/providers/` |
+| Provider plugin install, approval, confined runtime, hosted plugin code and ABI | `internal/plugins/`, `sdk/plugin/` and `console/src/lib/features/plugins/` |
+| Grants beneath credential versions, grant enrollment sessions and grant refresh | `internal/grants/`, with its API in `internal/providers/grants.go` |
 | Route drafts, target selection, publication, history | `internal/routes/` and `console/src/lib/features/routes/` |
 | Users, sessions, OIDC, projects, API keys, budgets, tokens, audit | `internal/access/` and `console/src/lib/features/access/` |
 | Installation settings and notification destinations/rules | `internal/access/` and console access/settings features |
@@ -14,14 +17,16 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Content-policy validation and matching | `internal/contentpolicy/` |
 | Provider-resource mappings and stored-response accounting | `internal/resources/` and `internal/gateway/` |
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
+| Upstream failure classes and upstream acceptance | `internal/upstream/` |
 | Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
 | Ordered generation views and independent operation contracts | `internal/operations/` |
 | Strict generation admission, continuation and semantic obligations | `internal/interaction/` |
 | Registered non-generation strict operation contracts | `internal/operationplan/`, `internal/operationregistry/` |
 | Strict media, batch, realtime and Gemini lifecycle contracts | `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Transformed provider preparation and wire defaults | `internal/providerinvoke/` |
+| Provider profiles, addressing, and upstream hosting, authentication and signing | `internal/connectors/` |
 | OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
-| Immutable runtime publication, activation, authority refresh, strict contract compilation | `internal/runtime/` |
+| Immutable runtime publication, activation, authority refresh, credential source, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
 | Playground execution state, request composition, routing inspection | `console/src/lib/features/inference/playground/` |
@@ -44,8 +49,14 @@ tests check handler/contract parity.
 
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
 revision metadata and stored JSON. Runtime publication and retained-resource
-resolution share these pure decoders. Their callers still own SQL, transactions,
-authorization, credential checks, and operation eligibility. Publication alone
+resolution share these pure decoders. A plugin provider's revision decodes with
+the plugin it pins (`PluginColumn`: its manifest and whether it is unconfined),
+so snapshots carry its plugin profile and gateways read no manifest; a
+profile's signing hook runs on the code `plugins.Host` loads by digest: a
+confined plugin's module on wazero, or an unconfined plugin's executable as a
+subprocess speaking the ABI over stdio, where the deployment enables the
+unconfined tier. Their callers still own SQL,
+transactions, authorization, credential checks, and operation eligibility. Publication alone
 drops empty provider limits; retained resources preserve the stored limits.
 
 The console usage feature owns `PricingRevisionsPanel`, including its queries,
@@ -65,9 +76,25 @@ Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`
 owns shared attempt progression, reservations, settlement, health and failover
 for canonical inference and ordinary media. `executor.go` and `media.go` retain
 their transport deadlines, streaming commitment and delivery; adjacent resource,
-video, Bedrock, and realtime paths handle their specific lifecycles. Protocol
+video, Bedrock, and realtime paths handle their specific lifecycles. Every
+upstream call path, including media workers and provider probes, reports its
+evidence to the `internal/upstream` classifier: whether the request reached the
+upstream, the status and error it stated, and any interruption or transport
+failure. The classifier derives the failure class and upstream acceptance, so a
+transport other than net/http is classified the same way. A plugin profile's
+declared classification rules, which the connector config carries, take
+precedence over the built-in rules for the failures they match. Protocol
 codecs live in `internal/protocols/`. Independent key-authority refresh prevents
 a failed activation from retaining revoked access.
+
+`internal/runtime/credentials.go` is the one credential source. Planning, slot
+availability, dispatch, retained resources and continuations, and media
+reconciliation ask it whether a credential version is eligible and for its
+usable secret: from the pinned release, or from the secret authority for a
+historical revision's version. A version with a grant serves the grant's
+current access token: a worker's refresh advances the grant's generation, and
+each poll reloads the access tokens whose generation changed. An ineligible
+version carries its reason into plan and attempt records.
 
 OIF is an in-process contract, not a public API or another request authority.
 `internal/oif` owns immutable JSON source spans, exact presence and numeric

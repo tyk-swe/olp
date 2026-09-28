@@ -102,6 +102,8 @@ upstream.
 | [Concepts](docs/concepts.md) | Projects, routes, revisions, keys, budgets, and privacy |
 | [Provider routing](docs/provider-routing.md) | Onboarding, credential pools, model facts, and selection policy |
 | [Provider profiles](docs/provider-profiles.md) | API dialects, defaults, bindings, and connection security |
+| [Provider plugins](docs/plugins.md) | Installing, approving, and confining operator-installed plugins |
+| [Plugin authoring](docs/plugin-authoring.md) | The Go SDK, reference plugin, and plugin ABI |
 | [Compatibility](docs/compatibility.md) | Endpoints, supported providers, and translation limits |
 | [Deployment](docs/deployment.md) | Database setup, topology, capacity, qualification limits, and edge routing |
 | [Configuration](docs/configuration.md) | Variables, secret files, CLI settings, and configuration promotion |

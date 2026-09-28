@@ -1,11 +1,14 @@
 package providers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http"
+	"errors"
+	"maps"
 	"net/textproto"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -36,10 +40,14 @@ type Options struct {
 	Models            map[string]json.RawMessage       `json:"models"`
 	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 	VendorID          *string                          `json:"vendor_id"`
+	// PluginOptions holds a plugin provider's values for the options its
+	// plugin profile declares, by option name.
+	PluginOptions map[string]string `json:"plugin_options,omitempty"`
 }
 
 // Configuration is the stored connection configuration; it is the contract's
-// ProviderConfiguration verbatim.
+// ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
+// as the profile revision; pin resolves that plugin profile.
 type Configuration struct {
 	ProviderID      string   `json:"-"`
 	ProfileID       string   `json:"profile_id,omitempty"`
@@ -53,6 +61,7 @@ type Configuration struct {
 	Deployment      *string  `json:"deployment"`
 	APIVersion      *string  `json:"api_version"`
 	Options         Options  `json:"options"`
+	plugin          *connectors.PluginProfile
 }
 
 // normalize applies defaults and canonical forms so equal configurations
@@ -78,10 +87,70 @@ func (c *Configuration) Normalize() {
 	if c.Options.ParameterDefaults == nil {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
-	if c.VendorMissing() {
+	// An option left empty is unset.
+	maps.DeleteFunc(c.Options.PluginOptions, func(_, value string) bool { return value == "" })
+	switch {
+	case c.Kind == KindPlugin:
+		// No vendor list price applies to a plugin provider.
+		if c.VendorMissing() {
+			c.Options.VendorID = nil
+		}
+	case c.VendorMissing():
 		c.Options.VendorID = new(defaultVendor(c.Kind))
 	}
 }
+
+// Pin resolves the plugin profile a plugin provider's configuration pins,
+// which must belong to a plugin usable in the deployment's unconfined tier,
+// or nil, and gives the provider its address, with its options in place, as
+// endpoint.
+func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined) error {
+	if c.Kind != KindPlugin {
+		return nil
+	}
+	if c.ProfileID == "" || !pluginDigest.MatchString(c.ProfileRevision) {
+		return access.Invalid("configuration.profile_revision", "Choose a plugin profile: its ID, and the plugin's digest as the profile revision.")
+	}
+	plugin, err := plugins.Profile(ctx, q, unconfined, c.ProfileRevision, c.ProfileID)
+	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
+		field := "configuration.profile_revision"
+		if refusal.Code == plugins.CodeProfileUnknown {
+			field = "configuration.profile_id"
+		}
+		return &access.Problem{Status: 422, Code: refusal.Code, Detail: refusal.Message, Field: field}
+	}
+	if err != nil {
+		return err
+	}
+	c.plugin, c.Endpoint = plugin, new(plugin.Address(c.Options.PluginOptions))
+	return nil
+}
+
+// pluginDigest is the digest of the plugin a plugin provider pins, or "".
+func (c *Configuration) pluginDigest() string {
+	if c.Kind != KindPlugin {
+		return ""
+	}
+	return c.ProfileRevision
+}
+
+// pinned attaches the plugin profile a stored plugin provider configuration
+// pins, from its installed plugin, which pluginColumn selects. Uninstalling a
+// plugin is refused while a provider pins it.
+func (c *Configuration) pinned(installed []byte) error {
+	if c.Kind != KindPlugin || installed == nil {
+		return nil
+	}
+	plugin, err := connectors.DecodePluginProfile(c.ProfileRevision, installed, c.ProfileID)
+	c.plugin = plugin
+	return err
+}
+
+// pluginColumn selects the plugin that the provider p pins, as a
+// connectors.InstalledPlugin, or NULL.
+const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
+
+var pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // VendorMissing reports whether the configuration omits its vendor id.
 func (c *Configuration) VendorMissing() bool {
@@ -104,6 +173,20 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if kind == nil {
 		return access.Fail(422, "provider_kind_unavailable", "Unknown provider connector kind.")
 	}
+	if c.Kind == KindPlugin && c.plugin == nil {
+		return access.Invalid("configuration.profile_revision", "Choose a profile of an installed, approved plugin, with the plugin's digest as the profile revision.")
+	}
+	if c.plugin == nil && len(c.Options.PluginOptions) != 0 {
+		return access.Invalid("configuration.options.plugin_options", "Only plugin providers have plugin options.")
+	}
+	if c.plugin != nil {
+		if err := c.plugin.ValidateOptions(c.Options.PluginOptions); err != nil {
+			if refusal, ok := errors.AsType[*connectors.OptionError](err); ok {
+				return access.Invalid("configuration.options.plugin_options."+refusal.Option, refusal.Message)
+			}
+			return err
+		}
+	}
 	modeAllowed := false
 	for _, m := range kind.AuthModes {
 		modeAllowed = modeAllowed || m.Mode == c.AuthMode
@@ -121,7 +204,7 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.credential_headers", "Use at most 16 credential headers.")
 	}
 	for _, h := range c.Options.CredentialHeaders {
-		if h == "" || !validHeaderName(h) || reservedHeader(h) {
+		if !connectors.ConfigurableHeader(h) {
 			return access.Invalid("configuration.options.credential_headers", "Use valid header names other than hop-by-hop or framing headers.")
 		}
 	}
@@ -134,7 +217,11 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if err := c.transport().Validate(policy); err != nil {
 		return access.Invalid("configuration", err.Error())
 	}
-	if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
+	if c.Kind == KindPlugin {
+		if !c.VendorMissing() {
+			return access.Invalid("configuration.options.vendor_id", "A plugin provider has no vendor.")
+		}
+	} else if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
 		return access.Invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	if len(c.Options.Models) > 2000 {
@@ -183,20 +270,26 @@ func ValidQuota(q Limits) bool {
 	return true
 }
 
-func validHeaderName(name string) bool {
-	if name == "" || len(name) > 128 {
-		return false
-	}
-	for _, r := range name {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
-			return false
-		}
-	}
-	return true
-}
-
 // credentialRequired reports whether the auth mode needs a secret.
 func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
+
+// Grant reports whether the provider authenticates with a grant, whose
+// credential versions only grant enrollment creates, never a pasted secret.
+func (c *Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant }
+
+// Authenticates reports whether a provider that takes a credential can
+// authenticate with a credential version recording pluginDigest: the plugin
+// build whose grant enrollment created it, or "" for a pasted credential. A
+// grant serves only a provider that pins the build that enrolled it, since a
+// plugin gets only its own grant (ADR 0007) and a build's name is only what
+// its manifest claims; moving a provider to another build therefore takes a
+// new grant enrollment for each of its slots.
+func (c *Configuration) Authenticates(pluginDigest string) bool {
+	if c.Grant() {
+		return pluginDigest == c.ProfileRevision
+	}
+	return pluginDigest == ""
+}
 
 // transportFingerprint identifies everything that affects how the gateway
 // reaches the upstream. Certification evidence is retained only while it is
@@ -207,23 +300,15 @@ func (c *Configuration) transportFingerprint() string {
 	if c.ProfileID != "" {
 		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
 	}
+	if c.Kind == KindPlugin {
+		parts = append(parts, c.Options.PluginOptions)
+	}
 	if c.Options.Network != nil {
 		parts = append(parts, c.Options.Network)
 	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
-}
-
-// applyCredential adds the credential to an upstream request.
-func (c *Configuration) applyCredential(req *http.Request, credential []byte) error {
-	switch c.AuthMode {
-	case AuthAPIKey:
-		req.Header.Set("Authorization", "Bearer "+string(credential))
-	case AuthHeaders:
-		return egress.ApplyCredentialHeaders(req.Header, c.Options.CredentialHeaders, credential)
-	}
-	return nil
 }
 
 func value(v *string) string {
@@ -233,16 +318,5 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
-}
-func reservedHeader(h string) bool {
-	h = strings.ToLower(h)
-	if strings.HasPrefix(h, "x-olp-") {
-		return true
-	}
-	switch h {
-	case "host", "content-length", "transfer-encoding", "connection", "cookie", "proxy-authorization", "proxy-connection", "upgrade", "te", "trailer", "content-type", "content-encoding", "accept", "traceparent", "tracestate", "x-request-id":
-		return true
-	}
-	return false
+	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }

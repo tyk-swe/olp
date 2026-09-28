@@ -48,8 +48,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v1/notifications/destinations/{notification_destination_id}":   s.notificationDestination,
 		"PATCH /api/v1/notifications/destinations/{notification_destination_id}": s.updateNotificationDestination,
 		"GET /api/v1/notifications/rules":                                        s.notificationRules, "POST /api/v1/notifications/rules": s.createNotificationRule,
-		"GET /api/v1/notifications/rules/{budget_alert_rule_id}":   s.notificationRule,
-		"PATCH /api/v1/notifications/rules/{budget_alert_rule_id}": s.updateNotificationRule,
+		"GET /api/v1/notifications/rules/{notification_rule_id}":   s.notificationRule,
+		"PATCH /api/v1/notifications/rules/{notification_rule_id}": s.updateNotificationRule,
 		"GET /api/v1/notifications/deliveries":                     s.notificationDeliveries,
 		"GET /api/v1/audit":                                        s.auditEvents,
 		"GET /api/v1/projects":                                     s.projects, "POST /api/v1/projects": s.createProject,
@@ -310,7 +310,7 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	}
 	// Issuance is installation-scoped. Existing keys retain their issuer and
 	// policy across account role changes and disabling, as in the reference.
-	if _, err = AdvanceAuthority(r, tx); err != nil {
+	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.update", "user", id, "success"); err != nil {

@@ -50,8 +50,18 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 			return nil, errors.New("duplicate mounted provider identifier")
 		}
 		entry.Configuration.Normalize()
-		if err = entry.Configuration.Validate(policy); err != nil {
-			return nil, err
+		// A plugin provider's profile comes from the plugin its published
+		// revision pins, and the gateway requires this configuration to match
+		// that revision: only the credential is mounted.
+		if entry.Configuration.Kind != KindPlugin {
+			if err = entry.Configuration.Validate(policy); err != nil {
+				return nil, err
+			}
+		}
+		// A grant is refreshed beneath its credential version in the database,
+		// which a gateway without the master key can't read.
+		if entry.Configuration.Grant() {
+			return nil, errors.New("mounted connectors can't serve a provider that authenticates with a grant; run the gateway with the master key")
 		}
 		required := entry.Configuration.CredentialRequired()
 		if required != (entry.CredentialFile != nil) {

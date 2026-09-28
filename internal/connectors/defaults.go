@@ -23,8 +23,10 @@ type DefaultSet struct {
 }
 
 // Binding identifies a configured serving environment separately from secrets.
-// PrincipalID/Snapshot are operator declarations until independently observed;
-// omitted values remain unknown. Credential secret versions are not identities.
+// PrincipalID/Snapshot are operator declarations until independently observed
+// (a grant's observed principal replaces a declared one; see
+// Config.ServingPrincipal); omitted values remain unknown. Credential secret
+// versions are not identities.
 type Binding struct {
 	Model         string                `json:"model,omitempty"`
 	Deployment    string                `json:"deployment,omitempty"`
@@ -284,7 +286,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 // A whole member (including an array/schema/null) from the binding replaces the
 // provider member. Request member presence is applied by the operation lowerer.
 func (c Config) DefaultsFor(operation, model string) (map[string]json.RawMessage, []DefaultProvenance, error) {
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return nil, nil, err
 	}

@@ -51,14 +51,31 @@ type Config struct {
 	// shares it with the public admission middleware so both bound the same
 	// capacity and the metrics endpoint reads one truth.
 	AdmissionPool *observability.Pool
+	// Signer runs the signing hooks of plugin profiles. Without one, a
+	// provider whose profile declares signing authorizes no request.
+	Signer connectors.Signer
+	// Carrier runs the unconfined plugins that carry their profiles' traffic.
+	// Without one, a provider whose profile's plugin carries its traffic
+	// sends no request.
+	Carrier connectors.Carrier
+	// UnconfinedPlugins is set where the deployment enables unconfined
+	// plugins. Elsewhere, the gateway refuses targets of providers whose
+	// plugin is unconfined.
+	UnconfinedPlugins bool
 }
 
-// Runtime is the pinned authority and release source. *runtime.Manager
-// implements it; fixtures and tests supply static releases.
+// Runtime is the pinned authority, release and credential source.
+// *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	Release() *runtime.Release
 	Authenticate(secret string) (access.Authority, error)
-	Revoked(credentialID string) bool
+	runtime.Credentials
+	// GrantGeneration is the generation of the token currently served.
+	GrantGeneration(credentialID string) int64
+	// CredentialRefused reports that the upstream refused a credential
+	// version's secret, so that a grant beneath the version is refreshed
+	// early.
+	CredentialRefused(credentialID string, generation int64)
 }
 
 // Server serves the native OpenAI surface from pinned runtime releases.
@@ -103,6 +120,8 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	if pool == nil {
 		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
 	}
+	auth := connectors.NewAuth(policy)
+	auth.Signer = cfg.Signer
 	return &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
@@ -111,7 +130,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		egress:      policy,
 		client:      policy.Client(upstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
-		auth:        connectors.NewAuth(policy),
+		auth:        auth,
 		admission:   pool,
 		health:      newHealthTracker(time.Now),
 		now:         time.Now,
@@ -647,7 +666,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
 	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
 				return source.parameters, source.demand
@@ -660,7 +679,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
-			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
+			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != runtime.Eligible {
 				return errors.New("provider network credential unavailable")
 			}
 			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {

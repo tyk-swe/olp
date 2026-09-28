@@ -59,7 +59,26 @@ func (s *staticRuntime) Authenticate(secret string) (access.Authority, error) {
 	return authority, nil
 }
 
-func (s *staticRuntime) Revoked(string) bool { return false }
+func (s *staticRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
+
+// Secret serves the credentials the pinned release installed.
+func (s *staticRuntime) Secret(_ context.Context, release *runtime.Release, credentialID string) ([]byte, int64, error) {
+	if secret, ok := release.Credential(credentialID); ok {
+		return secret, 0, nil
+	}
+	return nil, 0, runtime.ErrCredentialUnavailable
+}
+
+func (s *staticRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, credentialID string) ([]byte, error) {
+	secret, _, err := s.Secret(ctx, release, credentialID)
+	return secret, err
+}
+
+// CredentialRefused ignores refusals: the fixture's credentials have no
+// grants.
+func (s *staticRuntime) CredentialRefused(string, int64) {}
+
+func (s *staticRuntime) GrantGeneration(string) int64 { return 0 }
 
 func run() error {
 	path := os.Getenv("OLP_SDK_SMOKE_METADATA")

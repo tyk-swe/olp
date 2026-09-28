@@ -645,7 +645,7 @@
             "type": "boolean"
           },
           "notifications_active": {
-            "description": "Whether the installation runs the budget alert delivery worker, so stored rules actually notify.",
+            "description": "Whether the installation runs the notification delivery worker, so stored rules actually notify.",
             "type": "boolean"
           },
           "oidc_login_enabled": {
@@ -685,248 +685,6 @@
         "propertyNames": {
           "type": "string"
         },
-        "type": "object"
-      },
-      "BudgetAlertDelivery": {
-        "properties": {
-          "accrued": {
-            "description": "The exact accrual that crossed the threshold, preserved from claim time.",
-            "type": "string"
-          },
-          "attempts": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "delivered_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "currency": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "last_attempt_at": {
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "last_error_code": {
-            "description": "Safe failure category only; raw errors are never stored.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "limit": {
-            "description": "The subject limit evaluated at claim time.",
-            "type": "string"
-          },
-          "project_id": {
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "rule_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "rule_name": {
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "delivered",
-              "failed"
-            ],
-            "type": "string"
-          },
-          "threshold_percent": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "window_id": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "rule_id",
-          "rule_name",
-          "project_id",
-          "window_id",
-          "threshold_percent",
-          "accrued",
-          "limit",
-          "currency",
-          "status",
-          "attempts",
-          "last_error_code",
-          "created_at",
-          "last_attempt_at",
-          "delivered_at"
-        ],
-        "type": "object"
-      },
-      "BudgetAlertDeliveryListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/BudgetAlertDelivery"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "BudgetAlertRule": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "created_by": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "created_by_email": {
-            "type": "string"
-          },
-          "destination_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "destination_name": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "etag": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "project_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "subject_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "subject_kind": {
-            "enum": [
-              "api_key",
-              "budget_group"
-            ],
-            "type": "string"
-          },
-          "subject_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "threshold_percent": {
-            "format": "int32",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "window_kind": {
-            "enum": [
-              "day",
-              "month"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "project_id",
-          "project_name",
-          "subject_kind",
-          "subject_id",
-          "subject_name",
-          "window_kind",
-          "threshold_percent",
-          "destination_id",
-          "destination_name",
-          "enabled",
-          "etag",
-          "created_by",
-          "created_by_email",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
-      "BudgetAlertRuleListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/BudgetAlertRule"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "items"
-        ],
         "type": "object"
       },
       "BudgetGroupBudgetResponse": {
@@ -1089,6 +847,86 @@
           "etag"
         ],
         "type": "object"
+      },
+      "BudgetSubjectKind": {
+        "description": "Whose spend a budget.threshold rule watches.",
+        "enum": [
+          "api_key",
+          "budget_group"
+        ],
+        "type": "string"
+      },
+      "BudgetThresholdEvent": {
+        "description": "The webhook body of a budget.threshold event: the subject of a budget threshold rule accrued at least its threshold of its limit in the current UTC window. Metadata only: it never carries prompts, outputs or attribution labels.",
+        "properties": {
+          "accrued": {
+            "description": "The exact accrual that crossed the threshold, as claimed.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The pricing currency, or empty when none is set.",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "budget.threshold"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "The subject's limit for the window, as claimed.",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind"
+          }
+        },
+        "required": [
+          "event",
+          "rule_id",
+          "rule_name",
+          "subject_kind",
+          "subject_id",
+          "window_kind",
+          "window_id",
+          "threshold_percent",
+          "accrued",
+          "limit",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "BudgetWindowKind": {
+        "description": "The UTC window a budget.threshold rule watches.",
+        "enum": [
+          "day",
+          "month"
+        ],
+        "type": "string"
       },
       "CapabilityCertificationItemResponse": {
         "properties": {
@@ -1352,15 +1190,39 @@
       "ConfigurationPlanItem": {
         "properties": {
           "action": {
+            "description": "What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.",
+            "enum": [
+              "create",
+              "reuse",
+              "replace",
+              "noop",
+              "bind",
+              "stage",
+              "enroll",
+              "conflict",
+              "blocker"
+            ],
             "type": "string"
           },
           "detail": {
+            "description": "Qualifies the action, or names the conflict or blocker, such as `secret_binding_required`, `grant_enrollment_required`, `plugin_not_installed` or `plugin_not_approved`",
             "type": "string"
           },
           "key": {
+            "description": "Natural identity of the item: a name, slug or credential reference; a plugin's digest",
             "type": "string"
           },
           "kind": {
+            "enum": [
+              "configuration",
+              "project",
+              "plugin",
+              "provider",
+              "network_credential",
+              "credential",
+              "route",
+              "pricing"
+            ],
             "type": "string"
           }
         },
@@ -1547,7 +1409,7 @@
               "type": "string",
               "writeOnly": true
             },
-            "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed",
+            "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
             "type": "object"
           }
         },
@@ -1710,7 +1572,7 @@
       "ConfigurationSlotEntry": {
         "properties": {
           "credential_ref": {
-            "description": "Stable 'provider-name/slot-name-or-default' reference; null for credentialless authentication",
+            "description": "Stable 'provider-name/slot-name-or-default' reference to the slot's credential; null for credentialless authentication. Every slot of a provider that authenticates with a grant has one: exports never carry grant material, and importing leaves the slot for grant enrollment.",
             "type": [
               "string",
               "null"
@@ -1908,6 +1770,15 @@
             },
             "type": "object"
           },
+          "plugin_options": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "description": "A plugin provider's values for the options its plugin profile declares, by option name, which the profile's options_schema describes. Hosting templates and plugin calls for the provider use them. An empty value leaves an option unset.",
+            "maxProperties": 16,
+            "type": "object"
+          },
           "query_settings": {
             "additionalProperties": {
               "maxLength": 2048,
@@ -1985,6 +1856,21 @@
           "phase",
           "pattern",
           "action"
+        ],
+        "type": "object"
+      },
+      "ContinueGrantEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "description": "What the upstream returned after the operator signed in: the whole loopback callback URL it redirected the browser to, or the code it displayed.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
         ],
         "type": "object"
       },
@@ -2104,62 +1990,6 @@
           "lookup_id",
           "secret",
           "runtime_generation"
-        ],
-        "type": "object"
-      },
-      "CreateBudgetAlertRuleRequest": {
-        "properties": {
-          "destination_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "enabled": {
-            "description": "Defaults to true.",
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "project_id": {
-            "description": "Owning project; subject and destination must belong to the same project.",
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "subject_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "subject_kind": {
-            "enum": [
-              "api_key",
-              "budget_group"
-            ],
-            "type": "string"
-          },
-          "threshold_percent": {
-            "format": "int32",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "window_kind": {
-            "enum": [
-              "day",
-              "month"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "subject_kind",
-          "subject_id",
-          "window_kind",
-          "threshold_percent",
-          "destination_id"
         ],
         "type": "object"
       },
@@ -2410,6 +2240,55 @@
         ],
         "type": "object"
       },
+      "CreateNotificationRuleRequest": {
+        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide.",
+        "properties": {
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Defaults to true.",
+            "type": "boolean"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; subject and destination must belong to the same project.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind"
+          }
+        },
+        "required": [
+          "name",
+          "event",
+          "destination_id"
+        ],
+        "type": "object"
+      },
       "CreatePricingSourceRequest": {
         "properties": {
           "enabled": {
@@ -2547,6 +2426,52 @@
         ],
         "type": "object"
       },
+      "CredentialGrant": {
+        "additionalProperties": false,
+        "description": "What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.",
+        "properties": {
+          "expires_at": {
+            "description": "When the grant's current access token expires, if the upstream said.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "facts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The grant facts the plugin reported, which the profile's hosting templates use.",
+            "type": "object"
+          },
+          "lapsed_at": {
+            "description": "When the grant lapsed: it can no longer be refreshed, so the version's slots are ineligible until a new grant enrollment replaces it. Null while the grant lives.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plugin_digest": {
+            "description": "Digest of the plugin whose grant enrollment created the version.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "principal": {
+            "description": "The observed principal: the upstream account the grant authorizes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_digest",
+          "principal",
+          "facts",
+          "expires_at",
+          "lapsed_at"
+        ],
+        "type": "object"
+      },
       "CredentialListResponse": {
         "properties": {
           "items": {
@@ -2568,9 +2493,11 @@
         "type": "object"
       },
       "CredentialRequirement": {
+        "description": "Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.",
         "enum": [
           "required",
-          "forbidden"
+          "forbidden",
+          "grant"
         ],
         "type": "string"
       },
@@ -2587,6 +2514,17 @@
           "draft_selected": {
             "description": "True when this credential is selected only by the mutable draft.",
             "type": "boolean"
+          },
+          "grant": {
+            "description": "What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CredentialGrant"
+              }
+            ]
           },
           "id": {
             "format": "uuid",
@@ -2640,6 +2578,7 @@
           },
           "credential_version_id": {
             "default": null,
+            "description": "The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.",
             "format": "uuid",
             "type": [
               "string",
@@ -2739,6 +2678,136 @@
         },
         "required": [
           "new_password"
+        ],
+        "type": "object"
+      },
+      "GrantDeviceAuthorization": {
+        "additionalProperties": false,
+        "description": "A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.",
+        "properties": {
+          "interval": {
+            "description": "How many seconds to wait between status requests.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "user_code": {
+            "description": "The code the operator enters at the verification URL.",
+            "type": "string"
+          },
+          "verification_url": {
+            "description": "Where the operator enters the user code, at one of the plugin's approved origins.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verification_url",
+          "user_code",
+          "interval"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollment": {
+        "additionalProperties": false,
+        "description": "A grant enrollment in progress, with either an authorization URL or a device authorization. With an authorization URL, the operator opens it, signs in upstream, and continues the enrollment with what the upstream returns before it expires; it is continued once. With a device authorization, the operator approves the device upstream while status requests poll the enrollment until it completes, is denied or expires. Any control replica serves either.",
+        "properties": {
+          "authorization_url": {
+            "description": "The plugin's authorization request, at one of its approved origins.",
+            "type": "string"
+          },
+          "device": {
+            "$ref": "#/components/schemas/GrantDeviceAuthorization"
+          },
+          "expires_at": {
+            "description": "When the enrollment expires: 10 minutes after it starts, or when a device authorization's user code expires, within 30 minutes.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "slot_id": {
+            "description": "The credential slot the grant will back.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_id",
+          "slot_id",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollmentCompletion": {
+        "additionalProperties": false,
+        "description": "The credential version grant enrollment created, with the grant beneath it, staged on the enrollment's credential slot of the provider draft like a rotated credential.",
+        "properties": {
+          "credential_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "credential_version": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "etag": {
+            "description": "The provider draft's new ETag.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "principal": {
+            "description": "The observed principal: the upstream account the grant authorizes.",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "etag",
+          "credential_id",
+          "credential_version",
+          "principal"
+        ],
+        "type": "object"
+      },
+      "GrantEnrollmentStatus": {
+        "additionalProperties": false,
+        "description": "Where a grant enrollment by device authorization stands.",
+        "properties": {
+          "completion": {
+            "$ref": "#/components/schemas/GrantEnrollmentCompletion",
+            "description": "The credential version the grant created, once completed."
+          },
+          "interval": {
+            "description": "How many seconds to wait before the next status request, while pending. The upstream may ask OLP to slow down, which lengthens it.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "description": "`pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.",
+            "enum": [
+              "pending",
+              "completed",
+              "denied",
+              "expired"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },
@@ -3174,7 +3243,8 @@
           "manage_sessions",
           "manage_tokens",
           "manage_projects",
-          "local_login"
+          "local_login",
+          "manage_plugins"
         ],
         "type": "string"
       },
@@ -3635,6 +3705,179 @@
         ],
         "type": "object"
       },
+      "NotificationDelivery": {
+        "description": "Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.",
+        "properties": {
+          "accrued": {
+            "description": "The exact accrual that crossed the threshold, preserved from claim time. Set for budget.threshold deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credential_version": {
+            "description": "The number of the credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "credential_version_id": {
+            "description": "The credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_code": {
+            "description": "Safe failure category only; raw errors are never stored.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "description": "The subject limit evaluated at claim time. Set for budget.threshold deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "description": "The provider whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "description": "The provider's name when its grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "threshold_percent": {
+            "description": "Set for budget.threshold deliveries only; null for other events.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "window_id": {
+            "description": "Set for budget.threshold deliveries only; null for other events.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "rule_name",
+          "project_id",
+          "event",
+          "window_id",
+          "threshold_percent",
+          "accrued",
+          "limit",
+          "currency",
+          "provider_id",
+          "provider_name",
+          "credential_version_id",
+          "credential_version",
+          "status",
+          "attempts",
+          "last_error_code",
+          "created_at",
+          "last_attempt_at",
+          "delivered_at"
+        ],
+        "type": "object"
+      },
+      "NotificationDeliveryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationDelivery"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "NotificationDestination": {
         "properties": {
           "created_at": {
@@ -3703,6 +3946,159 @@
           "items": {
             "items": {
               "$ref": "#/components/schemas/NotificationDestination"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotificationEvent": {
+        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.",
+        "enum": [
+          "budget.threshold",
+          "provider.grant.lapsed"
+        ],
+        "type": "string"
+      },
+      "NotificationRule": {
+        "description": "A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "destination_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; null for an installation-wide rule, as every provider event rule is.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_id": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_kind": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BudgetSubjectKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threshold_percent": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window_kind": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BudgetWindowKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "event",
+          "subject_kind",
+          "subject_id",
+          "subject_name",
+          "window_kind",
+          "threshold_percent",
+          "destination_id",
+          "destination_name",
+          "enabled",
+          "etag",
+          "created_by",
+          "created_by_email",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "NotificationRuleListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationRule"
             },
             "type": "array"
           },
@@ -4320,6 +4716,229 @@
         ],
         "type": "object"
       },
+      "PluginGrantAuthentication": {
+        "additionalProperties": false,
+        "description": "Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.",
+        "properties": {
+          "facts": {
+            "description": "The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}, and with which the address may begin when the fact holds the upstream's base URL.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PluginHosting": {
+        "additionalProperties": false,
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.",
+        "properties": {
+          "address": {
+            "description": "Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place. A grant profile's address may instead begin with the grant fact that holds the upstream's base URL, such as {grant.api_base}/v1: the endpoint's origin is then https://grant.invalid, and OLP sends each request to its grant's base URL, which must be at one of the plugin's approved origins.",
+            "type": "string"
+          },
+          "classification": {
+            "description": "Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.",
+            "items": {
+              "$ref": "#/components/schemas/PluginFailureRule"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "discovery": {
+            "$ref": "#/components/schemas/PluginDiscovery"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/PluginEnvelope"
+          },
+          "force_streaming": {
+            "description": "The upstream serves only streaming requests. OLP sends every request as a streaming one and aggregates the stream into the dialect's non-streaming result for a caller that did not ask to stream. Only openai-responses profiles may force streaming.",
+            "type": "boolean"
+          },
+          "headers": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared request headers by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "query": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared query parameters by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "rewrites": {
+            "description": "Declared changes to the dialect's request body, applied in order before the envelope wraps it.",
+            "items": {
+              "$ref": "#/components/schemas/PluginRewrite"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "PluginEnvelope": {
+        "additionalProperties": false,
+        "description": "The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "The request object's other members by name, with value templates in which {model} stands for the upstream model and {options.<name>} for the provider's value of one of the profile's required options. They become JSON strings.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "request": {
+            "description": "The member of the upstream's request object that carries the dialect's request body.",
+            "type": "string"
+          },
+          "response": {
+            "description": "The member of the upstream's responses and stream events that carries the dialect's response or event.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PluginRewrite": {
+        "additionalProperties": false,
+        "description": "A declared change to one member of the dialect's request body.",
+        "properties": {
+          "op": {
+            "description": "set replaces the member, default sets it unless the request has it, and delete removes it.",
+            "enum": [
+              "set",
+              "default",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON pointer to an object member, such as /generationConfig/seed. Setting it creates the objects above it.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The JSON value to set or default to, which may be null; absent for delete.",
+            "x-go-type": "json.RawMessage",
+            "x-go-type-skip-optional-pointer": true
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "type": "object"
+      },
+      "PluginDiscovery": {
+        "additionalProperties": false,
+        "description": "The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.",
+        "properties": {
+          "id": {
+            "description": "The field of each model object that holds its ID.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "models": {
+            "description": "The top-level field of the listing that holds the array of model objects.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PluginPagination"
+          },
+          "path": {
+            "description": "The listing's path, which extends the address, such as /models.",
+            "maxLength": 512,
+            "pattern": "^(/[A-Za-z0-9._~!$'()*+,;=:@-]+)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "models",
+          "id"
+        ],
+        "type": "object"
+      },
+      "PluginFailureRule": {
+        "additionalProperties": false,
+        "description": "Classifies the upstream failures it matches: unsuccessful responses by status and the error their body states, and errors stated in-band, such as a stream's error event, by code and type. It matches when every value it declares matches exactly, and declares at least one.",
+        "properties": {
+          "class": {
+            "description": "credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.",
+            "enum": [
+              "credential",
+              "rate_limited",
+              "retryable",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "code": {
+            "description": "The stated error's code.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "status": {
+            "description": "The unsuccessful response's HTTP status. A rule with a status never matches an in-band error.",
+            "maximum": 599,
+            "minimum": 400,
+            "type": "integer"
+          },
+          "type": {
+            "description": "The stated error's type.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "class"
+        ],
+        "type": "object"
+      },
+      "PluginPagination": {
+        "additionalProperties": false,
+        "description": "How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.",
+        "properties": {
+          "cursor": {
+            "description": "The top-level field of a page that holds the next page's cursor.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "more": {
+            "description": "The top-level boolean field of a page that reports whether another page follows.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The query parameter that carries the cursor.",
+            "pattern": "^[A-Za-z0-9._~-]{1,128}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter",
+          "cursor"
+        ],
+        "type": "object"
+      },
       "PolicyDecision": {
         "description": "Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.",
         "properties": {
@@ -4357,6 +4976,248 @@
         "required": [
           "policy",
           "etag"
+        ],
+        "type": "object"
+      },
+      "Plugin": {
+        "additionalProperties": false,
+        "description": "An installed provider plugin: its digest and the manifest it declared. A confined plugin's WebAssembly module is stored with it; an unconfined plugin's executable lives in the deployment's image.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the plugin was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "approved_at": {
+            "description": "When an owner approved the declared origins, or permitted an unconfined plugin; null while the plugin awaits approval and can't be used.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the module, or of an unconfined plugin's executable, which identifies the plugin.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "executable": {
+            "description": "For an unconfined plugin, the name of its executable in the deployment's unconfined plugin directory; null for a confined plugin. Unconfined plugins are listed only where the deployment enables them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "installed_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "installed_by_email": {
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "size_bytes": {
+            "description": "Size of the module or executable.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "executable",
+          "manifest",
+          "installed_by",
+          "installed_by_email",
+          "installed_at",
+          "approved_by",
+          "approved_by_email",
+          "approved_at",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "PluginApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "origins": {
+            "description": "Exactly the origins the plugin declares, in any order.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "origins"
+        ],
+        "type": "object"
+      },
+      "PluginListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Plugin"
+            },
+            "type": "array"
+          },
+          "unconfined_plugins_enabled": {
+            "description": "Whether this deployment enables the experimental unconfined plugin tier. Only a deployment setting enables it, never the management API.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "unconfined_plugins_enabled"
+        ],
+        "type": "object"
+      },
+      "PluginManifest": {
+        "additionalProperties": false,
+        "description": "What a plugin declared at install. It never changes for a digest.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifies the plugin across its versions; several digests of one plugin may be installed side by side.",
+            "type": "string"
+          },
+          "origins": {
+            "description": "The only origins the plugin may reach once an owner approves them, as scheme://host[:port].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/PluginProfile"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "version": {
+            "description": "The author's label for this build.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "origins",
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "PluginProfile": {
+        "additionalProperties": false,
+        "description": "A provider profile the plugin supplies around a built-in dialect.",
+        "properties": {
+          "carries_traffic": {
+            "description": "Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.",
+            "type": "boolean"
+          },
+          "dialect": {
+            "description": "The built-in dialect the profile serves.",
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/PluginGrantAuthentication"
+          },
+          "hosting": {
+            "$ref": "#/components/schemas/PluginHosting"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "description": "Non-secret settings each provider using the profile sets, in the order the provider wizard shows them.",
+            "items": {
+              "$ref": "#/components/schemas/PluginOption"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "signing": {
+            "description": "Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "dialect",
+          "hosting"
+        ],
+        "type": "object"
+      },
+      "PluginOption": {
+        "additionalProperties": false,
+        "description": "A non-secret setting a plugin profile declares, such as an account ID, a region or a project, whose value the operator sets on each provider using the profile. Values are text of 1-256 characters without control characters.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "description": "The only values the option takes.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifies the option in provider configuration and as {options.<name>} in hosting templates.",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "optional": {
+            "description": "Whether a provider may leave the option unset. Hosting templates reference only options that are not optional.",
+            "type": "boolean"
+          },
+          "pattern": {
+            "description": "A regular expression in RE2 syntax that values match; anchor it with ^ and $ to match whole values.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label"
         ],
         "type": "object"
       },
@@ -4448,7 +5309,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Scopes the price to one provider. A price for plugin providers names its provider: no kind-wide or vendor price applies to them."
           },
           "provider_kind": {
             "$ref": "#/components/schemas/ProviderKind"
@@ -5171,9 +6033,12 @@
           "default_chain",
           "static",
           "azure_default",
-          "azure_client_secret"
+          "azure_client_secret",
+          "static_credential",
+          "grant"
         ],
-        "type": "string"
+        "type": "string",
+        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
       },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
@@ -5228,7 +6093,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address, with the provider's plugin options in place."
           },
           "kind": {
             "$ref": "#/components/schemas/ProviderKind"
@@ -5241,7 +6107,7 @@
             "type": "string"
           },
           "profile_revision": {
-            "description": "Immutable provider profile composition revision selected with profile_id.",
+            "description": "Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.",
             "type": "string"
           }
         },
@@ -5430,6 +6296,80 @@
         ],
         "type": "object"
       },
+      "ProviderGrantLapsedEvent": {
+        "description": "The webhook body of a provider.grant.lapsed event: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment replaces it. It reports the provider, credential version, credential slots and observed principal as they were when the grant lapsed, and never carries secret material: no access or refresh token, grant facts or refresh failure.",
+        "properties": {
+          "credential_slots": {
+            "description": "The provider's credential slots bound to the credential version, in its draft or its active revision: usually one.",
+            "items": {
+              "properties": {
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "credential_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "credential_version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "provider.grant.lapsed"
+            ],
+            "type": "string"
+          },
+          "lapsed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "observed_principal": {
+            "description": "The upstream principal the grant's enrollment observed.",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "rule_id",
+          "rule_name",
+          "provider_id",
+          "provider_name",
+          "credential_version_id",
+          "credential_version",
+          "credential_slots",
+          "observed_principal",
+          "lapsed_at"
+        ],
+        "type": "object"
+      },
       "ProviderHealthItem": {
         "properties": {
           "attempt_count": {
@@ -5555,9 +6495,11 @@
           "vertex_ai",
           "bedrock",
           "azure_openai",
-          "openai_compatible"
+          "openai_compatible",
+          "plugin"
         ],
-        "type": "string"
+        "type": "string",
+        "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
       },
       "ProviderKindCapabilityListResponse": {
         "properties": {
@@ -5927,7 +6869,7 @@
         "type": "object"
       },
       "ProviderProfile": {
-        "description": "Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.",
+        "description": "Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.",
         "properties": {
           "authentication": {
             "items": {
@@ -5977,6 +6919,18 @@
             },
             "type": "array"
           },
+          "model_discovery": {
+            "description": "Whether a plugin profile declares the upstream's model listing. Without it, operators declare the models of a provider using the profile. A built-in profile's provider kind decides its discovery, and it omits this field.",
+            "type": "boolean"
+          },
+          "options_schema": {
+            "additionalProperties": {},
+            "description": "A plugin profile's options, as the JSON Schema of a provider's plugin_options: a string property per option, in declared order, with required options listed in required. Absent for a built-in profile.",
+            "type": "object"
+          },
+          "plugin": {
+            "$ref": "#/components/schemas/ProviderProfilePlugin"
+          },
           "query_settings": {
             "items": {
               "type": "string"
@@ -5992,7 +6946,12 @@
             },
             "type": "array"
           },
+          "strict": {
+            "description": "Whether the profile may serve strict routes: its hosting changes only authorization, address and headers, or is a qualified built-in binding.",
+            "type": "boolean"
+          },
           "transport": {
+            "description": "How the profile reaches the upstream: http, websocket, or plugin where an unconfined plugin carries its traffic.",
             "type": "string"
           }
         },
@@ -6011,7 +6970,8 @@
           "semantic_headers",
           "query_settings",
           "operation_dialects",
-          "default_schemas"
+          "default_schemas",
+          "strict"
         ],
         "type": "object"
       },
@@ -6026,6 +6986,33 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "ProviderProfilePlugin": {
+        "additionalProperties": false,
+        "description": "The installed provider plugin that supplies a profile.",
+        "properties": {
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module, or of an unconfined plugin's executable, which is the profile revision.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "unconfined": {
+            "description": "Set for an unconfined plugin, which runs with native privileges.",
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "name",
+          "version"
         ],
         "type": "object"
       },
@@ -6252,6 +7239,14 @@
           "network_configuration_changed": {
             "type": "boolean"
           },
+          "plugin_changed": {
+            "description": "The revisions pin different provider plugin digests, or only one pins a plugin.",
+            "type": "boolean"
+          },
+          "plugin_options_changed": {
+            "description": "The revisions set different values for the plugin profile's options.",
+            "type": "boolean"
+          },
           "profile_changed": {
             "type": "boolean"
           },
@@ -6259,6 +7254,7 @@
             "type": "boolean"
           },
           "serving_binding_changed": {
+            "description": "The revisions declare different serving bindings, or their credential slots observe different upstream principals.",
             "type": "boolean"
           },
           "to_revision": {
@@ -6282,6 +7278,8 @@
           "capabilities_added",
           "capabilities_removed",
           "profile_changed",
+          "plugin_changed",
+          "plugin_options_changed",
           "semantic_configuration_changed",
           "serving_binding_changed",
           "network_configuration_changed"
@@ -6729,7 +7727,7 @@
             "writeOnly": true
           },
           "purpose": {
-            "description": "Exact security operation authorized by this one-time grant.",
+            "description": "Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.",
             "type": "string"
           },
           "resource_id": {
@@ -8884,6 +9882,10 @@
               "null"
             ]
           },
+          "lapsed": {
+            "description": "True when the grant beneath the credential version this slot would\npresent lapsed. Selection refuses the version, so the slot cannot serve\ntraffic until its grant is re-enrolled and the provider activated.",
+            "type": "boolean"
+          },
           "revoked": {
             "description": "True when the credential version this slot would present has been\nrevoked. Selection refuses a revoked version, so the slot cannot serve\ntraffic until a replacement secret is staged and activated.",
             "type": "boolean"
@@ -8907,7 +9909,8 @@
           }
         },
         "required": [
-          "revoked"
+          "revoked",
+          "lapsed"
         ],
         "type": "object"
       },
@@ -8970,6 +9973,17 @@
         ],
         "type": "object"
       },
+      "StartGrantEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "slot_id": {
+            "description": "The credential slot the grant will back; the provider's default slot when omitted. Naming a slot a grant already backs re-enrolls its grant.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Surface": {
         "enum": [
           "openai",
@@ -8988,6 +10002,117 @@
           "realtime"
         ],
         "type": "string"
+      },
+      "UnconfinedExecutable": {
+        "additionalProperties": false,
+        "description": "An executable in the deployment's unconfined plugin directory, which an owner may review and permit as an unconfined plugin.",
+        "properties": {
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnconfinedExecutable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableReview": {
+        "additionalProperties": false,
+        "description": "An executable in the unconfined plugin directory with the manifest it declared when OLP ran it for review.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the executable was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted",
+          "abi_version",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "UnconfinedPluginPermitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge_risk": {
+            "description": "Must be true: the owner acknowledges that an unconfined plugin runs with the operating system privileges of OLP's processes, outside every confinement, and can reach anything they can.",
+            "type": "boolean"
+          },
+          "digest": {
+            "description": "Digest of the executable the owner reviewed. OLP refuses the permission if the executable has changed since.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "acknowledge_risk"
+        ],
+        "type": "object"
       },
       "UpdateApiKeyRequest": {
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
@@ -9074,45 +10199,6 @@
         },
         "type": "object"
       },
-      "UpdateBudgetAlertRuleRequest": {
-        "properties": {
-          "destination_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "subject_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "subject_kind": {
-            "enum": [
-              "api_key",
-              "budget_group"
-            ],
-            "type": "string"
-          },
-          "threshold_percent": {
-            "format": "int32",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "window_kind": {
-            "enum": [
-              "day",
-              "month"
-            ],
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "UpdateBudgetGroupRequest": {
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit null clears a cost limit. project_id is immutable.",
         "properties": {
@@ -9151,6 +10237,38 @@
           },
           "url": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateNotificationRuleRequest": {
+        "description": "A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.",
+        "properties": {
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind"
           }
         },
         "type": "object"
@@ -10267,6 +11385,11 @@
             "type": "string"
           },
           "principal_declared": {
+            "description": "A serving binding declares the upstream principal.",
+            "type": "boolean"
+          },
+          "principal_observed": {
+            "description": "Grant enrollment observed the upstream principal, which replaces any a binding declares.",
             "type": "boolean"
           },
           "snapshot_declared": {
@@ -10283,11 +11406,12 @@
           "provider_revision_id",
           "model",
           "principal_declared",
+          "principal_observed",
           "snapshot_declared",
           "region_declared",
           "resource_scope_declared"
         ],
-        "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
+        "description": "Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported."
       },
       "OperationDialect": {
         "type": "object",
@@ -12853,7 +13977,7 @@
     },
     "/api/v1/notifications/deliveries": {
       "get": {
-        "operationId": "list_budget_alert_deliveries",
+        "operationId": "list_notification_deliveries",
         "parameters": [
           {
             "description": "Opaque cursor returned by the previous page.",
@@ -12906,7 +14030,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BudgetAlertDeliveryListResponse"
+                  "$ref": "#/components/schemas/NotificationDeliveryListResponse"
                 }
               }
             },
@@ -13351,7 +14475,7 @@
     },
     "/api/v1/notifications/rules": {
       "get": {
-        "operationId": "list_budget_alert_rules",
+        "operationId": "list_notification_rules",
         "parameters": [
           {
             "description": "Opaque cursor returned by the previous page.",
@@ -13380,11 +14504,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BudgetAlertRuleListResponse"
+                  "$ref": "#/components/schemas/NotificationRuleListResponse"
                 }
               }
             },
-            "description": "Budget alert rules visible to the caller"
+            "description": "Notification rules visible to the caller"
           },
           "400": {
             "content": {
@@ -13424,7 +14548,7 @@
         ]
       },
       "post": {
-        "operationId": "create_budget_alert_rule",
+        "operationId": "create_notification_rule",
         "parameters": [
           {
             "description": "Unique mutation key",
@@ -13440,7 +14564,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateBudgetAlertRuleRequest"
+                "$ref": "#/components/schemas/CreateNotificationRuleRequest"
               }
             }
           },
@@ -13451,11 +14575,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BudgetAlertRule"
+                  "$ref": "#/components/schemas/NotificationRule"
                 }
               }
             },
-            "description": "Budget alert rule created"
+            "description": "Notification rule created"
           },
           "400": {
             "content": {
@@ -13505,7 +14629,7 @@
                 }
               }
             },
-            "description": "Invalid rule fields, or subject and destination outside the rule's project"
+            "description": "Invalid rule fields for its event, a subject or destination outside the rule's project, or a provider event rule in a project"
           }
         },
         "security": [
@@ -13539,14 +14663,14 @@
         ]
       }
     },
-    "/api/v1/notifications/rules/{budget_alert_rule_id}": {
+    "/api/v1/notifications/rules/{notification_rule_id}": {
       "get": {
-        "operationId": "get_budget_alert_rule",
+        "operationId": "get_notification_rule",
         "parameters": [
           {
             "description": "",
             "in": "path",
-            "name": "budget_alert_rule_id",
+            "name": "notification_rule_id",
             "required": true,
             "schema": {
               "format": "uuid",
@@ -13559,11 +14683,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BudgetAlertRule"
+                  "$ref": "#/components/schemas/NotificationRule"
                 }
               }
             },
-            "description": "Budget alert rule"
+            "description": "Notification rule"
           },
           "403": {
             "content": {
@@ -13603,12 +14727,12 @@
         ]
       },
       "patch": {
-        "operationId": "update_budget_alert_rule",
+        "operationId": "update_notification_rule",
         "parameters": [
           {
             "description": "",
             "in": "path",
-            "name": "budget_alert_rule_id",
+            "name": "notification_rule_id",
             "required": true,
             "schema": {
               "format": "uuid",
@@ -13629,7 +14753,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateBudgetAlertRuleRequest"
+                "$ref": "#/components/schemas/UpdateNotificationRuleRequest"
               }
             }
           },
@@ -13640,11 +14764,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BudgetAlertRule"
+                  "$ref": "#/components/schemas/NotificationRule"
                 }
               }
             },
-            "description": "Budget alert rule updated"
+            "description": "Notification rule updated"
           },
           "403": {
             "content": {
@@ -13694,7 +14818,7 @@
                 }
               }
             },
-            "description": "Invalid rule fields, or subject and destination outside the rule's project"
+            "description": "Invalid rule fields for its event, a subject or destination outside the rule's project, or a provider event rule in a project"
           }
         },
         "security": [
@@ -14595,6 +15719,534 @@
         ],
         "tags": [
           "playground"
+        ]
+      }
+    },
+    "/api/v1/plugins": {
+      "get": {
+        "description": "Lists installed provider plugins with the profiles and origins each declares: confined plugins and, where the deployment enables the unconfined tier, the unconfined plugins an owner permitted. Any role with read access may list them.",
+        "operationId": "list_plugins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Installed plugins, by name and newest install first"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Installs a provider plugin from its WebAssembly module. OLP instantiates the module within the plugin memory and time limits, reads its manifest and stores the module by its SHA-256 digest. The plugin can't be used until an owner approves its declared origins. Installing an installed digest changes nothing.",
+        "operationId": "install_plugin",
+        "requestBody": {
+          "content": {
+            "application/wasm": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The plugin module, at most 32 MiB",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "The digest was already installed; nothing changed",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin installed; it awaits approval of its declared origins",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Path of the installed plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The module exceeds 32 MiB"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not application/wasm"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin refused: plugin_module_invalid (not a plugin OLP can run), plugin_abi_unsupported (built for another ABI version), plugin_manifest_invalid, plugin_dialect_unknown (a profile names a dialect OLP doesn't have), plugin_timed_out or plugin_failed (the module exceeded its limits), or plugin_limit (64 digests are installed)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}": {
+      "delete": {
+        "description": "Uninstalls a provider plugin: it deletes a confined plugin's module, or withdraws the permission of an unconfined plugin, whose executable stays in the image. A plugin that a provider draft or published provider revision pins can't be uninstalled.",
+        "operationId": "uninstall_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Plugin uninstalled"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider revisions pin the plugin (plugin_pinned); the problem names the providers"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "get": {
+        "operationId": "get_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Installed plugin",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}/approve": {
+      "post": {
+        "description": "Approves the origins a plugin declares, after which it can be used. The request lists exactly the declared origins, so an approval covers only what the owner reviewed.",
+        "operationId": "approve_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin approved",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest or request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin already approved"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The origins differ from those the plugin declares (plugin_origins_mismatch)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
         ]
       }
     },
@@ -17481,7 +19133,7 @@
                 }
               }
             },
-            "description": "Provider is incomplete or incompatible with live media jobs"
+            "description": "Provider is incomplete or incompatible with live media jobs, or its credential slots observe different upstream principals (principal_mismatch)"
           }
         },
         "security": [
@@ -18104,6 +19756,364 @@
               }
             },
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments": {
+      "post": {
+        "description": "Starts grant enrollment for a credential slot of a provider draft whose plugin profile authenticates with a grant: the default slot, or the slot the body names, which re-enrolls a slot's grant. The plugin builds the authorization request, with its state and PKCE, which the operator opens to sign in upstream, or starts a device authorization, whose verification URL and user code the operator approves upstream. The plugin reaches only its approved origins, over the provider's network path and the egress policy. The grant becomes a new credential version staged on the slot like a rotation: re-enrolling the same principal activates as a credential rotation, and another principal changes the provider's serving identity.",
+        "operationId": "start_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollment"
+                }
+              }
+            },
+            "description": "Grant enrollment started"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), the named credential slot is unknown (validation_failed), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}": {
+      "delete": {
+        "description": "Cancels a grant enrollment its principal started and has not continued, deleting its session state.",
+        "operationId": "cancel_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Grant enrollment cancelled"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment was already continued (grant_enrollment_used)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue": {
+      "post": {
+        "description": "Continues a grant enrollment that has an authorization URL with what the upstream returned: the plugin exchanges the pasted callback URL or code for a grant. OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. A grant enrollment is continued once, by the principal that started it, before it expires.",
+        "operationId": "continue_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueGrantEnrollmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Credential version created"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment was already continued (grant_enrollment_used), or the provider's plugin profile or credential slot changed meanwhile (grant_enrollment_stale)"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The grant enrollment expired (grant_enrollment_expired)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "What was pasted back answers another authorization request (grant_state_mismatch), the plugin could not enroll a grant (grant_enrollment_failed), or its plugin is unusable (plugin_*)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll": {
+      "post": {
+        "description": "Reports where a grant enrollment by device authorization stands. Control runs no background jobs, so status requests drive polling: one made once the interval has passed since the last poll runs one plugin poll step, which honours the upstream's slow-down, and any control replica serves the next. Once the operator approves the device upstream, OLP creates a credential version recording the plugin, the observed principal and the grant facts, holds the grant beneath it, and stages it on the enrollment's credential slot. Polling stops when the enrollment completes, is denied, expires or is cancelled. Only the principal that started the enrollment polls it.",
+        "operationId": "poll_grant_enrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "enrollment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentStatus"
+                }
+              }
+            },
+            "description": "Where the grant enrollment stands"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Grant enrollment by device authorization not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An earlier poll failed, which ended the grant enrollment (grant_enrollment_used), or the provider's plugin profile or credential slot changed meanwhile (grant_enrollment_stale)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The plugin could not enroll a grant (grant_enrollment_failed), or its plugin is unusable (plugin_*); either ends the grant enrollment"
           }
         },
         "security": [
@@ -21854,6 +23864,293 @@
         ]
       }
     },
+    "/api/v1/unconfined-plugins": {
+      "get": {
+        "description": "Lists the executables in the deployment's unconfined plugin directory, without running them. Only an owner with a user session sees them, and only where a deployment setting enables the experimental unconfined tier.",
+        "operationId": "list_unconfined_executables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableListResponse"
+                }
+              }
+            },
+            "description": "Executables, by name"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/permit": {
+      "post": {
+        "description": "Permits an executable as an unconfined plugin, which providers may then pin by its digest. An unconfined plugin runs with native privileges, so permitting takes an owner who reauthenticated for plugin_permit within five minutes and acknowledges that risk. OLP runs the executable again and refuses the permission if it no longer has the reviewed digest.",
+        "operationId": "permit_unconfined_plugin",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnconfinedPluginPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Unconfined plugin permitted",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "The permitted plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/review": {
+      "post": {
+        "description": "Runs an executable in the unconfined plugin directory to read the manifest it declares, for an owner to review before permitting it. OLP refuses an executable that doesn't speak the plugin ABI over standard input and output, was built for another ABI version, or declares an invalid manifest.",
+        "operationId": "review_unconfined_executable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableReview"
+                }
+              }
+            },
+            "description": "The executable and its manifest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
     "/api/v1/usage/breakdown": {
       "get": {
         "operationId": "usage_breakdown",
@@ -22612,6 +24909,80 @@
           "providers"
         ],
         "summary": "List registered unary operation dialects"
+      }
+    }
+  },
+  "webhooks": {
+    "budget.threshold": {
+      "post": {
+        "description": "Posted to the destination of each enabled budget.threshold rule once per rule, window and threshold.",
+        "operationId": "budget_threshold_webhook",
+        "parameters": [
+          {
+            "description": "sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.",
+            "in": "header",
+            "name": "X-OLP-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetThresholdEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Delivered. Any other status, or none within five seconds, fails the attempt; a delivery is attempted up to five times, 2^(attempts-1) minutes apart."
+          }
+        },
+        "summary": "A budget threshold was crossed",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "provider.grant.lapsed": {
+      "post": {
+        "description": "Posted to the destination of each enabled provider.grant.lapsed rule once per lapse, when a worker records that a grant can no longer be refreshed.",
+        "operationId": "provider_grant_lapsed_webhook",
+        "parameters": [
+          {
+            "description": "sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.",
+            "in": "header",
+            "name": "X-OLP-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderGrantLapsedEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Delivered. Any other status, or none within five seconds, fails the attempt; a delivery is attempted up to five times, 2^(attempts-1) minutes apart."
+          }
+        },
+        "summary": "A grant lapsed",
+        "tags": [
+          "notifications"
+        ]
       }
     }
   }

@@ -33,6 +33,8 @@ const (
 	ManageProjects
 	// LocalLogin changes whether local password sign-in is available.
 	LocalLogin
+	// ManagePlugins installs and approves provider plugins.
+	ManagePlugins
 	operationCount
 )
 
@@ -93,6 +95,7 @@ var policy = [operationCount]rule{
 	ManageTokens:   {name: "manage_tokens", roles: owner, installation: true},
 	ManageProjects: {name: "manage_projects", roles: owner, installation: true},
 	LocalLogin:     {name: "local_login", roles: owner, installation: true},
+	ManagePlugins:  {name: "manage_plugins", roles: owner, installation: true},
 }
 
 func (op Operation) rule() (rule, bool) {

@@ -83,8 +83,7 @@ func inspectionUnaryAccept(route runtime.Route, source oif.Request, context inte
 		result.Representation = "oif"
 		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
 		result.Evidence = receipt.Evidence
-		serving := plan.Serving()
-		result.Serving = &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "", SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
+		result.Serving = inspectServing(provider, plan.Serving())
 		o := receipt.Obligations
 		result.Obligations = &inspectedObligations{Delivery: o.Delivery, Lifetime: o.Lifetime, Submission: o.Submission, Effects: o.Effects, Continuation: o.Continuation, Retry: o.Retry, MaxBodyBytes: o.MaxBodyBytes, RejectAmbiguousFailover: o.RejectAmbiguousFailover, GuardResults: o.GuardResults}
 		for _, d := range receipt.Dispositions {
@@ -151,8 +150,7 @@ func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect s
 		result.Representation = "oif"
 		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
 		result.Evidence = receipt.Evidence
-		serving := receipt.Serving
-		result.Serving = &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "", SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
+		result.Serving = inspectServing(provider, receipt.Serving)
 		o := receipt.Obligations
 		result.Obligations = &inspectedObligations{Delivery: o.Delivery, Lifetime: o.Lifetime, Submission: o.Submission, Effects: o.Effects, Continuation: o.Continuation, Retry: o.Retry, MaxBodyBytes: o.MaxBodyBytes, MaxEventBytes: o.MaxEventBytes, RejectAmbiguousFailover: o.RejectAmbiguousFailover, GuardResults: o.GuardResults}
 		for _, d := range receipt.Dispositions {

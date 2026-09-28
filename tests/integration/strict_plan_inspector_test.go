@@ -334,7 +334,7 @@ func TestStrictPlanInspectorChecksProviderStatePolicyAndCurrentRevocation(t *tes
 	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, withMatch(detail, idem("revoke-inspected-api")), 200)
 	for _, published := range []bool{false, true} {
 		decision := inspectorSimulation(t, h, owner, draft, published, request, map[string]any{"dialect": "openai-responses"})
-		if decision["eligible"] != false || decision["reason"] != "no_eligible_credentials" || decision["interaction"].(map[string]any)["status"] != "not_evaluated" {
+		if decision["eligible"] != false || decision["reason"] != "credential_revoked" || decision["interaction"].(map[string]any)["status"] != "not_evaluated" {
 			t.Fatal("inspection ignored current API credential revocation")
 		}
 	}

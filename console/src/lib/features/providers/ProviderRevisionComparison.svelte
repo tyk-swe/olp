@@ -29,6 +29,10 @@
           Credential version changed (secret remains redacted)
         </li>{/if}
       {#if revisionDiff.profile_changed}<li>Provider profile changed</li>{/if}
+      {#if revisionDiff.plugin_changed}<li>Plugin digest changed</li>{/if}
+      {#if revisionDiff.plugin_options_changed}<li>
+          Plugin options changed
+        </li>{/if}
       {#if revisionDiff.serving_binding_changed}<li>
           Model serving identity or binding changed
         </li>{/if}

@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -109,10 +110,13 @@ func ParseUUID(value string) (string, error) {
 	}
 	return id.String(), nil
 }
-func AdvanceAuthority(r *http.Request, tx pgx.Tx) (any, error) {
+
+// AdvanceAuthority advances key authority, so every gateway reloads API keys
+// and which credential versions may serve on its next poll.
+func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
 	var id string
 	var sequence int64
-	err := tx.QueryRow(r.Context(), "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", NewID()).Scan(&id, &sequence)
+	err := tx.QueryRow(ctx, "UPDATE olp.installation SET authority_id=$1,authority_sequence=authority_sequence+1 WHERE singleton RETURNING authority_id::text,authority_sequence", NewID()).Scan(&id, &sequence)
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
@@ -225,7 +229,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
 		return Reply{}, err
 	}
-	generation, err := AdvanceAuthority(r, tx)
+	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -328,7 +332,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), data, input.ExpiresAt, groupID, etag, id); err != nil {
 		return Reply{}, err
 	}
-	generation, err := AdvanceAuthority(r, tx)
+	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -444,7 +448,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	generation, err := AdvanceAuthority(r, tx)
+	generation, err := AdvanceAuthority(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}

@@ -88,6 +88,13 @@ func (h *healthTracker) cooldown(providerID, slotID string, d time.Duration) {
 	h.provider(providerID).cooldowns[slotID] = h.now().Add(cooldownDuration(d))
 }
 
+// endCooldown ends a credential slot's cooldown before it runs out.
+func (h *healthTracker) endCooldown(providerID, slotID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.provider(providerID).cooldowns, slotID)
+}
+
 // cooldownDuration bounds how long one rejection sidelines a credential slot.
 // An upstream that named no delay gets the default wait, and one that named an
 // implausible delay is not believed past the cap: a slot that never comes back
@@ -119,6 +126,13 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 				delete(p.buckets, k)
 			}
 		}
+		// Grant generations have separate cooldowns. Retire expired ones
+		// even when a gateway missed intermediate refresh notifications.
+		for key, until := range p.cooldowns {
+			if !now.Before(until) {
+				delete(p.cooldowns, key)
+			}
+		}
 	}
 	b.attempts++
 	b.latency += fact.Duration
@@ -136,11 +150,14 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	case "connect", "timeout", "protocol":
 		b.transportErrors++
 	case "ambiguous":
-		if fact.Interaction == nil {
+		// Ambiguity changes retry permission, not the evidence that the
+		// connection or provider failed to produce a usable response. That
+		// evidence counts for a strict interaction, and for traffic a plugin
+		// carries, whose every failure after sending is ambiguous; other
+		// side-effecting operations leave their ambiguous failures out.
+		if fact.Interaction == nil && !fact.Carried {
 			return
 		}
-		// Strict ambiguity changes retry permission, not the existing evidence
-		// that the connection or provider failed to produce a usable response.
 		if fact.Status >= 500 {
 			b.serverErrors++
 		} else {

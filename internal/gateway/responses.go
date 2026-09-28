@@ -148,7 +148,6 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 		x.attempts = []runtime.Attempt{p.attempt}
 		x.budget = 1
 		x.pinnedSlot = &slot
-		x.pinnedSecret = p.secret
 		return nil
 	}
 	historical.Targets = []runtime.Target{p.target}
@@ -163,7 +162,6 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	x.attempts = []runtime.Attempt{p.attempt}
 	x.budget = 1
 	x.pinnedSlot = &p.slot
-	x.pinnedSecret = p.secret
 	return nil
 }
 

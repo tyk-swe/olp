@@ -23,7 +23,8 @@ import (
 // Profile links independently owned dialect, hosting and authentication contracts.
 // Revision is OLP's immutable composition revision, not a provider model revision.
 // A provider without a profile is an Automatic provider: its endpoints follow
-// from its provider kind, and strict routes refuse it.
+// from its provider kind, and strict routes refuse it. A provider plugin
+// supplies the profiles of the plugin kind; see PluginProfile.
 type Profile struct {
 	OperationDialects map[string]string          `json:"operation_dialects"`
 	DefaultSchemas    map[string]json.RawMessage `json:"default_schemas"`
@@ -40,6 +41,20 @@ type Profile struct {
 	SemanticHeaders   []string                   `json:"semantic_headers"`
 	QuerySettings     []string                   `json:"query_settings"`
 	Documentation     string                     `json:"documentation"`
+	// Plugin is the provider plugin that supplies the profile, or nil for a
+	// built-in profile.
+	Plugin *Plugin `json:"plugin,omitempty"`
+	// ModelDiscovery reports that a plugin profile declares how the upstream
+	// lists its models; operators declare the models of a plugin profile
+	// without it. A built-in profile's provider kind decides its discovery.
+	ModelDiscovery bool `json:"model_discovery,omitempty"`
+	// OptionsSchema is the JSON Schema of a plugin provider's option values,
+	// which the plugin profile declares; nil for a built-in profile.
+	OptionsSchema json.RawMessage `json:"options_schema,omitempty"`
+	// Strict reports whether the profile may serve strict routes: its hosting
+	// changes only authorization, address and headers, or is a qualified
+	// built-in binding.
+	Strict bool `json:"strict"`
 }
 
 const ProfileRevision = "1"
@@ -70,7 +85,7 @@ var profileRegistry = []Profile{
 func init() {
 	for i := range profileRegistry {
 		p := &profileRegistry[i]
-		p.Revision, p.Transport = ProfileRevision, "http"
+		p.Revision, p.Transport, p.Strict = ProfileRevision, "http", true
 		p.Authentication = []string{"api_key", "headers", "none"}
 		p.Operations = []string{"generation", "token_count"}
 		p.SemanticHeaders, p.QuerySettings = []string{}, []string{}
@@ -160,10 +175,15 @@ func cloneProfile(p Profile) Profile {
 		schemas[name] = bytes.Clone(schema)
 	}
 	p.DefaultSchemas = schemas
+	p.OptionsSchema = bytes.Clone(p.OptionsSchema)
 	p.Authentication = slices.Clone(p.Authentication)
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
 	p.QuerySettings = slices.Clone(p.QuerySettings)
+	if p.Plugin != nil {
+		plugin := *p.Plugin
+		p.Plugin = &plugin
+	}
 	return p
 }
 
@@ -189,27 +209,51 @@ func LookupProfile(id, revision string) (Profile, error) {
 	return cloneProfile(p), nil
 }
 
+// profile borrows the catalogue metadata of the connector's profile: its
+// plugin profile's, or a built-in profile's.
+func (c Config) profile() (Profile, error) {
+	if c.Plugin == nil {
+		return profileView(c.ProfileID, c.ProfileRevision)
+	}
+	if p := c.Plugin.profile; p.ID == c.ProfileID && p.Revision == c.ProfileRevision {
+		return p, nil
+	}
+	return Profile{}, errors.New("the plugin profile is not the configured profile revision")
+}
+
 func (c Config) Profile() (Profile, error) {
-	return LookupProfile(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
+	if err != nil {
+		return Profile{}, err
+	}
+	return cloneProfile(p), nil
 }
 
 func (c Config) Hosting() string {
-	if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
+	if p, err := c.profile(); err == nil {
 		return p.Hosting
 	}
 	return ""
 }
 
 func (c Config) ValidateProfile() error {
+	if c.Plugin == nil && len(c.PluginOptions) > 0 {
+		return errors.New("only plugin profiles declare options")
+	}
 	if c.ProfileID == "" {
 		if c.ProfileRevision != "" || len(c.SemanticHeaders) > 0 || len(c.QuerySettings) > 0 || len(c.OperationDefaults) > 0 || len(c.Bindings) > 0 {
 			return errors.New("semantic configuration and serving bindings require an explicit versioned profile")
 		}
 		return nil
 	}
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return err
+	}
+	if c.Plugin != nil {
+		if err = c.Plugin.ValidateOptions(c.PluginOptions); err != nil {
+			return err
+		}
 	}
 	if p.Kind != c.Kind || !slices.Contains(p.Authentication, c.AuthMode) {
 		return errors.New("profile, connector kind and authentication are not a supported composition")
@@ -266,7 +310,7 @@ func (c Config) ValidateProfile() error {
 // TargetFamily is explicit for generation and operation-owned for other calls.
 // The raw model-specific Invoke profile deliberately cannot enter a chat codec.
 func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return "", err
 	}
@@ -279,17 +323,8 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	}
 	switch operation {
 	case "generation":
-		switch p.Dialect {
-		case "openai-chat":
-			return openai.FamilyChat, nil
-		case "openai-responses":
-			return openai.FamilyResponses, nil
-		case "anthropic-messages":
-			return openai.FamilyAnthropic, nil
-		case "gemini-generate-content":
-			return openai.FamilyGemini, nil
-		case "bedrock-converse":
-			return openai.FamilyBedrock, nil
+		if family, ok := generationFamily(p.Dialect); ok {
+			return family, nil
 		}
 	case "token_count":
 		switch p.Dialect {
@@ -323,9 +358,30 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	return "", errors.New("operation has no codec in the selected profile")
 }
 
+// generationFamily is the codec family of a dialect's generation requests.
+func generationFamily(dialect string) (openai.Family, bool) {
+	switch dialect {
+	case "openai-chat":
+		return openai.FamilyChat, true
+	case "openai-responses":
+		return openai.FamilyResponses, true
+	case "anthropic-messages":
+		return openai.FamilyAnthropic, true
+	case "gemini-generate-content":
+		return openai.FamilyGemini, true
+	case "bedrock-converse":
+		return openai.FamilyBedrock, true
+	}
+	return "", false
+}
+
 func (c Config) Supports(operation, surface, mode string) bool {
+	if c.Kind == KindPlugin {
+		p, err := c.profile()
+		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
+	}
 	if c.ProfileID != "" {
-		if p, err := profileView(c.ProfileID, c.ProfileRevision); err == nil {
+		if p, err := c.profile(); err == nil {
 			switch p.Dialect {
 			case "gemini-interactions":
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
@@ -350,13 +406,33 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	if c.ProfileID == "" {
 		return true
 	}
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	return err == nil && slices.Contains(p.Operations, operation)
 }
 
-// ApplySemantic configures only profile-owned headers and query settings. Call
-// before authentication so final SigV4 signs the complete request. Authentication
-// never chooses the semantic configuration of an explicit profile.
+// host is the hosting stage of Apply. It places a request the caller addressed
+// from the connector: a profile's semantic headers and query settings, a
+// plugin profile's declared headers and query parameters filled from the
+// credential and the provider's options, or the API revision an automatic
+// Anthropic provider sends. It returns the placed values that carry the
+// credential.
+func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
+	if err := c.ApplySemantic(req); err != nil {
+		return nil, err
+	}
+	if c.Kind == "anthropic" && c.ProfileID == "" {
+		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
+	}
+	if c.Plugin != nil {
+		return c.Plugin.place(req, credential, c.PluginOptions)
+	}
+	return nil, nil
+}
+
+// ApplySemantic configures only profile-owned headers and query settings.
+// Hosting applies it before authentication, so signing covers the complete
+// request. Authentication never chooses the semantic configuration of an
+// explicit profile.
 func (c Config) ApplySemantic(req *http.Request) error {
 	if c.ProfileID == "" {
 		return nil
@@ -364,7 +440,7 @@ func (c Config) ApplySemantic(req *http.Request) error {
 	if err := c.ValidateProfile(); err != nil {
 		return err
 	}
-	p, _ := profileView(c.ProfileID, c.ProfileRevision)
+	p, _ := c.profile()
 	if p.Hosting == "direct-anthropic" {
 		req.Header.Set("Anthropic-Version", p.DialectRevision)
 	}
@@ -416,6 +492,11 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
 	switch c.Hosting() {
+	case pluginHosting:
+		if c.Endpoint != c.Plugin.Address(c.PluginOptions) {
+			return errors.New("a plugin provider's endpoint is its profile's address, with its options in place")
+		}
+		return nil
 	case "direct-gemini-interactions", "direct-gemini-live":
 		if u.Path != "/v1beta" {
 			return errors.New("Gemini lifecycle endpoint must end at /v1beta")
@@ -467,7 +548,7 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return nil, errors.New("cloud request must be a JSON object")
 	}
-	p, _ := profileView(c.ProfileID, c.ProfileRevision)
+	p, _ := c.profile()
 	version, _ := json.Marshal(p.DialectRevision)
 	if prior, found := fields["anthropic_version"]; found && string(prior) != string(version) {
 		return nil, errors.New("native cloud version collides with the configured profile")
@@ -590,6 +671,7 @@ func RegisterProfile(p Profile) error {
 	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
 		return errors.New("profile transport and capabilities are required")
 	}
+	p.Plugin, p.ModelDiscovery, p.Strict = nil, false, template.Strict
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil

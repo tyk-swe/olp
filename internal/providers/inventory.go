@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/plugins"
 )
 
 func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -133,16 +134,20 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// Each advertised capability can consume a full probe budget; reserve
 	// another management budget for preparation, queueing, and persistence.
 	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/network-credentials", s.networkCredentials)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials", s.createNetworkCredential, access.MaxBody(256<<10))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", s.revokeNetworkCredential)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credentials", s.credentials)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments", s.startGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue", s.continueGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}", s.cancelGrantEnrollment)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots", s.slots)
 	s.Access.Route(mux, "PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.writeSlot)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions", s.revisions)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/diff", s.revisionDiff)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}", s.revision)
@@ -150,6 +155,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevisionAsDraft)
 }
 
+// profiles lists the built-in profiles and those of usable plugins.
 func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(map[string]any{"items": connectors.Profiles()}), nil
+	pluginProfiles, err := plugins.Profiles(r.Context(), s.Access.Pool, s.Unconfined)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return access.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
 }

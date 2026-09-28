@@ -92,9 +92,11 @@
             </dd>
             <dt>Environment</dt>
             <dd>
-              Principal {inspection.serving.principal_declared
-                ? 'declared'
-                : 'unknown'} · region {inspection.serving.region_declared
+              Principal {inspection.serving.principal_observed
+                ? 'observed'
+                : inspection.serving.principal_declared
+                  ? 'declared'
+                  : 'unknown'} · region {inspection.serving.region_declared
                 ? 'declared'
                 : 'unknown'} · resource scope {inspection.serving
                 .resource_scope_declared

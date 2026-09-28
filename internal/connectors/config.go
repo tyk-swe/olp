@@ -1,5 +1,6 @@
-// Package connectors owns provider addressing and authentication. It does not
-// retry inference calls: the gateway's attempt executor is the only retry owner.
+// Package connectors owns provider addressing and the preparation of upstream
+// requests: hosting, authentication and signing. It does not retry inference
+// calls: the gateway's attempt executor is the only retry owner.
 package connectors
 
 import (
@@ -16,7 +17,12 @@ import (
 )
 
 type Config struct {
-	Network                                                                               *egress.ConnectionOptions
+	Network *egress.ConnectionOptions
+	// Plugin is the plugin profile a plugin provider pins as its profile
+	// revision, or nil for any other provider. PluginOptions holds the
+	// provider's values for the options that profile declares, by name.
+	Plugin                                                                                *PluginProfile
+	PluginOptions                                                                         map[string]string
 	ProfileID, ProfileRevision                                                            string
 	SemanticHeaders                                                                       map[string]string
 	QuerySettings                                                                         map[string]string
@@ -25,11 +31,12 @@ type Config struct {
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
 	CredentialHeaders                                                                     []string
 	Models                                                                                map[string]json.RawMessage
+	// ObservedPrincipal is the upstream principal that grant enrollment
+	// observed for every credential slot of a provider authenticated by a
+	// grant, or empty.
+	ObservedPrincipal string
 }
 
-func SecretRequired(mode string) bool {
-	return mode != "none" && mode != "adc" && mode != "default_chain" && mode != "azure_default"
-}
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
 	case "openai":
@@ -141,6 +148,17 @@ func (c Config) Model(model string) string {
 		return metadata.Deployment
 	}
 	return strings.TrimPrefix(model, "models/")
+}
+
+// ServingPrincipal is the upstream principal that serves a model, part of its
+// serving identity: the provider's observed principal, which replaces any
+// the model's serving binding declares, else the declared one, or "" when
+// the principal is unknown.
+func (c Config) ServingPrincipal(model string) string {
+	if c.ObservedPrincipal != "" {
+		return c.ObservedPrincipal
+	}
+	return c.Bindings[model].PrincipalID
 }
 func (c Config) URL(wire openai.Family, model string, stream bool) (string, error) {
 	if c.ProfileID != "" {

@@ -88,6 +88,9 @@ func Compile(config Config) (*Template, error) {
 		return nil, incompatible("resource_affinity", "/model", "serving_binding", "The configured serving model is invalid.")
 	}
 	profile, _ := provider.Profile()
+	if !profile.Strict {
+		return nil, incompatible("target_capability", "/profile", "strict_profile", "This provider profile changes more than authorization, address and headers, or its plugin carries its traffic.")
+	}
 	if !slices.Contains(profile.Operations, "generation") {
 		return nil, incompatible("target_capability", "/operation", "operation_contract", "This profile has no strict generation contract.")
 	}
@@ -125,7 +128,7 @@ func Compile(config Config) (*Template, error) {
 	}
 	config.Provider, config.Policy = provider, policy
 	binding := provider.Bindings[config.Model]
-	serving := ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: provider.Model(config.Model), ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, PrincipalID: binding.PrincipalID, Snapshot: binding.Snapshot, Region: provider.CloudRegion, ResourceScope: binding.ResourceScope}
+	serving := ServingIdentity{ProviderID: config.ProviderID, RevisionID: config.RevisionID, Model: provider.Model(config.Model), ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, PrincipalID: provider.ServingPrincipal(config.Model), Snapshot: binding.Snapshot, Region: provider.CloudRegion, ResourceScope: binding.ResourceScope}
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}
@@ -135,6 +138,7 @@ func copyConfig(config connectors.Config) (connectors.Config, error) {
 	out := config
 	out.SemanticHeaders = maps.Clone(config.SemanticHeaders)
 	out.QuerySettings = maps.Clone(config.QuerySettings)
+	out.PluginOptions = maps.Clone(config.PluginOptions)
 	out.CredentialHeaders = slices.Clone(config.CredentialHeaders)
 	out.Models = copyValues(config.Models)
 	out.OperationDefaults = copyDefaults(config.OperationDefaults)

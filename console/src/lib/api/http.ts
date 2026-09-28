@@ -151,10 +151,16 @@ export function abortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-export function retryQuery(failureCount: number, error: unknown): boolean {
-  if (failureCount >= 1) return false;
-  if (abortError(error)) return false;
+/** Whether a request failed on the way, or OLP could not answer it for now,
+ * so that asking again may succeed. */
+export function unanswered(error: unknown): boolean {
   if (error instanceof ApiProblem)
     return [502, 503, 504].includes(error.problem.status);
   return error instanceof TypeError;
+}
+
+export function retryQuery(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 1) return false;
+  if (abortError(error)) return false;
+  return unanswered(error);
 }

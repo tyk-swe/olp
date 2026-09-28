@@ -82,6 +82,57 @@ func TestFramingLimitsAndTermination(t *testing.T) {
 	}
 }
 
+func TestFramesPreserveSeparateControlsAndEmptyData(t *testing.T) {
+	id, clearedID, name := " id", "", "chunk"
+	retry := uint64(250)
+	frames := []struct {
+		wire string
+		want sse.Frame
+	}{
+		{"id:  id\n\n", sse.Frame{ID: &id, Control: true}},
+		{"retry: 00250\n\n", sse.Frame{RetryMS: &retry, Control: true}},
+		{"event: chunk\n\n", sse.Frame{Event: &name, Control: true}},
+		{"data\n\n", sse.Frame{Data: ""}},
+		{"event: chunk\ndata: first\ndata: second\n\n", sse.Frame{Event: &name, Data: "first\nsecond"}},
+		{"id\n\n", sse.Frame{ID: &clearedID, Control: true}},
+		{"data: last\n\n", sse.Frame{Data: "last"}},
+		{"id:  id\n\n", sse.Frame{ID: &id, Control: true}},
+	}
+	var input strings.Builder
+	limit := 0
+	for _, frame := range frames {
+		input.WriteString(frame.wire)
+		limit = max(limit, len(frame.wire))
+	}
+	for _, width := range []int{1, input.Len()} {
+		d := sse.NewDecoder(testutil.Fragmented([]byte(input.String()), width), limit)
+		var encoded strings.Builder
+		for _, expected := range frames {
+			frame, err := d.NextFrame()
+			if err != nil || !reflect.DeepEqual(frame, expected.want) {
+				t.Fatalf("width=%d frame=%+v error=%v, want %+v", width, frame, err, expected.want)
+			}
+			wire := frame.Encode()
+			if len(wire) > len(expected.wire) {
+				t.Fatalf("frame grew from %q to %q", expected.wire, wire)
+			}
+			encoded.Write(wire)
+		}
+		if _, err := d.NextFrame(); err != io.EOF {
+			t.Fatalf("stream end: %v", err)
+		}
+		var events []sse.Frame
+		err := sse.Decode(strings.NewReader(encoded.String()), limit, func(frame sse.Frame) error {
+			events = append(events, frame)
+			return nil
+		})
+		want := []sse.Frame{{ID: &id, Data: ""}, {Event: &name, ID: &id, Data: "first\nsecond"}, {ID: &clearedID, Data: "last"}}
+		if err != nil || !reflect.DeepEqual(events, want) {
+			t.Fatalf("width=%d events=%+v error=%v, want %+v", width, events, err, want)
+		}
+	}
+}
+
 func TestCRDispatchesBeforeAnotherReadOrEOF(t *testing.T) {
 	for _, input := range []string{"data: x\r\r", "data: x\r\n\r"} {
 		for _, width := range []int{1, len(input)} {
@@ -208,5 +259,36 @@ func TestControlledUpstreamFragmentationAndCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("canceled upstream did not stop")
+	}
+}
+
+// A decoded stream, encoded again event by event, decodes to the same events.
+func TestEncodedEventsDecodeAsTheyWereRead(t *testing.T) {
+	data, err := fixtures.Files.ReadFile("streams/generic-fragmented.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read, encoded []sse.Frame
+	var wire []byte
+	events := sse.NewDecoder(testutil.Fragmented(data, 2), 4096)
+	for {
+		frame, err := events.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		read = append(read, frame)
+		wire = append(wire, frame.Encode()...)
+	}
+	if _, err = events.Next(); err != io.EOF {
+		t.Fatalf("a finished stream answered %v", err)
+	}
+	if err = sse.Decode(strings.NewReader(string(wire)), 4096, func(f sse.Frame) error { encoded = append(encoded, f); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(read) == 0 || !reflect.DeepEqual(encoded, read) {
+		t.Fatalf("encoded %s decodes to %#v; want %#v", wire, encoded, read)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/plugins"
 )
 
 // HealthStats summarises gateway attempts against one provider.
@@ -43,9 +44,15 @@ type QuotaSource interface {
 
 // Server serves the provider management surface.
 type Server struct {
-	Access      *access.Server
-	Egress      *egress.Policy
-	Quotas      QuotaSource
+	Access *access.Server
+	Egress *egress.Policy
+	// Unconfined is the deployment's unconfined plugin tier, or nil where it
+	// enables none: providers may pin unconfined plugins only where it does.
+	Unconfined *plugins.Unconfined
+	Quotas     QuotaSource
+	// Plugins runs plugins' grant enrollment steps, and carries the probes of
+	// profiles whose unconfined plugin carries their traffic.
+	Plugins     *plugins.Host
 	Log         *slog.Logger
 	client      *http.Client
 	connections *egress.ConnectionClientCache
@@ -54,9 +61,12 @@ type Server struct {
 }
 
 // New prepares the provider surface with a bounded upstream client and at
-// most four concurrent probes.
-func New(a *access.Server, policy *egress.Policy) *Server {
-	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: connectors.NewAuth(policy), probes: make(chan struct{}, 4)}
+// most four concurrent probes, whose plugin profiles' signing hooks signer
+// runs.
+func New(a *access.Server, policy *egress.Policy, signer connectors.Signer) *Server {
+	auth := connectors.NewAuth(policy)
+	auth.Signer = signer
+	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
 }
 
 type record struct {
@@ -79,21 +89,30 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text"
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
-	var configuration []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID)
+	var configuration, plugin []byte
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
+	if err = p.decodeConfiguration(configuration, plugin); err != nil {
 		return nil, err
+	}
+	return &p, nil
+}
+
+// decodeConfiguration reads a stored draft configuration, with the plugin it
+// pins, if any.
+func (p *record) decodeConfiguration(configuration, plugin []byte) error {
+	if err := json.Unmarshal(configuration, &p.Configuration); err != nil {
+		return err
 	}
 	p.Configuration.Normalize()
 	p.Configuration.ProviderID = p.ID
-	return &p, nil
+	return p.Configuration.pinned(plugin)
 }
 
 // load reads one provider, locking the row inside a transaction when asked.
@@ -179,21 +198,19 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 
 func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
-	var configuration []byte
+	var configuration, plugin []byte
 	var d detail
 	var draft credentialState
 	var usableCredential bool
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID,
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin,
 		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
 		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
+	if err = p.decodeConfiguration(configuration, plugin); err != nil {
 		return nil, err
 	}
-	p.Configuration.Normalize()
-	p.Configuration.ProviderID = p.ID
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
 	d.ProjectID = p.ProjectID
 	d.VendorID = p.Configuration.Options.VendorID

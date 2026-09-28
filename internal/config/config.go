@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,11 +51,15 @@ type Config struct {
 	BootstrapTokenFile        string
 	MasterKeyFile             string
 	ConnectorConfigFile       string
-	RuntimeDatabaseRole       string
-	LogLevel                  slog.Level
-	RequestTimeout            time.Duration
-	StartupTimeout            time.Duration
-	ShutdownTimeout           time.Duration
+	// UnconfinedPluginDir names the directory of the image that holds
+	// unconfined plugin executables. Setting it enables the experimental
+	// unconfined plugin tier, which nothing else can.
+	UnconfinedPluginDir string
+	RuntimeDatabaseRole string
+	LogLevel            slog.Level
+	RequestTimeout      time.Duration
+	StartupTimeout      time.Duration
+	ShutdownTimeout     time.Duration
 	// Inference and provider egress bounds; names mirror the reference settings.
 	TrustedProxyCIDRs             []netip.Prefix
 	ProviderEgressAllowCIDRs      []netip.Prefix
@@ -108,6 +113,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted hex/base64 authentication key")
 	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted first-owner bootstrap token")
 	f.StringVar(&c.ConnectorConfigFile, "connector-config-file", "", "mounted provider transport configuration")
+	f.StringVar(&c.UnconfinedPluginDir, "unconfined-plugin-dir", "", "absolute directory of unconfined plugin executables; setting it enables the experimental unconfined plugin tier")
 	f.StringVar(&c.MasterKeyFile, "master-key-file", "", "mounted JSON master key ring")
 	f.StringVar(&c.RuntimeDatabaseRole, "runtime-role", "", "existing runtime role granted access by migrate")
 	f.StringVar(&level, "log-level", "info", "debug, info, warn, or error (OLP_LOG_LEVEL)")
@@ -312,6 +318,9 @@ func (c Config) Validate() error {
 	}
 	if c.TraceSampleRatio < 0 || c.TraceSampleRatio > 1 {
 		return errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
+	}
+	if c.UnconfinedPluginDir != "" && !filepath.IsAbs(c.UnconfinedPluginDir) {
+		return errors.New("OLP_UNCONFINED_PLUGIN_DIR must be an absolute path")
 	}
 	for _, setting := range []struct {
 		name       string

@@ -320,7 +320,7 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 		return Reply{}, err
 	}
 	if enroll {
-		if err = s.consumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
+		if err = s.ConsumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -348,7 +348,7 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 }
 func validatePurpose(purpose, resource string) error {
 	switch purpose {
-	case "password_enrollment", "oidc_link":
+	case "password_enrollment", "oidc_link", "plugin_permit":
 		if resource == "" {
 			return nil
 		}
@@ -356,7 +356,7 @@ func validatePurpose(purpose, resource string) error {
 		_, err := ParseUUID(resource)
 		return err
 	}
-	return Invalid("purpose", "Use password_enrollment, oidc_link, or oidc_unlink with its identity ID.")
+	return Invalid("purpose", "Use password_enrollment, oidc_link, plugin_permit, or oidc_unlink with its identity ID.")
 }
 func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	var err error
@@ -418,7 +418,11 @@ func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, r
 	_, err := tx.Exec(r.Context(), "INSERT INTO olp.recent_auth(digest,session_id,purpose,resource_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", s.Auth.Digest(secrets.RecentAuthDigest, token), p.SessionID, purpose, target)
 	return Reply{Status: 204, Cookies: []*http.Cookie{cookie(recentCookie, token, 5*time.Minute, true)}}, err
 }
-func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) error {
+
+// ConsumeRecent spends the recent authentication the principal's session
+// holds for purpose and resource, refusing with 428 reauthentication_required
+// unless the session reauthenticated for them within five minutes.
+func (s *Server) ConsumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) error {
 	var target any
 	if resource != "" {
 		target = resource

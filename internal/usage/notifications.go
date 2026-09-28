@@ -19,16 +19,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const (
-	budgetAlertLockID  = int64(0x4f4c505f414c5254)
-	budgetAlertEvery   = time.Minute
-	budgetAlertTimeout = 2 * time.Minute
-	webhookTimeout     = 5 * time.Second
+	budgetAlertLockID   = int64(0x4f4c505f414c5254)
+	notificationEvery   = time.Minute
+	notificationTimeout = 2 * time.Minute
+	webhookTimeout      = 5 * time.Second
 
 	webhookDrainBytes   = 64 << 10
 	maxDeliveryAttempts = 5
@@ -47,7 +48,7 @@ const dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
       WHEN r.subject_kind='api_key' THEN k.policy->>'monthly_cost_limit'
       WHEN r.window_kind='day' THEN g.daily_cost_limit::text ELSE g.monthly_cost_limit::text END AS limit,
  d.id::text,d.url,d.secret_id::text,r.name
-FROM olp.budget_alert_rules r
+FROM olp.notification_rules r
 LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
 LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
 LEFT JOIN olp.api_key_cost_windows kwd ON kwd.api_key_id=k.id AND kwd.window_kind='day'
@@ -55,14 +56,14 @@ LEFT JOIN olp.api_key_cost_windows kwm ON kwm.api_key_id=k.id AND kwm.window_kin
 LEFT JOIN olp.budget_group_cost_windows gwd ON gwd.budget_group_id=g.id AND gwd.window_kind='day'
 LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.window_kind='month'
 JOIN olp.notification_destinations d ON d.id=r.destination_id
-WHERE r.enabled AND d.enabled`
+WHERE r.event=$1 AND r.enabled AND d.enabled`
 
-const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,v.window_id,v.threshold_percent,v.attempts,v.last_attempt_at,
- r.name,r.subject_kind,r.subject_id::text,r.window_kind,
- v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),
+const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,r.event,v.attempts,v.last_attempt_at,
+ r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
+ v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,
  d.url,d.secret_id::text
-FROM olp.budget_alert_deliveries v
-JOIN olp.budget_alert_rules r ON r.id=v.rule_id
+FROM olp.notification_deliveries v
+JOIN olp.notification_rules r ON r.id=v.rule_id
 JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE v.status IN ('pending','failed') AND v.attempts<$1
 ORDER BY v.created_at
@@ -82,20 +83,25 @@ type dueAlert struct {
 	ruleName      string
 }
 
+// delivery is an event notification awaiting delivery to its rule's
+// destination, with the event's evidence: a budget threshold's spend as it was
+// claimed, or the payload of a provider event as it was when it happened.
 type delivery struct {
 	id            string
 	ruleID        string
-	windowID      int64
-	threshold     int
+	event         string
 	attempts      int
 	lastAttemptAt *time.Time
 	ruleName      string
-	subjectKind   string
+	subjectKind   *string
 	subjectID     *string
-	windowKind    string
-	accrued       string
+	windowKind    *string
+	windowID      *int64
+	threshold     *int
+	accrued       *string
 	limit         *string
 	currency      string
+	payload       []byte
 	url           string
 	secretID      *string
 }
@@ -132,7 +138,7 @@ func retryDue(lastAttemptAt *time.Time, attempts int, now time.Time) bool {
 	return !now.Before(lastAttemptAt.Add(backoff))
 }
 
-type alertWorker struct {
+type notificationWorker struct {
 	pool         *pgxpool.Pool
 	keys         *secrets.KeyRing
 	installation string
@@ -143,8 +149,12 @@ type alertWorker struct {
 	now          func() time.Time
 }
 
-func RunBudgetAlertDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger) {
-	w := &alertWorker{
+// RunNotificationDelivery evaluates budget threshold rules and delivers event
+// notifications to their rules' destinations every minute until ctx ends,
+// checkpointing each pass as the notification_delivery worker task. A
+// delivery that fails is retried with backoff, up to maxDeliveryAttempts.
+func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger) {
+	w := &notificationWorker{
 		pool:         pool,
 		keys:         keys,
 		installation: installation,
@@ -154,15 +164,15 @@ func RunBudgetAlertDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secre
 		newID:        uuid7,
 		now:          time.Now,
 	}
-	ticker := time.NewTicker(budgetAlertEvery)
+	ticker := time.NewTicker(notificationEvery)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		outcome, progress := w.pass(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		if err := CheckpointTask(ctx, pool, TaskBudgetAlertDelivery, outcome, progress); err != nil {
-			log.Warn("budget alert delivery checkpoint failed", "error", err)
+		if err := CheckpointTask(ctx, pool, TaskNotificationDelivery, outcome, progress); err != nil {
+			log.Warn("notification delivery checkpoint failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -188,8 +198,8 @@ func webhookClient(policy *egress.Policy) *http.Client {
 
 var errLockNotHeld = errors.New("another replica holds the budget alert lock")
 
-func (w *alertWorker) pass(ctx context.Context) (Outcome, bool) {
-	passCtx, cancel := context.WithTimeout(ctx, budgetAlertTimeout)
+func (w *notificationWorker) pass(ctx context.Context) (Outcome, bool) {
+	passCtx, cancel := context.WithTimeout(ctx, notificationTimeout)
 	defer cancel()
 	claimed, err := w.claimDue(passCtx)
 	if errors.Is(err, errLockNotHeld) {
@@ -201,7 +211,7 @@ func (w *alertWorker) pass(ctx context.Context) (Outcome, bool) {
 	}
 	deliveries, err := w.pending(passCtx)
 	if err != nil {
-		w.log.Warn("budget alert retry query failed", "error", err)
+		w.log.Warn("pending notification query failed", "error", err)
 		return OutcomeFailure, claimed > 0
 	}
 	now := w.now()
@@ -213,13 +223,14 @@ func (w *alertWorker) pass(ctx context.Context) (Outcome, bool) {
 		if !retryDue(d.lastAttemptAt, d.attempts, now) {
 			continue
 		}
-		w.deliver(passCtx, d)
-		sent++
+		if w.deliver(passCtx, d) {
+			sent++
+		}
 	}
 	return OutcomeSuccess, claimed > 0 || sent > 0
 }
 
-func (w *alertWorker) claimDue(ctx context.Context) (int, error) {
+func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -232,7 +243,7 @@ func (w *alertWorker) claimDue(ctx context.Context) (int, error) {
 	if !held {
 		return 0, errLockNotHeld
 	}
-	rows, err := tx.Query(ctx, dueAlertSQL)
+	rows, err := tx.Query(ctx, dueAlertSQL, access.BudgetThresholdEvent)
 	if err != nil {
 		return 0, err
 	}
@@ -270,7 +281,7 @@ func (w *alertWorker) claimDue(ctx context.Context) (int, error) {
 			storedCurrency = &currency
 		}
 		tag, err := tx.Exec(ctx,
-			`INSERT INTO olp.budget_alert_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
+			`INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
 			 VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, 'pending') ON CONFLICT DO NOTHING`,
 			w.newID(), a.ruleID, *a.windowID, a.threshold, accrued.String(), limit.String(), storedCurrency)
 		if err != nil {
@@ -286,7 +297,53 @@ func (w *alertWorker) claimDue(ctx context.Context) (int, error) {
 	return claimed, nil
 }
 
-func (w *alertWorker) pending(ctx context.Context) ([]delivery, error) {
+// grantLapseSQL returns the payload that reports the lapse of a credential
+// version's grant: its provider, the credential slots bound to it in the
+// provider's draft or active revision, by their draft names, and the
+// principal its grant enrollment observed. It carries no secret material.
+const grantLapseSQL = `SELECT jsonb_build_object('provider_id',p.id,'provider_name',p.name,
+ 'credential_version_id',c.id,'credential_version',c.version,'observed_principal',c.principal,'lapsed_at',g.lapsed_at,
+ 'credential_slots',(SELECT coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name) ORDER BY s.name,s.id),'[]')
+   FROM (SELECT DISTINCT ON (id) id,name FROM (
+     SELECT id,name,false AS published FROM olp.provider_slots WHERE credential_id=c.id
+     UNION ALL
+     SELECT (e->>'id')::uuid,e->>'name',true FROM olp.provider_revisions r CROSS JOIN jsonb_array_elements(r.slots) e
+     WHERE r.id=p.active_revision_id AND e->>'credential_id'=c.id::text) bound
+   ORDER BY id,published) s))
+FROM olp.provider_credentials c
+JOIN olp.providers p ON p.id=c.provider_id
+JOIN olp.provider_grants g ON g.credential_id=c.id
+WHERE c.id=$1`
+
+// NotifyGrantLapsed enqueues, in the transaction that records the lapse of a
+// credential version's grant, one delivery of the provider.grant.lapsed event
+// to each enabled rule subscribed to it whose destination is enabled. The
+// notification delivery task delivers it like a budget alert.
+func NotifyGrantLapsed(ctx context.Context, tx pgx.Tx, credentialID string) error {
+	rows, err := tx.Query(ctx, `SELECT r.id::text FROM olp.notification_rules r
+		JOIN olp.notification_destinations d ON d.id=r.destination_id WHERE r.event=$1 AND r.enabled AND d.enabled`,
+		access.GrantLapsedEvent)
+	if err != nil {
+		return err
+	}
+	rules, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(rules) == 0 {
+		return err
+	}
+	var payload []byte
+	if err = tx.QueryRow(ctx, grantLapseSQL, credentialID).Scan(&payload); err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.notification_deliveries (id, rule_id, credential_id, payload, status)
+			VALUES ($1, $2, $3, $4, 'pending') ON CONFLICT DO NOTHING`, uuid7(), rule, credentialID, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
 	rows, err := w.pool.Query(ctx, pendingDeliverySQL, maxDeliveryAttempts, deliveriesPerPass)
 	if err != nil {
 		return nil, err
@@ -295,9 +352,9 @@ func (w *alertWorker) pending(ctx context.Context) ([]delivery, error) {
 	var deliveries []delivery
 	for rows.Next() {
 		var d delivery
-		if err = rows.Scan(&d.id, &d.ruleID, &d.windowID, &d.threshold, &d.attempts,
-			&d.lastAttemptAt, &d.ruleName, &d.subjectKind, &d.subjectID,
-			&d.windowKind, &d.accrued, &d.limit, &d.currency, &d.url, &d.secretID); err != nil {
+		if err = rows.Scan(&d.id, &d.ruleID, &d.event, &d.attempts, &d.lastAttemptAt,
+			&d.ruleName, &d.subjectKind, &d.subjectID, &d.windowKind, &d.windowID, &d.threshold,
+			&d.accrued, &d.limit, &d.currency, &d.payload, &d.url, &d.secretID); err != nil {
 			return nil, err
 		}
 		deliveries = append(deliveries, d)
@@ -305,7 +362,7 @@ func (w *alertWorker) pending(ctx context.Context) ([]delivery, error) {
 	return deliveries, rows.Err()
 }
 
-func (w *alertWorker) currency(ctx context.Context) string {
+func (w *notificationWorker) currency(ctx context.Context) string {
 	var currency string
 	err := w.pool.QueryRow(ctx, "SELECT currency FROM olp.pricing_currency WHERE singleton").Scan(&currency)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -314,23 +371,33 @@ func (w *alertWorker) currency(ctx context.Context) string {
 	return currency
 }
 
-func alertBody(d delivery, currency string) ([]byte, error) {
-	return json.Marshal(map[string]any{
-		"event":             "budget.threshold",
-		"rule_id":           d.ruleID,
-		"rule_name":         d.ruleName,
-		"subject_kind":      d.subjectKind,
-		"subject_id":        d.subjectID,
-		"window_kind":       d.windowKind,
-		"window_id":         d.windowID,
-		"threshold_percent": d.threshold,
-		"accrued":           d.accrued,
-		"limit":             d.limit,
-		"currency":          currency,
-	})
+// webhookBody is the body that reports a delivery's event to its rule's
+// destination: metadata only, never secret material.
+func webhookBody(d delivery) ([]byte, error) {
+	if d.event == access.BudgetThresholdEvent {
+		return json.Marshal(map[string]any{
+			"event":             d.event,
+			"rule_id":           d.ruleID,
+			"rule_name":         d.ruleName,
+			"subject_kind":      d.subjectKind,
+			"subject_id":        d.subjectID,
+			"window_kind":       d.windowKind,
+			"window_id":         d.windowID,
+			"threshold_percent": d.threshold,
+			"accrued":           d.accrued,
+			"limit":             d.limit,
+			"currency":          d.currency,
+		})
+	}
+	var body map[string]any
+	if err := json.Unmarshal(d.payload, &body); err != nil {
+		return nil, err
+	}
+	body["event"], body["rule_id"], body["rule_name"] = d.event, d.ruleID, d.ruleName
+	return json.Marshal(body)
 }
 
-func (w *alertWorker) notificationSecret(ctx context.Context, secretID *string) ([]byte, error) {
+func (w *notificationWorker) notificationSecret(ctx context.Context, secretID *string) ([]byte, error) {
 	if secretID == nil {
 		return nil, nil
 	}
@@ -350,7 +417,21 @@ func deliveryErrorCode(err error) string {
 	return "network"
 }
 
-func (w *alertWorker) deliver(ctx context.Context, d delivery) {
+// deliver makes one attempt to deliver d and records how it ended, reporting
+// whether it made one. The attempt is recorded before it is made, unless
+// another replica recorded one since d was read, so replicas never make the
+// same attempt twice.
+func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
+	claimed, err := w.pool.Exec(ctx,
+		"UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now() WHERE id=$1 AND attempts=$2",
+		d.id, d.attempts)
+	if err != nil {
+		w.log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
+		return false
+	}
+	if claimed.RowsAffected() == 0 {
+		return false
+	}
 	code := w.send(ctx, d)
 	delivered := code == ""
 	var lastError *string
@@ -358,16 +439,16 @@ func (w *alertWorker) deliver(ctx context.Context, d delivery) {
 		lastError = &code
 	}
 	if _, err := w.pool.Exec(ctx,
-		`UPDATE olp.budget_alert_deliveries
-		 SET attempts=attempts+1,last_attempt_at=now(),status=$2,last_error_code=$3,
-		     delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
+		`UPDATE olp.notification_deliveries
+		 SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
 		 WHERE id=$1`,
 		d.id, map[bool]string{true: "delivered", false: "failed"}[delivered], lastError); err != nil {
-		w.log.Warn("budget alert delivery update failed", "delivery", d.id, "error", err)
+		w.log.Warn("notification delivery update failed", "delivery", d.id, "error", err)
 	}
+	return true
 }
 
-func (w *alertWorker) send(ctx context.Context, d delivery) string {
+func (w *notificationWorker) send(ctx context.Context, d delivery) string {
 	if w.policy == nil {
 		return "invalid_destination"
 	}
@@ -375,13 +456,13 @@ func (w *alertWorker) send(ctx context.Context, d delivery) string {
 	if err != nil {
 		return "invalid_destination"
 	}
-	body, err := alertBody(d, d.currency)
+	body, err := webhookBody(d)
 	if err != nil {
 		return "invalid_destination"
 	}
 	secret, err := w.notificationSecret(ctx, d.secretID)
 	if err != nil {
-		w.log.Warn("budget alert secret unavailable", "delivery", d.id, "error", err)
+		w.log.Warn("notification secret unavailable", "delivery", d.id, "error", err)
 		return "network"
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, webhookTimeout)

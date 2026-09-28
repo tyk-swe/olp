@@ -27,7 +27,8 @@ var WorkerTasks = []WorkerTask{
 	{Name: string(usage.TaskMediaReconciliation), StaleAfter: 20},
 	{Name: string(usage.TaskMaintenance), StaleAfter: 180},
 	{Name: string(usage.TaskCostReconciliation), StaleAfter: 180},
-	{Name: string(usage.TaskBudgetAlertDelivery), StaleAfter: 180},
+	{Name: string(usage.TaskNotificationDelivery), StaleAfter: 180},
+	{Name: string(usage.TaskGrantRefresh), StaleAfter: 20},
 }
 
 // ValkeyWorkerTasks are the responsibilities expected only when a limiter is
@@ -158,7 +159,8 @@ func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHea
 		switch task.Name {
 		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
 			string(usage.TaskMediaReconciliation), string(usage.TaskMaintenance),
-			string(usage.TaskCostReconciliation), string(usage.TaskBudgetAlertDelivery):
+			string(usage.TaskCostReconciliation), string(usage.TaskNotificationDelivery),
+			string(usage.TaskGrantRefresh):
 		default:
 			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)
 		}

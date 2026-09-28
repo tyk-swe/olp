@@ -31,6 +31,11 @@ type RevisionCapability struct {
 type RevisionSlot struct {
 	Slot
 	Default bool `json:"default"`
+	// ObservedPrincipal is the upstream principal grant enrollment observed
+	// for the slot's unrevoked credential version, if a grant backs it.
+	// Activation publishes a revision only when its slots observe one
+	// principal (ADR 0008), which becomes the provider's.
+	ObservedPrincipal string `json:"observed_principal,omitempty"`
 }
 
 // Configuration is the subset of a provider configuration the gateway needs.
@@ -55,6 +60,7 @@ type Configuration struct {
 		Limits            *Limits                          `json:"limits"`
 		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 		VendorID          string                           `json:"vendor_id"`
+		PluginOptions     map[string]string                `json:"plugin_options,omitempty"`
 	} `json:"options"`
 }
 
@@ -74,12 +80,19 @@ type PublishedTarget struct {
 }
 
 // ProviderRevision contains scanned metadata and the stored documents of one
-// provider revision. The caller selects the revision and its current state.
+// provider revision. The caller selects the revision and its current state,
+// and the plugin a plugin provider's revision pins, which PluginColumn
+// selects.
 type ProviderRevision struct {
 	ID, RevisionID, Name, State  string
 	ProjectID                    *string
 	Configuration, Models, Slots []byte
+	Plugin                       []byte
 }
+
+// PluginColumn selects the plugin that the provider revision r pins, as a
+// connectors.InstalledPlugin, or NULL. A pinned plugin stays installed.
+const PluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE r.configuration->>'kind'='plugin' AND pl.digest=r.configuration->>'profile_revision')"
 
 // DecodeProviderRevision reconstructs a serving provider without consulting
 // current authority or normalizing stored limits. Publication owns empty-limit
@@ -95,13 +108,17 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	if err == nil {
 		err = json.Unmarshal(revision.Slots, &slots)
 	}
+	var plugin *connectors.PluginProfile
+	if err == nil && cfg.Kind == connectors.KindPlugin {
+		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.Plugin, cfg.ProfileID)
+	}
 	if err != nil {
 		return Provider{}, fmt.Errorf("provider %s revision: %w", revision.ID, err)
 	}
 	provider := Provider{
 		ID: revision.ID, RevisionID: revision.RevisionID, Name: revision.Name,
 		Enabled: revision.State == "active", ProjectID: revision.ProjectID,
-		Network:   cfg.Options.Network,
+		Network: cfg.Options.Network, Plugin: plugin, PluginOptions: cfg.Options.PluginOptions,
 		ProfileID: cfg.ProfileID, ProfileRevision: cfg.ProfileRevision,
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
@@ -125,7 +142,19 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 			provider.DefaultSlotID = slot.ID
 		}
 	}
+	provider.ObservedPrincipal = ObservedPrincipal(slots)
 	return provider, nil
+}
+
+// ObservedPrincipal is the principal a provider revision's slots observe, or
+// "" when no grant backs them.
+func ObservedPrincipal(slots []RevisionSlot) string {
+	for _, slot := range slots {
+		if slot.ObservedPrincipal != "" {
+			return slot.ObservedPrincipal
+		}
+	}
+	return ""
 }
 
 // RouteRevision contains scanned metadata and the stored documents of one

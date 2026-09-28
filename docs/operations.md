@@ -66,6 +66,13 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   historical credentials, checks current credential revocation before upstream
   calls, records completion/deletion and finishes accounting. Claims survive
   restart and hand off between workers.
+- **Grant refresh:** every five seconds, refreshes the
+  [grants](plugins.md#grant-refresh) that are due through their plugins, each
+  under its own advisory lock so a rotating refresh token is spent once. A
+  refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant,
+  and a grant that no provider configuration uses any more is
+  [retired](plugins.md#grant-refresh) instead of refreshed. A refresh the
+  upstream answered is recorded even when the worker is shutting down.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without
@@ -82,16 +89,20 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
 - **Cost reconciliation:** every 60 seconds, repairs current UTC spend windows
   from durable facts. See [spend-budget reconciliation](#spend-budget-reconciliation)
   for initialization, leadership and recovery.
-- **Budget alert delivery:** every 60 seconds under a transaction advisory
-  lock, evaluates enabled budget alert rules against the exact accrued window
-  totals and posts each crossed threshold once per rule and window to its
-  notification destination. Failed deliveries retry on later passes up to five
-  attempts with `2^(attempts-1)`-minute backoff. See
-  [budget notifications](#budget-threshold-notifications).
+- **Notification delivery:** every 60 seconds under a transaction advisory
+  lock, evaluates enabled budget threshold rules against the exact accrued
+  window totals and claims each crossed threshold once per rule and window, then
+  posts every pending delivery, including [grant lapses](#notifications), to
+  its rule's notification destination. Each attempt is recorded before it is
+  made, so replicas never repeat one. Failed deliveries retry on later passes up
+  to five attempts with `2^(attempts-1)`-minute backoff. See
+  [notifications](#notifications).
 
-The first three tasks become stale after 20 seconds without a successful
-checkpoint; maintenance, cost reconciliation, and budget alert delivery after
-180 seconds. A skipped follower pass does not establish leader success.
+Media reconciliation, grant refresh, the consumer and epoch detection become
+stale after 20 seconds without a successful checkpoint; maintenance, cost
+reconciliation, and notification delivery after 180 seconds. Media
+reconciliation and grant refresh also run without Valkey. A skipped follower
+pass does not establish leader success.
 `asynchronous_plane: healthy` requires current expected tasks, a
 healthy/backlogged consumer checkpoint, and zero request-metadata pending and
 lag counts. A current fleet with pending work is `backlogged`; missing task
@@ -186,33 +197,67 @@ prove attribution is current; no maximum lag or monetary overshoot is measured.
 See the [limits](../tests/integration/limits_test.go) and
 [fleet recovery](../tests/integration/fleet_recovery_test.go) tests for evidence.
 
-### Budget threshold notifications
+### Notifications
 
 `GET/POST /api/v1/notifications/destinations` and
 `GET/PATCH /api/v1/notifications/destinations/{id}` manage webhook endpoints;
 `GET/POST /api/v1/notifications/rules` and
-`GET/PATCH /api/v1/notifications/rules/{id}` manage alert rules, and
-`GET /api/v1/notifications/deliveries` lists delivery metadata only.
-Installation-wide destinations and rules require settings permission;
-project-scoped ones require project-manager access, and a rule's subject (an API
-key or budget group) and destination must belong to the same project.
+`GET/PATCH /api/v1/notifications/rules/{id}` manage rules, and
+`GET /api/v1/notifications/deliveries` lists delivery metadata only. A rule
+subscribes a destination to one `event`, which never changes:
+
+- `budget.threshold`: an API key's or budget group's accrued spend reached the
+  rule's `threshold_percent` of its limit in the current UTC `day` or `month`
+  window. A rule fires once per window. Installation-wide destinations and rules
+  require settings permission; project-scoped ones require project-manager
+  access, and a rule's subject and destination must belong to the same project.
+- `provider.grant.lapsed`: a provider plugin's [grant lapsed](plugins.md#lapsed-grants).
+  Provider events concern the whole installation: their rules take no subject,
+  window or threshold, are installation-wide with an installation-wide
+  destination, and require settings permission; a destination is subscribed to
+  them once. The worker that records a lapse enqueues, in the same transaction,
+  exactly one delivery for each enabled rule whose destination is enabled. A
+  retired grant, which nothing used, is not a lapse to notify.
 
 A destination may carry a signing secret: it is write-only, stored encrypted in
 the keyring, and never returned by any read. When configured, deliveries sign
-the exact request body with HMAC-SHA256 in `X-OLP-Signature: sha256=<hex>`. The
-webhook payload is metadata only — the `budget.threshold` event, rule, subject,
-window, threshold, accrued, limit, and currency — and never contains prompts,
-outputs, or attribution labels. Destination URLs pass the egress policy at
-creation and again on every delivery dial; a five-second timeout applies and
-responses are drained bounded. Delivery failures persist only a safe category
-(`timeout`, `network`, `http_4xx`, `http_5xx`, `invalid_destination`), never
-response bodies or raw error text.
+the exact request body with HMAC-SHA256 in `X-OLP-Signature: sha256=<hex>`.
+Destination URLs pass the egress policy at creation and again on every delivery
+dial; a five-second timeout applies and responses are drained bounded. Delivery
+failures persist only a safe category (`timeout`, `network`, `http_4xx`,
+`http_5xx`, `invalid_destination`), never response bodies or raw error text.
+
+Webhook payloads are metadata only, and the management contract documents both
+under `webhooks`. A `budget.threshold` payload names the rule, subject, window,
+threshold, accrued, limit, and currency, never prompts, outputs, or attribution
+labels. A `provider.grant.lapsed` payload reports the lapse as it was when the
+grant lapsed:
+
+```json
+{
+  "event": "provider.grant.lapsed",
+  "rule_id": "0199…",
+  "rule_name": "Lapsed grants",
+  "provider_id": "0199…",
+  "provider_name": "Team account",
+  "credential_version_id": "0199…",
+  "credential_version": 3,
+  "credential_slots": [{ "id": "0199…", "name": "default" }],
+  "observed_principal": "operator@example.com",
+  "lapsed_at": "2026-09-27T12:00:00.000000+00:00"
+}
+```
+
+`credential_slots` are the provider's slots bound to the credential version in
+its draft or active revision, usually one; re-enroll their grant. The payload
+never carries secret material: no access or refresh token, grant facts, or the
+refresh failure that lapsed the grant.
 
 The delivery worker runs only where Valkey-backed shared state exists.
 `GET /api/v1/auth/capabilities` reports `notifications_active`; when it is
 false, destinations and rules still save but nothing is delivered — monitor
-`olp_worker_task_healthy{task="budget_alert_delivery"}` and the
-`budget_alert_deliveries` status counters for live health.
+`olp_worker_task_healthy{task="notification_delivery"}` and the
+`notification_deliveries` status counters for live health.
 
 ## Accounting delivery and shutdown
 
@@ -258,6 +303,9 @@ overrides. A source is advisory: negotiated rates need publish-time overrides,
 because the published revision — not the raw source document — is what
 accounting prices against. Revisions record their source name and snapshot for
 provenance, and all entries share the installation's single pricing currency.
+No list price applies to a [plugin provider](plugins.md#providers-from-plugin-profiles):
+its attempts stay unpriced until a revision carries a price scoped to that
+provider, and a `plugin` price must name its `provider_id`.
 
 Shutdown stops the listeners and drains their handlers first, then closes
 metadata intake and gives the writer a bounded opportunity to flush the buffer.

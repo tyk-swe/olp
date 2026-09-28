@@ -54,7 +54,7 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(status)
+		return statusError(cfg, status, body)
 	}
 	if _, err := plan.Decode(body); err != nil {
 		return &probeError{Code: "provider_protocol_error", Detail: "The upstream violated its native operation result contract."}

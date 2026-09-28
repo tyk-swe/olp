@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -120,13 +121,18 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
+	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
+		return access.Reply{}, err
+	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
-	if input.Configuration.CredentialRequired() && input.Credential == nil {
+	switch cfg := &input.Configuration; {
+	case cfg.Grant() && input.Credential != nil:
+		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
+	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	}
-	if !input.Configuration.CredentialRequired() && input.Credential != nil {
+	case !cfg.CredentialRequired() && input.Credential != nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	if input.Credential != nil {
@@ -254,6 +260,9 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	input.Configuration.Normalize()
+	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
+		return access.Reply{}, err
+	}
 	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
@@ -375,16 +384,25 @@ func loadModels(ctx context.Context, q access.Queryer, providerID string, enable
 }
 
 type slotRow struct {
-	ID                   string
-	Default              bool
-	Position             int
-	Name                 string
-	Enabled              bool
-	Priority             int
-	Weight               int64
-	CredentialID         *string
-	CredentialVersion    *int
-	CredentialRevoked    bool
+	ID                string
+	Default           bool
+	Position          int
+	Name              string
+	Enabled           bool
+	Priority          int
+	Weight            int64
+	CredentialID      *string
+	CredentialVersion *int
+	CredentialRevoked bool
+	// CredentialPlugin is the digest of the plugin build whose grant
+	// enrollment created the credential version, or "" for a pasted one.
+	CredentialPlugin    string
+	CredentialLapsed    bool
+	GrantGeneration     int64
+	CredentialPrincipal string
+	// CredentialFacts are the grant facts the credential version reported at
+	// enrollment — what it serves as beyond its principal.
+	CredentialFacts      map[string]string
 	Restrictions         slotRestrictions
 	Limits               Limits
 	ValidatedAt          *time.Time
@@ -398,7 +416,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -406,13 +424,16 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 	var slots []slotRow
 	for rows.Next() {
 		var row slotRow
-		var restrictions, limits []byte
+		var facts, restrictions, limits []byte
 		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
-		if err = json.Unmarshal(restrictions, &row.Restrictions); err == nil {
+		if err = json.Unmarshal(facts, &row.CredentialFacts); err == nil {
+			err = json.Unmarshal(restrictions, &row.Restrictions)
+		}
+		if err == nil {
 			err = json.Unmarshal(limits, &row.Limits)
 		}
 		if err != nil {
@@ -423,18 +444,93 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 	return slots, rows.Err()
 }
 
+// credentialFits refuses a slot whose credential version the provider can't
+// authenticate with (Configuration.Authenticates): a version with a grant
+// beneath it for a provider that takes a static credential, a pasted one for
+// a provider that authenticates with a grant, or a grant another build of the
+// plugin enrolled.
+func (row *slotRow) credentialFits(cfg *Configuration) error {
+	switch {
+	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin):
+		return nil
+	case !cfg.Grant():
+		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
+	case row.CredentialPlugin == "":
+		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
+	}
+	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build of the plugin enrolled. A grant serves only the plugin build that enrolled it: re-enroll the slot's grant through the build this provider pins.")
+}
+
+// observedPrincipal is the principal the slot observes: the one grant
+// enrollment observed for its credential version, unless that version serves
+// no more because it is revoked or its grant lapsed.
+func (row *slotRow) observedPrincipal() string {
+	if row.CredentialRevoked || row.CredentialLapsed {
+		return ""
+	}
+	return row.CredentialPrincipal
+}
+
+// observedFacts are the grant facts the slot's credential version serves
+// with, cleared like its principal when the version serves no more.
+func (row *slotRow) observedFacts() map[string]string {
+	if row.CredentialRevoked || row.CredentialLapsed {
+		return nil
+	}
+	return row.CredentialFacts
+}
+
+// onePrincipal refuses to activate credential slots that observe different
+// principals or serving environments (their grants' facts), naming each
+// slot's principal. Every slot of a provider revision serves as one upstream
+// account and environment (ADR 0008), so re-enrolling that account is a
+// credential rotation and several accounts are pooled through several
+// providers.
+func onePrincipal(slots []slotRow, cfg *Configuration) error {
+	if !cfg.Grant() {
+		return nil
+	}
+	var first string
+	var firstFacts map[string]string
+	var observed []string
+	mixed := false
+	for i := range slots {
+		principal := slots[i].observedPrincipal()
+		if principal == "" {
+			continue
+		}
+		facts := slots[i].observedFacts()
+		if first == "" {
+			first, firstFacts = principal, facts
+		}
+		mixed = mixed || principal != first || !maps.Equal(facts, firstFacts)
+		observed = append(observed, "slot "+slots[i].Name+" observes "+principal)
+	}
+	if !mixed {
+		return nil
+	}
+	return access.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
+}
+
 func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 	slot := runtime.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency}
+	var principal string
 	if connectors.SecretRequired(authMode) {
 		slot.Enabled = slot.Enabled && !row.CredentialRevoked
 		slot.CredentialID = row.CredentialID
 		slot.CredentialVersion = row.CredentialVersion
+		principal = row.observedPrincipal()
 	}
-	return runtime.RevisionSlot{Slot: slot, Default: row.Default}
+	return runtime.RevisionSlot{Slot: slot, Default: row.Default, ObservedPrincipal: principal}
 }
 
 func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		// The plugin a draft pinned may since have become unusable, such as
+		// an unconfined plugin in a deployment that no longer enables them.
+		if err := current.Configuration.Pin(ctx, tx, s.Unconfined); err != nil {
+			return access.Reply{}, err
+		}
 		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
 		}
@@ -469,10 +565,16 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if err != nil {
 			return access.Reply{}, err
 		}
+		if err = onePrincipal(slots, &current.Configuration); err != nil {
+			return access.Reply{}, err
+		}
 		var credentialVersion *int
 		revisionSlots := make([]runtime.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			slot := slots[i].published(current.Configuration.AuthMode)
+			if err := slots[i].credentialFits(&current.Configuration); err != nil {
+				return access.Reply{}, err
+			}
 			if slot.Enabled && current.Configuration.CredentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
 				if slot.CredentialID == nil {
 					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
@@ -747,8 +849,10 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
 		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
+		"plugin_changed":                 a.pluginDigest() != b.pluginDigest(),
+		"plugin_options_changed":         !sameJSON(a.Options.PluginOptions, b.Options.PluginOptions),
 		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
-		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings),
+		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || runtime.ObservedPrincipal(from.Slots) != runtime.ObservedPrincipal(to.Slots),
 		"name_changed":                   from.Name != to.Name,
 		"endpoint_changed":               deref(a.Endpoint) != deref(b.Endpoint),
 		"cloud_context_changed":          deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject),

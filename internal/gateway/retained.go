@@ -73,7 +73,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if s.Resolver == nil || s.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	provider, route, slot, secret, err := s.Resolver.ResolveCurrent(ctx, res, operation)
+	provider, route, slot, err := s.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return nil, nil, pinUnavailable()
 	}
@@ -113,9 +113,6 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		VendorID:           provider.VendorID,
 	}
 	p := &pin{target: *target, provider: *provider, attempt: attempt, slot: *slot, model: target.ProviderModel}
-	if secret != nil {
-		p.secret, p.hasSecret = secret, true
-	}
 	return p, route, nil
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -101,12 +102,24 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if _, err := s.auth.Apply(ctx, req, cfg.transport(), credential, body); err != nil {
+	transport := cfg.transport()
+	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
+	switch {
+	case errors.Is(err, connectors.ErrSigningUnavailable):
+		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: err.Error()}
+	case err != nil:
 		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
-	client, err := s.connectionClient(ctx, cfg, credential)
-	if err != nil {
-		return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	var client *http.Client
+	switch {
+	case transport.CarriedByPlugin() && s.Plugins == nil:
+		return 0, nil, &probeError{Code: "upstream_unavailable", Detail: "This process runs no plugins that carry traffic."}
+	case transport.CarriedByPlugin():
+		client = transport.CarrierClient(s.Plugins, sensitive.Values())
+	default:
+		if client, err = s.connectionClient(ctx, cfg, credential); err != nil {
+			return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -123,22 +136,26 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	return resp.StatusCode, data, nil
 }
 
-// statusError uses only local codes and text: upstream error fields may echo
-// credentials and must never enter persistent probe diagnostics.
-func statusError(status int) *probeError {
+// statusError classifies an unsuccessful probe response by its status and the
+// error its body states, under the classification the provider's profile
+// declares. It reports only local codes and text: upstream error fields may
+// echo credentials and must never enter persistent probe diagnostics.
+func statusError(cfg *Configuration, status int, body []byte) *probeError {
 	detail := fmt.Sprintf("The upstream answered HTTP %d.", status)
 	code := "upstream_rejected"
+	evidence := upstream.Evidence{Status: status, Error: openai.ParseErrorBody(body)}
+	class := upstream.Classifier{Declared: cfg.transport().Classification()}.Classify(evidence).Class
 	switch {
-	case status == 401:
-		code, detail = "upstream_authentication_failed", "The upstream rejected the credential (HTTP 401)."
-	case status == 403:
-		code, detail = "upstream_permission_denied", "The upstream denied access (HTTP 403)."
-	case status == 404:
-		code, detail = "upstream_not_found", "The upstream has no such resource (HTTP 404)."
-	case status == 429:
-		code, detail = "upstream_rate_limit", "The upstream is rate limiting (HTTP 429)."
-	case status >= 500:
+	case class == upstream.Credential && status == http.StatusForbidden:
+		code, detail = "upstream_permission_denied", fmt.Sprintf("The upstream denied access (HTTP %d).", status)
+	case class == upstream.Credential:
+		code, detail = "upstream_authentication_failed", fmt.Sprintf("The upstream rejected the credential (HTTP %d).", status)
+	case class == upstream.RateLimit:
+		code, detail = "upstream_rate_limit", fmt.Sprintf("The upstream is rate limiting (HTTP %d).", status)
+	case class == upstream.ServerError:
 		code, detail = "upstream_unavailable", fmt.Sprintf("The upstream failed (HTTP %d).", status)
+	case status == http.StatusNotFound:
+		code, detail = "upstream_not_found", "The upstream has no such resource (HTTP 404)."
 	}
 	return &probeError{Code: code, Detail: detail}
 }
@@ -161,16 +178,74 @@ type discoveredModel struct {
 	Metadata      map[string]json.RawMessage
 }
 
+// A modelListing is how an upstream lists its models: a GET of path, which
+// extends the endpoint unless it is an absolute URL, answered with a JSON
+// object whose models field holds an array of model objects, each with its ID
+// in its id field and display name in its display field. A listing with a
+// cursor continues while a page holds the next page's cursor in that field,
+// and, when it names a more field, reports there that another page follows.
+// The next request sends the cursor back in the parameter query parameter.
+type modelListing struct {
+	path, models, id, display string
+	cursor, more, parameter   string
+}
+
+// listingFor returns how the configured upstream lists its models, or false
+// when it has no listing and operators declare its models.
+func listingFor(cfg *Configuration) (modelListing, bool, error) {
+	switch cfg.Kind {
+	case KindAzure, KindVertex:
+		return modelListing{}, false, nil
+	case KindPlugin:
+		// A plugin profile declares the listing, if its upstream has one.
+		if cfg.plugin == nil {
+			return modelListing{}, false, nil
+		}
+		declared, ok := cfg.plugin.Discovery()
+		if !ok {
+			return modelListing{}, false, nil
+		}
+		// Keep the rendered address's escaped option segments. call validates
+		// absolute URLs without rebuilding their path from a normalized base.
+		listing := modelListing{path: strings.TrimRight(value(cfg.Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
+		if pagination := declared.Pagination; pagination != nil {
+			listing.cursor, listing.more, listing.parameter = pagination.Cursor, pagination.More, pagination.Parameter
+		}
+		return listing, true, nil
+	}
+	for _, vendor := range vendors {
+		if vendor.ID == value(cfg.Options.VendorID) && !vendor.Discovery {
+			return modelListing{}, false, nil
+		}
+	}
+	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
+	switch cfg.Kind {
+	case KindAnthropic:
+		listing.cursor, listing.more, listing.parameter = "last_id", "has_more", "after_id"
+	case KindGemini:
+		listing.models, listing.id, listing.display = "models", "name", "displayName"
+		listing.cursor, listing.parameter = "nextPageToken", "pageToken"
+	case KindBedrock:
+		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
+		if value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, value(cfg.CloudRegion), "") {
+			endpoint, err := connectors.BedrockEndpoint(value(cfg.CloudRegion), true)
+			if err != nil {
+				return modelListing{}, false, err
+			}
+			listing.path = endpoint + "/foundation-models"
+		}
+	}
+	return listing, true, nil
+}
+
 func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	discovery := true
-	for _, vendor := range vendors {
-		if vendor.ID == value(cfg.Options.VendorID) {
-			discovery = vendor.Discovery
-		}
+	listing, discovery, err := listingFor(cfg)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.Kind == KindAzure || cfg.Kind == KindVertex || !discovery {
+	if !discovery {
 		names := append([]string{}, cfg.ProbeModels...)
 		if cfg.Kind == KindAzure {
 			names = append(names, value(cfg.Deployment))
@@ -212,45 +287,29 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		}
 		return out, nil
 	}
-	basePath := "/models"
-	key, idKey, displayKey := "data", "id", "display_name"
-	if cfg.Kind == KindGemini {
-		key, idKey, displayKey = "models", "name", "displayName"
-	}
-	if cfg.Kind == KindBedrock {
-		key, idKey, displayKey = "modelSummaries", "modelId", "modelName"
-		basePath = "/foundation-models"
-		if value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, value(cfg.CloudRegion), "") {
-			endpoint, err := connectors.BedrockEndpoint(value(cfg.CloudRegion), true)
-			if err != nil {
-				return nil, err
-			}
-			basePath = endpoint + "/foundation-models"
-		}
-	}
 	out := []discoveredModel{}
 	seen, cursors := map[string]bool{}, map[string]bool{}
-	path := basePath
+	path := listing.path
 	for {
 		status, body, err := s.call(ctx, cfg, credential, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
 		}
 		if status != http.StatusOK {
-			return nil, statusError(status)
+			return nil, statusError(cfg, status, body)
 		}
-		var envelope map[string]json.RawMessage
-		if json.Unmarshal(body, &envelope) != nil {
+		var page map[string]json.RawMessage
+		if json.Unmarshal(body, &page) != nil {
 			return nil, &probeError{Code: "provider_protocol_error", Detail: "Invalid model discovery response."}
 		}
 		var items []map[string]json.RawMessage
-		if json.Unmarshal(envelope[key], &items) != nil || items == nil {
+		if json.Unmarshal(page[listing.models], &items) != nil || items == nil {
 			return nil, &probeError{Code: "provider_protocol_error", Detail: "Discovery response is missing its model array."}
 		}
 		for _, item := range items {
 			var name, display string
-			_ = json.Unmarshal(item[idKey], &name)
-			_ = json.Unmarshal(item[displayKey], &display)
+			_ = json.Unmarshal(item[listing.id], &name)
+			_ = json.Unmarshal(item[listing.display], &display)
 			name = strings.TrimPrefix(name, "models/")
 			if ValidModelName("model", name) != nil || seen[name] {
 				continue
@@ -274,31 +333,36 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 				return out, nil
 			}
 		}
-		cursor, parameter := "", ""
-		if cfg.Kind == KindGemini {
-			_ = json.Unmarshal(envelope["nextPageToken"], &cursor)
-			parameter = "pageToken"
-		}
-		if cfg.Kind == KindAnthropic {
-			var more bool
-			_ = json.Unmarshal(envelope["has_more"], &more)
-			if more {
-				_ = json.Unmarshal(envelope["last_id"], &cursor)
-				if cursor == "" {
-					return nil, &probeError{Code: "provider_protocol_error", Detail: "Discovery continuation is missing its cursor."}
-				}
-			}
-			parameter = "after_id"
-		}
-		if cursor == "" {
-			return out, nil
+		cursor, err := listing.next(page)
+		if err != nil || cursor == "" {
+			return out, err
 		}
 		if len(cursor) > 2048 || cursors[cursor] {
 			return nil, &probeError{Code: "provider_protocol_error", Detail: "Invalid repeated discovery continuation."}
 		}
 		cursors[cursor] = true
-		path = basePath + "?" + url.Values{parameter: []string{cursor}}.Encode()
+		path = listing.path + "?" + url.Values{listing.parameter: []string{cursor}}.Encode()
 	}
+}
+
+// next returns the cursor of the page after page, or "" when page is the last.
+func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
+	if l.cursor == "" {
+		return "", nil
+	}
+	if l.more != "" {
+		var more bool
+		_ = json.Unmarshal(page[l.more], &more)
+		if !more {
+			return "", nil
+		}
+	}
+	var cursor string
+	_ = json.Unmarshal(page[l.cursor], &cursor)
+	if cursor == "" && l.more != "" {
+		return "", &probeError{Code: "provider_protocol_error", Detail: "Discovery continuation is missing its cursor."}
+	}
+	return cursor, nil
 }
 
 func decodeModels(body []byte) ([]string, error) {
@@ -419,21 +483,30 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		if err != nil {
 			return err
 		}
-		endpoint, err := transport.URL(wire, model, tuple.Mode == ModeStreaming)
+		// A profile that forces streaming serves a non-streaming tuple through
+		// the stream the gateway aggregates.
+		aggregated := tuple.Mode != ModeStreaming && transport.ForcesStreaming()
+		endpoint, err := transport.URL(wire, model, tuple.Mode == ModeStreaming || aggregated)
 		if err != nil {
 			return err
 		}
-		status, data, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, body)
+		status, data, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, transport.WrapRequest(body, model))
 		if err != nil {
 			return err
 		}
 		if status != http.StatusOK {
-			return statusError(status)
+			return statusError(cfg, status, data)
 		}
-		if tuple.Mode == ModeStreaming {
+		switch {
+		case tuple.Mode == ModeStreaming:
 			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
-		} else {
-			_, err = protocols.DecodeRequest(wire, family, data, "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
+		case aggregated:
+			var streamed *openai.Completion
+			if streamed, err = openai.Aggregate(wire, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, probeBodyLimit); err == nil {
+				_, err = protocols.DecodeRequest(wire, family, streamed.Body, "certification", "", parsed)
+			}
+		default:
+			_, err = protocols.DecodeRequest(wire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
 		if err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
@@ -453,7 +526,7 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 			return err
 		}
 		if status != http.StatusOK {
-			return statusError(status)
+			return statusError(cfg, status, data)
 		}
 		var list struct {
 			Data []json.RawMessage `json:"data"`
@@ -503,7 +576,7 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 	conn, resp, err := websocket.Dial(ctx, req.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: req.Header})
 	if err != nil {
 		if resp != nil && resp.StatusCode != 0 {
-			return statusError(resp.StatusCode)
+			return statusError(cfg, resp.StatusCode, nil)
 		}
 		return classify(err)
 	}
@@ -561,7 +634,7 @@ func (s *Server) bedrockProbe(ctx context.Context, cfg *Configuration, credentia
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(status)
+		return statusError(cfg, status, data)
 	}
 	if err := validate(data); err != nil {
 		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
@@ -619,11 +692,20 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if !p.Configuration.CredentialRequired() {
 		return nil, state, nil
 	}
+	if state.ID == nil && p.Configuration.Grant() {
+		return nil, state, access.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
+	}
 	if state.ID == nil {
 		return nil, state, access.Fail(422, "credential_required", "Add a credential before probing this connection.")
 	}
 	if state.Revoked {
 		return nil, state, access.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
+	}
+	if slot.CredentialLapsed {
+		return nil, state, access.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
+	}
+	if err := slot.credentialFits(&p.Configuration); err != nil {
+		return nil, state, err
 	}
 	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, secrets.ProviderCredential)
 	if err != nil {
@@ -635,7 +717,7 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 	var best *slotRow
 	usable := func(s *slotRow) bool {
-		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked
+		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked && !s.CredentialLapsed
 	}
 	for i := range slots {
 		row := &slots[i]
@@ -691,7 +773,7 @@ func (s *Server) certifyNativeImage(ctx context.Context, cfg *Configuration, cre
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(status)
+		return statusError(cfg, status, data)
 	}
 	_, mErr := media.DecodeNativeImageResponse(call.Native, data, 1, func(b64 string, index int) (*media.Artifact, *media.Error) {
 		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {

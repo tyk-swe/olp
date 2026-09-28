@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +46,10 @@ type fakeRuntime struct {
 	keys    map[string]access.Authority
 	stale   bool
 	revoked map[string]bool
+	// lapsed holds the credential versions whose grants lapsed.
+	lapsed map[string]bool
+	// refused records the credential versions the upstream refused.
+	refused []string
 }
 
 func (f *fakeRuntime) Release() *runtime.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
@@ -62,7 +67,53 @@ func (f *fakeRuntime) Authenticate(secret string) (access.Authority, error) {
 	return a, nil
 }
 
-func (f *fakeRuntime) Revoked(id string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.revoked[id] }
+func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case f.stale:
+		return runtime.StaleAuthority
+	case f.revoked[id]:
+		return runtime.Revoked
+	case f.lapsed[id]:
+		return runtime.Lapsed
+	}
+	return runtime.Eligible
+}
+
+// Secret serves eligible credentials the pinned release installed. The fake's
+// secret authority, for callers that pin no release, is its current release.
+func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
+	if f.Eligibility(id) != runtime.Eligible {
+		return nil, 0, runtime.ErrCredentialUnavailable
+	}
+	if release == nil {
+		release = f.Release()
+	}
+	if secret, ok := release.Credential(id); ok {
+		return secret, 0, nil
+	}
+	return nil, 0, runtime.ErrCredentialUnavailable
+}
+
+func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
+	secret, _, err := f.Secret(ctx, release, id)
+	return secret, err
+}
+
+func (f *fakeRuntime) GrantGeneration(string) int64 { return 0 }
+
+func (f *fakeRuntime) CredentialRefused(id string, _ int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refused = append(f.refused, id)
+}
+
+func (f *fakeRuntime) refusals() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.refused)
+}
 
 type capture struct {
 	mu   sync.Mutex
@@ -424,6 +475,88 @@ func TestCredentialFailureCoolsVersionAndFailsOver(t *testing.T) {
 	}
 	if !h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+env.Attempts[0].CredentialID) {
 		t.Fatal("rejected credential version should be cooling down")
+	}
+}
+
+// A credential failure the upstream stated asks the credential source to
+// refresh a grant beneath the version early. The refreshed grant ends the
+// version's cooldown, so its slot serves again at once.
+func TestUpstreamCredentialFailureRequestsAnEarlyGrantRefresh(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.mock.set("a", status(http.StatusUnauthorized, `{"error":{"message":"expired token","type":"invalid_request_error","code":"invalid_api_key"}}`))
+	h.chat(fullKey, nil)
+	providerID := h.sink.last(t).Attempts[0].ProviderID
+	if refused := h.rt.refusals(); !slices.Equal(refused, []string{h.credA}) {
+		t.Fatalf("refused credential versions %v", refused)
+	}
+	h.mock.set("a", completion(modelA, answerText))
+	h.chat(fullKey, nil)
+	if attempts := h.sink.last(t).Attempts; attempts[0].CredentialID == h.credA {
+		t.Fatal("the refused credential version served before its grant was refreshed")
+	}
+	h.gateway.GrantRefreshed(providerID, h.credA)
+	h.chat(fullKey, nil)
+	if attempts := h.sink.last(t).Attempts; len(attempts) != 1 || attempts[0].CredentialID != h.credA || attempts[0].Class != classSuccess {
+		t.Fatalf("after the refresh, attempts %+v", attempts)
+	}
+}
+
+// unreadableSecrets serves every credential version but one, whose secret
+// the credential source can't read.
+type unreadableSecrets struct {
+	*fakeRuntime
+	credentialID string
+}
+
+func (u unreadableSecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
+	if id == u.credentialID {
+		return nil, 0, runtime.ErrCredentialUnavailable
+	}
+	return u.fakeRuntime.Secret(ctx, release, id)
+}
+
+// A credential the gateway could not apply never reached the upstream, which
+// refused nothing, so no grant refresh is requested.
+func TestUnappliedCredentialRequestsNoGrantRefresh(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.gateway.Runtime = unreadableSecrets{fakeRuntime: h.rt, credentialID: h.credA}
+	if resp, _ := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK || h.sink.last(t).Attempts[0].Class != classCredential {
+		t.Fatalf("status %d attempts %+v", resp.StatusCode, h.sink.last(t).Attempts)
+	}
+	if refused := h.rt.refusals(); len(refused) != 0 {
+		t.Fatalf("refused credential versions %v", refused)
+	}
+}
+
+// authoritySecrets serves one credential version from a secret authority that
+// answers only once the reading context ends.
+type authoritySecrets struct {
+	*fakeRuntime
+	credentialID string
+}
+
+func (a authoritySecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
+	if id != a.credentialID {
+		return a.fakeRuntime.Secret(ctx, release, id)
+	}
+	<-ctx.Done()
+	return nil, 0, fmt.Errorf("credential %s: %w: %w", id, runtime.ErrCredentialUnavailable, ctx.Err())
+}
+
+func TestInterruptedSecretReadIsNotACredentialFailure(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.gateway.Runtime = authoritySecrets{fakeRuntime: h.rt, credentialID: h.credA}
+	h.rt.release.Snapshot.Routes[routeSlug].Targets[0].Timeout = 50
+	resp, _ := h.chat(fullKey, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.Status)
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 2 || env.Attempts[0].Class != classTimeout || env.Attempts[1].Class != classSuccess {
+		t.Fatalf("attempts %+v", env.Attempts)
+	}
+	if h.mock.count("a") != 0 || h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+h.credA) {
+		t.Fatal("the attempt timer interrupting a secret read was blamed on the credential")
 	}
 }
 

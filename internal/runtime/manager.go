@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -47,7 +48,6 @@ type Release struct {
 	credentials map[string][]byte
 }
 
-// Credential returns the plaintext credential referenced by a slot.
 // NewRelease builds an installed release directly from a snapshot and its
 // credentials for fixtures and tests that bypass the database.
 func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[string][]byte) (*Release, error) {
@@ -61,7 +61,12 @@ func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[s
 	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: maps.Clone(credentials)}, nil
 }
 
+// Credential returns a plaintext credential the release installed; a nil
+// release installed none. Serving paths ask the credential source instead.
 func (r *Release) Credential(id string) ([]byte, bool) {
+	if r == nil {
+		return nil, false
+	}
 	secret, ok := r.credentials[id]
 	return secret, ok
 }
@@ -86,7 +91,9 @@ type authorityState struct {
 	id       string
 	sequence int64
 	keys     map[string]keyRecord
-	revoked  map[string]struct{}
+	// ineligible holds the credential versions and network credentials that
+	// may not serve, with why.
+	ineligible map[string]Eligibility
 }
 
 // Manager installs releases and refreshes key authority for one gateway.
@@ -98,12 +105,26 @@ type Manager struct {
 	Mounted      map[string]MountedProvider
 	log          *slog.Logger
 
+	// GrantRefreshed, when set before Start, is told of each credential
+	// version of the installed release whose grant a poll found refreshed,
+	// with the provider it belongs to, apart from the poll.
+	GrantRefreshed func(providerID, credentialID string)
+
 	mu        sync.RWMutex
 	authority authorityState
 	release   *Release
 	failed    int64
 	inputs    *usage.RoutingInputs
 	desired   atomic.Int64
+	// grants holds what the manager serves for the installed release's
+	// credential versions with grants, and refreshRequested the generation
+	// whose access token each asked workers to refresh early.
+	grants           map[string]servedGrant
+	refreshRequested map[string]int64
+	// refreshedGrants holds the refreshed grants, by credential version and
+	// provider, that the notifier telling GrantRefreshed has yet to tell of;
+	// it is non-nil while the notifier runs.
+	refreshedGrants map[string]string
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -120,6 +141,8 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 		log:          log,
 		release:      emptyRelease(),
 		stop:         make(chan struct{}),
+
+		refreshRequested: map[string]int64{},
 	}
 }
 
@@ -162,11 +185,12 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// Refresh reloads authority and installs any newer release.
+// Refresh reloads authority, installs any newer release and reloads the
+// access tokens of refreshed grants.
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshInputs(ctx))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
@@ -190,7 +214,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if unchanged {
 		return nil
 	}
-	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}, revoked: map[string]struct{}{}}
+	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}}
 	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
@@ -212,26 +236,13 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
-	rows, err = tx.Query(ctx, "SELECT id::text FROM olp.provider_credentials WHERE revoked_at IS NOT NULL UNION SELECT id::text FROM olp.provider_network_credentials WHERE revoked_at IS NOT NULL")
-	if err != nil {
-		return fmt.Errorf("authority: %w", err)
-	}
-	for rows.Next() {
-		var credential string
-		if err = rows.Scan(&credential); err != nil {
-			rows.Close()
-			return fmt.Errorf("authority: %w", err)
-		}
-		state.revoked[credential] = struct{}{}
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
+	if state.ineligible, err = ReadIneligible(ctx, tx, nil); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	m.mu.Lock()
 	m.authority = state
 	m.mu.Unlock()
-	m.log.Info("authority refreshed", "sequence", sequence, "keys", len(state.keys), "revoked_credentials", len(state.revoked))
+	m.log.Info("authority refreshed", "sequence", sequence, "keys", len(state.keys), "ineligible_credentials", len(state.ineligible))
 	return nil
 }
 
@@ -324,6 +335,12 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			}
 			release.credentials[id] = secret
 		}
+		// Grant tokens rotate beneath the pinned credential version. Only
+		// static credentials belong in the release's cache; Secret reads
+		// grants from the poll or authority even after a newer publication.
+		if provider.AuthMode == connectors.AuthGrant {
+			continue
+		}
 		for _, slot := range provider.Slots {
 			if slot.CredentialID == nil {
 				continue
@@ -365,18 +382,6 @@ func (m *Manager) Authenticate(secret string) (access.Authority, error) {
 		return access.Authority{}, ErrInvalidKey
 	}
 	return record.authority, nil
-}
-
-// Revoked reports whether a credential version was revoked as of the last
-// authority read. A stale authority reports every credential revoked.
-func (m *Manager) Revoked(credentialID string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
-		return true
-	}
-	_, revoked := m.authority.revoked[credentialID]
-	return revoked
 }
 
 // Authority reports the last authority read for health output.

@@ -1,14 +1,16 @@
 import type { RecentAuthenticationPurpose } from '$lib/features/access/profile/api';
 
-export const ENROLLMENT_GRANT_TTL_MS = 5 * 60 * 1000;
-export const ENROLLMENT_GRANT_READY_MESSAGE =
+export const ENROLLMENT_VERIFICATION_TTL_MS = 5 * 60 * 1000;
+export const ENROLLMENT_VERIFIED_MESSAGE =
   'Identity verified. Add your local password within five minutes.';
 
 export type PendingIdentityAction =
   { purpose: 'oidc_link' } | { purpose: 'oidc_unlink'; resourceId: string };
 
 export type RecentAuthenticationCallback = {
-  purpose: RecentAuthenticationPurpose;
+  // The profile page continues every security operation but permitting an
+  // unconfined plugin, which the Plugins page continues.
+  purpose: Exclude<RecentAuthenticationPurpose, 'plugin_permit'>;
   resourceId?: string;
 };
 

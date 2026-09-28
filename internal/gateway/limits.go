@@ -356,7 +356,7 @@ func settleTargetRefund(ctx context.Context, reservation *targetReservation) {
 // cooldown records a shared cooldown for the credential and for the slot, so
 // every replica avoids a target the upstream just rejected instead of each
 // learning it alone.
-func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runtime.Slot, d time.Duration, credential bool) {
+func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, d time.Duration, credential bool) {
 	if !a.ready() || d <= 0 {
 		return
 	}
@@ -364,7 +364,7 @@ func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runti
 	defer cancel()
 	scope := limits.SlotScope(slot.ID)
 	if credential {
-		scope = limits.CredentialScope(providerID, slot.CredentialID)
+		scope = limits.CredentialScope(providerID, slot.CredentialID, generation)
 	}
 	{
 		if err := a.limiter.Cooldown(ctx, scope, d); err != nil {
@@ -373,16 +373,29 @@ func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runti
 	}
 }
 
+// endCredentialCooldown ends a credential version's shared cooldown before it
+// runs out, for every replica.
+func (a *Admission) endCredentialCooldown(ctx context.Context, providerID, credentialID string, generation int64) {
+	if !a.ready() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationTimeout)
+	defer cancel()
+	if err := a.limiter.Cooldown(ctx, limits.CredentialScope(providerID, &credentialID, generation), 0); err != nil {
+		a.logger().Warn("shared cooldown not ended", "provider_id", providerID, "credential_id", credentialID, "error", err.Error())
+	}
+}
+
 // cooling reports whether another replica put this credential or slot in a
 // cooldown. A store that cannot answer must not take every slot out of
 // service, so an unreadable cooldown is treated as absent and logged.
-func (a *Admission) cooling(ctx context.Context, providerID string, slot *runtime.Slot) bool {
+func (a *Admission) cooling(ctx context.Context, providerID string, slot *runtime.Slot, generation int64) bool {
 	if !a.ready() {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, coordinationTimeout)
 	defer cancel()
-	cooling, err := a.limiter.Cooling(ctx, limits.CredentialScope(providerID, slot.CredentialID), limits.SlotScope(slot.ID))
+	cooling, err := a.limiter.Cooling(ctx, limits.CredentialScope(providerID, slot.CredentialID, generation), limits.SlotScope(slot.ID))
 	if err != nil {
 		a.logger().Warn("shared cooldown not read", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
 		return false

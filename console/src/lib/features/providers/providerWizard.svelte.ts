@@ -7,6 +7,7 @@ import {
   errorMessage as message,
   fieldIssues,
   isEtagMismatch,
+  unanswered,
   type FieldIssue
 } from '$lib/api/http';
 import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
@@ -16,6 +17,7 @@ import {
   createProvider,
   probeProvider,
   updateProvider,
+  type Provider,
   type ProviderProbe
 } from '$lib/features/providers/api';
 import {
@@ -29,7 +31,20 @@ import {
   type CapabilityDeclaration,
   type CapabilityCertification
 } from '$lib/features/providers/models';
-import { rotateProviderCredential } from '$lib/features/providers/credentials';
+import {
+  isLiveGrant,
+  listProviderCredentials,
+  rotateProviderCredential
+} from '$lib/features/providers/credentials';
+import type { ProviderProfile } from '$lib/features/providers/profiles';
+import {
+  cancelGrantEnrollment,
+  continueGrantEnrollment,
+  pollGrantEnrollment,
+  startGrantEnrollment,
+  type GrantEnrollment,
+  type GrantEnrollmentStatus
+} from '$lib/features/providers/grants';
 import {
   authOptionsFor,
   buildCreateProviderInput,
@@ -38,6 +53,7 @@ import {
   parseManualModelNames,
   probeSummary,
   requiresCredential,
+  requiresGrant,
   validateProviderDraft,
   type ProviderDraft
 } from '$lib/features/providers/providerEditor';
@@ -57,7 +73,14 @@ export class ProviderWizardState {
   wizardModelPagination = $state(emptyCursorHistory());
   wizardModels;
   capabilityOptions;
+  /** The draft provider's credential versions, while its profile takes a
+   * grant. */
+  draftCredentials;
   probe = $state<ProviderProbe | null>(null);
+  /** The grant enrollment the operator is signing in through, if any. */
+  grantEnrollment = $state<GrantEnrollment | null>(null);
+  /** What the operator pastes back from the upstream's sign-in. */
+  grantInput = $state('');
   manualModelNames = $state('');
   busy = $state('');
   errorMessage = $state('');
@@ -79,6 +102,23 @@ export class ProviderWizardState {
       this.draft &&
       this.selectedSpec &&
       requiresCredential(this.selectedSpec, this.draft.authMode)
+    )
+  );
+  grantRequired = $derived(
+    Boolean(
+      this.draft &&
+      this.selectedSpec &&
+      requiresGrant(this.selectedSpec, this.draft.authMode)
+    )
+  );
+  /** Set while a live grant, enrolled through the plugin build the
+   * Connection stage pins, backs the draft, so saving tests the connection
+   * rather than signing in upstream. */
+  grantEnrolled = $derived.by(() =>
+    isLiveGrant(
+      this.draftCredentials.data,
+      this.wizardProvider?.draft_credential_id,
+      this.draft?.profileRevision
     )
   );
   run = async (
@@ -142,6 +182,8 @@ export class ProviderWizardState {
     this.draft = null;
     this.wizardStep = 1;
     this.probe = null;
+    this.grantEnrollment = null;
+    this.grantInput = '';
     this.manualModelNames = '';
     this.busy = '';
     this.errorMessage = '';
@@ -162,7 +204,11 @@ export class ProviderWizardState {
     const issue = validateProviderDraft(current, spec, {
       // The first pass stored a write-only credential; the field is cleared
       // afterwards and must not be demanded again on a re-save.
-      credentialAlreadyStored: Boolean(existing)
+      credentialAlreadyStored: Boolean(existing),
+      // The connection form loads the profile catalogue.
+      profiles: this.queryClient.getQueryData<ProviderProfile[]>([
+        'provider-profiles'
+      ])
     });
     if (issue) {
       this.errorMessage = issue;
@@ -195,9 +241,113 @@ export class ProviderWizardState {
           queryKey: providerKeys.modelCatalog
         })
       ]);
-      this.probe = await probeProvider(snapshot.provider);
-      if (!this.probe.succeeded) throw new Error(this.probe.detail);
-      this.wizardStep = 2;
+      // A grant comes from the operator's sign-in upstream, which the grant
+      // enrollment panel collects before the connection is tested. Unless a
+      // live grant of the pinned build backs the draft, its credential is
+      // none, a static credential from another profile, or a grant that
+      // lapsed, was revoked or came through another build.
+      if (
+        this.grantRequired &&
+        !(await this.holdsLiveGrant(snapshot.provider))
+      ) {
+        this.grantEnrollment = await startGrantEnrollment(snapshot.provider);
+        return;
+      }
+      await this.testConnection(snapshot.provider);
+    });
+  };
+  /** Reports whether a live grant, enrolled through the plugin build the
+   * provider pins, backs its draft now. */
+  private holdsLiveGrant = async (provider: Provider) => {
+    if (!provider.draft_credential_id) return false;
+    const credentials = await this.queryClient.fetchQuery({
+      queryKey: providerKeys.credentials(provider.id),
+      queryFn: ({ signal }) => listProviderCredentials(provider.id, signal),
+      staleTime: 0
+    });
+    return isLiveGrant(
+      credentials,
+      provider.draft_credential_id,
+      provider.configuration.profile_revision
+    );
+  };
+  /** Tests the connection with the grant a completed enrollment staged. */
+  private testEnrolledGrant = async () => {
+    await this.queryClient.invalidateQueries({
+      queryKey: providerKeys.credentials(this.providerId)
+    });
+    await this.testConnection((await this.refetchWizardModels()).provider);
+  };
+  private testConnection = async (provider: Provider) => {
+    this.probe = await probeProvider(provider);
+    if (!this.probe.succeeded) throw new Error(this.probe.detail);
+    this.wizardStep = 2;
+  };
+  /** Exchanges what the operator pasted back for a grant, which becomes the
+   * draft's credential version, then tests the connection with it. */
+  continueGrantEnrollment = async () => {
+    const enrollment = this.grantEnrollment;
+    const input = this.grantInput.trim();
+    if (!enrollment) return;
+    if (!input) {
+      this.errorMessage =
+        'Paste the callback URL, or the code the upstream displayed.';
+      this.validationIssues = [];
+      return;
+    }
+    await this.run('grant', async () => {
+      try {
+        await continueGrantEnrollment(enrollment, input);
+      } finally {
+        // A grant enrollment is continued once, whether or not it succeeds.
+        this.grantEnrollment = null;
+        this.grantInput = '';
+      }
+      await this.testEnrolledGrant();
+    });
+  };
+  /** Asks whether the operator approved the device upstream, and returns how
+   * many seconds to wait before asking again, or null once the enrollment
+   * ended. On approval, the grant is the draft's credential version, and the
+   * connection is tested with it. A request that fails without an answer,
+   * such as while OLP restarts, is asked again. */
+  pollGrantEnrollment = async (): Promise<number | null> => {
+    const enrollment = this.grantEnrollment;
+    if (!enrollment) return null;
+    let status: GrantEnrollmentStatus | undefined;
+    let failure: unknown;
+    try {
+      status = await pollGrantEnrollment(enrollment);
+    } catch (error) {
+      failure = error;
+    }
+    // Cancelled meanwhile.
+    if (this.grantEnrollment !== enrollment) return null;
+    const interval = enrollment.device?.interval ?? null;
+    if (status?.status === 'pending') return status.interval ?? interval;
+    if (unanswered(failure)) return interval;
+    this.grantEnrollment = null;
+    if (status?.status === 'completed') {
+      await this.run('grant', this.testEnrolledGrant);
+      return null;
+    }
+    this.errorMessage =
+      status?.status === 'denied'
+        ? 'The device sign-in was denied upstream. Save and sign in upstream to try again.'
+        : status?.status === 'expired'
+          ? 'The device sign-in expired before it was approved. Save and sign in upstream to try again.'
+          : message(failure);
+    this.validationIssues = [];
+    return null;
+  };
+  cancelGrantEnrollment = async () => {
+    const enrollment = this.grantEnrollment;
+    if (!enrollment) return;
+    await this.run('grant-cancel', async () => {
+      // Abandoned at once, so a status request answering meanwhile is ignored.
+      this.grantEnrollment = null;
+      this.grantInput = '';
+      await cancelGrantEnrollment(enrollment);
     });
   };
   discoverWizardProvider = async () => {
@@ -336,6 +486,12 @@ export class ProviderWizardState {
         ),
       enabled: Boolean(this.providerId)
     }));
+    this.draftCredentials = createQuery(() => ({
+      queryKey: providerKeys.credentials(this.providerId),
+      queryFn: ({ signal }) => listProviderCredentials(this.providerId, signal),
+      enabled:
+        this.grantRequired && Boolean(this.wizardProvider?.draft_credential_id)
+    }));
     this.capabilityOptions = createQuery(() => {
       const kind = this.wizardProvider?.configuration.kind;
       return {
@@ -392,6 +548,7 @@ export class ProviderWizardState {
         queryKey: providerKeys.modelsOf(this.providerId)
       });
       if (this.draft) this.draft.credential = '';
+      this.grantInput = '';
     });
   }
 }

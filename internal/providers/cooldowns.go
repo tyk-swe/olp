@@ -19,7 +19,7 @@ func (s *Server) clearValidatedCooldowns(ctx context.Context, providerID string,
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
-	scopes := []string{limits.SlotScope(slot.ID), limits.CredentialScope(providerID, slot.CredentialID)}
+	scopes := []string{limits.SlotScope(slot.ID), limits.CredentialScope(providerID, slot.CredentialID, slot.GrantGeneration)}
 	for _, scope := range scopes {
 		if err := clearer.Cooldown(ctx, scope, 0); err != nil && s.Log != nil {
 			s.Log.Warn("validated credential cooldown could not be cleared", "provider_id", providerID)

@@ -22,6 +22,7 @@ require (
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/shopspring/decimal v1.4.0
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/valkey-io/valkey-glide/go/v2 v2.5.2
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0

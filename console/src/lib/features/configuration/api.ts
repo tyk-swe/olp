@@ -54,3 +54,26 @@ export function missingSecretBindings(plan: ConfigurationPlan): string[] {
     .filter((item) => item.detail === 'secret_binding_required')
     .map((item) => item.key);
 }
+
+/** The credential references a plan leaves for grant enrollment after
+ * applying: exports never carry grants. */
+export function grantEnrollments(plan: ConfigurationPlan): string[] {
+  return plan.actions
+    .filter((item) => item.action === 'enroll')
+    .map((item) => item.key);
+}
+
+/** The names of the artifact's providers that pin the plugin build with the
+ * digest. */
+export function pinningProviders(
+  document: ConfigurationDocument,
+  digest: string
+): string[] {
+  return document.providers
+    .filter(
+      (provider) =>
+        provider.configuration.kind === 'plugin' &&
+        provider.configuration.profile_revision === digest
+    )
+    .map((provider) => provider.name);
+}

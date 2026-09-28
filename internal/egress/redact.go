@@ -32,6 +32,10 @@ func (s *Sensitive) Include(other Sensitive) {
 	s.values = append(s.values, other.values...)
 }
 
+// Values returns a copy of the recorded values for a plugin runtime to redact
+// its own output before returning it to the host.
+func (s Sensitive) Values() []string { return slices.Clone(s.values) }
+
 // Redact replaces each recorded value, including its JSON-escaped forms, with
 // [REDACTED]. Longer values are replaced first so a credential that contains
 // another cannot leave part of itself exposed.

@@ -16,9 +16,25 @@ generation dialects; a Responses profile cannot fall back to the Chat endpoint.
 
 `GET /api/v1/provider-profiles` returns profile revisions, operation dialects,
 allowed semantic headers/query settings and JSON schemas for operation defaults.
-Those schemas also describe the controls the console can present. Model
-certification and credential-slot validation remain explicit activation gates.
+Those schemas also describe the controls the console can present. Each entry's
+`strict` reports whether the profile may serve
+[strict routes](provider-routing.md#route-fidelity). Model certification and
+credential-slot validation remain explicit activation gates.
 Connectivity/certification is not empirical evidence of model intelligence parity.
+
+The catalogue also lists the profiles of approved [provider plugins](plugins.md)
+under the `plugin` provider kind. A plugin profile's revision is the digest of
+the plugin module that supplies it, so a provider pins that build. It serves one
+built-in dialect's generation operation at the address its plugin declares,
+shares that dialect's revision and semantic headers and query settings, and
+authenticates with a static credential that its declared headers and query
+parameters place, or that its [signing hook](plugins.md#signing-hooks) signs
+with, or with a [grant](plugins.md#grant-enrollment) when it declares one. Its
+`options_schema` describes the options a provider using it sets, which the
+hosting adaptation places too. A plugin profile that also envelopes or rewrites
+the dialect's bodies, or forces upstream streaming, is not `strict`. Its entry
+reports `model_discovery: true` when the plugin declares the upstream's model
+listing; otherwise operators declare its providers' models.
 
 | Profile | Native generation address / contract |
 | --- | --- |
@@ -135,9 +151,11 @@ values need a qualified representation and delivery-mode changes are rejected.
 
 Bindings can declare model/deployment, principal, snapshot, region and resource
 scope. Identity facts without independent observation remain operator declarations;
-a secret version is not proof of an upstream account. Binding/semantic/profile
-changes are visible separately in revision diffs. Credential rotation preserves
-semantic configuration; changes to a declared principal or resource scope are
+a secret version is not proof of an upstream account, while a grant's
+[observed principal](plugins.md#re-enrolling-and-the-observed-principal)
+replaces a declared principal. Binding/semantic/profile changes are visible
+separately in revision diffs. Credential rotation preserves semantic
+configuration; changes to a declared principal or resource scope are
 serving-identity changes rather than a secret-refresh shortcut.
 
 Semantic headers are independent from encrypted API credentials. Profile allowlists
@@ -212,9 +230,12 @@ They are deterministic fixture evidence, not live-provider or quality evidence.
 
 A trusted in-process `connectors.RegisterProfile` can add a provider using an
 existing component composition and model bindings. The registry validates the
-composition; it does not load executable configuration or untrusted plugins.
-Adding a new dialect or lifecycle still requires its own codec/runner and scoped
-behavioral evidence.
+composition. Executable configuration comes from
+[provider plugins](plugins.md) instead: WASM modules an owner installs, whose
+profiles name a built-in dialect and whose code OLP runs confined
+([ADR 0007](adr/0007-confined-provider-plugins.md)). A plugin never defines a
+dialect, so adding a new dialect or lifecycle still requires its own
+codec/runner and scoped behavioral evidence.
 
 First-party contract references consulted for these compositions:
 [OpenAI API migration](https://developers.openai.com/api/docs/guides/migrate-to-responses),
@@ -226,7 +247,8 @@ First-party contract references consulted for these compositions:
 
 A gateway using `OLP_CONNECTOR_CONFIG_FILE` without database decryption keys may
 supply `network_credential_file` beside `credential_file` in each mounted
-provider entry. The network file contains the same private JSON shape as the
+provider entry. A plugin provider mounts its static credential the same way;
+its profile comes from the plugin its published revision pins. The network file contains the same private JSON shape as the
 creation API. Its configured credential UUID must match the published provider's
 network reference; mounting a file cannot create authority. For an explicit
 profile the mounted configuration must match the published model-significant

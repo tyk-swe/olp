@@ -16,7 +16,8 @@
   import {
     DISABLED_EDIT_NOTE,
     providerDisabled,
-    requiresCredential
+    requiresCredential,
+    requiresGrant
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
 
@@ -95,7 +96,15 @@
     runtime credential remains live until activation. Rotation keeps certified
     capabilities; test with the new credential before activation.
   </p>
-  {#if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
+  {#if providerSpec && requiresGrant(providerSpec, current.configuration.auth_mode)}<div
+      class="identity-note"
+    >
+      <strong>Grant</strong><span
+        >Credential versions come from grant enrollment: an operator signs in to
+        the upstream account through the provider plugin, and re-enrolls a
+        slot's grant from the credential pool. There is no credential to paste.</span
+      >
+    </div>{:else if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
       class="identity-note"
     >
       <strong
@@ -136,26 +145,40 @@
     </div>{:else if credentials.isPending}<p role="status">
       Loading versions…
     </p>{:else}<ul class="credential-list">
-      {#each credentials.data ?? [] as credential (credential.id)}<li>
+      {#each credentials.data ?? [] as credential (credential.id)}{@const lapsed =
+          credential.grant?.lapsed_at}
+        <li>
           <span
             ><strong>Version {credential.version}</strong><small
               >{formatDate(credential.created_at)}</small
-            ></span
+            >{#if credential.grant}<small
+                >Observed principal {credential.grant.principal}</small
+              >{/if}{#if lapsed}<small
+                >Grant lapsed {formatDate(lapsed)}: it can no longer be
+                refreshed, so it serves no more.</small
+              >{/if}</span
           ><span
-            class:success={credential.active}
-            class:warning={credential.draft_selected && !credential.active}
-            class:danger={Boolean(credential.revoked_at)}
+            class:success={credential.active && !lapsed}
+            class:warning={credential.draft_selected &&
+              !credential.active &&
+              !lapsed}
+            class:danger={Boolean(credential.revoked_at || lapsed)}
             class="badge"
             >{credential.revoked_at
               ? 'revoked'
-              : credential.active && credential.draft_selected
-                ? 'runtime active · draft selected'
-                : credential.active
-                  ? 'runtime active'
-                  : credential.draft_selected
-                    ? 'pending activation'
-                    : 'retired'}</span
-          >{#if canManage && !credential.active && !credential.draft_selected && !credential.revoked_at}<button
+              : lapsed
+                ? 'grant lapsed'
+                : credential.active && credential.draft_selected
+                  ? 'runtime active · draft selected'
+                  : credential.active
+                    ? 'runtime active'
+                    : credential.draft_selected
+                      ? 'pending activation'
+                      : 'retired'}</span
+          >{#if canManage && lapsed && credential.draft_selected && !credential.revoked_at}<a
+              class="button button-primary"
+              href="#credential-pool-heading">Re-enroll grant</a
+            >{/if}{#if canManage && !credential.active && !credential.draft_selected && !credential.revoked_at}<button
               class="button button-secondary"
               type="button"
               onclick={() => revoke(credential)}

@@ -120,7 +120,7 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (a
 		if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := access.AdvanceAuthority(r, tx)
+		generation, err := access.AdvanceAuthority(ctx, tx)
 		if err != nil {
 			return access.Reply{}, err
 		}

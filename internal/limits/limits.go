@@ -322,13 +322,18 @@ func SlotLookup(slotID string) string { return "ps_" + simpleUUID(slotID) }
 func BudgetGroupLookup(id string) string { return "bg_" + simpleUUID(id) }
 
 // CredentialScope names the cooldown that follows one credential version, so a
-// rotation is not punished for the version it replaced.
-func CredentialScope(providerID string, credentialID *string) string {
+// rotation is not punished for the version it replaced. Grants also scope
+// refusals to the dispatched generation; static credentials use zero.
+func CredentialScope(providerID string, credentialID *string, generation int64) string {
 	version := nilUUID
 	if credentialID != nil {
 		version = *credentialID
 	}
-	return canonicalUUID(providerID) + ":" + canonicalUUID(version)
+	scope := canonicalUUID(providerID) + ":" + canonicalUUID(version)
+	if generation != 0 {
+		scope += ":" + strconv.FormatInt(generation, 10)
+	}
+	return scope
 }
 
 // SlotScope names the cooldown that follows one provider slot.

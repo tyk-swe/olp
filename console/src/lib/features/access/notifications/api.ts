@@ -10,12 +10,13 @@ export type CreateNotificationDestinationInput =
   Schemas['CreateNotificationDestinationRequest'];
 export type UpdateNotificationDestinationInput =
   Schemas['UpdateNotificationDestinationRequest'];
-export type BudgetAlertRule = Schemas['BudgetAlertRule'];
-export type CreateBudgetAlertRuleInput =
-  Schemas['CreateBudgetAlertRuleRequest'];
-export type UpdateBudgetAlertRuleInput =
-  Schemas['UpdateBudgetAlertRuleRequest'];
-export type BudgetAlertDelivery = Schemas['BudgetAlertDelivery'];
+export type NotificationEvent = Schemas['NotificationEvent'];
+export type NotificationRule = Schemas['NotificationRule'];
+export type CreateNotificationRuleInput =
+  Schemas['CreateNotificationRuleRequest'];
+export type UpdateNotificationRuleInput =
+  Schemas['UpdateNotificationRuleRequest'];
+export type NotificationDelivery = Schemas['NotificationDelivery'];
 
 export async function listNotificationDestinations(
   signal?: AbortSignal
@@ -63,18 +64,18 @@ export async function updateNotificationDestination(
   return result(response.data, response.error, response.response);
 }
 
-export async function listBudgetAlertRules(
+export async function listNotificationRules(
   signal?: AbortSignal
-): Promise<BudgetAlertRule[]> {
+): Promise<NotificationRule[]> {
   return collectCursorPages((cursor) =>
-    listBudgetAlertRulePage(cursor, signal)
+    listNotificationRulePage(cursor, signal)
   );
 }
 
-export async function listBudgetAlertRulePage(
+export async function listNotificationRulePage(
   cursor?: string,
   signal?: AbortSignal
-): Promise<CursorPage<BudgetAlertRule>> {
+): Promise<CursorPage<NotificationRule>> {
   const response = await apiClient.GET('/api/v1/notifications/rules', {
     params: { query: { limit: 50, cursor } },
     signal
@@ -82,9 +83,9 @@ export async function listBudgetAlertRulePage(
   return pageResult(result(response.data, response.error, response.response));
 }
 
-export async function createBudgetAlertRule(
-  input: CreateBudgetAlertRuleInput
-): Promise<BudgetAlertRule> {
+export async function createNotificationRule(
+  input: CreateNotificationRuleInput
+): Promise<NotificationRule> {
   const response = await apiClient.POST('/api/v1/notifications/rules', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
@@ -92,15 +93,15 @@ export async function createBudgetAlertRule(
   return result(response.data, response.error, response.response);
 }
 
-export async function updateBudgetAlertRule(
-  rule: BudgetAlertRule,
-  input: UpdateBudgetAlertRuleInput
-): Promise<BudgetAlertRule> {
+export async function updateNotificationRule(
+  rule: NotificationRule,
+  input: UpdateNotificationRuleInput
+): Promise<NotificationRule> {
   const response = await apiClient.PATCH(
-    '/api/v1/notifications/rules/{budget_alert_rule_id}',
+    '/api/v1/notifications/rules/{notification_rule_id}',
     {
       params: {
-        path: { budget_alert_rule_id: rule.id },
+        path: { notification_rule_id: rule.id },
         header: { 'If-Match': rule.etag }
       },
       body: input
@@ -112,7 +113,7 @@ export async function updateBudgetAlertRule(
 export async function listNotificationDeliveries(
   ruleId?: string,
   signal?: AbortSignal
-): Promise<BudgetAlertDelivery[]> {
+): Promise<NotificationDelivery[]> {
   return collectCursorPages(async (cursor) => {
     const response = await apiClient.GET('/api/v1/notifications/deliveries', {
       params: { query: { limit: 50, cursor, rule_id: ruleId } },

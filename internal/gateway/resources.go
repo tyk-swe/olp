@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -70,14 +71,12 @@ func resourceCommitContext(ctx context.Context) (context.Context, context.Cancel
 const maxResourceList = 100
 
 type pin struct {
-	target    runtime.Target
-	provider  runtime.Provider
-	attempt   runtime.Attempt
-	slot      runtime.Slot
-	model     string
-	hold      *dispatchHold
-	secret    []byte
-	hasSecret bool
+	target   runtime.Target
+	provider runtime.Provider
+	attempt  runtime.Attempt
+	slot     runtime.Slot
+	model    string
+	hold     *dispatchHold
 }
 
 func readBounded(r io.Reader, limit int64) ([]byte, error) {
@@ -110,17 +109,6 @@ func resourceURL(cfg connectors.Config, model, path string, query url.Values) (s
 	return cfg.ResourceURL(model, path, query)
 }
 
-func (s *Server) pinSecret(x *execution, p *pin) []byte {
-	if p.hasSecret {
-		return p.secret
-	}
-	if p.slot.CredentialID != nil {
-		secret, _ := x.request.release.Credential(*p.slot.CredentialID)
-		return secret
-	}
-	return nil
-}
-
 func resourceModel(res *resources.Resource) string {
 	var meta struct {
 		UpstreamModel string `json:"upstream_model"`
@@ -139,7 +127,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	snapshot := x.request.release.Snapshot
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, operation, surface, mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !qualified(&p, t.ProviderModel) {
 				return errors.New("provider capability unavailable")
@@ -208,12 +196,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		fact.Class = class
 		fact.Committed = f.committed
 		if fact.Interaction != nil && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
-			switch {
-			case f.status > 0:
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			case f.dispatched:
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			}
+			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		// Stored-response lifecycle calls do not generate billable work.
@@ -246,7 +229,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	if err := s.applyCredentials(ctx, x, req, cfg, s.pinSecret(x, p), body); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -258,14 +241,8 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	received := s.now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
@@ -293,18 +270,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode == http.StatusNotFound:
-		f.class = classUpstreamClient
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }
@@ -892,12 +860,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
-		if fact.Interaction != nil && f.dispatched {
-			if f.status > 0 {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			} else {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			}
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
 		}
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(true)
@@ -912,7 +876,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if err := s.applyCredentials(ctx, x, req, p.provider.Connector(), s.pinSecret(x, p), nil); err != nil {
+	cfg := p.provider.Connector()
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, nil); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}
@@ -924,14 +889,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	resp, err := client.Do(req)
 	if err != nil {
 		pipeR.CloseWithError(err)
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	// A provider may reply before consuming the entire multipart body. Close
 	// the read side so the writer cannot wait forever for a peer that has
@@ -958,18 +917,9 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode == http.StatusNotFound:
-		f.class = classUpstreamClient
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }

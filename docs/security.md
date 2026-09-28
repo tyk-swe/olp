@@ -59,6 +59,7 @@ See [ADR 0006](adr/0006-management-routes-are-authorized-from-the-contract.md).
 | `manage_tokens` | yes |  |  |  | yes |  |
 | `manage_projects` | yes |  |  |  | yes |  |
 | `local_login` | yes |  |  |  | yes |  |
+| `manage_plugins` | yes |  |  |  | yes |  |
 <!-- /operations -->
 
 `internal/access/testdata/authorization.golden.json` records which callers
@@ -127,7 +128,7 @@ names are bound into stored data and never change:
 | Kind | Purposes |
 | --- | --- |
 | Digest | `api_key`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source` |
+| Seal | `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per

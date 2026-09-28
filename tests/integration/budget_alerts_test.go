@@ -85,7 +85,9 @@ func alertInstallation(t *testing.T, h *accessHarness) string {
 	return installation
 }
 
-func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
+// deliveryPass runs the notification delivery task until it checkpoints one
+// pass.
+func deliveryPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	t.Helper()
 	ring, err := secrets.ParseRing([]byte(h.Ring))
 	if err != nil {
@@ -93,26 +95,26 @@ func alertPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	}
 	var baseline int64
 	_ = h.Pool.QueryRow(context.Background(),
-		"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&baseline)
+		"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='notification_delivery'").Scan(&baseline)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		usage.RunBudgetAlertDelivery(ctx, h.Pool, ring, alertInstallation(t, h), policy,
+		usage.RunNotificationDelivery(ctx, h.Pool, ring, alertInstallation(t, h), policy,
 			slog.New(slog.NewTextHandler(io.Discard, nil)))
 	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var checked int64
 		err := h.Pool.QueryRow(context.Background(),
-			"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='budget_alert_delivery'").Scan(&checked)
+			"SELECT successes_total+failures_total+skipped_total FROM olp.worker_task_health WHERE task='notification_delivery'").Scan(&checked)
 		if err == nil && checked > baseline {
 			break
 		}
 		if time.Now().After(deadline) {
 			cancel()
 			<-done
-			t.Fatalf("budget alert pass never checkpointed: %v", err)
+			t.Fatalf("notification delivery pass never checkpointed: %v", err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -126,7 +128,7 @@ func alertDeliveries(t *testing.T, h *accessHarness, ruleID string) []map[string
 		`SELECT jsonb_build_object('id',id,'status',status,'attempts',attempts,'last_error_code',last_error_code,
 		 'window_id',window_id,'threshold_percent',threshold_percent,'delivered_at',delivered_at,
 		 'accrued',accrued::text,'limit',limit_amount::text,'currency',currency)
-		 FROM olp.budget_alert_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
+		 FROM olp.notification_deliveries WHERE rule_id=$1 ORDER BY created_at`, ruleID)
 	if err != nil {
 		t.Fatalf("deliveries: %v", err)
 	}
@@ -205,23 +207,23 @@ func TestBudgetAlertDelivery(t *testing.T) {
 	}
 
 	ruleKey := h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "key over 80", "subject_kind": "api_key", "subject_id": keyHit["id"],
+		map[string]any{"name": "key over 80", "event": "budget.threshold", "subject_kind": "api_key", "subject_id": keyHit["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	ruleGroup := h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "group at limit", "subject_kind": "budget_group", "subject_id": group["id"],
+		map[string]any{"name": "group at limit", "event": "budget.threshold", "subject_kind": "budget_group", "subject_id": group["id"],
 			"window_kind": "month", "threshold_percent": 100, "destination_id": unsigned["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	ruleQuiet := h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "quiet rule", "subject_kind": "api_key", "subject_id": keyMiss["id"],
+		map[string]any{"name": "quiet rule", "event": "budget.threshold", "subject_kind": "api_key", "subject_id": keyMiss["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	ruleStale := h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "stale rule", "subject_kind": "api_key", "subject_id": keyStale["id"],
+		map[string]any{"name": "stale rule", "event": "budget.threshold", "subject_kind": "api_key", "subject_id": keyStale["id"],
 			"window_kind": "day", "threshold_percent": 80, "destination_id": signed["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 
 	if hook.count() != 2 {
 		t.Fatalf("deliveries = %d, want 2 (below-threshold rule must not fire)", hook.count())
@@ -295,7 +297,7 @@ func TestBudgetAlertDelivery(t *testing.T) {
 		t.Fatalf("quiet rule recorded a delivery: %v", rows)
 	}
 
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 	if hook.count() != 2 {
 		t.Fatalf("second pass delivered again: %d", hook.count())
 	}
@@ -306,7 +308,7 @@ func TestBudgetAlertDelivery(t *testing.T) {
 		t.Fatalf("delivery listing = %v", listed)
 	}
 	item := items[0].(map[string]any)
-	for _, field := range []string{"id", "rule_id", "rule_name", "status", "attempts", "window_id", "threshold_percent", "accrued", "limit", "currency"} {
+	for _, field := range []string{"id", "rule_id", "rule_name", "event", "status", "attempts", "window_id", "threshold_percent", "accrued", "limit", "currency"} {
 		if _, ok := item[field]; !ok {
 			t.Fatalf("delivery metadata missing %s: %v", field, item)
 		}
@@ -343,18 +345,18 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		map[string]any{"name": "flaky hook", "url": hook.URL + "/flaky"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	rule := h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "retry rule", "subject_kind": "api_key", "subject_id": key["id"],
+		map[string]any{"name": "retry rule", "event": "budget.threshold", "subject_kind": "api_key", "subject_id": key["id"],
 			"window_kind": "day", "threshold_percent": 50, "destination_id": destination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	ruleID := rule["id"].(string)
 
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 	rows := alertDeliveries(t, h, ruleID)
 	if len(rows) != 1 || rows[0]["status"] != "failed" || rows[0]["last_error_code"] != "http_5xx" || rows[0]["attempts"].(float64) != 1 {
 		t.Fatalf("failed delivery = %v", rows)
 	}
 
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 	if hook.count() != 1 {
 		t.Fatalf("retry fired inside backoff: %d", hook.count())
 	}
@@ -362,9 +364,9 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 	exec("DELETE FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'", key["id"])
 	exec(`UPDATE olp.api_keys SET policy = jsonb_set(policy, '{daily_cost_limit}', '"999.00"') WHERE id=$1`, key["id"])
 
-	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusBadRequest)
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)
 	if rows[0]["last_error_code"] != "http_4xx" || rows[0]["attempts"].(float64) != 2 {
 		t.Fatalf("retried delivery = %v", rows)
@@ -377,9 +379,9 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 		t.Fatalf("retry did not report claim-time evidence: %v", retryBody)
 	}
 
-	exec("UPDATE olp.budget_alert_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
+	exec("UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '3 minutes' WHERE rule_id=$1", ruleID)
 	hook.setStatus(http.StatusNoContent)
-	alertPass(t, h, policy)
+	deliveryPass(t, h, policy)
 	rows = alertDeliveries(t, h, ruleID)
 	if rows[0]["status"] != "delivered" || rows[0]["last_error_code"] != nil || rows[0]["attempts"].(float64) != 3 {
 		t.Fatalf("delivered retry = %v", rows)
@@ -423,7 +425,7 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
 	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "mismatch subject", "project_id": projectID, "subject_kind": "api_key",
+		map[string]any{"name": "mismatch subject", "project_id": projectID, "event": "budget.threshold", "subject_kind": "api_key",
 			"subject_id": globalKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": scopedDestination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
@@ -434,7 +436,7 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 		map[string]any{"name": "global hook", "url": hook.URL + "/global"},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "mismatch destination", "project_id": projectID, "subject_kind": "api_key",
+		map[string]any{"name": "mismatch destination", "project_id": projectID, "event": "budget.threshold", "subject_kind": "api_key",
 			"subject_id": projectKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": globalDestination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
@@ -443,7 +445,7 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	}
 
 	status, _, _ = h.request(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "global rule project dest", "subject_kind": "api_key",
+		map[string]any{"name": "global rule project dest", "event": "budget.threshold", "subject_kind": "api_key",
 			"subject_id": globalKey["id"], "window_kind": "day", "threshold_percent": 50,
 			"destination_id": scopedDestination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()})
@@ -452,7 +454,7 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	}
 
 	h.want(owner, "POST", "/api/v1/notifications/rules",
-		map[string]any{"name": "scoped rule", "project_id": projectID, "subject_kind": "api_key",
+		map[string]any{"name": "scoped rule", "project_id": projectID, "event": "budget.threshold", "subject_kind": "api_key",
 			"subject_id": projectKey["id"], "window_kind": "month", "threshold_percent": 90,
 			"destination_id": scopedDestination["id"]},
 		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)

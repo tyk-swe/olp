@@ -344,20 +344,8 @@ func (r *Request) validateChat(fields map[string]json.RawMessage) error {
 }
 
 func validateResponses(fields map[string]json.RawMessage) error {
-	raw, present := fields["input"]
-	if !present || isNull(raw) {
-		return &RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
-	}
-	if _, ok := stringField(fields, "input"); !ok {
-		items, ok := arrayField(fields, "input")
-		if !ok || len(items) == 0 {
-			return invalid("input", "input must be a string or a non-empty array.")
-		}
-		for i, raw := range items {
-			if err := validateResponseInput(raw, fmt.Sprintf("input[%d]", i)); err != nil {
-				return err
-			}
-		}
+	if err := ValidateResponsesInput(fields["input"]); err != nil {
+		return err
 	}
 	if raw, present := fields["previous_response_id"]; present && !isNull(raw) {
 		if _, ok := stringField(fields, "previous_response_id"); !ok {
@@ -391,6 +379,28 @@ func validateResponses(fields map[string]json.RawMessage) error {
 		}
 	}
 	return toolsField(fields)
+}
+
+// ValidateResponsesInput validates inline Responses input and rejects
+// account-scoped references, both on ingress and after hosting rewrites.
+func ValidateResponsesInput(raw json.RawMessage) error {
+	if len(raw) == 0 || isNull(raw) {
+		return &RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return nil
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil || len(items) == 0 {
+		return invalid("input", "input must be a string or a non-empty array.")
+	}
+	for i, item := range items {
+		if err := validateResponseInput(item, fmt.Sprintf("input[%d]", i)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validateResponseInput rejects account-scoped references while retaining

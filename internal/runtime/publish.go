@@ -68,6 +68,8 @@ func StrictRefusal(err error) error {
 	switch requirement {
 	case "explicit_profile":
 		message += " Declare the route transformed to use a provider without a profile."
+	case "strict_profile":
+		message += " Declare the route transformed to use this profile."
 	case "operation_contract", "native_media_contract", "native_batch_contract", "native_realtime_contract":
 		message += " Declare the route transformed to translate for this target."
 	}
@@ -79,13 +81,13 @@ func StrictRefusal(err error) error {
 // their latest published revision.
 func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	snapshot := &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
-	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
+	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var revision ProviderRevision
-		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID); err != nil {
+		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.Plugin); err != nil {
 			rows.Close()
 			return nil, err
 		}

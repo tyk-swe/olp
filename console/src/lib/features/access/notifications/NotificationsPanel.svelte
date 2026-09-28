@@ -10,15 +10,16 @@
   import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
   import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
   import {
-    createBudgetAlertRule,
     createNotificationDestination,
-    listBudgetAlertRules,
+    createNotificationRule,
     listNotificationDeliveries,
     listNotificationDestinations,
-    updateBudgetAlertRule,
+    listNotificationRules,
     updateNotificationDestination,
-    type BudgetAlertRule,
-    type NotificationDestination
+    updateNotificationRule,
+    type NotificationDestination,
+    type NotificationEvent,
+    type NotificationRule
   } from '$lib/features/access/notifications/api';
   import { notificationKeys } from '$lib/features/access/notifications/notificationKeys';
   import { formatDate } from '$lib/format';
@@ -36,7 +37,7 @@
   }));
   const rules = createQuery(() => ({
     queryKey: notificationKeys.rules(),
-    queryFn: ({ signal }) => listBudgetAlertRules(signal)
+    queryFn: ({ signal }) => listNotificationRules(signal)
   }));
   const deliveries = createQuery(() => ({
     queryKey: notificationKeys.deliveries(),
@@ -142,6 +143,8 @@
   }
 
   let ruleName = $state('');
+  let ruleEvent = $state<NotificationEvent>('budget.threshold');
+  const watchesBudget = $derived(ruleEvent === 'budget.threshold');
   let ruleProjectId = $state('');
   let ruleSubjectKind = $state<'api_key' | 'budget_group'>('api_key');
   let ruleSubjectId = $state('');
@@ -162,7 +165,8 @@
   const destinationOptions = $derived(
     (destinations.data ?? []).filter(
       (destination) =>
-        (destination.project_id ?? null) === (ruleProjectId || null)
+        (destination.project_id ?? null) ===
+        (watchesBudget ? ruleProjectId || null : null)
     )
   );
 
@@ -187,56 +191,84 @@
       !canManage ||
       ruleBusy ||
       !ruleName.trim() ||
-      !ruleSubjectId ||
+      (watchesBudget && !ruleSubjectId) ||
       !ruleDestinationId
     )
       return;
     const threshold = Number(ruleThreshold);
-    if (!Number.isInteger(threshold) || threshold < 1 || threshold > 100) {
+    if (
+      watchesBudget &&
+      (!Number.isInteger(threshold) || threshold < 1 || threshold > 100)
+    ) {
       error = 'Threshold must be a whole percentage from 1 to 100.';
       return;
     }
     ruleBusy = true;
     error = notice = '';
     try {
-      await createBudgetAlertRule({
-        name: ruleName.trim(),
-        project_id: ruleProjectId || null,
-        subject_kind: ruleSubjectKind,
-        subject_id: ruleSubjectId,
-        window_kind: ruleWindow,
-        threshold_percent: threshold,
-        destination_id: ruleDestinationId
-      });
+      await createNotificationRule(
+        watchesBudget
+          ? {
+              name: ruleName.trim(),
+              event: ruleEvent,
+              project_id: ruleProjectId || null,
+              subject_kind: ruleSubjectKind,
+              subject_id: ruleSubjectId,
+              window_kind: ruleWindow,
+              threshold_percent: threshold,
+              destination_id: ruleDestinationId
+            }
+          : {
+              name: ruleName.trim(),
+              event: ruleEvent,
+              destination_id: ruleDestinationId
+            }
+      );
       ruleName = '';
       ruleSubjectId = '';
       ruleDestinationId = '';
-      notice = 'Alert rule created.';
+      notice = 'Rule created.';
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
       });
     } catch (cause) {
-      error = errorMessage(cause, 'The alert rule could not be created.');
+      error = errorMessage(cause, 'The rule could not be created.');
     } finally {
       ruleBusy = false;
     }
   }
 
-  async function toggleRule(rule: BudgetAlertRule) {
+  async function toggleRule(rule: NotificationRule) {
     if (!canManage) return;
     error = notice = '';
     try {
-      await updateBudgetAlertRule(rule, { enabled: !rule.enabled });
+      await updateNotificationRule(rule, { enabled: !rule.enabled });
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
       });
     } catch (cause) {
-      error = errorMessage(cause, 'The alert rule could not be updated.');
+      error = errorMessage(cause, 'The rule could not be updated.');
     }
   }
 
-  function subjectLabel(rule: BudgetAlertRule) {
+  const eventLabels: Record<NotificationEvent, string> = {
+    'budget.threshold': 'Budget threshold',
+    'provider.grant.lapsed': 'Grant lapsed'
+  };
+
+  function subjectLabel(rule: NotificationRule) {
+    if (rule.event !== 'budget.threshold') return 'Every provider';
     return `${rule.subject_kind === 'api_key' ? 'API key' : 'Budget group'} · ${rule.subject_name ?? rule.subject_id}`;
+  }
+
+  function windowLabel(windowKind: NotificationRule['window_kind']) {
+    if (!windowKind) return '—';
+    return windowKind === 'day' ? 'UTC day' : 'UTC month';
+  }
+
+  function amount(value: string | null, currency: string | null) {
+    if (value == null) return '—';
+    return currency ? `${value} ${currency}` : value;
   }
 </script>
 
@@ -244,12 +276,13 @@
   class="card notifications-panel"
   aria-labelledby="notifications-heading"
 >
-  <p class="eyebrow">Budget alerts</p>
+  <p class="eyebrow">Notifications</p>
   <h2 id="notifications-heading">Notification destinations and rules</h2>
   <p class="section-help">
-    {#if services.notificationsActive}Crossed budget thresholds post a
-      metadata-only webhook to the destination. Rules fire at most once per rule
-      and window; failed deliveries retry with backoff.{:else}Alert rules and
+    {#if services.notificationsActive}Crossed budget thresholds and lapsed
+      provider grants post a metadata-only webhook to each subscribed
+      destination. A budget rule fires at most once per window, a grant lapse
+      once per rule; failed deliveries retry with backoff.{:else}Rules and
       destinations are stored, but this installation is not running the delivery
       worker, so no notifications will be sent yet.{/if}
   </p>
@@ -274,7 +307,7 @@
             type="url"
             bind:value={destUrl}
             required
-            placeholder="https://hooks.example.com/budget"
+            placeholder="https://hooks.example.com/olp"
           />
         </div>
         <ProjectScopeField
@@ -390,7 +423,7 @@
     </div>
   {/if}
 
-  <h3>Alert rules</h3>
+  <h3>Rules</h3>
   {#if canManage}
     <form class="create-form" onsubmit={submitRule}>
       <div class="form-grid">
@@ -401,47 +434,64 @@
             required
           />
         </div>
-        <ProjectScopeField
-          id="rule-project"
-          bind:value={ruleProjectId}
-          unassigned={installationWide}
-        />
-        <div class="form-field">
-          <label for="rule-subject-kind">Subject</label><select
-            id="rule-subject-kind"
-            bind:value={ruleSubjectKind}
-            ><option value="api_key">API key</option><option
-              value="budget_group">Budget group</option
-            ></select
-          >
-        </div>
-        <div class="form-field">
-          <label for="rule-subject">
-            {ruleSubjectKind === 'api_key' ? 'API key' : 'Budget group'}</label
-          ><select id="rule-subject" bind:value={ruleSubjectId} required
-            ><option value="" disabled>Choose a subject</option
-            >{#each subjectOptions as subject (subject.id)}<option
-                value={subject.id}>{subject.name}</option
-              >{/each}</select
-          >
-        </div>
-        <div class="form-field">
-          <label for="rule-window">Window</label><select
-            id="rule-window"
-            bind:value={ruleWindow}
-            ><option value="day">UTC day</option><option value="month"
-              >UTC month</option
-            ></select
-          >
-        </div>
-        <div class="form-field">
-          <label for="rule-threshold">Threshold %</label><input
-            id="rule-threshold"
-            inputmode="numeric"
-            bind:value={ruleThreshold}
-            required
+        {#if installationWide}
+          <div class="form-field">
+            <label for="rule-event">Event</label><select
+              id="rule-event"
+              bind:value={ruleEvent}
+              ><option value="budget.threshold"
+                >{eventLabels['budget.threshold']}</option
+              ><option value="provider.grant.lapsed"
+                >{eventLabels['provider.grant.lapsed']}</option
+              ></select
+            >
+          </div>
+        {/if}
+        {#if watchesBudget}
+          <ProjectScopeField
+            id="rule-project"
+            bind:value={ruleProjectId}
+            unassigned={installationWide}
           />
-        </div>
+          <div class="form-field">
+            <label for="rule-subject-kind">Subject</label><select
+              id="rule-subject-kind"
+              bind:value={ruleSubjectKind}
+              ><option value="api_key">API key</option><option
+                value="budget_group">Budget group</option
+              ></select
+            >
+          </div>
+          <div class="form-field">
+            <label for="rule-subject">
+              {ruleSubjectKind === 'api_key'
+                ? 'API key'
+                : 'Budget group'}</label
+            ><select id="rule-subject" bind:value={ruleSubjectId} required
+              ><option value="" disabled>Choose a subject</option
+              >{#each subjectOptions as subject (subject.id)}<option
+                  value={subject.id}>{subject.name}</option
+                >{/each}</select
+            >
+          </div>
+          <div class="form-field">
+            <label for="rule-window">Window</label><select
+              id="rule-window"
+              bind:value={ruleWindow}
+              ><option value="day">UTC day</option><option value="month"
+                >UTC month</option
+              ></select
+            >
+          </div>
+          <div class="form-field">
+            <label for="rule-threshold">Threshold %</label><input
+              id="rule-threshold"
+              inputmode="numeric"
+              bind:value={ruleThreshold}
+              required
+            />
+          </div>
+        {/if}
         <div class="form-field">
           <label for="rule-destination">Destination</label><select
             id="rule-destination"
@@ -460,33 +510,36 @@
           type="submit"
           disabled={ruleBusy ||
             !ruleName.trim() ||
-            !ruleSubjectId ||
+            (watchesBudget && !ruleSubjectId) ||
             !ruleDestinationId}>{ruleBusy ? 'Creating…' : 'Create rule'}</button
         >
       </div>
+      {#if !watchesBudget}<p class="section-help">
+          A grant lapses when its provider plugin can no longer refresh it. Each
+          lapse, on any provider, notifies an installation-wide destination
+          once.
+        </p>{/if}
     </form>
   {/if}
 
-  {#if rules.isPending}<span role="status">Loading alert rules…</span>
+  {#if rules.isPending}<span role="status">Loading rules…</span>
   {:else if rules.isError}<span class="inline-problem" role="alert"
-      >Alert rules are unavailable.
+      >Rules are unavailable.
       <button class="text-button" type="button" onclick={() => rules.refetch()}
         >Retry</button
       ></span
     >
-  {:else if !(rules.data ?? []).length}<p class="section-help">
-      No alert rules yet.
-    </p>
+  {:else if !(rules.data ?? []).length}<p class="section-help">No rules yet.</p>
   {:else}
     <div class="table-scroll">
       <table class="data-table">
         <thead
           ><tr
-            ><th scope="col">Name</th><th scope="col">Subject</th><th
-              scope="col">Window</th
-            ><th scope="col">Threshold</th><th scope="col">Destination</th><th
-              scope="col">Enabled</th
-            >{#if canManage}<th scope="col"
+            ><th scope="col">Name</th><th scope="col">Event</th><th scope="col"
+              >Subject</th
+            ><th scope="col">Window</th><th scope="col">Threshold</th><th
+              scope="col">Destination</th
+            ><th scope="col">Enabled</th>{#if canManage}<th scope="col"
                 ><span class="sr-only">Actions</span></th
               >{/if}</tr
           ></thead
@@ -498,10 +551,14 @@
                 ><strong>{rule.name}</strong><br /><small
                   >{rule.project_name ?? 'Installation-wide'}</small
                 ></td
-              ><td>{subjectLabel(rule)}</td><td
-                >{rule.window_kind === 'day' ? 'UTC day' : 'UTC month'}</td
-              ><td>{rule.threshold_percent}%</td><td>{rule.destination_name}</td
-              ><td>{rule.enabled ? 'Yes' : 'No'}</td>{#if canManage}<td
+              ><td>{eventLabels[rule.event]}</td><td>{subjectLabel(rule)}</td
+              ><td>{windowLabel(rule.window_kind)}</td><td
+                >{rule.threshold_percent == null
+                  ? '—'
+                  : `${rule.threshold_percent}%`}</td
+              ><td>{rule.destination_name}</td><td
+                >{rule.enabled ? 'Yes' : 'No'}</td
+              >{#if canManage}<td
                   ><button
                     class="text-button"
                     type="button"
@@ -534,31 +591,34 @@
       <table class="data-table">
         <thead
           ><tr
-            ><th scope="col">Rule</th><th scope="col">Window</th><th scope="col"
-              >Threshold</th
-            ><th scope="col">Accrued</th><th scope="col">Limit</th><th
-              scope="col">Status</th
-            ><th scope="col">Attempts</th><th scope="col">Last error</th><th
-              scope="col">Last attempt</th
-            ></tr
+            ><th scope="col">Rule</th><th scope="col">Event</th><th scope="col"
+              >Window</th
+            ><th scope="col">Threshold</th><th scope="col">Accrued</th><th
+              scope="col">Limit</th
+            ><th scope="col">Status</th><th scope="col">Attempts</th><th
+              scope="col">Last error</th
+            ><th scope="col">Last attempt</th></tr
           ></thead
         >
         <tbody>
           {#each deliveries.data ?? [] as delivery (delivery.id)}
             <tr
               ><td>{delivery.rule_name}</td><td
-                ><span class="mono">{delivery.window_id}</span></td
-              ><td>{delivery.threshold_percent}%</td><td
+                >{eventLabels[delivery.event]}{#if delivery.provider_name}<br
+                  /><small
+                    >{delivery.provider_name} · credential v{delivery.credential_version}</small
+                  >{/if}</td
+              ><td><span class="mono">{delivery.window_id ?? '—'}</span></td><td
+                >{delivery.threshold_percent == null
+                  ? '—'
+                  : `${delivery.threshold_percent}%`}</td
+              ><td
                 ><span class="mono"
-                  >{delivery.accrued}{delivery.currency
-                    ? ` ${delivery.currency}`
-                    : ''}</span
+                  >{amount(delivery.accrued, delivery.currency)}</span
                 ></td
               ><td
                 ><span class="mono"
-                  >{delivery.limit}{delivery.currency
-                    ? ` ${delivery.currency}`
-                    : ''}</span
+                  >{amount(delivery.limit, delivery.currency)}</span
                 ></td
               ><td
                 ><span class="badge" class:danger={delivery.status === 'failed'}

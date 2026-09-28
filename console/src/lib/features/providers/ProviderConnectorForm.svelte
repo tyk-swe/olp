@@ -2,15 +2,19 @@
   import { createQuery } from '@tanstack/svelte-query';
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
+  import PluginProfileField from './PluginProfileField.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
+  import type { FieldIssue } from '$lib/api/http';
   import { listProviderVendors } from '$lib/features/providers/api';
+  import { listProviderProfiles } from '$lib/features/providers/profiles';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
     emptyProviderOptions,
     requiresCredential,
-    requiresSeedModel,
+    requiresGrant,
+    requiresProbeModel,
     selectProviderPreset,
     setProviderDraftKind,
     type ProviderDraft
@@ -22,6 +26,8 @@
     selectedSpec,
     busy,
     lockKind = false,
+    issues = [],
+    grantEnrolled = false,
     onSubmit
   }: {
     draft: ProviderDraft;
@@ -30,6 +36,11 @@
     busy: string;
     /** Set once the draft provider exists; its connector kind is immutable. */
     lockKind?: boolean;
+    /** Field issues the server reported for the last submission. */
+    issues?: FieldIssue[];
+    /** Set while a live grant of the plugin build the form pins backs the
+     * draft, so saving tests the connection rather than signing in upstream. */
+    grantEnrolled?: boolean;
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
@@ -67,10 +78,16 @@
   const credentialRequired = $derived(
     requiresCredential(selectedSpec, draft.authMode)
   );
+  const profiles = createQuery(() => ({
+    queryKey: ['provider-profiles'],
+    queryFn: ({ signal }) => listProviderProfiles(signal)
+  }));
+  const grantRequired = $derived(requiresGrant(selectedSpec, draft.authMode));
+  const signInNext = $derived(grantRequired && !grantEnrolled);
   const seedModelRequired = $derived(
-    requiresSeedModel(selectedSpec) ||
-      ['voyage', 'perplexity', 'cohere'].includes(draft.presetId)
+    requiresProbeModel(draft, selectedSpec, profiles.data)
   );
+  const plugin = $derived(draft.kind === 'plugin');
   const selectedPreset = $derived(
     selectedSpec.presets.find((preset) => preset.id === draft.presetId)
   );
@@ -156,6 +173,12 @@
       authEditable
       endpointReadonly={false}
     />
+    {#if plugin}<PluginProfileField
+        values={draft}
+        idPrefix="provider"
+        disabled={Boolean(busy)}
+        {issues}
+      />{/if}
     {#if draft.kind === 'openai_compatible'}<div class="form-field full">
         <label for="compatible-provider">Compatible provider</label><select
           id="compatible-provider"
@@ -218,9 +241,11 @@
           : 'gpt-5.4'}
         required={seedModelRequired}
       /><small id="initial-model-help"
-        >{seedModelRequired
-          ? 'This provider needs an explicit model to test credentials.'
-          : 'Used for the initial connector probe; upstream discovery follows.'}</small
+        >{plugin && seedModelRequired
+          ? 'This plugin profile declares no model discovery: the connection test certifies this declared model.'
+          : seedModelRequired
+            ? 'This provider needs an explicit model to test credentials.'
+            : 'Used for the initial connector probe; upstream discovery follows.'}</small
       >
     </div>
     {#if draft.authMode === 'headers'}<label class="form-field full"
@@ -232,7 +257,15 @@
           Credential.</small
         ></label
       >{/if}
-    {#if credentialRequired}<div class="form-field full">
+    {#if grantRequired}<div class="identity-note full">
+        <strong>Grant enrollment</strong><span
+          >This profile authenticates with a grant instead of a pasted
+          credential. {signInNext
+            ? 'After saving, sign in to the upstream account as the plugin directs: paste back what its authorization page returns, or approve its device code.'
+            : 'The draft holds a grant from an earlier sign-in.'} OLP keeps the grant
+          encrypted; the console never sees it.</span
+        >
+      </div>{:else if credentialRequired}<div class="form-field full">
         <label for="provider-secret">Credential</label><input
           id="provider-secret"
           aria-describedby="credential-help"
@@ -242,7 +275,9 @@
           required
         /><small id="credential-help"
           >Sent once to this installation; never saved by the console or
-          returned by the API.</small
+          returned by the API.{#if plugin}
+            The plugin's hosting adaptation places it in the headers and query
+            parameters the profile declares.{/if}</small
         >
       </div>{:else}<div class="identity-note full">
         <strong>No stored credential</strong><span
@@ -260,7 +295,13 @@
   />
   <div class="form-actions">
     <button class="button button-primary" type="submit" disabled={Boolean(busy)}
-      >{busy === 'create' ? 'Saving and testing…' : 'Save and test connection'}
+      >{busy === 'create'
+        ? signInNext
+          ? 'Saving…'
+          : 'Saving and testing…'
+        : signInNext
+          ? 'Save and sign in upstream'
+          : 'Save and test connection'}
       <NavIcon name="arrow" /></button
     >
   </div>

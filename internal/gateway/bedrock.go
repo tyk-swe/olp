@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
@@ -201,11 +202,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	var secret []byte
-	if p.slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*p.slot.CredentialID)
-	}
-	if err := s.applyCredentials(ctx, x, req, p.provider.Connector(), secret, body); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -217,14 +214,8 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		class := classConnect
-		if ctx.Err() != nil {
-			class = classCancelled
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				class = classTimeout
-			}
-		}
-		return nil, finish(class, &attemptFailure{dispatched: true})
+		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	received := s.now().Sub(fact.StartedAt)
 	fact.FirstByte = &received
@@ -240,16 +231,9 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(bedrockErrorBody(raw)), dispatched: true}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		f.class = classCredential
-	case resp.StatusCode == http.StatusTooManyRequests:
+	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
-		f.class = classRateLimit
-	case resp.StatusCode >= 500:
-		f.class = classUpstreamServer
-	default:
-		f.class = classUpstreamClient
 	}
 	return nil, finish(f.class, f)
 }

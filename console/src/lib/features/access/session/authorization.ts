@@ -76,7 +76,8 @@ const CAPABILITY_ROUTES = {
   'playground.use': 'POST /api/v1/playground',
   'settings.read': 'GET /api/v1/settings',
   'settings.update': 'PUT /api/v1/settings/{key}',
-  'pricing.update': 'POST /api/v1/pricing/revisions'
+  'pricing.update': 'POST /api/v1/pricing/revisions',
+  'plugins.manage': 'POST /api/v1/plugins'
 } as const satisfies Record<string, ManagementRoute>;
 
 export type Capability = keyof typeof CAPABILITY_ROUTES | 'sessions.manage';

@@ -21,9 +21,13 @@ func (c Config) EventStream() bool {
 }
 
 // StreamPayload removes only the qualified hosting envelope, retaining the native
-// Anthropic event document verbatim. Every event is bounded before allocating it;
-// there are no goroutines, unbounded queues, fabricated terminal events or retries.
+// Anthropic event document verbatim, or the envelope a plugin profile declares
+// around each event. Every event is bounded before allocating it; there are no
+// goroutines, unbounded queues, fabricated terminal events or retries.
 func (c Config) StreamPayload(reader io.Reader, maxEventBytes int) io.Reader {
+	if c.Plugin != nil {
+		return c.unwrapStream(reader, maxEventBytes)
+	}
 	if c.Hosting() != "bedrock-anthropic-invoke" {
 		return reader
 	}

@@ -40,7 +40,7 @@ func TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping(t *testin
 	deployment, version := "fallback", "2024-10-21"
 	cfg := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: &upstream.URL, Deployment: &deployment, APIVersion: &version, Options: Options{Models: map[string]json.RawMessage{"logical-a": json.RawMessage(`{"deployment":"wire-b"}`), "wire-b": json.RawMessage(`{"deployment":"wire-c"}`)}}}
 	cfg.Normalize()
-	err := New(nil, policy).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
+	err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}

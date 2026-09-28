@@ -45,6 +45,7 @@
   import {
     buildUpdateProviderInput,
     providerEditValues,
+    requiresGrant,
     type ProviderEditValues
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
@@ -341,6 +342,7 @@
       {run}
       onTouch={touch}
       dirty={sync.dirty}
+      issues={validationIssues}
       onSave={() => saveProvider(current)}
       onProviderChanged={providerChanged}
       onRefetchProvider={refetchProvider}
@@ -365,6 +367,10 @@
   <ProviderCredentialPool
     provider={current}
     {canManage}
+    grant={Boolean(
+      providerSpec &&
+      requiresGrant(providerSpec, current.configuration.auth_mode)
+    )}
     onChanged={providerChanged}
   />
   <ProviderBulkModels

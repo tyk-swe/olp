@@ -24,7 +24,7 @@ func TestPurposeNamesNeverChange(t *testing.T) {
 	if want := []string{"api_key", "management_token", "session", "recent_auth", "csrf", "oidc_state", "oidc_cookie", "invitation", "admission", "mutation", "installation"}; !slices.Equal(digests, want) {
 		t.Fatalf("digest purposes %v, want %v", digests, want)
 	}
-	if want := []string{"provider_credential", "provider_continuation", "notification_secret", "mutation_replay", "oidc_client", "oidc_flow", "media_job_source"}; !slices.Equal(seals, want) {
+	if want := []string{"provider_credential", "provider_continuation", "notification_secret", "mutation_replay", "oidc_client", "oidc_flow", "media_job_source", "provider_grant_refresh", "grant_enrollment"}; !slices.Equal(seals, want) {
 		t.Fatalf("seal purposes %v, want %v", seals, want)
 	}
 	for _, names := range [][]string{digests, seals} {

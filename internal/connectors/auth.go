@@ -31,12 +31,28 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
+// ErrAuthentication reports that authentication could not authorize an
+// upstream request. Every authentication failure matches it. Unless it also
+// matches ErrCredentialRejected, the failure may pass on a later attempt, such
+// as a token that could not be fetched.
 var ErrAuthentication = errors.New("provider authentication failed")
+
+// ErrCredentialRejected reports a credential that cannot authorize requests
+// until it changes: it is malformed, or its authority refused it.
+var ErrCredentialRejected error = credentialRejected{}
+
+type credentialRejected struct{}
+
+func (credentialRejected) Error() string        { return ErrAuthentication.Error() }
+func (credentialRejected) Is(target error) bool { return target == ErrAuthentication }
 
 const authTimeout = 10 * time.Second
 const authBodyLimit = 1 << 20
 
 type Auth struct {
+	// Signer runs the signing hooks of plugin profiles. Without one, a
+	// request of a profile that declares signing fails authentication.
+	Signer       Signer
 	mu           sync.Mutex
 	tokens       map[[32]byte]*cloudauth.Token
 	aws          map[[32]byte]aws.CredentialsProvider
@@ -180,72 +196,195 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 	return n, e
 }
 
-// Apply authenticates req for the provider and returns every credential value
-// it sent, so text derived from the reply can be redacted.
+// Apply prepares an upstream request in three stages, which every upstream
+// call path runs in this order:
+//
+//  1. Hosting places the request. The caller addressed it from the connector;
+//     hosting adds its semantic headers, query settings and version headers,
+//     and a plugin profile's declared headers and query parameters, which may
+//     carry the credential.
+//  2. Authentication authorizes it, using the authenticator registered for
+//     the connector's auth mode.
+//  3. Signing runs last, over the finished request and its body: the auth
+//     mode's signature, such as SigV4, then a plugin profile's signing hook.
+//
+// It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
-	var sensitive egress.Sensitive
-	sensitive.Add(string(secret))
-	if err := c.ApplySemantic(req); err != nil {
+	placed, err := c.host(req, secret)
+	if err != nil {
 		return egress.Sensitive{}, err
 	}
-	if c.Kind == "anthropic" && c.ProfileID == "" {
-		req.Header.Set("Anthropic-Version", "2023-06-01")
+	authenticator, ok := authenticators[c.AuthMode]
+	if !ok {
+		return egress.Sensitive{}, ErrCredentialRejected
 	}
-	switch c.AuthMode {
-	case "none":
-		return egress.Sensitive{}, nil
-	case "headers":
-		if e := egress.ApplyCredentialHeaders(req.Header, c.CredentialHeaders, secret); e != nil {
-			return egress.Sensitive{}, ErrAuthentication
+	authorized, err := authenticator.authenticate(a, ctx, req, c, secret)
+	if err != nil {
+		return egress.Sensitive{}, err
+	}
+	sensitive := append(append([]string{string(secret)}, placed...), authorized.sensitive...)
+	if authorized.sign != nil {
+		signed, err := authorized.sign(ctx, req, body)
+		if err != nil {
+			return egress.Sensitive{}, err
 		}
-		for _, h := range c.CredentialHeaders {
-			sensitive.Add(req.Header.Get(h))
+		sensitive = append(sensitive, signed...)
+	}
+	if c.Plugin != nil {
+		signed, err := c.Plugin.sign(ctx, a.Signer, c.PluginOptions, req, secret, body, sensitive)
+		if err != nil {
+			return egress.Sensitive{}, err
 		}
-	case "api_key":
-		if len(secret) == 0 || strings.ContainsAny(string(secret), "\r\n\x00") {
-			return egress.Sensitive{}, ErrAuthentication
-		}
-		switch c.Kind {
-		case "anthropic":
-			req.Header.Set("X-Api-Key", string(secret))
-		case "gemini":
-			req.Header.Set("X-Goog-Api-Key", string(secret))
-		case "azure_openai":
-			req.Header.Set("Api-Key", string(secret))
-		default:
-			req.Header.Set("Authorization", "Bearer "+string(secret))
-		}
-	case "adc", "service_account":
-		token, e := a.googleToken(ctx, c, secret)
-		if e != nil {
-			return egress.Sensitive{}, ErrAuthentication
-		}
-		req.Header.Set("Authorization", "Bearer "+token.Value)
-		sensitive.Add(token.Value)
-	case "azure_default", "azure_client_secret":
-		token, e := a.azureToken(ctx, c, secret)
-		if e != nil {
-			return egress.Sensitive{}, ErrAuthentication
-		}
-		req.Header.Set("Authorization", "Bearer "+token.Token)
-		sensitive.Add(token.Token)
-	case "static", "default_chain":
-		creds, e := a.awsCredentials(ctx, c, secret)
-		if e != nil {
-			return egress.Sensitive{}, ErrAuthentication
-		}
+		sensitive = append(sensitive, signed...)
+	}
+	var applied egress.Sensitive
+	applied.Add(sensitive...)
+	return applied, nil
+}
+
+// An authenticator authorizes upstream requests for one auth mode.
+type authenticator struct {
+	// credential reports whether the mode authorizes with a stored credential
+	// secret rather than ambient credentials or none.
+	credential bool
+	// authenticate adds the mode's authorization to a placed request.
+	authenticate func(a *Auth, ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error)
+}
+
+// An authorization is what authentication leaves for the rest of the request's
+// preparation.
+type authorization struct {
+	// sensitive holds the values authentication added that must be redacted.
+	sensitive []string
+	// sign, when set, runs over the finished request and returns the values it
+	// added that must be redacted.
+	sign func(ctx context.Context, req *http.Request, body []byte) ([]string, error)
+}
+
+// authenticators registers the authenticator for each auth mode. A provider
+// kind lists the modes its validation admits; a mode without an authenticator
+// never authorizes a request.
+var authenticators = map[string]authenticator{
+	"none":                {authenticate: (*Auth).authenticateNone},
+	"api_key":             {credential: true, authenticate: (*Auth).authenticateAPIKey},
+	"headers":             {credential: true, authenticate: (*Auth).authenticateHeaders},
+	"adc":                 {authenticate: (*Auth).authenticateGoogle},
+	"service_account":     {credential: true, authenticate: (*Auth).authenticateGoogle},
+	"azure_default":       {authenticate: (*Auth).authenticateAzure},
+	"azure_client_secret": {credential: true, authenticate: (*Auth).authenticateAzure},
+	"default_chain":       {authenticate: (*Auth).authenticateAWS},
+	"static":              {credential: true, authenticate: (*Auth).authenticateAWS},
+	AuthStaticCredential:  {credential: true, authenticate: (*Auth).authenticatePlaced},
+	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
+}
+
+// SecretRequired reports whether an auth mode authorizes with a stored
+// credential secret. An unregistered mode requires one.
+func SecretRequired(mode string) bool {
+	authenticator, ok := authenticators[mode]
+	return !ok || authenticator.credential
+}
+
+// authenticateNone sends no authorization.
+func (*Auth) authenticateNone(context.Context, *http.Request, Config, []byte) (authorization, error) {
+	return authorization{}, nil
+}
+
+// authenticatePlaced adds no authorization of its own: the plugin profile's
+// hosting adaptation placed the static credential or the grant's access token.
+func (*Auth) authenticatePlaced(context.Context, *http.Request, Config, []byte) (authorization, error) {
+	return authorization{}, nil
+}
+
+// authenticateAPIKey sends the key in the header the provider kind expects.
+func (*Auth) authenticateAPIKey(_ context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
+	if len(secret) == 0 || strings.ContainsAny(string(secret), "\r\n\x00") {
+		return authorization{}, ErrCredentialRejected
+	}
+	switch c.Kind {
+	case "anthropic":
+		req.Header.Set("X-Api-Key", string(secret))
+	case "gemini":
+		req.Header.Set("X-Goog-Api-Key", string(secret))
+	case "azure_openai":
+		req.Header.Set("Api-Key", string(secret))
+	default:
+		req.Header.Set("Authorization", "Bearer "+string(secret))
+	}
+	return authorization{}, nil
+}
+
+// authenticateHeaders sends the encrypted header values the connector names.
+func (*Auth) authenticateHeaders(_ context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
+	if err := egress.ApplyCredentialHeaders(req.Header, c.CredentialHeaders, secret); err != nil {
+		return authorization{}, ErrCredentialRejected
+	}
+	var sensitive []string
+	for _, h := range c.CredentialHeaders {
+		sensitive = append(sensitive, req.Header.Get(h))
+	}
+	return authorization{sensitive: sensitive}, nil
+}
+
+// authenticateGoogle sends an access token from application default
+// credentials or a service-account key.
+func (a *Auth) authenticateGoogle(ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
+	token, err := a.googleToken(ctx, c, secret)
+	if err != nil {
+		return authorization{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Value)
+	return authorization{sensitive: []string{token.Value}}, nil
+}
+
+// authenticateAzure sends a Microsoft Entra access token.
+func (a *Auth) authenticateAzure(ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
+	token, err := a.azureToken(ctx, c, secret)
+	if err != nil {
+		return authorization{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	return authorization{sensitive: []string{token.Token}}, nil
+}
+
+// authenticateAWS resolves AWS credentials, which sign the finished request
+// with SigV4.
+func (a *Auth) authenticateAWS(ctx context.Context, _ *http.Request, c Config, secret []byte) (authorization, error) {
+	creds, err := a.awsCredentials(ctx, c, secret)
+	if err != nil {
+		return authorization{}, err
+	}
+	sign := func(ctx context.Context, req *http.Request, body []byte) ([]string, error) {
 		hash := sha256.Sum256(body)
-		if e := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); e != nil {
-			return egress.Sensitive{}, ErrAuthentication
+		if err := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); err != nil {
+			return nil, ErrAuthentication
 		}
 		header := req.Header.Get("Authorization")
-		sensitive.Add(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, header)
-		// An upstream diagnostic may echo only the signature, not the header.
-		sensitive.Add(sigV4Signature(header))
-	default:
-		return egress.Sensitive{}, ErrAuthentication
+		return []string{header, sigV4Signature(header)}, nil
 	}
-	return sensitive, nil
+	return authorization{sensitive: []string{creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken}, sign: sign}, nil
+}
+
+// tokenFailure classifies a failure to fetch a token or cloud credentials. A
+// refusal from the credential authority, such as an invalid client or grant,
+// rejects the credential; any other failure, such as an unreachable
+// authority, may pass on a later attempt.
+func tokenFailure(err error) error {
+	status := 0
+	if e, ok := errors.AsType[*cloudauth.Error](err); ok && e.Response != nil {
+		status = e.Response.StatusCode
+	} else if e, ok := errors.AsType[*azidentity.AuthenticationFailedError](err); ok && e.RawResponse != nil {
+		status = e.RawResponse.StatusCode
+	} else if e, ok := errors.AsType[interface {
+		error
+		HTTPStatusCode() int
+	}](err); ok {
+		status = e.HTTPStatusCode()
+	}
+	if status >= 400 && status < 500 && status != http.StatusRequestTimeout && status != http.StatusTooManyRequests {
+		return ErrCredentialRejected
+	}
+	return ErrAuthentication
 }
 
 // sigV4Signature extracts the signature value a SigV4 Authorization header
@@ -302,15 +441,15 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 			result <- value
 			cred, err = value.credentials, value.err
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, ErrAuthentication
 		}
 	}
 	if err != nil {
-		return nil, ErrAuthentication
+		return nil, ErrCredentialRejected
 	}
 	token, err := cred.Token(ctx)
 	if err != nil {
-		return nil, ErrAuthentication
+		return nil, tokenFailure(err)
 	}
 	a.mu.Lock()
 	if len(a.tokens) >= 256 {
@@ -333,13 +472,13 @@ func (a *Auth) azureToken(ctx context.Context, c Config, secret []byte) (azcore.
 	}
 	credential, e := a.azureCredential(c, secret, key)
 	if e != nil {
-		return azcore.AccessToken{}, ErrAuthentication
+		return azcore.AccessToken{}, ErrCredentialRejected
 	}
 	ctx, cancel := context.WithTimeout(ctx, authTimeout)
 	defer cancel()
 	token, err := credential.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{c.AzureScope()}})
 	if err != nil {
-		return azcore.AccessToken{}, ErrAuthentication
+		return azcore.AccessToken{}, tokenFailure(err)
 	}
 	a.mu.Lock()
 	if len(a.azureTokens) >= 256 {
@@ -389,11 +528,11 @@ func (a *Auth) newAzureCredential(mode string, secret []byte) (azcore.TokenCrede
 		if len(secret) > 16384 || d.Decode(&v) != nil || d.Decode(new(any)) != io.EOF ||
 			!secretComponent(v.TenantID, 1, 128) || !secretComponent(v.ClientID, 1, 128) ||
 			!secretComponent(v.ClientSecret, 1, 1024) {
-			return nil, ErrAuthentication
+			return nil, ErrCredentialRejected
 		}
 		return azidentity.NewClientSecretCredential(v.TenantID, v.ClientID, v.ClientSecret, &azidentity.ClientSecretCredentialOptions{ClientOptions: options})
 	}
-	return nil, ErrAuthentication
+	return nil, ErrCredentialRejected
 }
 
 func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws.Credentials, error) {
@@ -406,9 +545,13 @@ func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws
 		d := json.NewDecoder(bytes.NewReader(secret))
 		d.DisallowUnknownFields()
 		if len(secret) > 16384 || d.Decode(&v) != nil || d.Decode(new(any)) != io.EOF || !secretComponent(v.AccessKeyID, 16, 256) || !secretComponent(v.SecretAccessKey, 16, 1024) || v.SessionToken != "" && !secretComponent(v.SessionToken, 1, 8192) {
-			return aws.Credentials{}, ErrAuthentication
+			return aws.Credentials{}, ErrCredentialRejected
 		}
-		return credentials.NewStaticCredentialsProvider(v.AccessKeyID, v.SecretAccessKey, v.SessionToken).Retrieve(ctx)
+		creds, err := credentials.NewStaticCredentialsProvider(v.AccessKeyID, v.SecretAccessKey, v.SessionToken).Retrieve(ctx)
+		if err != nil {
+			return aws.Credentials{}, ErrCredentialRejected
+		}
+		return creds, nil
 	}
 	key := cacheKey(c, secret)
 	a.mu.Lock()
@@ -419,7 +562,7 @@ func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws
 	if provider == nil {
 		cfg, e := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(c.CloudRegion), awsconfig.WithHTTPClient(a.client), awsconfig.WithRetryMaxAttempts(1), awsconfig.WithProcessCredentialOptions(func(o *processcreds.Options) { o.Timeout = authTimeout }))
 		if e != nil {
-			return aws.Credentials{}, ErrAuthentication
+			return aws.Credentials{}, ErrCredentialRejected
 		}
 		provider = cfg.Credentials
 		a.mu.Lock()
@@ -429,7 +572,11 @@ func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws
 		a.aws[key] = provider
 		a.mu.Unlock()
 	}
-	return provider.Retrieve(ctx)
+	creds, err := provider.Retrieve(ctx)
+	if err != nil {
+		return aws.Credentials{}, tokenFailure(err)
+	}
+	return creds, nil
 }
 func secretComponent(s string, min, max int) bool {
 	if len(s) < min || len(s) > max {

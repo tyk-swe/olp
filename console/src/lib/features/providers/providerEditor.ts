@@ -1,5 +1,5 @@
 import { ConfigurationDraft } from './configurationDraft.svelte';
-import type { NativeValue } from '$lib/json/nativeJson';
+import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
 import type { Provider } from './api';
 import type {
   CreateProviderInput,
@@ -12,6 +12,11 @@ import type {
   ProviderKindCapability,
   ProviderPreset
 } from '$lib/features/providers/models';
+import {
+  declaresModels,
+  pluginOptionFields,
+  type ProviderProfile
+} from './profiles';
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {
@@ -244,6 +249,18 @@ export function requiresCredential(
   );
 }
 
+/** Whether the provider authenticates with a grant, whose credential versions
+ * come from grant enrollment rather than a pasted credential. */
+export function requiresGrant(
+  spec: ProviderKindCapability,
+  authMode: ProviderAuthMode
+): boolean {
+  return (
+    spec.auth_modes.find((auth) => auth.mode === authMode)?.credential ===
+    'grant'
+  );
+}
+
 function hasField(spec: ProviderKindCapability, field: string): boolean {
   return spec.fields.some((candidate) => candidate.field === field);
 }
@@ -256,6 +273,75 @@ function requiresField(spec: ProviderKindCapability, field: string): boolean {
 
 export function requiresSeedModel(spec: ProviderKindCapability): boolean {
   return requiresField(spec, 'model');
+}
+
+/** Vendors that publish no model list, so their connection test needs a model. */
+const UNLISTED_VENDORS = ['voyage', 'perplexity', 'cohere'];
+
+/**
+ * Whether creating the draft needs a probe model: the connection test
+ * certifies a declared model when the upstream publishes no model list, as
+ * for kinds that require one, some reviewed vendors, and plugin profiles that
+ * declare no model discovery.
+ */
+export function requiresProbeModel(
+  draft: Pick<
+    ProviderDraft,
+    'kind' | 'presetId' | 'profileId' | 'profileRevision'
+  >,
+  spec: ProviderKindCapability,
+  profiles?: readonly ProviderProfile[]
+): boolean {
+  if (draft.kind === 'plugin')
+    return declaresModels(
+      {
+        kind: draft.kind,
+        profile_id: draft.profileId,
+        profile_revision: draft.profileRevision
+      },
+      profiles
+    );
+  return requiresSeedModel(spec) || UNLISTED_VENDORS.includes(draft.presetId);
+}
+
+/**
+ * Pins a plugin profile: its identity and the digest of the plugin build that
+ * supplies it, and the authentication it declares, a static credential or a
+ * grant. A plugin provider's endpoint is that profile's address, which the
+ * server sets, so any address of a previous pin is cleared, and a credential
+ * typed for one profile or build is never submitted as another's. Option
+ * values carry over to the options the new profile also declares.
+ */
+export function selectPluginProfile(
+  values: ProviderEditValues & { credential?: string },
+  profile:
+    | Pick<
+        ProviderProfile,
+        'id' | 'revision' | 'options_schema' | 'authentication'
+      >
+    | undefined
+): void {
+  if (
+    values.profileId !== (profile?.id ?? '') ||
+    values.profileRevision !== (profile?.revision ?? '')
+  ) {
+    values.credential = '';
+  }
+  values.profileId = profile?.id ?? '';
+  values.profileRevision = profile?.revision ?? '';
+  values.endpoint = '';
+  const authentication = profile?.authentication[0];
+  if (authentication) values.authMode = authentication as ProviderAuthMode;
+  const options = values.document?.at(['options', 'plugin_options']);
+  if (!nativeObject(options)) return;
+  const declared = pluginOptionFields(profile).map((option) => option.name);
+  const kept = Object.entries(options).filter(([name]) =>
+    declared.includes(name)
+  );
+  values.document?.set(
+    ['options', 'plugin_options'],
+    kept.length ? Object.fromEntries(kept) : undefined
+  );
 }
 
 export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {
@@ -281,7 +367,11 @@ export function hasApiVersion(spec: ProviderKindCapability): boolean {
 export function validateProviderDraft(
   draft: ProviderDraft,
   spec: ProviderKindCapability,
-  options: { credentialAlreadyStored?: boolean } = {}
+  options: {
+    credentialAlreadyStored?: boolean;
+    /** The profile catalogue, which says whether a plugin profile discovers models. */
+    profiles?: readonly ProviderProfile[];
+  } = {}
 ): string | null {
   const values: Record<string, string> = {
     endpoint: draft.endpoint,
@@ -303,9 +393,12 @@ export function validateProviderDraft(
         !values[field.field]?.trim()
     )
     .map((field) => field.label.toLowerCase());
+  if (draft.kind === 'plugin' && !draft.profileId)
+    missing.unshift('plugin profile');
   if (!draft.name.trim()) missing.unshift('name');
   if (
-    ['voyage', 'perplexity', 'cohere'].includes(draft.presetId) &&
+    requiresProbeModel(draft, spec, options.profiles) &&
+    !requiresSeedModel(spec) &&
     !draft.model.trim()
   )
     missing.push('probe model');

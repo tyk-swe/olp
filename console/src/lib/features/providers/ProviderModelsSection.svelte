@@ -21,6 +21,10 @@
   } from '$lib/features/providers/models';
   import { probeProvider, type Provider } from '$lib/features/providers/api';
   import {
+    declaresModels,
+    listProviderProfiles
+  } from '$lib/features/providers/profiles';
+  import {
     cursorPaginationProps,
     resetCursor,
     type CursorHistory
@@ -77,6 +81,15 @@
   // Discovery, manual declaration and capability review all fail with the same
   // 409 on a disabled provider, so they stay locked until it is a draft again.
   const editingLocked = $derived(providerDisabled(current));
+  const profiles = createQuery(() => ({
+    queryKey: ['provider-profiles'],
+    queryFn: ({ signal }) => listProviderProfiles(signal)
+  }));
+  // A plugin profile without model discovery has no upstream model list; the
+  // operator declares models.
+  const declared = $derived(
+    declaresModels(current.configuration, profiles.data)
+  );
 
   const capabilityOptions = createQuery(() => ({
     queryKey: providerKeys.capabilityOptions(current.configuration.kind),
@@ -191,8 +204,10 @@
   </div>
   <div class="discovery-row">
     <p class="muted">
-      Refresh the inventory from the upstream model-list API. Existing
-      capability certification is reconciled server-side.
+      {#if declared}This plugin profile declares no upstream model list.
+        Rechecking probes every declared model; declare further models below.{:else}Refresh
+        the inventory from the upstream model-list API. Existing capability
+        certification is reconciled server-side.{/if}
     </p>
     <button
       class="button button-secondary"
@@ -201,16 +216,21 @@
       disabled={!canManage || Boolean(busy) || editingLocked}
       >{busy === 'detail-discover'
         ? 'Discovering…'
-        : 'Run upstream discovery'}</button
+        : declared
+          ? 'Recheck declared models'
+          : 'Run upstream discovery'}</button
     >
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
-  {#if canManage && !editingLocked && current.configuration.kind === 'openai_compatible'}<details
+  {#if canManage && !editingLocked && (declared || current.configuration.kind === 'openai_compatible')}<details
       class="manual-fallback"
+      open={declared}
     >
       <summary>Manual model identifiers</summary>
       <p>
-        Use only if this compatible endpoint has no list API. Models remain
+        {declared
+          ? 'Declare the upstream models this plugin provider serves.'
+          : 'Use only if this compatible endpoint has no list API.'} Models remain
         disabled until capability review.
       </p>
       <div class="form-field">

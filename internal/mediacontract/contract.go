@@ -87,7 +87,7 @@ func Compile(c Config) (*Template, error) {
 		return nil, err
 	}
 	binding := c.Provider.Bindings[c.Model]
-	serving := oif.ServingIdentity{ProviderID: c.ProviderID, RevisionID: c.RevisionID, Model: c.Provider.Model(c.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: binding.PrincipalID, Snapshot: binding.Snapshot, Region: c.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
+	serving := oif.ServingIdentity{ProviderID: c.ProviderID, RevisionID: c.RevisionID, Model: c.Provider.Model(c.Model), ProfileID: p.ID, ProfileRevision: p.Revision, PrincipalID: c.Provider.ServingPrincipal(c.Model), Snapshot: binding.Snapshot, Region: c.Provider.CloudRegion, ResourceScope: binding.ResourceScope}
 	if binding.Region != "" {
 		serving.Region = binding.Region
 	}

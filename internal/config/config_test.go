@@ -33,6 +33,7 @@ func TestInvalidConfigAndSecretErrors(t *testing.T) {
 		{"OLP_LOG_LEVEL": "info+1"},
 		{"OLP_PUBLIC_ORIGIN": "https://user:secret@example.test"},
 		{"OLP_STARTUP_TIMEOUT": "0s"},
+		{"OLP_UNCONFINED_PLUGIN_DIR": "plugins"},
 	} {
 		env := map[string]string{"OLP_DATABASE_URL": "postgres://user:secret@localhost/db"}
 		for k, v := range extra {
@@ -70,6 +71,23 @@ func TestExplicitFlagOverridesInvalidEnvironment(t *testing.T) {
 	c, err := config.Parse([]string{"all", "--database-max-connections=3"}, func(k string) string { return env[k] }, io.Discard)
 	if err != nil || c.DatabaseMaxConnections != 3 {
 		t.Fatalf("flag precedence: %v", err)
+	}
+}
+
+// The unconfined plugin tier is off unless the deployment names the
+// directory of its executables, as a flag or an environment variable.
+func TestUnconfinedPluginDirEnablesTheTier(t *testing.T) {
+	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/db"}
+	c, err := config.Parse([]string{"all"}, func(k string) string { return env[k] }, io.Discard)
+	if err != nil || c.UnconfinedPluginDir != "" {
+		t.Fatalf("default: %q %v", c.UnconfinedPluginDir, err)
+	}
+	env["OLP_UNCONFINED_PLUGIN_DIR"] = "/opt/olp/plugins"
+	if c, err = config.Parse([]string{"gateway"}, func(k string) string { return env[k] }, io.Discard); err != nil || c.UnconfinedPluginDir != "/opt/olp/plugins" {
+		t.Fatalf("environment: %q %v", c.UnconfinedPluginDir, err)
+	}
+	if c, err = config.Parse([]string{"control", "--unconfined-plugin-dir=/srv/plugins"}, func(k string) string { return env[k] }, io.Discard); err != nil || c.UnconfinedPluginDir != "/srv/plugins" {
+		t.Fatalf("flag: %q %v", c.UnconfinedPluginDir, err)
 	}
 }
 

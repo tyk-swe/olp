@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -82,6 +83,33 @@ func TestStrictUnknownUpstreamOutcomeNeverFailsOver(t *testing.T) {
 	}
 }
 
+func TestStrictServerFailureLeavesUpstreamOutcomeUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		harness func(*testing.T) *harness
+		path    string
+		body    string
+	}{
+		{"generation", func(t *testing.T) *harness { return strictHarness(t, nil) }, "/v1/chat/completions", `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]}`},
+		{"image generation", func(t *testing.T) *harness { return strictMediaHarness(t, media.OpImageGeneration, nil, nil) }, "/v1/images/generations", `{"model":"` + routeSlug + `","prompt":"photo"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.harness(t)
+			h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"busy","type":"server_error"}}`))
+			resp := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(tc.body), nil)
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(raw), "ambiguous_upstream_result") || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
+				t.Fatalf("status=%d body=%s dispatches=%d/%d", resp.StatusCode, raw, h.mock.count("a"), h.mock.count("b"))
+			}
+			fact := h.sink.last(t).Attempts[0]
+			if fact.Class != classAmbiguous || fact.Status != http.StatusServiceUnavailable || fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamUnknown || !fact.BillingUncertain {
+				t.Fatalf("server failure evidence %+v / %+v", fact, fact.Interaction)
+			}
+		})
+	}
+}
+
 func TestStrictSemanticEligibilityPrecedesPriorityAndPreservesNativeSource(t *testing.T) {
 	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
 		for id, provider := range snapshot.Providers {
@@ -128,6 +156,47 @@ func TestStrictKnownRejectionCannotSubstituteServingEnvironment(t *testing.T) {
 	fact := h.sink.last(t).Attempts[0]
 	if fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamTerminal || fact.Interaction.ClientState != usage.ClientUnobserved || fact.BillingUncertain {
 		t.Fatalf("rejection evidence %+v", fact)
+	}
+}
+
+// Every slot of a provider revision observes the principal grant enrollment
+// observed, so a strict request fails over to another slot of the provider
+// and stays with that account; without a known principal the first admitted
+// slot pins the request.
+func TestStrictFailoverAcrossSlotsKeepsTheObservedPrincipal(t *testing.T) {
+	for _, principal := range []string{"", "operator@example.com"} {
+		t.Run("principal="+principal, func(t *testing.T) {
+			h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+				for id, provider := range snapshot.Providers {
+					if provider.Name == "a" {
+						backup := provider.Slots[0]
+						backup.ID, backup.Name, backup.Priority = uuid.NewString(), "backup", 1
+						provider.Slots = append(provider.Slots, backup)
+						provider.ObservedPrincipal = principal
+						snapshot.Providers[id] = provider
+					}
+				}
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				if h.mock.count("a") == 1 {
+					status(http.StatusTooManyRequests, `{"error":{"message":"busy"}}`)(w, r)
+					return
+				}
+				completion(modelA, answerText)(w, r)
+			})
+			resp, body := h.chat(fullKey, nil)
+			attempts := h.sink.last(t).Attempts
+			if principal == "" {
+				if resp.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 1 || h.mock.count("b") != 0 || len(attempts) != 1 {
+					t.Fatalf("an unknown principal did not pin the slot: %d %v attempts %+v", resp.StatusCode, body, attempts)
+				}
+				return
+			}
+			if resp.StatusCode != http.StatusOK || h.mock.count("a") != 2 || h.mock.count("b") != 0 || len(attempts) != 2 ||
+				attempts[0].ProviderID != attempts[1].ProviderID || attempts[0].SlotID == attempts[1].SlotID {
+				t.Fatalf("failover within the observed principal: %d %v attempts %+v", resp.StatusCode, body, attempts)
+			}
+		})
 	}
 }
 

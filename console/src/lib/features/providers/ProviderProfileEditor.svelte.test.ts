@@ -43,7 +43,8 @@ const compatibleChat: ProviderProfile = {
   default_schemas: {},
   semantic_headers: [],
   query_settings: [],
-  documentation: 'https://example.test/compatible-chat'
+  documentation: 'https://example.test/compatible-chat',
+  strict: true
 };
 
 let host: HTMLElement;

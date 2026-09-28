@@ -10,6 +10,8 @@
     schema = {},
     disabled = false,
     native = false,
+    required = false,
+    problem = '',
     onChange
   }: {
     draft: ConfigurationDraft;
@@ -19,15 +21,26 @@
     schema?: FieldSchema;
     disabled?: boolean;
     native?: boolean;
+    /** Whether the configuration must set this value. */
+    required?: boolean;
+    /** What the server reported wrong with the value, if anything. */
+    problem?: string;
     onChange: () => void;
   } = $props();
   let actionIssue = $state('');
   const value = $derived(draft.at(path));
   const present = $derived(value !== undefined);
   const issue = $derived(
-    actionIssue || (value instanceof IncompleteJSON ? value.issue : '')
+    actionIssue ||
+      (value instanceof IncompleteJSON ? value.issue : '') ||
+      problem
   );
   const stringField = $derived(schema.type === 'string' && !native);
+  const choices = $derived(
+    stringField && Array.isArray(schema.enum)
+      ? schema.enum.filter((choice) => typeof choice === 'string')
+      : []
+  );
   const multiline = $derived(stringField && path.at(-1) === 'trust_roots_pem');
   const source = $derived(
     stringField ? (typeof value === 'string' ? value : '') : draft.json(path)
@@ -63,10 +76,29 @@
         ? value === null
           ? 'Native null'
           : 'Configured'
-        : 'Not configured'}</span
+        : required
+          ? 'Required'
+          : 'Not configured'}</span
     >
   </div>
-  {#if multiline}
+  {#if choices.length}
+    <select
+      {id}
+      value={source}
+      onchange={(event) => edit(event.currentTarget.value)}
+      {disabled}
+      {required}
+      aria-invalid={Boolean(issue)}
+      aria-describedby={`${id}-help`}
+    >
+      <option value="" disabled>Choose a value</option>
+      {#if source && !choices.includes(source)}<option value={source}
+          >{source}</option
+        >{/if}
+      {#each choices as choice (choice)}<option value={choice}>{choice}</option
+        >{/each}
+    </select>
+  {:else if multiline}
     <textarea
       {id}
       value={source}
@@ -92,6 +124,7 @@
       value={source}
       oninput={(event) => edit(event.currentTarget.value)}
       {disabled}
+      {required}
       aria-invalid={Boolean(issue)}
       aria-describedby={`${id}-help`}
       inputmode={schema.type === 'integer' ? 'numeric' : undefined}
@@ -103,6 +136,7 @@
     {:else if native}Enter a JSON value. Null, zero, false, empty strings and
       arrays remain distinct.
     {:else if schema.minimum !== undefined}Allowed range: {schema.minimum}–{schema.maximum}.
+    {:else if required}Set a value; it is required.
     {:else}Leave unconfigured to use the profile's ordinary behavior.{/if}
   </small>
   <div class="field-actions">

@@ -54,6 +54,12 @@
           route: 'GET /api/v1/providers'
         },
         {
+          label: 'Plugins',
+          href: resolve('/plugins'),
+          icon: 'provider',
+          route: 'GET /api/v1/plugins'
+        },
+        {
           label: 'Models',
           href: resolve('/models'),
           icon: 'model',
@@ -148,6 +154,7 @@
       resolve('/'),
       resolve('/api-keys'),
       resolve('/access'),
+      resolve('/plugins'),
       resolve('/audit'),
       resolve('/settings')
     ];

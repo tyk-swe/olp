@@ -2,11 +2,15 @@ package runtime
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -156,6 +160,119 @@ func TestPreviewEnumeratesCredentialAttemptsWithinOneBudget(t *testing.T) {
 		}
 		if i == 2 && (d.Eligible || d.Attempt != nil) {
 			t.Fatal("credential escaped route budget")
+		}
+	}
+}
+
+// Planning skips credential slots whose credential versions may not serve,
+// such as a lapsed grant's, naming why, and never spends the attempt budget
+// on them: the budget goes to the slots and targets that may serve.
+func TestPlanningSkipsIneligibleCredentialsWithTheirReason(t *testing.T) {
+	s, slug, ids := planningFixture()
+	route := s.Routes[slug]
+	route.Targets = route.Targets[:2]
+	s.Routes[slug] = route
+	network := uuid.NewString()
+	for i, id := range ids[:2] {
+		p := s.Providers[id]
+		p.AuthMode = "api_key"
+		for range 2 {
+			credential := uuid.NewString()
+			p.Slots = append(p.Slots, Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential})
+		}
+		if i == 1 {
+			p.Network = &egress.ConnectionOptions{CredentialID: network}
+		}
+		s.Providers[id] = p
+	}
+	first := s.Providers[ids[0]]
+	// plan answers each decision's outcome by credential slot, or by provider
+	// for a target with no slot to try: its attempt, or its reason.
+	plan := func(eligibility map[string]Eligibility) map[string]string {
+		t.Helper()
+		plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{
+			CheckSlots: true, CredentialEligibility: func(id string) Eligibility { return eligibility[id] },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcomes := map[string]string{}
+		for _, decision := range plan.Decisions {
+			key := decision.ProviderID
+			if decision.CredentialSlotID != nil {
+				key = *decision.CredentialSlotID
+			}
+			switch {
+			case decision.Eligible && decision.Attempt != nil && decision.Reason == nil:
+				outcomes[key] = "attempt"
+			case !decision.Eligible && decision.Attempt == nil && decision.Reason != nil:
+				outcomes[key] = *decision.Reason
+			default:
+				t.Fatalf("decision %+v", decision)
+			}
+		}
+		return outcomes
+	}
+	lapsed := plan(map[string]Eligibility{*first.Slots[0].CredentialID: Lapsed})
+	if len(lapsed) != 4 || lapsed[first.Slots[0].ID] != "credential_lapsed" || lapsed[first.Slots[1].ID] != "attempt" {
+		t.Fatalf("a lapsed slot was planned or spent the budget: %v", lapsed)
+	}
+	for _, slot := range s.Providers[ids[1]].Slots {
+		if lapsed[slot.ID] != "attempt" {
+			t.Fatalf("the budget skipped an eligible slot: %v", lapsed)
+		}
+	}
+	for want, eligibility := range map[string]map[string]Eligibility{
+		"credential_lapsed":       {*first.Slots[0].CredentialID: Lapsed, *first.Slots[1].CredentialID: Lapsed},
+		"credential_revoked":      {*first.Slots[0].CredentialID: Revoked, *first.Slots[1].CredentialID: Revoked},
+		"no_eligible_credentials": {*first.Slots[0].CredentialID: Revoked, *first.Slots[1].CredentialID: Lapsed},
+	} {
+		if got := plan(eligibility); len(got) != 3 || got[ids[0]] != want {
+			t.Fatalf("a target with no slot to try: %v, want %s", got, want)
+		}
+	}
+	for _, reason := range []Eligibility{Revoked, StaleAuthority} {
+		if got := plan(map[string]Eligibility{network: reason}); got[ids[1]] != "network_credential_"+string(reason) {
+			t.Fatalf("%s network credential: %v", reason, got)
+		}
+	}
+}
+
+// Only a deployment that enables unconfined plugins serves targets of
+// providers whose plugin is unconfined; a confined plugin's are served
+// anywhere.
+func TestPlanningRefusesUnconfinedPluginTargetsWithoutTheTier(t *testing.T) {
+	s, slug, ids := planningFixture()
+	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{"https://api.acme.example"}, Profiles: []abi.Profile{{
+		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
+		Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}},
+	}}}
+	confined, err := connectors.NewPluginProfile(strings.Repeat("ab", 32), manifest, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unconfined, err := connectors.NewUnconfinedPluginProfile(strings.Repeat("cd", 32), manifest, "acme-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, plugin := range map[string]*connectors.PluginProfile{ids[0]: confined, ids[1]: unconfined} {
+		p := s.Providers[id]
+		p.Kind, p.Plugin = connectors.KindPlugin, plugin
+		s.Providers[id] = p
+	}
+	for enabled, want := range map[bool]string{false: "plugin_unconfined_disabled", true: ""} {
+		plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{UnconfinedPlugins: enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reasons := map[string]string{}
+		for _, decision := range plan.Decisions {
+			if decision.Reason != nil {
+				reasons[decision.ProviderID] = *decision.Reason
+			}
+		}
+		if reasons[ids[0]] != "" || reasons[ids[1]] != want {
+			t.Fatalf("with the tier enabled %v, reasons %v", enabled, reasons)
 		}
 	}
 }

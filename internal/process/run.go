@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -159,6 +160,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var gw *gateway.Server
 	var mediaService *media.Service
 	var mediaSpool *media.Spool
+	var pluginHost *plugins.Host
 	var policy egress.Policy
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
@@ -170,8 +172,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
 	// Worker replicas also need the runtime manager and the key ring: media
-	// reconciliation serves jobs against their pinned historical providers and
-	// checks the live credential revocation authority.
+	// reconciliation serves jobs against their pinned historical providers
+	// with credentials from the manager's credential source.
 	var keys *secrets.KeyRing
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 		var auth *secrets.AuthKey
@@ -189,7 +191,21 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 		}
+		var unconfined *plugins.Unconfined
+		if c.UnconfinedPluginDir != "" {
+			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits, log)
+		}
 		if c.Mode.Management() || c.Mode.Inference() {
+			// Gateways and control's probes run signing hooks per upstream
+			// request, so the host compiles the modules it keeps. Unconfined
+			// plugins may carry the requests themselves.
+			serving, err := plugins.NewRuntime(startup, plugins.Compiled, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer serving.Close(context.Background())
+			pluginHost = plugins.NewHost(serving, unconfined, pool)
+			defer pluginHost.Close(context.Background())
 			gw = gateway.New(rt, &policy, gateway.Config{
 				MaxInFlight:        c.MaxInFlightInference,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
@@ -200,7 +216,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				MaxEventBytes:      c.ProviderMaxEventBytes,
 				TrustedProxies:     c.TrustedProxyCIDRs,
 				AdmissionPool:      inferencePool,
+				Signer:             pluginHost,
+				Carrier:            pluginHost,
+				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			rt.GrantRefreshed = gw.GrantRefreshed
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
 				if outage != nil {
@@ -209,6 +229,26 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				// Control-only processes also execute playground requests.
 				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
+		}
+		if c.Mode == config.Worker {
+			// A worker runs a grant's refresh once per access token, which
+			// the interpreter is ready for sooner than the compiler.
+			refreshing, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer refreshing.Close(context.Background())
+			pluginHost = plugins.NewHost(refreshing, unconfined, pool)
+			defer pluginHost.Close(context.Background())
+		}
+		if pluginHost != nil {
+			// Plugins that providers pin are compiled now rather than by the
+			// first call that needs them.
+			go func() {
+				if err := pluginHost.PreparePinned(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("plugins could not be prepared", "error", err)
+				}
+			}()
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 			spoolDir := c.MediaSpoolDir
@@ -233,15 +273,15 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					Spool:            spool,
 					MaxResponseBytes: c.ProviderMaxResponseBytes,
 				},
-				Revoked: rt.Revoked,
-				Log:     log,
+				Credentials: rt,
+				Log:         log,
 			}
 		}
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
 				gw.Resources = resources.NewEncrypted(pool, installation, keys)
-				gw.Resolver = resources.NewResolver(pool, installation, keys)
+				gw.Resolver = resources.NewResolver(pool)
 			}
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather
@@ -266,7 +306,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
 			control.NotificationsActive = limiter != nil
-			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log}.Register(public)
+			// Installing reads a module's manifest once, which the
+			// interpreter is ready to do several times sooner.
+			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
+			if err != nil {
+				return err
+			}
+			defer pluginRuntime.Close(context.Background())
+			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -342,7 +389,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if mediaService == nil && limiter == nil {
 			log.Warn("worker plane skipped: no shared state is configured", "mode", c.Mode)
 		} else {
-			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, keys, installation, &policy, log)
+			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, &policy, log)
 		}
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)

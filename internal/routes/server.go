@@ -25,6 +25,9 @@ import (
 type Server struct {
 	Access *access.Server
 	Inputs func() *usage.RoutingInputs
+	// UnconfinedPlugins is set where the deployment enables unconfined
+	// plugins; previews plan as its gateways do.
+	UnconfinedPlugins bool
 }
 
 // New prepares the route surface.

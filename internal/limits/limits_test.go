@@ -392,11 +392,11 @@ func TestLookupsAndCooldownScopes(t *testing.T) {
 	}
 	// An absent credential version still names a stable scope, and an
 	// upper-case identifier must address the same key as a lower-case one.
-	if got, want := CredentialScope(provider, nil),
+	if got, want := CredentialScope(provider, nil, 0),
 		"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607:00000000-0000-0000-0000-000000000000"; got != want {
 		t.Fatalf("CredentialScope() = %q, want %q", got, want)
 	}
-	if got, want := CredentialScope(provider, pointer(credential)),
+	if got, want := CredentialScope(provider, pointer(credential), 0),
 		"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607:0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"; got != want {
 		t.Fatalf("CredentialScope() = %q, want %q", got, want)
 	}

@@ -114,57 +114,51 @@ func (e AuditEventResponseActorType) Valid() bool {
 	}
 }
 
-// Defines values for BudgetAlertDeliveryStatus.
+// Defines values for BudgetSubjectKind.
 const (
-	BudgetAlertDeliveryStatusDelivered BudgetAlertDeliveryStatus = "delivered"
-	BudgetAlertDeliveryStatusFailed    BudgetAlertDeliveryStatus = "failed"
-	BudgetAlertDeliveryStatusPending   BudgetAlertDeliveryStatus = "pending"
+	BudgetSubjectKindApiKey      BudgetSubjectKind = "api_key"
+	BudgetSubjectKindBudgetGroup BudgetSubjectKind = "budget_group"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertDeliveryStatus enum.
-func (e BudgetAlertDeliveryStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetSubjectKind enum.
+func (e BudgetSubjectKind) Valid() bool {
 	switch e {
-	case BudgetAlertDeliveryStatusDelivered:
+	case BudgetSubjectKindApiKey:
 		return true
-	case BudgetAlertDeliveryStatusFailed:
-		return true
-	case BudgetAlertDeliveryStatusPending:
+	case BudgetSubjectKindBudgetGroup:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for BudgetAlertRuleSubjectKind.
+// Defines values for BudgetThresholdEventEvent.
 const (
-	BudgetAlertRuleSubjectKindApiKey      BudgetAlertRuleSubjectKind = "api_key"
-	BudgetAlertRuleSubjectKindBudgetGroup BudgetAlertRuleSubjectKind = "budget_group"
+	BudgetThresholdEventEventBudgetThreshold BudgetThresholdEventEvent = "budget.threshold"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertRuleSubjectKind enum.
-func (e BudgetAlertRuleSubjectKind) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetThresholdEventEvent enum.
+func (e BudgetThresholdEventEvent) Valid() bool {
 	switch e {
-	case BudgetAlertRuleSubjectKindApiKey:
-		return true
-	case BudgetAlertRuleSubjectKindBudgetGroup:
+	case BudgetThresholdEventEventBudgetThreshold:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for BudgetAlertRuleWindowKind.
+// Defines values for BudgetWindowKind.
 const (
-	BudgetAlertRuleWindowKindDay   BudgetAlertRuleWindowKind = "day"
-	BudgetAlertRuleWindowKindMonth BudgetAlertRuleWindowKind = "month"
+	Day   BudgetWindowKind = "day"
+	Month BudgetWindowKind = "month"
 )
 
-// Valid indicates whether the value is a known member of the BudgetAlertRuleWindowKind enum.
-func (e BudgetAlertRuleWindowKind) Valid() bool {
+// Valid indicates whether the value is a known member of the BudgetWindowKind enum.
+func (e BudgetWindowKind) Valid() bool {
 	switch e {
-	case BudgetAlertRuleWindowKindDay:
+	case Day:
 		return true
-	case BudgetAlertRuleWindowKindMonth:
+	case Month:
 		return true
 	default:
 		return false
@@ -198,6 +192,81 @@ const (
 func (e ConfigurationDocumentApiVersion) Valid() bool {
 	switch e {
 	case OpenllmproxyDevconfigv1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationPlanItemAction.
+const (
+	Bind     ConfigurationPlanItemAction = "bind"
+	Blocker  ConfigurationPlanItemAction = "blocker"
+	Conflict ConfigurationPlanItemAction = "conflict"
+	Create   ConfigurationPlanItemAction = "create"
+	Enroll   ConfigurationPlanItemAction = "enroll"
+	Noop     ConfigurationPlanItemAction = "noop"
+	Replace  ConfigurationPlanItemAction = "replace"
+	Reuse    ConfigurationPlanItemAction = "reuse"
+	Stage    ConfigurationPlanItemAction = "stage"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationPlanItemAction enum.
+func (e ConfigurationPlanItemAction) Valid() bool {
+	switch e {
+	case Bind:
+		return true
+	case Blocker:
+		return true
+	case Conflict:
+		return true
+	case Create:
+		return true
+	case Enroll:
+		return true
+	case Noop:
+		return true
+	case Replace:
+		return true
+	case Reuse:
+		return true
+	case Stage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationPlanItemKind.
+const (
+	ConfigurationPlanItemKindConfiguration     ConfigurationPlanItemKind = "configuration"
+	ConfigurationPlanItemKindCredential        ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindNetworkCredential ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindPlugin            ConfigurationPlanItemKind = "plugin"
+	ConfigurationPlanItemKindPricing           ConfigurationPlanItemKind = "pricing"
+	ConfigurationPlanItemKindProject           ConfigurationPlanItemKind = "project"
+	ConfigurationPlanItemKindProvider          ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRoute             ConfigurationPlanItemKind = "route"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
+func (e ConfigurationPlanItemKind) Valid() bool {
+	switch e {
+	case ConfigurationPlanItemKindConfiguration:
+		return true
+	case ConfigurationPlanItemKindCredential:
+		return true
+	case ConfigurationPlanItemKindNetworkCredential:
+		return true
+	case ConfigurationPlanItemKindPlugin:
+		return true
+	case ConfigurationPlanItemKindPricing:
+		return true
+	case ConfigurationPlanItemKindProject:
+		return true
+	case ConfigurationPlanItemKindProvider:
+		return true
+	case ConfigurationPlanItemKindRoute:
 		return true
 	default:
 		return false
@@ -240,54 +309,45 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	}
 }
 
-// Defines values for CreateBudgetAlertRuleRequestSubjectKind.
-const (
-	CreateBudgetAlertRuleRequestSubjectKindApiKey      CreateBudgetAlertRuleRequestSubjectKind = "api_key"
-	CreateBudgetAlertRuleRequestSubjectKindBudgetGroup CreateBudgetAlertRuleRequestSubjectKind = "budget_group"
-)
-
-// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestSubjectKind enum.
-func (e CreateBudgetAlertRuleRequestSubjectKind) Valid() bool {
-	switch e {
-	case CreateBudgetAlertRuleRequestSubjectKindApiKey:
-		return true
-	case CreateBudgetAlertRuleRequestSubjectKindBudgetGroup:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CreateBudgetAlertRuleRequestWindowKind.
-const (
-	CreateBudgetAlertRuleRequestWindowKindDay   CreateBudgetAlertRuleRequestWindowKind = "day"
-	CreateBudgetAlertRuleRequestWindowKindMonth CreateBudgetAlertRuleRequestWindowKind = "month"
-)
-
-// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestWindowKind enum.
-func (e CreateBudgetAlertRuleRequestWindowKind) Valid() bool {
-	switch e {
-	case CreateBudgetAlertRuleRequestWindowKindDay:
-		return true
-	case CreateBudgetAlertRuleRequestWindowKindMonth:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CredentialRequirement.
 const (
-	Forbidden CredentialRequirement = "forbidden"
-	Required  CredentialRequirement = "required"
+	CredentialRequirementForbidden CredentialRequirement = "forbidden"
+	CredentialRequirementGrant     CredentialRequirement = "grant"
+	CredentialRequirementRequired  CredentialRequirement = "required"
 )
 
 // Valid indicates whether the value is a known member of the CredentialRequirement enum.
 func (e CredentialRequirement) Valid() bool {
 	switch e {
-	case Forbidden:
+	case CredentialRequirementForbidden:
 		return true
-	case Required:
+	case CredentialRequirementGrant:
+		return true
+	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GrantEnrollmentStatusStatus.
+const (
+	GrantEnrollmentStatusStatusCompleted GrantEnrollmentStatusStatus = "completed"
+	GrantEnrollmentStatusStatusDenied    GrantEnrollmentStatusStatus = "denied"
+	GrantEnrollmentStatusStatusExpired   GrantEnrollmentStatusStatus = "expired"
+	GrantEnrollmentStatusStatusPending   GrantEnrollmentStatusStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the GrantEnrollmentStatusStatus enum.
+func (e GrantEnrollmentStatusStatus) Valid() bool {
+	switch e {
+	case GrantEnrollmentStatusStatusCompleted:
+		return true
+	case GrantEnrollmentStatusStatusDenied:
+		return true
+	case GrantEnrollmentStatusStatusExpired:
+		return true
+	case GrantEnrollmentStatusStatusPending:
 		return true
 	default:
 		return false
@@ -517,6 +577,7 @@ const (
 	ManagementOperationConfigure      ManagementOperation = "configure"
 	ManagementOperationKeys           ManagementOperation = "keys"
 	ManagementOperationLocalLogin     ManagementOperation = "local_login"
+	ManagementOperationManagePlugins  ManagementOperation = "manage_plugins"
 	ManagementOperationManageProjects ManagementOperation = "manage_projects"
 	ManagementOperationManageSessions ManagementOperation = "manage_sessions"
 	ManagementOperationManageTokens   ManagementOperation = "manage_tokens"
@@ -539,6 +600,8 @@ func (e ManagementOperation) Valid() bool {
 	case ManagementOperationKeys:
 		return true
 	case ManagementOperationLocalLogin:
+		return true
+	case ManagementOperationManagePlugins:
 		return true
 	case ManagementOperationManageProjects:
 		return true
@@ -591,6 +654,45 @@ func (e ManagementTokenScope) Valid() bool {
 	case ManagementTokenScopeSettings:
 		return true
 	case ManagementTokenScopeUsage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationDeliveryStatus.
+const (
+	NotificationDeliveryStatusDelivered NotificationDeliveryStatus = "delivered"
+	NotificationDeliveryStatusFailed    NotificationDeliveryStatus = "failed"
+	NotificationDeliveryStatusPending   NotificationDeliveryStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the NotificationDeliveryStatus enum.
+func (e NotificationDeliveryStatus) Valid() bool {
+	switch e {
+	case NotificationDeliveryStatusDelivered:
+		return true
+	case NotificationDeliveryStatusFailed:
+		return true
+	case NotificationDeliveryStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationEvent.
+const (
+	NotificationEventBudgetThreshold     NotificationEvent = "budget.threshold"
+	NotificationEventProviderGrantLapsed NotificationEvent = "provider.grant.lapsed"
+)
+
+// Valid indicates whether the value is a known member of the NotificationEvent enum.
+func (e NotificationEvent) Valid() bool {
+	switch e {
+	case NotificationEventBudgetThreshold:
+		return true
+	case NotificationEventProviderGrantLapsed:
 		return true
 	default:
 		return false
@@ -669,6 +771,51 @@ func (e PlaygroundResponseFormat2Type) Valid() bool {
 	}
 }
 
+// Defines values for PluginFailureRuleClass.
+const (
+	PluginFailureRuleClassCredential  PluginFailureRuleClass = "credential"
+	PluginFailureRuleClassRateLimited PluginFailureRuleClass = "rate_limited"
+	PluginFailureRuleClassRetryable   PluginFailureRuleClass = "retryable"
+	PluginFailureRuleClassTerminal    PluginFailureRuleClass = "terminal"
+)
+
+// Valid indicates whether the value is a known member of the PluginFailureRuleClass enum.
+func (e PluginFailureRuleClass) Valid() bool {
+	switch e {
+	case PluginFailureRuleClassCredential:
+		return true
+	case PluginFailureRuleClassRateLimited:
+		return true
+	case PluginFailureRuleClassRetryable:
+		return true
+	case PluginFailureRuleClassTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginRewriteOp.
+const (
+	Default PluginRewriteOp = "default"
+	Delete  PluginRewriteOp = "delete"
+	Set     PluginRewriteOp = "set"
+)
+
+// Valid indicates whether the value is a known member of the PluginRewriteOp enum.
+func (e PluginRewriteOp) Valid() bool {
+	switch e {
+	case Default:
+		return true
+	case Delete:
+		return true
+	case Set:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -712,10 +859,12 @@ const (
 	ProviderAuthModeAzureClientSecret ProviderAuthMode = "azure_client_secret"
 	ProviderAuthModeAzureDefault      ProviderAuthMode = "azure_default"
 	ProviderAuthModeDefaultChain      ProviderAuthMode = "default_chain"
+	ProviderAuthModeGrant             ProviderAuthMode = "grant"
 	ProviderAuthModeHeaders           ProviderAuthMode = "headers"
 	ProviderAuthModeNone              ProviderAuthMode = "none"
 	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
 	ProviderAuthModeStatic            ProviderAuthMode = "static"
+	ProviderAuthModeStaticCredential  ProviderAuthMode = "static_credential"
 )
 
 // Valid indicates whether the value is a known member of the ProviderAuthMode enum.
@@ -731,6 +880,8 @@ func (e ProviderAuthMode) Valid() bool {
 		return true
 	case ProviderAuthModeDefaultChain:
 		return true
+	case ProviderAuthModeGrant:
+		return true
 	case ProviderAuthModeHeaders:
 		return true
 	case ProviderAuthModeNone:
@@ -738,6 +889,8 @@ func (e ProviderAuthMode) Valid() bool {
 	case ProviderAuthModeServiceAccount:
 		return true
 	case ProviderAuthModeStatic:
+		return true
+	case ProviderAuthModeStaticCredential:
 		return true
 	default:
 		return false
@@ -774,6 +927,21 @@ func (e ProviderConfigurationField) Valid() bool {
 	}
 }
 
+// Defines values for ProviderGrantLapsedEventEvent.
+const (
+	ProviderGrantLapsedEventEventProviderGrantLapsed ProviderGrantLapsedEventEvent = "provider.grant.lapsed"
+)
+
+// Valid indicates whether the value is a known member of the ProviderGrantLapsedEventEvent enum.
+func (e ProviderGrantLapsedEventEvent) Valid() bool {
+	switch e {
+	case ProviderGrantLapsedEventEventProviderGrantLapsed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderKind.
 const (
 	ProviderKindAnthropic        ProviderKind = "anthropic"
@@ -782,6 +950,7 @@ const (
 	ProviderKindGemini           ProviderKind = "gemini"
 	ProviderKindOpenai           ProviderKind = "openai"
 	ProviderKindOpenaiCompatible ProviderKind = "openai_compatible"
+	ProviderKindPlugin           ProviderKind = "plugin"
 	ProviderKindVertexAi         ProviderKind = "vertex_ai"
 )
 
@@ -799,6 +968,8 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindOpenai:
 		return true
 	case ProviderKindOpenaiCompatible:
+		return true
+	case ProviderKindPlugin:
 		return true
 	case ProviderKindVertexAi:
 		return true
@@ -1071,42 +1242,6 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
-// Defines values for UpdateBudgetAlertRuleRequestSubjectKind.
-const (
-	UpdateBudgetAlertRuleRequestSubjectKindApiKey      UpdateBudgetAlertRuleRequestSubjectKind = "api_key"
-	UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup UpdateBudgetAlertRuleRequestSubjectKind = "budget_group"
-)
-
-// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestSubjectKind enum.
-func (e UpdateBudgetAlertRuleRequestSubjectKind) Valid() bool {
-	switch e {
-	case UpdateBudgetAlertRuleRequestSubjectKindApiKey:
-		return true
-	case UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for UpdateBudgetAlertRuleRequestWindowKind.
-const (
-	UpdateBudgetAlertRuleRequestWindowKindDay   UpdateBudgetAlertRuleRequestWindowKind = "day"
-	UpdateBudgetAlertRuleRequestWindowKindMonth UpdateBudgetAlertRuleRequestWindowKind = "month"
-)
-
-// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestWindowKind enum.
-func (e UpdateBudgetAlertRuleRequestWindowKind) Valid() bool {
-	switch e {
-	case UpdateBudgetAlertRuleRequestWindowKindDay:
-		return true
-	case UpdateBudgetAlertRuleRequestWindowKindMonth:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for UpdateUserRoleRequestAccessScope.
 const (
 	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
@@ -1182,21 +1317,21 @@ func (e DownloadMediaJobContentParamsVariant) Valid() bool {
 	}
 }
 
-// Defines values for ListBudgetAlertDeliveriesParamsStatus.
+// Defines values for ListNotificationDeliveriesParamsStatus.
 const (
-	ListBudgetAlertDeliveriesParamsStatusDelivered ListBudgetAlertDeliveriesParamsStatus = "delivered"
-	ListBudgetAlertDeliveriesParamsStatusFailed    ListBudgetAlertDeliveriesParamsStatus = "failed"
-	ListBudgetAlertDeliveriesParamsStatusPending   ListBudgetAlertDeliveriesParamsStatus = "pending"
+	ListNotificationDeliveriesParamsStatusDelivered ListNotificationDeliveriesParamsStatus = "delivered"
+	ListNotificationDeliveriesParamsStatusFailed    ListNotificationDeliveriesParamsStatus = "failed"
+	ListNotificationDeliveriesParamsStatusPending   ListNotificationDeliveriesParamsStatus = "pending"
 )
 
-// Valid indicates whether the value is a known member of the ListBudgetAlertDeliveriesParamsStatus enum.
-func (e ListBudgetAlertDeliveriesParamsStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the ListNotificationDeliveriesParamsStatus enum.
+func (e ListNotificationDeliveriesParamsStatus) Valid() bool {
 	switch e {
-	case ListBudgetAlertDeliveriesParamsStatusDelivered:
+	case ListNotificationDeliveriesParamsStatusDelivered:
 		return true
-	case ListBudgetAlertDeliveriesParamsStatusFailed:
+	case ListNotificationDeliveriesParamsStatusFailed:
 		return true
-	case ListBudgetAlertDeliveriesParamsStatusPending:
+	case ListNotificationDeliveriesParamsStatusPending:
 		return true
 	default:
 		return false
@@ -1418,7 +1553,7 @@ type AuthenticationCapabilities struct {
 	LimitsEnforced    *bool `json:"limits_enforced,omitempty"`
 	LocalLoginEnabled bool  `json:"local_login_enabled"`
 
-	// NotificationsActive Whether the installation runs the budget alert delivery worker, so stored rules actually notify.
+	// NotificationsActive Whether the installation runs the notification delivery worker, so stored rules actually notify.
 	NotificationsActive bool `json:"notifications_active"`
 	OidcLoginEnabled    bool `json:"oidc_login_enabled"`
 
@@ -1430,72 +1565,6 @@ type AuthenticationCapabilities struct {
 type BTreeMap map[string][]struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-}
-
-// BudgetAlertDelivery defines model for BudgetAlertDelivery.
-type BudgetAlertDelivery struct {
-	// Accrued The exact accrual that crossed the threshold, preserved from claim time.
-	Accrued       string                       `json:"accrued"`
-	Attempts      int32                        `json:"attempts"`
-	CreatedAt     time.Time                    `json:"created_at"`
-	Currency      nullable.Nullable[string]    `json:"currency"`
-	DeliveredAt   nullable.Nullable[time.Time] `json:"delivered_at"`
-	Id            openapi_types.UUID           `json:"id"`
-	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
-
-	// LastErrorCode Safe failure category only; raw errors are never stored.
-	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
-
-	// Limit The subject limit evaluated at claim time.
-	Limit            string                                `json:"limit"`
-	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	RuleId           openapi_types.UUID                    `json:"rule_id"`
-	RuleName         string                                `json:"rule_name"`
-	Status           BudgetAlertDeliveryStatus             `json:"status"`
-	ThresholdPercent int32                                 `json:"threshold_percent"`
-	WindowId         int64                                 `json:"window_id"`
-}
-
-// BudgetAlertDeliveryStatus defines model for BudgetAlertDelivery.Status.
-type BudgetAlertDeliveryStatus string
-
-// BudgetAlertDeliveryListResponse defines model for BudgetAlertDeliveryListResponse.
-type BudgetAlertDeliveryListResponse struct {
-	Items      []BudgetAlertDelivery     `json:"items"`
-	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
-}
-
-// BudgetAlertRule defines model for BudgetAlertRule.
-type BudgetAlertRule struct {
-	CreatedAt        time.Time                             `json:"created_at"`
-	CreatedBy        openapi_types.UUID                    `json:"created_by"`
-	CreatedByEmail   string                                `json:"created_by_email"`
-	DestinationId    openapi_types.UUID                    `json:"destination_id"`
-	DestinationName  string                                `json:"destination_name"`
-	Enabled          bool                                  `json:"enabled"`
-	Etag             openapi_types.UUID                    `json:"etag"`
-	Id               openapi_types.UUID                    `json:"id"`
-	Name             string                                `json:"name"`
-	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName      nullable.Nullable[string]             `json:"project_name"`
-	SubjectId        openapi_types.UUID                    `json:"subject_id"`
-	SubjectKind      BudgetAlertRuleSubjectKind            `json:"subject_kind"`
-	SubjectName      nullable.Nullable[string]             `json:"subject_name"`
-	ThresholdPercent int32                                 `json:"threshold_percent"`
-	UpdatedAt        time.Time                             `json:"updated_at"`
-	WindowKind       BudgetAlertRuleWindowKind             `json:"window_kind"`
-}
-
-// BudgetAlertRuleSubjectKind defines model for BudgetAlertRule.SubjectKind.
-type BudgetAlertRuleSubjectKind string
-
-// BudgetAlertRuleWindowKind defines model for BudgetAlertRule.WindowKind.
-type BudgetAlertRuleWindowKind string
-
-// BudgetAlertRuleListResponse defines model for BudgetAlertRuleListResponse.
-type BudgetAlertRuleListResponse struct {
-	Items      []BudgetAlertRule         `json:"items"`
-	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
@@ -1544,6 +1613,39 @@ type BudgetGroupListResponse struct {
 type BudgetGroupMutationResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
 }
+
+// BudgetSubjectKind Whose spend a budget.threshold rule watches.
+type BudgetSubjectKind string
+
+// BudgetThresholdEvent The webhook body of a budget.threshold event: the subject of a budget threshold rule accrued at least its threshold of its limit in the current UTC window. Metadata only: it never carries prompts, outputs or attribution labels.
+type BudgetThresholdEvent struct {
+	// Accrued The exact accrual that crossed the threshold, as claimed.
+	Accrued string `json:"accrued"`
+
+	// Currency The pricing currency, or empty when none is set.
+	Currency string                    `json:"currency"`
+	Event    BudgetThresholdEventEvent `json:"event"`
+
+	// Limit The subject's limit for the window, as claimed.
+	Limit     string             `json:"limit"`
+	RuleId    openapi_types.UUID `json:"rule_id"`
+	RuleName  string             `json:"rule_name"`
+	SubjectId openapi_types.UUID `json:"subject_id"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      BudgetSubjectKind `json:"subject_kind"`
+	ThresholdPercent int32             `json:"threshold_percent"`
+	WindowId         int64             `json:"window_id"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind BudgetWindowKind `json:"window_kind"`
+}
+
+// BudgetThresholdEventEvent defines model for BudgetThresholdEvent.Event.
+type BudgetThresholdEventEvent string
+
+// BudgetWindowKind The UTC window a budget.threshold rule watches.
+type BudgetWindowKind string
 
 // CapabilityCertificationItemResponse defines model for CapabilityCertificationItemResponse.
 type CapabilityCertificationItemResponse struct {
@@ -1632,11 +1734,22 @@ type ConfigurationModelEntry struct {
 
 // ConfigurationPlanItem defines model for ConfigurationPlanItem.
 type ConfigurationPlanItem struct {
-	Action string `json:"action"`
+	// Action What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.
+	Action ConfigurationPlanItemAction `json:"action"`
+
+	// Detail Qualifies the action, or names the conflict or blocker, such as `secret_binding_required`, `grant_enrollment_required`, `plugin_not_installed` or `plugin_not_approved`
 	Detail string `json:"detail"`
-	Key    string `json:"key"`
-	Kind   string `json:"kind"`
+
+	// Key Natural identity of the item: a name, slug or credential reference; a plugin's digest
+	Key  string                    `json:"key"`
+	Kind ConfigurationPlanItemKind `json:"kind"`
 }
+
+// ConfigurationPlanItemAction What applying does to the item; `enroll` leaves a credential slot for grant enrollment after applying. Conflicts and blockers carry `conflict` and `blocker`.
+type ConfigurationPlanItemAction string
+
+// ConfigurationPlanItemKind defines model for ConfigurationPlanItem.Kind.
+type ConfigurationPlanItemKind string
 
 // ConfigurationPlanResponse defines model for ConfigurationPlanResponse.
 type ConfigurationPlanResponse struct {
@@ -1684,7 +1797,7 @@ type ConfigurationPromotionRequest struct {
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
 	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
 
-	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed
+	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.
 	SecretBindings *map[string]string `json:"secret_bindings,omitempty"`
 }
 
@@ -1733,7 +1846,7 @@ type ConfigurationRouteTarget struct {
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
 type ConfigurationSlotEntry struct {
-	// CredentialRef Stable 'provider-name/slot-name-or-default' reference; null for credentialless authentication
+	// CredentialRef Stable 'provider-name/slot-name-or-default' reference to the slot's credential; null for credentialless authentication. Every slot of a provider that authenticates with a grant has one: exports never carry grant material, and importing leaves the slot for grant enrollment.
 	CredentialRef nullable.Nullable[string]     `json:"credential_ref"`
 	Enabled       bool                          `json:"enabled"`
 	IsDefault     bool                          `json:"is_default"`
@@ -1783,6 +1896,9 @@ type ConnectionOptions struct {
 	OperationDefaults *map[string]ProviderOperationDefaults `json:"operation_defaults,omitempty"`
 	ParameterDefaults *map[string]interface{}               `json:"parameter_defaults,omitempty"`
 
+	// PluginOptions A plugin provider's values for the options its plugin profile declares, by option name, which the profile's options_schema describes. Hosting templates and plugin calls for the provider use them. An empty value leaves an option unset.
+	PluginOptions *map[string]string `json:"plugin_options,omitempty"`
+
 	// QuerySettings Profile-allowlisted semantic query settings; cannot replace operation addressing or authentication.
 	QuerySettings *map[string]string `json:"query_settings,omitempty"`
 
@@ -1815,6 +1931,12 @@ type ContentPolicyRuleAction string
 
 // ContentPolicyRulePhase defines model for ContentPolicyRule.Phase.
 type ContentPolicyRulePhase string
+
+// ContinueGrantEnrollmentRequest defines model for ContinueGrantEnrollmentRequest.
+type ContinueGrantEnrollmentRequest struct {
+	// Input What the upstream returned after the operator signed in: the whole loopback callback URL it redirected the browser to, or the code it displayed.
+	Input string `json:"input"`
+}
 
 // CreateApiKeyRequest defines model for CreateApiKeyRequest.
 type CreateApiKeyRequest struct {
@@ -1850,28 +1972,6 @@ type CreateApiKeyResponse struct {
 	// Secret Returned only by this creation response.
 	Secret string `json:"secret"`
 }
-
-// CreateBudgetAlertRuleRequest defines model for CreateBudgetAlertRuleRequest.
-type CreateBudgetAlertRuleRequest struct {
-	DestinationId openapi_types.UUID `json:"destination_id"`
-
-	// Enabled Defaults to true.
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
-
-	// ProjectId Owning project; subject and destination must belong to the same project.
-	ProjectId        nullable.Nullable[openapi_types.UUID]   `json:"project_id,omitempty"`
-	SubjectId        openapi_types.UUID                      `json:"subject_id"`
-	SubjectKind      CreateBudgetAlertRuleRequestSubjectKind `json:"subject_kind"`
-	ThresholdPercent int32                                   `json:"threshold_percent"`
-	WindowKind       CreateBudgetAlertRuleRequestWindowKind  `json:"window_kind"`
-}
-
-// CreateBudgetAlertRuleRequestSubjectKind defines model for CreateBudgetAlertRuleRequest.SubjectKind.
-type CreateBudgetAlertRuleRequestSubjectKind string
-
-// CreateBudgetAlertRuleRequestWindowKind defines model for CreateBudgetAlertRuleRequest.WindowKind.
-type CreateBudgetAlertRuleRequestWindowKind string
 
 // CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
 type CreateBudgetGroupRequest struct {
@@ -1958,6 +2058,29 @@ type CreateNotificationDestinationRequest struct {
 	Url string `json:"url"`
 }
 
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide.
+type CreateNotificationRuleRequest struct {
+	DestinationId openapi_types.UUID `json:"destination_id"`
+
+	// Enabled Defaults to true.
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event NotificationEvent `json:"event"`
+	Name  string            `json:"name"`
+
+	// ProjectId Owning project; subject and destination must belong to the same project.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	SubjectId *openapi_types.UUID                   `json:"subject_id,omitempty"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
+	ThresholdPercent *int32             `json:"threshold_percent,omitempty"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind *BudgetWindowKind `json:"window_kind,omitempty"`
+}
+
 // CreatePricingSourceRequest defines model for CreatePricingSourceRequest.
 type CreatePricingSourceRequest struct {
 	// Enabled Defaults to true.
@@ -2005,13 +2128,31 @@ type CreateRouteDraftRequest struct {
 	Targets   []RouteTargetRequest                  `json:"targets"`
 }
 
+// CredentialGrant What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.
+type CredentialGrant struct {
+	// ExpiresAt When the grant's current access token expires, if the upstream said.
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at"`
+
+	// Facts The grant facts the plugin reported, which the profile's hosting templates use.
+	Facts map[string]string `json:"facts"`
+
+	// LapsedAt When the grant lapsed: it can no longer be refreshed, so the version's slots are ineligible until a new grant enrollment replaces it. Null while the grant lives.
+	LapsedAt nullable.Nullable[time.Time] `json:"lapsed_at"`
+
+	// PluginDigest Digest of the plugin whose grant enrollment created the version.
+	PluginDigest string `json:"plugin_digest"`
+
+	// Principal The observed principal: the upstream account the grant authorizes.
+	Principal string `json:"principal"`
+}
+
 // CredentialListResponse defines model for CredentialListResponse.
 type CredentialListResponse struct {
 	Items      []CredentialResponse      `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// CredentialRequirement defines model for CredentialRequirement.
+// CredentialRequirement Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.
 type CredentialRequirement string
 
 // CredentialResponse defines model for CredentialResponse.
@@ -2021,17 +2162,22 @@ type CredentialResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// DraftSelected True when this credential is selected only by the mutable draft.
-	DraftSelected bool                         `json:"draft_selected"`
-	Id            openapi_types.UUID           `json:"id"`
-	RevokedAt     nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
-	Version       int32                        `json:"version"`
+	DraftSelected bool `json:"draft_selected"`
+
+	// Grant What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.
+	Grant     nullable.Nullable[CredentialGrant] `json:"grant,omitempty"`
+	Id        openapi_types.UUID                 `json:"id"`
+	RevokedAt nullable.Nullable[time.Time]       `json:"revoked_at,omitempty"`
+	Version   int32                              `json:"version"`
 }
 
 // CredentialSlot defines model for CredentialSlot.
 type CredentialSlot struct {
-	AllowedApiKeys      *[]openapi_types.UUID                 `json:"allowed_api_keys,omitempty"`
-	AllowedModels       *[]string                             `json:"allowed_models,omitempty"`
-	AllowedRoutes       *[]string                             `json:"allowed_routes,omitempty"`
+	AllowedApiKeys *[]openapi_types.UUID `json:"allowed_api_keys,omitempty"`
+	AllowedModels  *[]string             `json:"allowed_models,omitempty"`
+	AllowedRoutes  *[]string             `json:"allowed_routes,omitempty"`
+
+	// CredentialVersionId The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
 	Enabled             *bool                                 `json:"enabled,omitempty"`
 	Id                  *openapi_types.UUID                   `json:"id,omitempty"`
@@ -2063,6 +2209,63 @@ type DiscoveredModelRequest struct {
 type EnrollPasswordRequest struct {
 	NewPassword *string `json:"new_password,omitempty"`
 }
+
+// GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
+type GrantDeviceAuthorization struct {
+	// Interval How many seconds to wait between status requests.
+	Interval int32 `json:"interval"`
+
+	// UserCode The code the operator enters at the verification URL.
+	UserCode string `json:"user_code"`
+
+	// VerificationUrl Where the operator enters the user code, at one of the plugin's approved origins.
+	VerificationUrl string `json:"verification_url"`
+}
+
+// GrantEnrollment A grant enrollment in progress, with either an authorization URL or a device authorization. With an authorization URL, the operator opens it, signs in upstream, and continues the enrollment with what the upstream returns before it expires; it is continued once. With a device authorization, the operator approves the device upstream while status requests poll the enrollment until it completes, is denied or expires. Any control replica serves either.
+type GrantEnrollment struct {
+	// AuthorizationUrl The plugin's authorization request, at one of its approved origins.
+	AuthorizationUrl *string `json:"authorization_url,omitempty"`
+
+	// Device A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
+	Device *GrantDeviceAuthorization `json:"device,omitempty"`
+
+	// ExpiresAt When the enrollment expires: 10 minutes after it starts, or when a device authorization's user code expires, within 30 minutes.
+	ExpiresAt  time.Time          `json:"expires_at"`
+	Id         openapi_types.UUID `json:"id"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
+
+	// SlotId The credential slot the grant will back.
+	SlotId openapi_types.UUID `json:"slot_id"`
+}
+
+// GrantEnrollmentCompletion The credential version grant enrollment created, with the grant beneath it, staged on the enrollment's credential slot of the provider draft like a rotated credential.
+type GrantEnrollmentCompletion struct {
+	CredentialId      openapi_types.UUID `json:"credential_id"`
+	CredentialVersion int32              `json:"credential_version"`
+
+	// Etag The provider draft's new ETag.
+	Etag openapi_types.UUID `json:"etag"`
+
+	// Principal The observed principal: the upstream account the grant authorizes.
+	Principal  string             `json:"principal"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
+}
+
+// GrantEnrollmentStatus Where a grant enrollment by device authorization stands.
+type GrantEnrollmentStatus struct {
+	// Completion The credential version the grant created, once completed.
+	Completion *GrantEnrollmentCompletion `json:"completion,omitempty"`
+
+	// Interval How many seconds to wait before the next status request, while pending. The upstream may ask OLP to slow down, which lengthens it.
+	Interval *int32 `json:"interval,omitempty"`
+
+	// Status `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
+	Status GrantEnrollmentStatusStatus `json:"status"`
+}
+
+// GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
+type GrantEnrollmentStatusStatus string
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -2149,10 +2352,15 @@ type InspectedRequestField struct {
 // InspectedRequestFieldKind defines model for InspectedRequestField.Kind.
 type InspectedRequestFieldKind string
 
-// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported.
 type InspectedServingIdentity struct {
-	Model                 string             `json:"model"`
-	PrincipalDeclared     bool               `json:"principal_declared"`
+	Model string `json:"model"`
+
+	// PrincipalDeclared A serving binding declares the upstream principal.
+	PrincipalDeclared bool `json:"principal_declared"`
+
+	// PrincipalObserved Grant enrollment observed the upstream principal, which replaces any a binding declares.
+	PrincipalObserved     bool               `json:"principal_observed"`
 	ProviderRevisionId    openapi_types.UUID `json:"provider_revision_id"`
 	RegionDeclared        bool               `json:"region_declared"`
 	ResourceScopeDeclared bool               `json:"resource_scope_declared"`
@@ -2212,7 +2420,7 @@ type InteractionInspection struct {
 	ReturnDialect       *string                              `json:"return_dialect,omitempty"`
 	SemanticContext     *[]InspectedRequestField             `json:"semantic_context,omitempty"`
 
-	// Serving Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+	// Serving Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported.
 	Serving *InspectedServingIdentity   `json:"serving,omitempty"`
 	Status  InteractionInspectionStatus `json:"status"`
 }
@@ -2395,6 +2603,58 @@ type NetworkCredentialResponse struct {
 	Version   int32                        `json:"version"`
 }
 
+// NotificationDelivery Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.
+type NotificationDelivery struct {
+	// Accrued The exact accrual that crossed the threshold, preserved from claim time. Set for budget.threshold deliveries only; null for other events.
+	Accrued   nullable.Nullable[string] `json:"accrued"`
+	Attempts  int32                     `json:"attempts"`
+	CreatedAt time.Time                 `json:"created_at"`
+
+	// CredentialVersion The number of the credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	CredentialVersion nullable.Nullable[int32] `json:"credential_version"`
+
+	// CredentialVersionId The credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id"`
+	Currency            nullable.Nullable[string]             `json:"currency"`
+	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event         NotificationEvent            `json:"event"`
+	Id            openapi_types.UUID           `json:"id"`
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastErrorCode Safe failure category only; raw errors are never stored.
+	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
+
+	// Limit The subject limit evaluated at claim time. Set for budget.threshold deliveries only; null for other events.
+	Limit     nullable.Nullable[string]             `json:"limit"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+
+	// ProviderId The provider whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id"`
+
+	// ProviderName The provider's name when its grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
+	ProviderName nullable.Nullable[string]  `json:"provider_name"`
+	RuleId       openapi_types.UUID         `json:"rule_id"`
+	RuleName     string                     `json:"rule_name"`
+	Status       NotificationDeliveryStatus `json:"status"`
+
+	// ThresholdPercent Set for budget.threshold deliveries only; null for other events.
+	ThresholdPercent nullable.Nullable[int32] `json:"threshold_percent"`
+
+	// WindowId Set for budget.threshold deliveries only; null for other events.
+	WindowId nullable.Nullable[int64] `json:"window_id"`
+}
+
+// NotificationDeliveryStatus defines model for NotificationDelivery.Status.
+type NotificationDeliveryStatus string
+
+// NotificationDeliveryListResponse defines model for NotificationDeliveryListResponse.
+type NotificationDeliveryListResponse struct {
+	Items      []NotificationDelivery    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
 // NotificationDestination defines model for NotificationDestination.
 type NotificationDestination struct {
 	CreatedAt      time.Time                             `json:"created_at"`
@@ -2413,6 +2673,49 @@ type NotificationDestination struct {
 // NotificationDestinationListResponse defines model for NotificationDestinationListResponse.
 type NotificationDestinationListResponse struct {
 	Items      []NotificationDestination `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+type NotificationEvent string
+
+// NotificationRule A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.
+type NotificationRule struct {
+	CreatedAt       time.Time          `json:"created_at"`
+	CreatedBy       openapi_types.UUID `json:"created_by"`
+	CreatedByEmail  string             `json:"created_by_email"`
+	DestinationId   openapi_types.UUID `json:"destination_id"`
+	DestinationName string             `json:"destination_name"`
+	Enabled         bool               `json:"enabled"`
+	Etag            openapi_types.UUID `json:"etag"`
+
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	Event NotificationEvent  `json:"event"`
+	Id    openapi_types.UUID `json:"id"`
+	Name  string             `json:"name"`
+
+	// ProjectId Owning project; null for an installation-wide rule, as every provider event rule is.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+
+	// SubjectId Set for budget.threshold rules only; null for other events.
+	SubjectId nullable.Nullable[openapi_types.UUID] `json:"subject_id"`
+
+	// SubjectKind Set for budget.threshold rules only; null for other events.
+	SubjectKind nullable.Nullable[BudgetSubjectKind] `json:"subject_kind"`
+	SubjectName nullable.Nullable[string]            `json:"subject_name"`
+
+	// ThresholdPercent Set for budget.threshold rules only; null for other events.
+	ThresholdPercent nullable.Nullable[int32] `json:"threshold_percent"`
+	UpdatedAt        time.Time                `json:"updated_at"`
+
+	// WindowKind Set for budget.threshold rules only; null for other events.
+	WindowKind nullable.Nullable[BudgetWindowKind] `json:"window_kind"`
+}
+
+// NotificationRuleListResponse defines model for NotificationRuleListResponse.
+type NotificationRuleListResponse struct {
+	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
@@ -2638,6 +2941,208 @@ type PlaygroundUsage struct {
 	TotalTokens       int64                    `json:"total_tokens"`
 }
 
+// Plugin An installed provider plugin: its digest and the manifest it declared. A confined plugin's WebAssembly module is stored with it; an unconfined plugin's executable lives in the deployment's image.
+type Plugin struct {
+	// AbiVersion Plugin ABI version the plugin was built for.
+	AbiVersion int32 `json:"abi_version"`
+
+	// ApprovedAt When an owner approved the declared origins, or permitted an unconfined plugin; null while the plugin awaits approval and can't be used.
+	ApprovedAt      nullable.Nullable[time.Time]          `json:"approved_at"`
+	ApprovedBy      nullable.Nullable[openapi_types.UUID] `json:"approved_by"`
+	ApprovedByEmail nullable.Nullable[string]             `json:"approved_by_email"`
+
+	// Digest Lowercase hexadecimal SHA-256 digest of the module, or of an unconfined plugin's executable, which identifies the plugin.
+	Digest string             `json:"digest"`
+	Etag   openapi_types.UUID `json:"etag"`
+
+	// Executable For an unconfined plugin, the name of its executable in the deployment's unconfined plugin directory; null for a confined plugin. Unconfined plugins are listed only where the deployment enables them.
+	Executable       nullable.Nullable[string] `json:"executable"`
+	InstalledAt      time.Time                 `json:"installed_at"`
+	InstalledBy      openapi_types.UUID        `json:"installed_by"`
+	InstalledByEmail string                    `json:"installed_by_email"`
+
+	// Manifest What a plugin declared at install. It never changes for a digest.
+	Manifest PluginManifest `json:"manifest"`
+
+	// SizeBytes Size of the module or executable.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// PluginApprovalRequest defines model for PluginApprovalRequest.
+type PluginApprovalRequest struct {
+	// Origins Exactly the origins the plugin declares, in any order.
+	Origins []string `json:"origins"`
+}
+
+// PluginDiscovery The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.
+type PluginDiscovery struct {
+	// Id The field of each model object that holds its ID.
+	Id string `json:"id"`
+
+	// Models The top-level field of the listing that holds the array of model objects.
+	Models string `json:"models"`
+
+	// Pagination How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.
+	Pagination *PluginPagination `json:"pagination,omitempty"`
+
+	// Path The listing's path, which extends the address, such as /models.
+	Path string `json:"path"`
+}
+
+// PluginEnvelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
+type PluginEnvelope struct {
+	// Fields The request object's other members by name, with value templates in which {model} stands for the upstream model and {options.<name>} for the provider's value of one of the profile's required options. They become JSON strings.
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Request The member of the upstream's request object that carries the dialect's request body.
+	Request *string `json:"request,omitempty"`
+
+	// Response The member of the upstream's responses and stream events that carries the dialect's response or event.
+	Response *string `json:"response,omitempty"`
+}
+
+// PluginFailureRule Classifies the upstream failures it matches: unsuccessful responses by status and the error their body states, and errors stated in-band, such as a stream's error event, by code and type. It matches when every value it declares matches exactly, and declares at least one.
+type PluginFailureRule struct {
+	// Class credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
+	Class PluginFailureRuleClass `json:"class"`
+
+	// Code The stated error's code.
+	Code *string `json:"code,omitempty"`
+
+	// Status The unsuccessful response's HTTP status. A rule with a status never matches an in-band error.
+	Status *int `json:"status,omitempty"`
+
+	// Type The stated error's type.
+	Type *string `json:"type,omitempty"`
+}
+
+// PluginFailureRuleClass credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.
+type PluginFailureRuleClass string
+
+// PluginGrantAuthentication Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
+type PluginGrantAuthentication struct {
+	// Facts The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}, and with which the address may begin when the fact holds the upstream's base URL.
+	Facts *[]string `json:"facts,omitempty"`
+}
+
+// PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
+type PluginHosting struct {
+	// Address Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place. A grant profile's address may instead begin with the grant fact that holds the upstream's base URL, such as {grant.api_base}/v1: the endpoint's origin is then https://grant.invalid, and OLP sends each request to its grant's base URL, which must be at one of the plugin's approved origins.
+	Address string `json:"address"`
+
+	// Classification Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.
+	Classification *[]PluginFailureRule `json:"classification,omitempty"`
+
+	// Discovery The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.
+	Discovery *PluginDiscovery `json:"discovery,omitempty"`
+
+	// Envelope The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.
+	Envelope *PluginEnvelope `json:"envelope,omitempty"`
+
+	// ForceStreaming The upstream serves only streaming requests. OLP sends every request as a streaming one and aggregates the stream into the dialect's non-streaming result for a caller that did not ask to stream. Only openai-responses profiles may force streaming.
+	ForceStreaming *bool `json:"force_streaming,omitempty"`
+
+	// Headers Declared request headers by name, with value templates.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Query Declared query parameters by name, with value templates.
+	Query *map[string]string `json:"query,omitempty"`
+
+	// Rewrites Declared changes to the dialect's request body, applied in order before the envelope wraps it.
+	Rewrites *[]PluginRewrite `json:"rewrites,omitempty"`
+}
+
+// PluginListResponse defines model for PluginListResponse.
+type PluginListResponse struct {
+	Items []Plugin `json:"items"`
+
+	// UnconfinedPluginsEnabled Whether this deployment enables the experimental unconfined plugin tier. Only a deployment setting enables it, never the management API.
+	UnconfinedPluginsEnabled bool `json:"unconfined_plugins_enabled"`
+}
+
+// PluginManifest What a plugin declared at install. It never changes for a digest.
+type PluginManifest struct {
+	Description *string `json:"description,omitempty"`
+
+	// Name Identifies the plugin across its versions; several digests of one plugin may be installed side by side.
+	Name string `json:"name"`
+
+	// Origins The only origins the plugin may reach once an owner approves them, as scheme://host[:port].
+	Origins  []string        `json:"origins"`
+	Profiles []PluginProfile `json:"profiles"`
+
+	// Version The author's label for this build.
+	Version string `json:"version"`
+}
+
+// PluginOption A non-secret setting a plugin profile declares, such as an account ID, a region or a project, whose value the operator sets on each provider using the profile. Values are text of 1-256 characters without control characters.
+type PluginOption struct {
+	Description *string `json:"description,omitempty"`
+
+	// Enum The only values the option takes.
+	Enum  *[]string `json:"enum,omitempty"`
+	Label string    `json:"label"`
+
+	// Name Identifies the option in provider configuration and as {options.<name>} in hosting templates.
+	Name string `json:"name"`
+
+	// Optional Whether a provider may leave the option unset. Hosting templates reference only options that are not optional.
+	Optional *bool `json:"optional,omitempty"`
+
+	// Pattern A regular expression in RE2 syntax that values match; anchor it with ^ and $ to match whole values.
+	Pattern *string `json:"pattern,omitempty"`
+}
+
+// PluginPagination How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.
+type PluginPagination struct {
+	// Cursor The top-level field of a page that holds the next page's cursor.
+	Cursor string `json:"cursor"`
+
+	// More The top-level boolean field of a page that reports whether another page follows.
+	More *string `json:"more,omitempty"`
+
+	// Parameter The query parameter that carries the cursor.
+	Parameter string `json:"parameter"`
+}
+
+// PluginProfile A provider profile the plugin supplies around a built-in dialect.
+type PluginProfile struct {
+	// CarriesTraffic Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.
+	CarriesTraffic *bool `json:"carries_traffic,omitempty"`
+
+	// Dialect The built-in dialect the profile serves.
+	Dialect string `json:"dialect"`
+
+	// Grant Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.
+	Grant *PluginGrantAuthentication `json:"grant,omitempty"`
+
+	// Hosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
+	Hosting PluginHosting `json:"hosting"`
+	Id      string        `json:"id"`
+	Label   string        `json:"label"`
+
+	// Options Non-secret settings each provider using the profile sets, in the order the provider wizard shows them.
+	Options *[]PluginOption `json:"options,omitempty"`
+
+	// Signing Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.
+	Signing *bool `json:"signing,omitempty"`
+}
+
+// PluginRewrite A declared change to one member of the dialect's request body.
+type PluginRewrite struct {
+	// Op set replaces the member, default sets it unless the request has it, and delete removes it.
+	Op PluginRewriteOp `json:"op"`
+
+	// Path JSON pointer to an object member, such as /generationConfig/seed. Setting it creates the objects above it.
+	Path string `json:"path"`
+
+	// Value The JSON value to set or default to, which may be null; absent for delete.
+	Value json.RawMessage `json:"value,omitempty"`
+}
+
+// PluginRewriteOp set replaces the member, default sets it unless the request has it, and delete removes it.
+type PluginRewriteOp string
+
 // PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
 type PolicyDecision struct {
 	Action  string `json:"action"`
@@ -2684,12 +3189,16 @@ type PriceRequest struct {
 	Model                 string                    `json:"model"`
 
 	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
-	Operation        PriceOperation                        `json:"operation"`
-	OutputPerMillion nullable.Nullable[string]             `json:"output_per_million,omitempty"`
-	ProviderId       nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind     ProviderKind                          `json:"provider_kind"`
-	UnitPrice        nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId         nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	Operation        PriceOperation            `json:"operation"`
+	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
+
+	// ProviderId Scopes the price to one provider. A price for plugin providers names its provider: no kind-wide or vendor price applies to them.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // PriceResponse defines model for PriceResponse.
@@ -2715,9 +3224,11 @@ type PriceResponse struct {
 	Operation             string                                `json:"operation"`
 	OutputPerMillion      nullable.Nullable[string]             `json:"output_per_million,omitempty"`
 	ProviderId            nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
-	ProviderKind          ProviderKind                          `json:"provider_kind"`
-	UnitPrice             nullable.Nullable[string]             `json:"unit_price,omitempty"`
-	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // PricingRevisionRequest defines model for PricingRevisionRequest.
@@ -2896,12 +3407,15 @@ type ProviderActivationResponse struct {
 
 // ProviderAuthCapabilityResponse defines model for ProviderAuthCapabilityResponse.
 type ProviderAuthCapabilityResponse struct {
+	// Credential Whether an authentication mode takes a stored credential: `required` takes a pasted credential, `grant` takes credential versions that grant enrollment creates, and `forbidden` takes none.
 	Credential CredentialRequirement `json:"credential"`
 	Label      string                `json:"label"`
-	Mode       ProviderAuthMode      `json:"mode"`
+
+	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	Mode ProviderAuthMode `json:"mode"`
 }
 
-// ProviderAuthMode defines model for ProviderAuthMode.
+// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 type ProviderAuthMode string
 
 // ProviderCapabilityOptionsResponse defines model for ProviderCapabilityOptionsResponse.
@@ -2909,24 +3423,32 @@ type ProviderCapabilityOptionsResponse struct {
 	// Capabilities Capability tuples with a safe server-owned certification path for this
 	// provider kind. Configuration validation may support additional future tuples.
 	Capabilities []CapabilityInput `json:"capabilities"`
-	ProviderKind ProviderKind      `json:"provider_kind"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
 }
 
 // ProviderConfiguration defines model for ProviderConfiguration.
 type ProviderConfiguration struct {
-	ApiVersion   nullable.Nullable[string] `json:"api_version,omitempty"`
+	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
+
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
 	Deployment   nullable.Nullable[string] `json:"deployment,omitempty"`
-	Endpoint     nullable.Nullable[string] `json:"endpoint,omitempty"`
-	Kind         ProviderKind              `json:"kind"`
-	Options      *ConnectionOptions        `json:"options,omitempty"`
+
+	// Endpoint Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address, with the provider's plugin options in place.
+	Endpoint nullable.Nullable[string] `json:"endpoint,omitempty"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind    ProviderKind       `json:"kind"`
+	Options *ConnectionOptions `json:"options,omitempty"`
 
 	// ProfileId Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.
 	ProfileId *string `json:"profile_id,omitempty"`
 
-	// ProfileRevision Immutable provider profile composition revision selected with profile_id.
+	// ProfileRevision Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.
 	ProfileRevision *string `json:"profile_revision,omitempty"`
 }
 
@@ -2972,23 +3494,48 @@ type ProviderFieldCapabilityResponse struct {
 	Required bool                       `json:"required"`
 }
 
+// ProviderGrantLapsedEvent The webhook body of a provider.grant.lapsed event: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment replaces it. It reports the provider, credential version, credential slots and observed principal as they were when the grant lapsed, and never carries secret material: no access or refresh token, grant facts or refresh failure.
+type ProviderGrantLapsedEvent struct {
+	// CredentialSlots The provider's credential slots bound to the credential version, in its draft or its active revision: usually one.
+	CredentialSlots []struct {
+		Id   openapi_types.UUID `json:"id"`
+		Name string             `json:"name"`
+	} `json:"credential_slots"`
+	CredentialVersion   int32                         `json:"credential_version"`
+	CredentialVersionId openapi_types.UUID            `json:"credential_version_id"`
+	Event               ProviderGrantLapsedEventEvent `json:"event"`
+	LapsedAt            time.Time                     `json:"lapsed_at"`
+
+	// ObservedPrincipal The upstream principal the grant's enrollment observed.
+	ObservedPrincipal string             `json:"observed_principal"`
+	ProviderId        openapi_types.UUID `json:"provider_id"`
+	ProviderName      string             `json:"provider_name"`
+	RuleId            openapi_types.UUID `json:"rule_id"`
+	RuleName          string             `json:"rule_name"`
+}
+
+// ProviderGrantLapsedEventEvent defines model for ProviderGrantLapsedEvent.Event.
+type ProviderGrantLapsedEventEvent string
+
 // ProviderHealthItem defines model for ProviderHealthItem.
 type ProviderHealthItem struct {
-	AttemptCount        int64                        `json:"attempt_count"`
-	AverageLatencyMs    nullable.Nullable[float64]   `json:"average_latency_ms,omitempty"`
-	LastAttemptAt       nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
-	LastProbeAt         nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
-	LastProbeDetail     nullable.Nullable[string]    `json:"last_probe_detail,omitempty"`
-	LastProbeStatus     nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
-	ProviderId          openapi_types.UUID           `json:"provider_id"`
-	ProviderKind        ProviderKind                 `json:"provider_kind"`
-	ProviderName        string                       `json:"provider_name"`
-	ProviderState       string                       `json:"provider_state"`
-	RateLimitCount      int64                        `json:"rate_limit_count"`
-	ServerErrorCount    int64                        `json:"server_error_count"`
-	Status              string                       `json:"status"`
-	SuccessCount        int64                        `json:"success_count"`
-	TransportErrorCount int64                        `json:"transport_error_count"`
+	AttemptCount     int64                        `json:"attempt_count"`
+	AverageLatencyMs nullable.Nullable[float64]   `json:"average_latency_ms,omitempty"`
+	LastAttemptAt    nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
+	LastProbeAt      nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
+	LastProbeDetail  nullable.Nullable[string]    `json:"last_probe_detail,omitempty"`
+	LastProbeStatus  nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
+	ProviderId       openapi_types.UUID           `json:"provider_id"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind        ProviderKind `json:"provider_kind"`
+	ProviderName        string       `json:"provider_name"`
+	ProviderState       string       `json:"provider_state"`
+	RateLimitCount      int64        `json:"rate_limit_count"`
+	ServerErrorCount    int64        `json:"server_error_count"`
+	Status              string       `json:"status"`
+	SuccessCount        int64        `json:"success_count"`
+	TransportErrorCount int64        `json:"transport_error_count"`
 }
 
 // ProviderHealthResponse defines model for ProviderHealthResponse.
@@ -2998,7 +3545,7 @@ type ProviderHealthResponse struct {
 	WindowMinutes int32                     `json:"window_minutes"`
 }
 
-// ProviderKind defines model for ProviderKind.
+// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 type ProviderKind string
 
 // ProviderKindCapabilityListResponse defines model for ProviderKindCapabilityListResponse.
@@ -3008,12 +3555,16 @@ type ProviderKindCapabilityListResponse struct {
 
 // ProviderKindCapabilityResponse defines model for ProviderKindCapabilityResponse.
 type ProviderKindCapabilityResponse struct {
-	AuthModes       []ProviderAuthCapabilityResponse  `json:"auth_modes"`
+	AuthModes []ProviderAuthCapabilityResponse `json:"auth_modes"`
+
+	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	DefaultAuthMode ProviderAuthMode                  `json:"default_auth_mode"`
 	Description     string                            `json:"description"`
 	Fields          []ProviderFieldCapabilityResponse `json:"fields"`
-	Kind            ProviderKind                      `json:"kind"`
-	Label           string                            `json:"label"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind  ProviderKind `json:"kind"`
+	Label string       `json:"label"`
 
 	// Presets Reviewed onboarding presets. Empty for provider kinds without presets.
 	Presets []ProviderPresetResponse `json:"presets"`
@@ -3033,12 +3584,14 @@ type ProviderModelInventoryListResponse struct {
 
 // ProviderModelInventoryResponse defines model for ProviderModelInventoryResponse.
 type ProviderModelInventoryResponse struct {
-	Available    bool                  `json:"available"`
-	Metadata     ModelMetadata         `json:"metadata"`
-	Model        ProviderModelResponse `json:"model"`
-	ProviderId   openapi_types.UUID    `json:"provider_id"`
-	ProviderKind ProviderKind          `json:"provider_kind"`
-	ProviderName string                `json:"provider_name"`
+	Available  bool                  `json:"available"`
+	Metadata   ModelMetadata         `json:"metadata"`
+	Model      ProviderModelResponse `json:"model"`
+	ProviderId openapi_types.UUID    `json:"provider_id"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
+	ProviderName string       `json:"provider_name"`
 }
 
 // ProviderModelListResponse defines model for ProviderModelListResponse.
@@ -3101,6 +3654,7 @@ type ProviderOperationDefaults struct {
 
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
+	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode           ProviderAuthMode `json:"auth_mode"`
 	Description        string           `json:"description"`
 	DocumentationLabel string           `json:"documentation_label"`
@@ -3117,7 +3671,7 @@ type ProviderPresetResponse struct {
 	Maintainer string `json:"maintainer"`
 }
 
-// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.
+// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.
 type ProviderProfile struct {
 	Authentication []string `json:"authentication"`
 
@@ -3131,18 +3685,43 @@ type ProviderProfile struct {
 	Kind            string                            `json:"kind"`
 	Label           string                            `json:"label"`
 
+	// ModelDiscovery Whether a plugin profile declares the upstream's model listing. Without it, operators declare the models of a provider using the profile. A built-in profile's provider kind decides its discovery, and it omits this field.
+	ModelDiscovery *bool `json:"model_discovery,omitempty"`
+
 	// OperationDialects Dialect identity for each supported operation.
 	OperationDialects map[string]string `json:"operation_dialects"`
 	Operations        []string          `json:"operations"`
-	QuerySettings     []string          `json:"query_settings"`
-	Revision          string            `json:"revision"`
-	SemanticHeaders   []string          `json:"semantic_headers"`
-	Transport         string            `json:"transport"`
+
+	// OptionsSchema A plugin profile's options, as the JSON Schema of a provider's plugin_options: a string property per option, in declared order, with required options listed in required. Absent for a built-in profile.
+	OptionsSchema *map[string]interface{} `json:"options_schema,omitempty"`
+
+	// Plugin The installed provider plugin that supplies a profile.
+	Plugin          *ProviderProfilePlugin `json:"plugin,omitempty"`
+	QuerySettings   []string               `json:"query_settings"`
+	Revision        string                 `json:"revision"`
+	SemanticHeaders []string               `json:"semantic_headers"`
+
+	// Strict Whether the profile may serve strict routes: its hosting changes only authorization, address and headers, or is a qualified built-in binding.
+	Strict bool `json:"strict"`
+
+	// Transport How the profile reaches the upstream: http, websocket, or plugin where an unconfined plugin carries its traffic.
+	Transport string `json:"transport"`
 }
 
 // ProviderProfileListResponse defines model for ProviderProfileListResponse.
 type ProviderProfileListResponse struct {
 	Items []ProviderProfile `json:"items"`
+}
+
+// ProviderProfilePlugin The installed provider plugin that supplies a profile.
+type ProviderProfilePlugin struct {
+	// Digest Lowercase hexadecimal SHA-256 digest of the plugin module, or of an unconfined plugin's executable, which is the profile revision.
+	Digest string `json:"digest"`
+	Name   string `json:"name"`
+
+	// Unconfined Set for an unconfined plugin, which runs with native privileges.
+	Unconfined *bool  `json:"unconfined,omitempty"`
+	Version    string `json:"version"`
 }
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
@@ -3182,8 +3761,10 @@ type ProviderResourceListResponse struct {
 
 // ProviderResponse defines model for ProviderResponse.
 type ProviderResponse struct {
-	Etag  openapi_types.UUID        `json:"etag"`
-	Id    openapi_types.UUID        `json:"id"`
+	Etag openapi_types.UUID `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Kind  ProviderKind              `json:"kind"`
 	Model nullable.Nullable[string] `json:"model,omitempty"`
 	Name  string                    `json:"name"`
@@ -3192,24 +3773,32 @@ type ProviderResponse struct {
 
 // ProviderRevisionDiffResponse defines model for ProviderRevisionDiffResponse.
 type ProviderRevisionDiffResponse struct {
-	ApiVersionChanged            bool     `json:"api_version_changed"`
-	CapabilitiesAdded            []string `json:"capabilities_added"`
-	CapabilitiesRemoved          []string `json:"capabilities_removed"`
-	CloudContextChanged          bool     `json:"cloud_context_changed"`
-	ConnectorChanged             bool     `json:"connector_changed"`
-	CredentialChanged            bool     `json:"credential_changed"`
-	DeploymentChanged            bool     `json:"deployment_changed"`
-	EndpointChanged              bool     `json:"endpoint_changed"`
-	FromRevision                 int32    `json:"from_revision"`
-	ModelsAdded                  []string `json:"models_added"`
-	ModelsChanged                []string `json:"models_changed"`
-	ModelsRemoved                []string `json:"models_removed"`
-	NameChanged                  bool     `json:"name_changed"`
-	NetworkConfigurationChanged  bool     `json:"network_configuration_changed"`
-	ProfileChanged               bool     `json:"profile_changed"`
-	SemanticConfigurationChanged bool     `json:"semantic_configuration_changed"`
-	ServingBindingChanged        bool     `json:"serving_binding_changed"`
-	ToRevision                   int32    `json:"to_revision"`
+	ApiVersionChanged           bool     `json:"api_version_changed"`
+	CapabilitiesAdded           []string `json:"capabilities_added"`
+	CapabilitiesRemoved         []string `json:"capabilities_removed"`
+	CloudContextChanged         bool     `json:"cloud_context_changed"`
+	ConnectorChanged            bool     `json:"connector_changed"`
+	CredentialChanged           bool     `json:"credential_changed"`
+	DeploymentChanged           bool     `json:"deployment_changed"`
+	EndpointChanged             bool     `json:"endpoint_changed"`
+	FromRevision                int32    `json:"from_revision"`
+	ModelsAdded                 []string `json:"models_added"`
+	ModelsChanged               []string `json:"models_changed"`
+	ModelsRemoved               []string `json:"models_removed"`
+	NameChanged                 bool     `json:"name_changed"`
+	NetworkConfigurationChanged bool     `json:"network_configuration_changed"`
+
+	// PluginChanged The revisions pin different provider plugin digests, or only one pins a plugin.
+	PluginChanged bool `json:"plugin_changed"`
+
+	// PluginOptionsChanged The revisions set different values for the plugin profile's options.
+	PluginOptionsChanged         bool `json:"plugin_options_changed"`
+	ProfileChanged               bool `json:"profile_changed"`
+	SemanticConfigurationChanged bool `json:"semantic_configuration_changed"`
+
+	// ServingBindingChanged The revisions declare different serving bindings, or their credential slots observe different upstream principals.
+	ServingBindingChanged bool  `json:"serving_binding_changed"`
+	ToRevision            int32 `json:"to_revision"`
 }
 
 // ProviderRevisionListResponse defines model for ProviderRevisionListResponse.
@@ -3263,11 +3852,13 @@ type ProviderRevisionSummaryResponse struct {
 	// HistoricalCredentialVersion Historical metadata only. Restore never selects this credential.
 	HistoricalCredentialVersion nullable.Nullable[int32] `json:"historical_credential_version,omitempty"`
 	Id                          openapi_types.UUID       `json:"id"`
-	Kind                        ProviderKind             `json:"kind"`
-	ModelCount                  int64                    `json:"model_count"`
-	Name                        string                   `json:"name"`
-	ProviderId                  openapi_types.UUID       `json:"provider_id"`
-	Revision                    int32                    `json:"revision"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	Kind       ProviderKind       `json:"kind"`
+	ModelCount int64              `json:"model_count"`
+	Name       string             `json:"name"`
+	ProviderId openapi_types.UUID `json:"provider_id"`
+	Revision   int32              `json:"revision"`
 }
 
 // ProviderServingBinding Serving environment identity independent of credentials. A binding may select a model or Azure deployment, never both. Region must match the provider connection.
@@ -3291,10 +3882,12 @@ type ProviderSummaryResponse struct {
 	CreatedAt                time.Time                `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the provider.
-	CreatedByEmail    nullable.Nullable[string]    `json:"created_by_email,omitempty"`
-	EnabledModelCount int64                        `json:"enabled_model_count"`
-	Etag              openapi_types.UUID           `json:"etag"`
-	Id                openapi_types.UUID           `json:"id"`
+	CreatedByEmail    nullable.Nullable[string] `json:"created_by_email,omitempty"`
+	EnabledModelCount int64                     `json:"enabled_model_count"`
+	Etag              openapi_types.UUID        `json:"etag"`
+	Id                openapi_types.UUID        `json:"id"`
+
+	// Kind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Kind              ProviderKind                 `json:"kind"`
 	LastProbeAt       nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
 	LastProbeStatus   nullable.Nullable[string]    `json:"last_probe_status,omitempty"`
@@ -3342,7 +3935,7 @@ type PutProjectMemberRequestRole string
 type RecentAuthenticationRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
-	// Purpose Exact security operation authorized by this one-time grant.
+	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
 }
@@ -3989,6 +4582,11 @@ type SlotHealth struct {
 	ActiveCredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"active_credential_version_id,omitempty"`
 	CoolingDown               nullable.Nullable[bool]               `json:"cooling_down,omitempty"`
 
+	// Lapsed True when the grant beneath the credential version this slot would
+	// present lapsed. Selection refuses the version, so the slot cannot serve
+	// traffic until its grant is re-enrolled and the provider activated.
+	Lapsed bool `json:"lapsed"`
+
 	// Revoked True when the credential version this slot would present has been
 	// revoked. Selection refuses a revoked version, so the slot cannot serve
 	// traffic until a replacement secret is staged and activated.
@@ -4011,11 +4609,67 @@ type SlotWrite struct {
 	Slot       CredentialSlot            `json:"slot"`
 }
 
+// StartGrantEnrollmentRequest defines model for StartGrantEnrollmentRequest.
+type StartGrantEnrollmentRequest struct {
+	// SlotId The credential slot the grant will back; the provider's default slot when omitted. Naming a slot a grant already backs re-enrolls its grant.
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // Surface defines model for Surface.
 type Surface string
 
 // TransportMode defines model for TransportMode.
 type TransportMode string
+
+// UnconfinedExecutable An executable in the deployment's unconfined plugin directory, which an owner may review and permit as an unconfined plugin.
+type UnconfinedExecutable struct {
+	// Digest Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.
+	Digest string `json:"digest"`
+
+	// Name The executable's file name in the unconfined plugin directory.
+	Name string `json:"name"`
+
+	// Permitted Whether an owner permitted this build of the executable, which is then an installed plugin.
+	Permitted bool `json:"permitted"`
+
+	// SizeBytes Size of the executable.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// UnconfinedExecutableListResponse defines model for UnconfinedExecutableListResponse.
+type UnconfinedExecutableListResponse struct {
+	Items []UnconfinedExecutable `json:"items"`
+}
+
+// UnconfinedExecutableReview An executable in the unconfined plugin directory with the manifest it declared when OLP ran it for review.
+type UnconfinedExecutableReview struct {
+	// AbiVersion Plugin ABI version the executable was built for.
+	AbiVersion int32 `json:"abi_version"`
+
+	// Digest Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.
+	Digest string `json:"digest"`
+
+	// Manifest What a plugin declared at install. It never changes for a digest.
+	Manifest PluginManifest `json:"manifest"`
+
+	// Name The executable's file name in the unconfined plugin directory.
+	Name string `json:"name"`
+
+	// Permitted Whether an owner permitted this build of the executable, which is then an installed plugin.
+	Permitted bool `json:"permitted"`
+
+	// SizeBytes Size of the executable.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// UnconfinedPluginPermitRequest defines model for UnconfinedPluginPermitRequest.
+type UnconfinedPluginPermitRequest struct {
+	// AcknowledgeRisk Must be true: the owner acknowledges that an unconfined plugin runs with the operating system privileges of OLP's processes, outside every confinement, and can reach anything they can.
+	AcknowledgeRisk bool `json:"acknowledge_risk"`
+
+	// Digest Digest of the executable the owner reviewed. OLP refuses the permission if the executable has changed since.
+	Digest string `json:"digest"`
+}
 
 // UpdateApiKeyRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit `null` clears one. Writing absent fields through
@@ -4045,23 +4699,6 @@ type UpdateApiKeyRequest struct {
 	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
 }
 
-// UpdateBudgetAlertRuleRequest defines model for UpdateBudgetAlertRuleRequest.
-type UpdateBudgetAlertRuleRequest struct {
-	DestinationId    *openapi_types.UUID                      `json:"destination_id,omitempty"`
-	Enabled          *bool                                    `json:"enabled,omitempty"`
-	Name             *string                                  `json:"name,omitempty"`
-	SubjectId        *openapi_types.UUID                      `json:"subject_id,omitempty"`
-	SubjectKind      *UpdateBudgetAlertRuleRequestSubjectKind `json:"subject_kind,omitempty"`
-	ThresholdPercent *int32                                   `json:"threshold_percent,omitempty"`
-	WindowKind       *UpdateBudgetAlertRuleRequestWindowKind  `json:"window_kind,omitempty"`
-}
-
-// UpdateBudgetAlertRuleRequestSubjectKind defines model for UpdateBudgetAlertRuleRequest.SubjectKind.
-type UpdateBudgetAlertRuleRequestSubjectKind string
-
-// UpdateBudgetAlertRuleRequestWindowKind defines model for UpdateBudgetAlertRuleRequest.WindowKind.
-type UpdateBudgetAlertRuleRequestWindowKind string
-
 // UpdateBudgetGroupRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit null clears a cost limit. project_id is immutable.
 type UpdateBudgetGroupRequest struct {
@@ -4078,6 +4715,21 @@ type UpdateNotificationDestinationRequest struct {
 	// Secret A string replaces the signing secret, null removes it, absent keeps it.
 	Secret nullable.Nullable[string] `json:"secret,omitempty"`
 	Url    *string                   `json:"url,omitempty"`
+}
+
+// UpdateNotificationRuleRequest A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.
+type UpdateNotificationRuleRequest struct {
+	DestinationId *openapi_types.UUID `json:"destination_id,omitempty"`
+	Enabled       *bool               `json:"enabled,omitempty"`
+	Name          *string             `json:"name,omitempty"`
+	SubjectId     *openapi_types.UUID `json:"subject_id,omitempty"`
+
+	// SubjectKind Whose spend a budget.threshold rule watches.
+	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
+	ThresholdPercent *int32             `json:"threshold_percent,omitempty"`
+
+	// WindowKind The UTC window a budget.threshold rule watches.
+	WindowKind *BudgetWindowKind `json:"window_kind,omitempty"`
 }
 
 // UpdatePricingSourceRequest defines model for UpdatePricingSourceRequest.
@@ -4251,7 +4903,9 @@ type UserResponseAccessScope string
 
 // Vendor defines model for Vendor.
 type Vendor struct {
-	Authentication   []ProviderAuthMode        `json:"authentication"`
+	Authentication []ProviderAuthMode `json:"authentication"`
+
+	// Connector Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	Connector        ProviderKind              `json:"connector"`
 	Discovery        bool                      `json:"discovery"`
 	DocumentationUrl string                    `json:"documentation_url"`
@@ -4426,8 +5080,8 @@ type DownloadMediaJobContentParams struct {
 // DownloadMediaJobContentParamsVariant defines parameters for DownloadMediaJobContent.
 type DownloadMediaJobContentParamsVariant string
 
-// ListBudgetAlertDeliveriesParams defines parameters for ListBudgetAlertDeliveries.
-type ListBudgetAlertDeliveriesParams struct {
+// ListNotificationDeliveriesParams defines parameters for ListNotificationDeliveries.
+type ListNotificationDeliveriesParams struct {
 	// Cursor Opaque cursor returned by the previous page.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
@@ -4438,11 +5092,11 @@ type ListBudgetAlertDeliveriesParams struct {
 	RuleId *openapi_types.UUID `form:"rule_id,omitempty" json:"rule_id,omitempty"`
 
 	// Status Only deliveries in this status.
-	Status *ListBudgetAlertDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status *ListNotificationDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
-// ListBudgetAlertDeliveriesParamsStatus defines parameters for ListBudgetAlertDeliveries.
-type ListBudgetAlertDeliveriesParamsStatus string
+// ListNotificationDeliveriesParamsStatus defines parameters for ListNotificationDeliveries.
+type ListNotificationDeliveriesParamsStatus string
 
 // ListNotificationDestinationsParams defines parameters for ListNotificationDestinations.
 type ListNotificationDestinationsParams struct {
@@ -4465,8 +5119,8 @@ type UpdateNotificationDestinationParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
-// ListBudgetAlertRulesParams defines parameters for ListBudgetAlertRules.
-type ListBudgetAlertRulesParams struct {
+// ListNotificationRulesParams defines parameters for ListNotificationRules.
+type ListNotificationRulesParams struct {
 	// Cursor Opaque cursor returned by the previous page.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
@@ -4474,14 +5128,14 @@ type ListBudgetAlertRulesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
-// CreateBudgetAlertRuleParams defines parameters for CreateBudgetAlertRule.
-type CreateBudgetAlertRuleParams struct {
+// CreateNotificationRuleParams defines parameters for CreateNotificationRule.
+type CreateNotificationRuleParams struct {
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
-// UpdateBudgetAlertRuleParams defines parameters for UpdateBudgetAlertRule.
-type UpdateBudgetAlertRuleParams struct {
+// UpdateNotificationRuleParams defines parameters for UpdateNotificationRule.
+type UpdateNotificationRuleParams struct {
 	// IfMatch Concurrency token returned with the resource
 	IfMatch string `json:"If-Match"`
 }
@@ -4508,6 +5162,18 @@ type PutConfigurationParams struct {
 type BeginLoginParams struct {
 	// ReturnTo Validated same-origin relative destination after login
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
+}
+
+// UninstallPluginParams defines parameters for UninstallPlugin.
+type UninstallPluginParams struct {
+	// IfMatch Current plugin ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ApprovePluginParams defines parameters for ApprovePlugin.
+type ApprovePluginParams struct {
+	// IfMatch Current plugin ETag
+	IfMatch string `json:"If-Match"`
 }
 
 // ListPricingRevisionsParams defines parameters for ListPricingRevisions.
@@ -4710,6 +5376,12 @@ type DisableProviderParams struct {
 
 // DiscoverProviderModelsParams defines parameters for DiscoverProviderModels.
 type DiscoverProviderModelsParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// StartGrantEnrollmentParams defines parameters for StartGrantEnrollment.
+type StartGrantEnrollmentParams struct {
+	// IfMatch Current provider draft ETag
 	IfMatch string `json:"If-Match"`
 }
 
@@ -5024,6 +5696,18 @@ type UpdateUserRoleParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// BudgetThresholdWebhookParams defines parameters for BudgetThresholdWebhook.
+type BudgetThresholdWebhookParams struct {
+	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
+	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
+}
+
+// ProviderGrantLapsedWebhookParams defines parameters for ProviderGrantLapsedWebhook.
+type ProviderGrantLapsedWebhookParams struct {
+	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
+	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
+}
+
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody = CreateApiKeyRequest
 
@@ -5060,11 +5744,11 @@ type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinatio
 // UpdateNotificationDestinationJSONRequestBody defines body for UpdateNotificationDestination for application/json ContentType.
 type UpdateNotificationDestinationJSONRequestBody = UpdateNotificationDestinationRequest
 
-// CreateBudgetAlertRuleJSONRequestBody defines body for CreateBudgetAlertRule for application/json ContentType.
-type CreateBudgetAlertRuleJSONRequestBody = CreateBudgetAlertRuleRequest
+// CreateNotificationRuleJSONRequestBody defines body for CreateNotificationRule for application/json ContentType.
+type CreateNotificationRuleJSONRequestBody = CreateNotificationRuleRequest
 
-// UpdateBudgetAlertRuleJSONRequestBody defines body for UpdateBudgetAlertRule for application/json ContentType.
-type UpdateBudgetAlertRuleJSONRequestBody = UpdateBudgetAlertRuleRequest
+// UpdateNotificationRuleJSONRequestBody defines body for UpdateNotificationRule for application/json ContentType.
+type UpdateNotificationRuleJSONRequestBody = UpdateNotificationRuleRequest
 
 // PutConfigurationJSONRequestBody defines body for PutConfiguration for application/json ContentType.
 type PutConfigurationJSONRequestBody = OidcConfigurationRequest
@@ -5080,6 +5764,9 @@ type ExecutePlaygroundJSONRequestBody = PlaygroundRequest
 
 // StreamPlaygroundJSONRequestBody defines body for StreamPlayground for application/json ContentType.
 type StreamPlaygroundJSONRequestBody = PlaygroundRequest
+
+// ApprovePluginJSONRequestBody defines body for ApprovePlugin for application/json ContentType.
+type ApprovePluginJSONRequestBody = PluginApprovalRequest
 
 // CreatePricingRevisionJSONRequestBody defines body for CreatePricingRevision for application/json ContentType.
 type CreatePricingRevisionJSONRequestBody = PricingRevisionRequest
@@ -5129,6 +5816,12 @@ type RotateProviderCredentialJSONRequestBody = RotateCredentialRequest
 // DiscoverProviderModelsJSONRequestBody defines body for DiscoverProviderModels for application/json ContentType.
 type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
 
+// StartGrantEnrollmentJSONRequestBody defines body for StartGrantEnrollment for application/json ContentType.
+type StartGrantEnrollmentJSONRequestBody = StartGrantEnrollmentRequest
+
+// ContinueGrantEnrollmentJSONRequestBody defines body for ContinueGrantEnrollment for application/json ContentType.
+type ContinueGrantEnrollmentJSONRequestBody = ContinueGrantEnrollmentRequest
+
 // SetProviderModelJSONRequestBody defines body for SetProviderModel for application/json ContentType.
 type SetProviderModelJSONRequestBody = SetModelRequest
 
@@ -5162,8 +5855,17 @@ type UpdateSettingJSONRequestBody = UpdateSettingRequest
 // SetupJSONRequestBody defines body for Setup for application/json ContentType.
 type SetupJSONRequestBody = SetupRequest
 
+// PermitUnconfinedPluginJSONRequestBody defines body for PermitUnconfinedPlugin for application/json ContentType.
+type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
+
 // UpdateUserRoleJSONRequestBody defines body for UpdateUserRole for application/json ContentType.
 type UpdateUserRoleJSONRequestBody = UpdateUserRoleRequest
+
+// BudgetThresholdWebhookJSONRequestBody defines body for BudgetThresholdWebhook for application/json ContentType.
+type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
+
+// ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
+type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent
 
 // AsPlaygroundResponseFormat0 returns the union data inside the PlaygroundResponseFormat as a PlaygroundResponseFormat0
 func (t PlaygroundResponseFormat) AsPlaygroundResponseFormat0() (PlaygroundResponseFormat0, error) {

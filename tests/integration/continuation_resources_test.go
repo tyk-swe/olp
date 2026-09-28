@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -219,20 +220,12 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	}
 }
 
-func TestResolverCurrentChecksLiveCredentialAndSecretExpiry(t *testing.T) {
+func TestHistoricalPinChecksLiveRevocationAndSecretExpiry(t *testing.T) {
 	h := newAccessHarness(t)
 	f := newStrictProviderFixture(t, "anthropic-messages")
 	slug, _ := publishStrictProvider(t, h, h.owner(), f, nil, nil, "strict")
 	h.refresh()
-	installation, err := database.Installation(t.Context(), h.Pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ring, err := secrets.ParseRing([]byte(h.Ring))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolver := resources.NewResolver(h.Pool, installation, ring)
+	resolver := resources.NewResolver(h.Pool)
 	route := h.Runtime.Release().Snapshot.Routes[slug]
 	provider := h.Runtime.Release().Snapshot.Providers[f.providerID]
 	res := &resources.Resource{
@@ -240,18 +233,26 @@ func TestResolverCurrentChecksLiveCredentialAndSecretExpiry(t *testing.T) {
 		RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID,
 		CredentialID: provider.Slots[0].CredentialID,
 	}
+	resolve := func() error {
+		_, _, _, err := resolver.ResolveCurrent(t.Context(), res, "generation")
+		return err
+	}
+	// A historical revision's credential version is one no pinned release
+	// installed, so the credential source reads it from the secret authority.
 	read := func() ([]byte, error) {
-		_, _, _, secret, err := resolver.ResolveCurrent(t.Context(), res, "generation")
+		secret, _, err := h.Runtime.Secret(t.Context(), nil, *res.CredentialID)
 		return secret, err
 	}
-	secret, err := read()
-	if err != nil || string(secret) != vendorSecret {
+	if err := resolve(); err != nil {
+		t.Fatalf("live pin: %v", err)
+	}
+	if secret, err := read(); err != nil || string(secret) != vendorSecret {
 		t.Fatalf("live credential: %v %q", err, secret)
 	}
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET expires_at=now()-interval '1 second' WHERE id=$1", *res.CredentialID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := read(); !errors.Is(err, resources.ErrUnavailable) {
+	if _, err := read(); !errors.Is(err, runtime.ErrCredentialUnavailable) {
 		t.Fatalf("expired secret: %v", err)
 	}
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", *res.CredentialID); err != nil {
@@ -260,7 +261,7 @@ func TestResolverCurrentChecksLiveCredentialAndSecretExpiry(t *testing.T) {
 	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1", *res.CredentialID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := read(); !errors.Is(err, resources.ErrUnavailable) {
+	if err := resolve(); !errors.Is(err, resources.ErrUnavailable) {
 		t.Fatalf("revoked credential: %v", err)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -266,7 +267,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	candidates := make(map[string][]string, len(route.Targets))
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !connectorsSupports(p, request.Op, x.mode) {
 				return errors.New("connector capability unavailable")
@@ -576,17 +577,10 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
+		f.accepted = fact.Status == http.StatusOK
+		f.acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.status, Accepted: f.accepted}.Acceptance()
 		if fact.Interaction != nil {
-			switch {
-			case f.dispatched && f.status != 0:
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-			case f.dispatched && fact.Status == http.StatusOK:
-				fact.Interaction.UpstreamState = usage.UpstreamAccepted
-			case f.dispatched:
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
-			default:
-				fact.Interaction.UpstreamState = usage.UpstreamNotSent
-			}
+			fact.Interaction.UpstreamState = string(f.acceptance)
 			if f.committed {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}
@@ -632,9 +626,9 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
 	defer cancel()
 
-	var secret []byte
-	if slot.CredentialID != nil {
-		secret, _ = x.request.release.Credential(*slot.CredentialID)
+	secret, err := s.slotSecret(actx, x, slot)
+	if err != nil {
+		return fail(classCredential, nil)
 	}
 	if x.request.trace.PropagateUpstream() {
 		call.Inject = http.Header{}
@@ -710,29 +704,13 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	return fact, result, nil
 }
 
-// mediaClass maps a media transport failure onto the attempt taxonomy. An
-// ambiguous side-effecting failure never falls over.
+// mediaClass is the attempt class of a media transport failure. An ambiguous
+// side-effecting failure never falls over.
 func mediaClass(f *media.Failure) string {
 	if f.Ambiguous {
 		return classAmbiguous
 	}
-	switch f.Class {
-	case media.ClassTimeout:
-		return classTimeout
-	case media.ClassRateLimit:
-		return classRateLimit
-	case media.ClassUpstreamServer:
-		return classUpstreamServer
-	case media.ClassUpstreamClient:
-		return classUpstreamClient
-	case media.ClassCredential:
-		return classCredential
-	case media.ClassProtocol:
-		return classProtocol
-	case media.ClassCancelled:
-		return classCancelled
-	}
-	return classConnect
+	return string(f.Class)
 }
 
 // mediaUsage builds the accounting usage a media result carries.

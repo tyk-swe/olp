@@ -75,16 +75,17 @@ func TestRetryDueBackoff(t *testing.T) {
 }
 
 func TestAlertBodyIsMetadataOnly(t *testing.T) {
-	subject := "0195f3c2-0000-7000-8000-0000000000aa"
-	limit := "10.000000000000"
+	subject, kind, window := "0195f3c2-0000-7000-8000-0000000000aa", "api_key", "day"
+	windowID, threshold := int64(4421), 80
+	accrued, limit := "8.000000000000", "10.000000000000"
 	d := delivery{
-		id: "0195f3c2-0000-7000-8000-0000000000bb", ruleID: "0195f3c2-0000-7000-8000-0000000000cc",
-		windowID: 4421, threshold: 80, ruleName: "warn", subjectKind: "api_key",
-		subjectID: &subject, windowKind: "day", accrued: "8.000000000000", limit: &limit,
+		id: "0195f3c2-0000-7000-8000-0000000000bb", ruleID: "0195f3c2-0000-7000-8000-0000000000cc", event: "budget.threshold",
+		windowID: &windowID, threshold: &threshold, ruleName: "warn", subjectKind: &kind,
+		subjectID: &subject, windowKind: &window, accrued: &accrued, limit: &limit, currency: "USD",
 	}
-	body, err := alertBody(d, "USD")
+	body, err := webhookBody(d)
 	if err != nil {
-		t.Fatalf("alertBody: %v", err)
+		t.Fatalf("webhookBody: %v", err)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
@@ -103,6 +104,27 @@ func TestAlertBodyIsMetadataOnly(t *testing.T) {
 		if _, ok := decoded[forbidden]; ok {
 			t.Fatalf("payload leaked %s: %v", forbidden, decoded)
 		}
+	}
+}
+
+// A provider event is reported by the payload recorded when it happened,
+// under the rule it is delivered for.
+func TestAProviderEventIsReportedByItsRecordedPayload(t *testing.T) {
+	d := delivery{
+		id: "0195f3c2-0000-7000-8000-0000000000bb", ruleID: "0195f3c2-0000-7000-8000-0000000000cc", event: "provider.grant.lapsed",
+		ruleName: "lapses", payload: []byte(`{"provider_id":"0195f3c2-0000-7000-8000-0000000000dd","credential_version":3,"credential_slots":[]}`),
+	}
+	body, err := webhookBody(d)
+	if err != nil {
+		t.Fatalf("webhookBody: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if decoded["event"] != "provider.grant.lapsed" || decoded["rule_id"] != d.ruleID || decoded["rule_name"] != "lapses" ||
+		decoded["provider_id"] != "0195f3c2-0000-7000-8000-0000000000dd" || decoded["credential_version"].(float64) != 3 || len(decoded) != 6 {
+		t.Fatalf("body = %s", body)
 	}
 }
 

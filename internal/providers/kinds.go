@@ -14,6 +14,7 @@ const (
 	KindAzure            = "azure_openai"
 	KindVertex           = "vertex_ai"
 	KindBedrock          = "bedrock"
+	KindPlugin           = connectors.KindPlugin
 )
 
 // Auth modes accepted by the gateway.
@@ -163,6 +164,13 @@ func init() {
 			Fields: []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}, Presets: []preset{}},
 		kindCapability{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc", AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
 		kindCapability{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain", AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
+		// A plugin profile supplies the address, credential placement, model
+		// discovery, and whether a static credential or a grant authenticates.
+		// Without discovery, the operator names a model to probe, as the
+		// profile catalogue's model_discovery tells.
+		kindCapability{Kind: KindPlugin, Label: "Provider plugin", Description: "A profile an installed provider plugin supplies around a built-in dialect.", DefaultAuthMode: connectors.AuthStaticCredential, AuthModes: []authCapability{
+			{Mode: connectors.AuthStaticCredential, Label: "Static credential", Credential: "required"},
+			{Mode: connectors.AuthGrant, Label: "Grant", Credential: "grant"}}, Fields: []fieldCapability{}, Presets: []preset{}},
 	)
 	for _, entry := range []struct {
 		id, name, endpoint, docs string

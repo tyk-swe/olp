@@ -25,6 +25,9 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 		if !p.Enabled {
 			continue
 		}
+		if p.AuthMode == connectors.AuthGrant {
+			return nil, errors.New("a mounted gateway can't serve provider " + id + ": its credential slots hold grants, which need the master key")
+		}
 		mounted, ok := entries[id]
 		if !ok {
 			return nil, errors.New("enabled provider has no mounted connector")
@@ -62,8 +65,8 @@ func installMounted(snapshot *Snapshot, entries map[string]MountedProvider) (map
 		if p.ProfileID != "" {
 			// Explicit profiles cannot silently acquire unpublished model-significant
 			// options from a local file. Only secret material is mounted.
-			left := []any{p.ProfileID, p.ProfileRevision, p.Endpoint, p.CloudRegion, p.CloudProject, p.Deployment, p.APIVersion, p.CredentialHeaders, p.ParameterDefaults, p.SemanticHeaders, p.QuerySettings, p.OperationDefaults, p.Bindings, p.Network}
-			right := []any{cfg.ProfileID, cfg.ProfileRevision, cfg.Endpoint, cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion, cfg.Options.CredentialHeaders, cfg.Options.ParameterDefaults, cfg.Options.SemanticHeaders, cfg.Options.QuerySettings, cfg.Options.OperationDefaults, cfg.Options.Bindings, cfg.Options.Network}
+			left := []any{p.ProfileID, p.ProfileRevision, p.Endpoint, p.CloudRegion, p.CloudProject, p.Deployment, p.APIVersion, p.CredentialHeaders, p.ParameterDefaults, p.SemanticHeaders, p.QuerySettings, p.OperationDefaults, p.Bindings, p.Network, p.PluginOptions}
+			right := []any{cfg.ProfileID, cfg.ProfileRevision, cfg.Endpoint, cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion, cfg.Options.CredentialHeaders, cfg.Options.ParameterDefaults, cfg.Options.SemanticHeaders, cfg.Options.QuerySettings, cfg.Options.OperationDefaults, cfg.Options.Bindings, cfg.Options.Network, cfg.Options.PluginOptions}
 			if !mountedSettingsEqual(left, right) {
 				return nil, errors.New("mounted explicit profile configuration must match the published revision")
 			}

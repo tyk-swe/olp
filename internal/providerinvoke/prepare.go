@@ -5,6 +5,7 @@ package providerinvoke
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -22,7 +23,9 @@ type Invocation struct {
 // Prepare builds a transformed invocation. Automatic providers select the
 // destination by provider kind and apply their parameter defaults. Explicit
 // profile selection fixes the destination dialect and records every effective
-// native default and hosting wrapper in the prepared document.
+// native default, plugin profile rewrite, forced upstream streaming and
+// hosting wrapper in the prepared document. A plugin profile's envelope stays
+// outside it: see connectors.Config.WrapRequest.
 func Prepare(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
 	wire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
 	defaults := parameterDefaults
@@ -76,6 +79,17 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 			}
 		}
 	}
+	beforeRewrites := prepared.Document()
+	prepared, err = config.Rewrite(prepared)
+	if err != nil {
+		return Invocation{}, profileError(err)
+	}
+	if err = checkStateRewrites(beforeRewrites, prepared.Document(), wire); err != nil {
+		return Invocation{}, profileError(err)
+	}
+	if prepared, err = config.StreamRequest(prepared); err != nil {
+		return Invocation{}, profileError(err)
+	}
 	body := prepared.Document().Bytes()
 	wrapped, err := config.WrapBody(body, wire)
 	if err != nil {
@@ -93,6 +107,52 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 		prepared = hosted.WithProvenance(prepared.Provenance()...)
 	}
 	return Invocation{Prepared: prepared, Wire: wire, Defaults: applied}, nil
+}
+
+// Hosting rewrites cannot introduce provider retention or replace a reference
+// authorized on ingress. Check the effective dialect body before any envelope
+// wraps it, including Responses' implicit retention when store is omitted.
+func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
+	fields := []string{"store"}
+	switch wire {
+	case openai.FamilyResponses:
+		from, _ := before.Root().Lookup("input")
+		to, _ := after.Root().Lookup("input")
+		if from.Raw() != to.Raw() {
+			if err := openai.ValidateResponsesInput(to.Bytes()); err != nil {
+				return fmt.Errorf("the plugin profile's rewrite of /input is invalid: %w", err)
+			}
+		}
+		fields = append(fields, "background", "previous_response_id", "conversation")
+	case openai.FamilyChat:
+	default:
+		return nil
+	}
+	for _, field := range fields {
+		from, _ := before.Root().Lookup(field)
+		to, _ := after.Root().Lookup(field)
+		if from.Raw() == to.Raw() {
+			continue
+		}
+		absent := to.Kind() == oif.Absent || to.Kind() == oif.Null
+		switch field {
+		case "store":
+			if to.Raw() == "false" || absent && (wire == openai.FamilyChat || from.Raw() == "true") {
+				continue
+			}
+		case "background":
+			if absent || to.Raw() == "false" {
+				continue
+			}
+		default:
+			previous, _ := from.Text()
+			if next, ok := to.Text(); absent || ok && (next == "" || next == previous) {
+				continue
+			}
+		}
+		return fmt.Errorf("the plugin profile's rewrite of /%s cannot introduce provider state or change a stateful reference", field)
+	}
+	return nil
 }
 
 func Encode(request *openai.Request, config connectors.Config, model string, parameterDefaults protocols.Object) ([]byte, openai.Family, error) {

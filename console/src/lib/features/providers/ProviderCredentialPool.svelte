@@ -1,23 +1,44 @@
 <script lang="ts">
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { apiClient } from '$lib/api/client';
-  import { result, errorMessage } from '$lib/api/http';
+  import { result, errorMessage, unanswered } from '$lib/api/http';
   import type { components } from '$lib/api/schema';
   import type { Provider } from './api';
+  import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
+  import {
+    cancelGrantEnrollment,
+    continueGrantEnrollment,
+    pollGrantEnrollment,
+    startGrantEnrollment,
+    type GrantEnrollment,
+    type GrantEnrollmentCompletion,
+    type GrantEnrollmentStatus
+  } from './grants';
   import { parseManualModelNames } from './providerEditor';
+  import { providerKeys } from './providerKeys';
   type Slot = components['schemas']['CredentialSlot'];
   let {
     provider,
     canManage,
+    grant = false,
     onChanged
   }: {
     provider: Provider;
     canManage: boolean;
+    /** Set when a grant authenticates the provider: its slots' credential
+     * versions come from grant enrollment, never a pasted credential. */
+    grant?: boolean;
     onChanged: () => void | Promise<void>;
   } = $props();
+  const queryClient = useQueryClient();
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
+  /** The grant enrollment an operator is signing in through, and the slot
+   * whose grant it re-enrolls. */
+  let enrollment = $state<GrantEnrollment | null>(null);
+  let enrollmentSlot = $state('');
+  let grantInput = $state('');
   let editing = $state<Slot | null>(null);
   let editingEtag = $state('');
   let secret = $state('');
@@ -75,6 +96,10 @@
           body: {
             slot: {
               ...editing,
+              // A write that names no credential version keeps the slot's.
+              // Naming it would bind it again, which OLP refuses once it is
+              // revoked or its grant lapsed.
+              credential_version_id: null,
               allowed_models: parseManualModelNames(models),
               allowed_routes: parseManualModelNames(routes),
               allowed_api_keys: parseManualModelNames(keys)
@@ -90,6 +115,110 @@
         'Credential staged. Validate its model access, then test and activate the completed provider draft.';
       await onChanged();
       await pool.refetch();
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = '';
+    }
+  }
+  async function enroll(slot: Slot) {
+    if (!canManage || busy) return;
+    busy = `enroll-${slot.id}`;
+    error = '';
+    notice = '';
+    try {
+      enrollment = await startGrantEnrollment(provider, slot.id!);
+      enrollmentSlot = slot.name;
+      editing = null;
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = '';
+    }
+  }
+  async function continueEnrollment() {
+    const current = enrollment;
+    const input = grantInput.trim();
+    if (!current || busy) return;
+    if (!input) {
+      error = 'Paste the callback URL, or the code the upstream displayed.';
+      return;
+    }
+    busy = 'grant';
+    error = '';
+    notice = '';
+    try {
+      let completion;
+      try {
+        completion = await continueGrantEnrollment(current, input);
+      } finally {
+        // A grant enrollment is continued once, whether or not it succeeds.
+        enrollment = null;
+        grantInput = '';
+      }
+      await enrolled(completion);
+    } catch (e) {
+      error = errorMessage(e);
+    } finally {
+      busy = '';
+    }
+  }
+  /** Asks whether the operator approved the device upstream, and returns how
+   * many seconds to wait before asking again, or null once the enrollment
+   * ended. A request that fails without an answer, such as while OLP
+   * restarts, is asked again. */
+  async function pollEnrollment(): Promise<number | null> {
+    const current = enrollment;
+    if (!current) return null;
+    let status: GrantEnrollmentStatus | undefined;
+    let failure: unknown;
+    try {
+      status = await pollGrantEnrollment(current);
+    } catch (e) {
+      failure = e;
+    }
+    // Cancelled meanwhile.
+    if (enrollment !== current) return null;
+    const interval = current.device?.interval ?? null;
+    if (status?.status === 'pending') return status.interval ?? interval;
+    if (unanswered(failure)) return interval;
+    enrollment = null;
+    try {
+      if (status?.status === 'completed' && status.completion) {
+        await enrolled(status.completion);
+      } else if (status?.status === 'denied') {
+        error = `${enrollmentSlot}: the device sign-in was denied upstream. Sign in again to enroll its grant.`;
+      } else if (status?.status === 'expired') {
+        error = `${enrollmentSlot}: the device sign-in expired before it was approved. Sign in again to enroll its grant.`;
+      } else {
+        error = errorMessage(failure);
+      }
+    } catch (e) {
+      error = errorMessage(e);
+    }
+    return null;
+  }
+  /** Reports the credential version a completed enrollment staged on the
+   * slot, and reloads the provider. */
+  async function enrolled(completion: GrantEnrollmentCompletion) {
+    notice = `${enrollmentSlot}: grant enrolled for ${completion.principal} as credential version ${completion.credential_version}, pending activation. Validate its access, then test and activate the provider.`;
+    await queryClient.invalidateQueries({
+      queryKey: providerKeys.credentials(provider.id)
+    });
+    await onChanged();
+    await pool.refetch();
+  }
+  async function cancelEnrollment() {
+    const current = enrollment;
+    if (!current || busy) return;
+    busy = 'grant-cancel';
+    error = '';
+    try {
+      // Abandoned at once, so a status request answering meanwhile is
+      // ignored.
+      enrollment = null;
+      grantInput = '';
+      await cancelGrantEnrollment(current);
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -122,10 +251,16 @@
 
 <section class="card pool" aria-labelledby="credential-pool-heading">
   <h2 id="credential-pool-heading">Credential pool</h2>
-  <p>
-    Use multiple accounts or keys on this connection. Lower priorities are tried
-    first; weights distribute requests within a priority.
-  </p>
+  {#if grant}<p>
+      Every slot signs in to the same upstream account; pool other accounts
+      through other providers on a route. Re-enrolling a slot's grant with that
+      account rotates its credential, while another account changes the
+      provider's serving identity. Lower priorities are tried first; weights
+      distribute requests within a priority.
+    </p>{:else}<p>
+      Use multiple accounts or keys on this connection. Lower priorities are
+      tried first; weights distribute requests within a priority.
+    </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
   {#if pool.isError}<p role="alert">
@@ -143,6 +278,7 @@
     </p>{/if}
   <ul>
     {#each pool.data?.items ?? [] as slot (slot.id)}
+      {@const lapsed = Boolean(pool.data?.health?.[slot.id]?.lapsed)}
       <li>
         <div>
           <strong>{slot.name}</strong><span
@@ -150,15 +286,20 @@
             Weight {slot.weight}</span
           >{#if pool.data?.health?.[slot.id]}{@const health =
               pool.data.health[slot.id]}<small
-              ><span class:revoked={health.revoked}
+              ><span class:revoked={health.revoked || lapsed}
                 >{health.revoked
-                  ? 'Revoked — stage a replacement secret'
-                  : health.active_credential_version_id ===
-                        slot.credential_version_id && slot.credential_version_id
-                    ? 'Active'
-                    : health.active_credential_version_id
-                      ? 'Change staged'
-                      : 'Draft'}</span
+                  ? grant
+                    ? 'Revoked — re-enroll its grant'
+                    : 'Revoked — stage a replacement secret'
+                  : lapsed
+                    ? 'Grant lapsed — re-enroll it'
+                    : health.active_credential_version_id ===
+                          slot.credential_version_id &&
+                        slot.credential_version_id
+                      ? 'Active'
+                      : health.active_credential_version_id
+                        ? 'Change staged'
+                        : 'Draft'}</span
               >
               · {health.cooling_down
                 ? 'Cooling down'
@@ -182,8 +323,21 @@
             class="button button-secondary"
             type="button"
             disabled={Boolean(busy)}
-            onclick={() => edit(slot)}>Edit / rotate</button
-          ><button
+            onclick={() => edit(slot)}
+            >{grant ? 'Edit' : 'Edit / rotate'}</button
+          >{#if grant}<button
+              class="button"
+              class:button-primary={lapsed}
+              class:button-secondary={!lapsed}
+              type="button"
+              disabled={Boolean(busy) || Boolean(enrollment)}
+              onclick={() => enroll(slot)}
+              >{busy === `enroll-${slot.id}`
+                ? 'Starting sign-in…'
+                : slot.credential_version_id
+                  ? 'Re-enroll grant'
+                  : 'Enroll grant'}</button
+            >{/if}<button
             class="button button-secondary"
             type="button"
             disabled={Boolean(busy) || !slot.credential_version_id}
@@ -193,6 +347,14 @@
       </li>
     {/each}
   </ul>
+  {#if enrollment}<GrantEnrollmentPanel
+      {enrollment}
+      bind:input={grantInput}
+      {busy}
+      onContinue={continueEnrollment}
+      onPoll={pollEnrollment}
+      onCancel={cancelEnrollment}
+    />{/if}
   {#if canManage && !editing}<button
       class="button button-secondary"
       type="button"
@@ -220,14 +382,14 @@
               bind:value={editing.weight}
             /></label
           >
-          <label
-            >Credential<input
-              type="password"
-              autocomplete="new-password"
-              bind:value={secret}
-              placeholder="Leave blank to retain the stored secret"
-            /></label
-          >
+          {#if !grant}<label
+              >Credential<input
+                type="password"
+                autocomplete="new-password"
+                bind:value={secret}
+                placeholder="Leave blank to retain the stored secret"
+              /></label
+            >{/if}
           <label
             >Allowed models<input
               bind:value={models}

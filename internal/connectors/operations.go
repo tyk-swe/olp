@@ -25,7 +25,7 @@ func registerUnaryProfiles() {
 		case "gemini-batch-embeddings":
 			kind, hosting = "gemini", "direct-gemini"
 		}
-		profile := Profile{ID: d.Identity.ID, Revision: ProfileRevision, Label: d.Label, Kind: kind, Dialect: d.Identity.ID, DialectRevision: d.Identity.Revision, Hosting: hosting, Authentication: auth, Transport: "http", Operations: []string{d.Operation.ID}, OperationDialects: map[string]string{d.Operation.ID: d.Identity.ID}, SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: d.Documentation}
+		profile := Profile{ID: d.Identity.ID, Revision: ProfileRevision, Label: d.Label, Kind: kind, Dialect: d.Identity.ID, DialectRevision: d.Identity.Revision, Hosting: hosting, Authentication: auth, Transport: "http", Operations: []string{d.Operation.ID}, OperationDialects: map[string]string{d.Operation.ID: d.Identity.ID}, SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: d.Documentation, Strict: true}
 		if d.Identity.ID == "cohere-embed-v2" || d.Identity.ID == "cohere-rerank-v2" {
 			profile.DialectRevision = "v2"
 		}
@@ -79,6 +79,7 @@ func RegisterOperationProfile(p Profile) error {
 			return errors.New("semantic query is outside hosting contract")
 		}
 	}
+	p.Plugin, p.Strict = nil, host.Strict
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil
@@ -87,7 +88,7 @@ func RegisterOperationProfile(p Profile) error {
 // OperationURL uses only a registered native addressing contract. Its family
 // endpoint adapter is bounded to explicit paths; unknown operations never choose Chat.
 func (c Config) OperationURL(d operations.Dialect, model string) (string, error) {
-	p, err := profileView(c.ProfileID, c.ProfileRevision)
+	p, err := c.profile()
 	if err != nil {
 		return "", err
 	}
