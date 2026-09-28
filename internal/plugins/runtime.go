@@ -387,7 +387,7 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", m.runtime.limits.Time))
+		return refuseTimedOut(m.runtime.limits.Time)
 	case errors.Is(err, errStackExhausted):
 		return refuse(CodeFailed, fmt.Sprintf("The plugin exhausted its %d KiB stack limit.", m.runtime.limits.Stack>>10))
 	}

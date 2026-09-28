@@ -1,12 +1,10 @@
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { Page } from '@playwright/test';
-import { expect, test } from '../playwright';
+import { expect, test, type Page } from '../playwright';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
+import {
+  approveReferencePlugin,
+  buildReferencePlugin,
+  installReferencePlugin
+} from './referencePlugin';
 
 // tests/plugins/mock-plugin-upstream.mjs: the upstream, and under /oauth the
 // fake authority the reference plugin enrolls grants with.
@@ -50,24 +48,11 @@ async function signInUpstream(page: Page, authorizationURL: string) {
 }
 
 test.beforeAll(() => {
-  module = join(mkdtempSync(join(tmpdir(), 'olp-plugin-')), 'reference.wasm');
-  execFileSync(
-    'go',
-    [
-      'build',
-      '-buildmode=c-shared',
-      `-ldflags=-X=main.upstream=${upstream.address} -X=main.authority=${upstream.authority} -X=main.version=${version}`,
-      '-o',
-      module,
-      './sdk/plugin/reference'
-    ],
-    {
-      cwd: fileURLToPath(new URL('../../..', import.meta.url)),
-      env: { ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', CGO_ENABLED: '0' },
-      stdio: 'inherit'
-    }
-  );
-  digest = createHash('sha256').update(readFileSync(module)).digest('hex');
+  ({ module, digest } = buildReferencePlugin({
+    upstream: upstream.address,
+    authority: upstream.authority,
+    version
+  }));
 });
 
 test('an operator connects a provider by signing in to an upstream account', async ({
@@ -82,24 +67,11 @@ test('an operator connects a provider by signing in to an upstream account', asy
 
   // An owner installs the plugin and approves its origin, where both its
   // upstream and its authority are.
-  await page.goto('/plugins');
-  await page.getByLabel('Plugin module (.wasm)').setInputFiles(module);
-  await page.getByRole('button', { name: 'Install plugin' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Installed reference ${version}.`
-  );
-  const plugin = page.getByRole('article', { name: `reference ${version}` });
+  const plugin = await installReferencePlugin(page, module, version);
   await expect(
     plugin.getByRole('row', { name: /reference-grant-chat/ })
   ).toContainText('Grant, enrolled by the plugin');
-  await plugin.getByRole('button', { name: 'Review and approve' }).click();
-  await plugin
-    .getByRole('region', { name: 'Approve these origins?' })
-    .getByRole('button', { name: 'Approve origins' })
-    .click();
-  await expect(page.getByRole('status')).toContainText(
-    `Approved reference ${version}.`
-  );
+  await approveReferencePlugin(page, plugin, version);
 
   // The grant profile replaces the credential with grant enrollment.
   await page.goto('/providers/new');

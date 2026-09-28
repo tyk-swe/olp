@@ -136,10 +136,10 @@ returns an error), correct the cause and restart the process.
 `retention_enforced` from configured Valkey, not live worker health. Configuring
 Valkey without running a worker still reports these flags as true. Use task
 checkpoints to confirm retention is running. Without Valkey, `all` starts only
-media reconciliation: epoch detection and maintenance also remain stopped,
-although readiness still expects their checkpoints and can stay degraded.
-Production accounting and retention require Valkey and a worker or `all`
-process.
+media reconciliation and grant refresh: epoch detection and maintenance also
+remain stopped, although readiness still expects their checkpoints and can stay
+degraded. Production accounting and retention require Valkey and a worker or
+`all` process.
 
 ### Spend-budget reconciliation
 

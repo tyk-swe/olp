@@ -253,14 +253,7 @@ func TestPluginFailureDiagnosticsShareTheCallLogBudget(t *testing.T) {
 						t.Fatal("a failure diagnostic disclosed its credential")
 					}
 					spent, warnings, failures := 0, 0, 0
-					for _, raw := range bytes.Split(bytes.TrimSpace(output), []byte("\n")) {
-						var line struct {
-							logLine
-							Error string `json:"error"`
-						}
-						if err := json.Unmarshal(raw, &line); err != nil {
-							t.Fatal(err)
-						}
+					for _, line := range logLines(t, bytes.NewBuffer(output)) {
 						if strings.Contains(line.Message, "exceeded its budget") {
 							warnings++
 							continue

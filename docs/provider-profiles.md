@@ -24,15 +24,17 @@ Connectivity/certification is not empirical evidence of model intelligence parit
 
 The catalogue also lists the profiles of approved [provider plugins](plugins.md)
 under the `plugin` provider kind. A plugin profile's revision is the digest of
-the plugin module that supplies it, so a provider pins that build. It serves one
-built-in dialect's generation operation at the address its plugin declares,
-shares that dialect's revision and semantic headers and query settings, and
-authenticates with a static credential that its declared headers and query
-parameters place, or that its [signing hook](plugins.md#signing-hooks) signs
-with, or with a [grant](plugins.md#grant-enrollment) when it declares one. Its
-`options_schema` describes the options a provider using it sets, which the
-hosting adaptation places too. A plugin profile that also envelopes or rewrites
-the dialect's bodies, or forces upstream streaming, is not `strict`. Its entry
+the plugin module, or of an unconfined plugin's executable, that supplies it, so
+a provider pins that build. It serves one built-in dialect's generation
+operation at the address its plugin declares, shares that dialect's revision and
+semantic headers and query settings, and authenticates with a static credential
+that its declared headers and query parameters place, or that its
+[signing hook](plugins.md#signing-hooks) signs with, or with a
+[grant](plugins.md#grant-enrollment) when it declares one. Its `options_schema`
+describes the options a provider using it sets, which the hosting adaptation
+places too. A plugin profile that also envelopes or rewrites the dialect's
+bodies or forces upstream streaming, or whose unconfined plugin
+[carries its traffic](plugins.md#carrying-traffic), is not `strict`. Its entry
 reports `model_discovery: true` when the plugin declares the upstream's model
 listing; otherwise operators declare its providers' models.
 
@@ -230,9 +232,10 @@ They are deterministic fixture evidence, not live-provider or quality evidence.
 
 A trusted in-process `connectors.RegisterProfile` can add a provider using an
 existing component composition and model bindings. The registry validates the
-composition. Executable configuration comes from
-[provider plugins](plugins.md) instead: WASM modules an owner installs, whose
-profiles name a built-in dialect and whose code OLP runs confined. A plugin
+composition. Executable configuration comes from [provider plugins](plugins.md)
+instead: WASM modules an owner installs, whose code OLP runs confined, or, in
+the experimental [unconfined tier](plugins.md#unconfined-plugins-experimental),
+executables an owner permits. Their profiles name a built-in dialect. A plugin
 never defines a dialect, so adding a new dialect or lifecycle still requires its
 own codec/runner and scoped behavioral evidence.
 

@@ -28,7 +28,7 @@ func TestGrantEnrollmentRejectsReplacedSlotBinding(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	for _, binding := range []string{"unbound", "bound"} {
 		t.Logf("starting with a %s slot", binding)
@@ -59,7 +59,7 @@ func TestDeviceGrantEnrollmentRejectsReplacedSlotBinding(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := deviceProvider(t, h, owner, digest, "reference-device-chat")
 	for _, binding := range []string{"unbound", "bound"} {
 		t.Logf("starting with a %s slot", binding)
@@ -105,7 +105,7 @@ func TestReenrollingAGrantRotatesTheCredentialOrChangesTheServingPrincipal(t *te
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	providerID := strings.TrimPrefix(path, "/api/v1/providers/")
 	enrollment := startGrantEnrollment(t, h, owner, path)
@@ -153,8 +153,7 @@ func TestReenrollingAGrantRotatesTheCredentialOrChangesTheServingPrincipal(t *te
 	if served := h.Runtime.Release().Snapshot.Providers[providerID]; served.ObservedPrincipal != "colleague@reference.example" {
 		t.Fatalf("the serving provider observes %q", served.ObservedPrincipal)
 	}
-	draft := fidelityDraft("reference-colleague", providerID)
-	draft["fidelity"] = map[string]any{"mode": "strict"}
+	draft := strictDraft(fidelityDraft("reference-colleague", providerID))
 	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
 	request := map[string]any{"model": "reference-colleague", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}

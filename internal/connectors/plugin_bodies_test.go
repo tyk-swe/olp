@@ -255,13 +255,9 @@ func TestPluginProfilesWithBodyChangesAreTransformedOnly(t *testing.T) {
 		if p, _ := c.Profile(); p.Strict {
 			t.Errorf("a profile with a declared %s serves strict routes", name)
 		}
-		encoded, err := json.Marshal(c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded Config
-		if err = json.Unmarshal(encoded, &decoded); err != nil || !reflect.DeepEqual(decoded.Plugin.hosting, c.Plugin.hosting) {
-			t.Errorf("the %s did not survive publication: %s %v", name, encoded, err)
+		decoded, encoded := publish(t, c)
+		if !reflect.DeepEqual(decoded.Plugin.hosting, c.Plugin.hosting) {
+			t.Errorf("the %s did not survive publication: %s", name, encoded)
 		}
 	}
 }

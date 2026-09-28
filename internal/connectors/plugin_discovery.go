@@ -39,7 +39,7 @@ func validateDiscovery(declared abi.Hosting) error {
 		}
 	}
 	for _, f := range fields {
-		if !plainText(f.name, 1, 128) {
+		if !PlainText(f.name, 1, 128) {
 			return &ProfileError{Field: f.field, Message: "Name a top-level field of the listing with 1–128 characters, without control characters."}
 		}
 	}

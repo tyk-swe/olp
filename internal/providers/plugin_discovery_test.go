@@ -23,14 +23,15 @@ func pluginConfiguration(t *testing.T, server *httptest.Server, hosting abi.Host
 	t.Helper()
 	hosting.Address = server.URL + "/v1"
 	hosting.Headers = map[string]string{"Authorization": "Token {credential}"}
-	cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Endpoint: new(hosting.Address)}
+	cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32)}
 	cfg.Normalize()
 	pinAcme(t, cfg, server.URL, abi.Profile{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: hosting})
 	return cfg
 }
 
 // pinAcme pins cfg to profile, as the installed acme plugin declares it with
-// origin as its only origin.
+// origin as its only origin, and gives cfg the address the profile places it
+// at, as Pin does.
 func pinAcme(t *testing.T, cfg *Configuration, origin string, profile abi.Profile) {
 	t.Helper()
 	installed, err := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{origin}, Profiles: []abi.Profile{profile}}})
@@ -40,6 +41,7 @@ func pinAcme(t *testing.T, cfg *Configuration, origin string, profile abi.Profil
 	if err = cfg.pinned(installed); err != nil {
 		t.Fatal(err)
 	}
+	cfg.Endpoint = new(cfg.plugin.Address(cfg.Options.PluginOptions))
 }
 
 func loopbackPolicy() *egress.Policy {
@@ -126,22 +128,17 @@ func TestPluginDiscoveryPreservesEscapedAddressOptions(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			plugin, err := connectors.NewPluginProfile(strings.Repeat("ab", 32), abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{server.URL}, Profiles: []abi.Profile{{
+			cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Options: Options{PluginOptions: map[string]string{"account": account}}}
+			cfg.Normalize()
+			pinAcme(t, cfg, server.URL, abi.Profile{
 				ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Options: []abi.Option{{Name: "account", Label: "Account"}},
 				Hosting: abi.Hosting{
 					Address: server.URL + "/accounts/{options.account}/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
 					Discovery: &abi.Discovery{Path: "/models", Models: "items", ID: "slug", Pagination: &abi.Pagination{Parameter: "page", Cursor: "next"}},
 				},
-			}}}, "acme-chat")
-			if err != nil {
-				t.Fatal(err)
-			}
-			options := map[string]string{"account": account}
-			endpoint := plugin.Address(options)
-			cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Endpoint: &endpoint, Options: Options{PluginOptions: options}, plugin: plugin}
-			cfg.Normalize()
+			})
 			models, err := New(nil, loopbackPolicy(), nil).listModelFacts(t.Context(), cfg, []byte("secret"))
-			want := strings.TrimPrefix(endpoint, server.URL) + "/models"
+			want := strings.TrimPrefix(*cfg.Endpoint, server.URL) + "/models"
 			if err != nil || len(models) != 2 || !slices.Equal(paths, []string{want, want}) {
 				t.Fatalf("discovery: models=%v error=%v paths=%q want=%q", models, err, paths, want)
 			}
@@ -212,7 +209,7 @@ func (s failingSigner) Sign(context.Context, string, abi.Provider, abi.SignReque
 func TestPluginProbesBlameTheCredentialOnlyForReportedSigningFailures(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("a request whose signing failed was sent") }))
 	defer server.Close()
-	cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Endpoint: new(server.URL + "/v1")}
+	cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32)}
 	cfg.Normalize()
 	pinAcme(t, cfg, server.URL, abi.Profile{ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Hosting: abi.Hosting{Address: server.URL + "/v1"}, Signing: true})
 	for failure, want := range map[error]string{

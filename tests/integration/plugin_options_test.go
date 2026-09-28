@@ -60,9 +60,7 @@ func TestPluginOptionsPlaceTheUpstreamAddress(t *testing.T) {
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("workspace-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Workspace")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("workspace-strict", created["id"])), "Workspace")
 	serve := func(workspace string) {
 		t.Helper()
 		h.refresh()

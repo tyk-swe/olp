@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderKindCapability } from '$lib/features/providers/models';
-import type { ProviderProfile } from '$lib/features/providers/profiles';
 import {
   activationReady,
   authOptionsFor,
@@ -36,6 +35,10 @@ import {
   validateProviderDraft,
   type ProviderEditValues
 } from '$lib/features/providers/providerEditor';
+import {
+  pluginSpec,
+  referenceProfile
+} from '$lib/features/providers/test/pluginFixtures';
 
 const openAiSpec: ProviderKindCapability = {
   kind: 'openai',
@@ -634,43 +637,9 @@ describe('probeSummary', () => {
 });
 
 describe('plugin providers', () => {
-  const pluginSpec: ProviderKindCapability = {
-    kind: 'plugin',
-    label: 'Provider plugin',
-    description: 'A profile an installed provider plugin supplies.',
-    default_auth_mode: 'static_credential',
-    auth_modes: [
-      {
-        mode: 'static_credential',
-        label: 'Static credential',
-        credential: 'required'
-      },
-      { mode: 'grant', label: 'Grant', credential: 'grant' }
-    ],
-    fields: [],
-    presets: []
-  };
   const digest = 'c'.repeat(64);
-  const profile = (model_discovery?: boolean): ProviderProfile => ({
-    id: 'reference-chat',
-    revision: digest,
-    label: 'Reference Chat Completions',
-    kind: 'plugin',
-    dialect: 'openai-chat',
-    dialect_revision: 'unversioned-2026-09-22',
-    hosting: 'plugin',
-    authentication: ['static_credential'],
-    transport: 'http',
-    operations: ['generation'],
-    operation_dialects: { generation: 'openai-chat' },
-    default_schemas: {},
-    semantic_headers: ['Openai-Beta'],
-    query_settings: [],
-    documentation: '',
-    strict: true,
-    plugin: { digest, name: 'reference', version: '0.1.0' },
-    model_discovery
-  });
+  const profile = (model_discovery?: boolean) =>
+    referenceProfile(digest, { model_discovery });
 
   it('pins a plugin profile by its digest and leaves the address to the server', () => {
     const draft = createProviderDraft(pluginSpec);

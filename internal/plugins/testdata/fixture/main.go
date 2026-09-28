@@ -68,10 +68,10 @@ var calls atomic.Int64
 // Sign signs as the credential's prefix up to a colon says: "loop" never
 // returns, "allocate" exhausts memory, "exit" stops the plugin, "fail" reports
 // a failure holding the credential, "large-failure:N" logs N records and
-// reports oversized failure diagnostics, "log" logs the credential, "stderr" writes
-// the credential to standard error just after it answers, "wait" returns once
-// its call is cancelled, "credential-header" returns a reserved header
-// containing the credential in its name, and "option:name" returns
+// reports oversized failure diagnostics, "log" logs the credential, "stderr"
+// writes the credential to standard error just after it answers, "wait"
+// returns once its call is cancelled, "credential-header" returns a reserved
+// header containing the credential in its name, and "option:name" returns
 // X-Fixture-Option, the provider's profile and value of that option. Anything
 // else returns X-Fixture-Signature and X-Fixture-Calls, this instance's count
 // of signed requests.

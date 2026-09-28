@@ -130,9 +130,7 @@ func TestPluginProfileWithAnEnvelopeServesTransformedRoutes(t *testing.T) {
 	// Certification probes unary and streaming chat through the envelope.
 	certifyPluginProvider(t, h, owner, "/api/v1/providers/"+created["id"].(string))
 
-	draft := fidelityDraft("enveloped-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	strict := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	strict := h.want(owner, "POST", "/api/v1/route-drafts", strictDraft(fidelityDraft("enveloped-strict", created["id"])), idem(uuid.NewString()), 201)
 	for _, action := range []string{"validate", "activate"} {
 		problem := h.want(owner, "POST", "/api/v1/route-drafts/"+strict["id"].(string)+"/"+action, nil, withMatch(strict, idem(uuid.NewString())), 422)
 		if problemCode(t, problem) != "target_capability" || !strings.Contains(problem["detail"].(string), "Declare the route transformed to use this profile") {

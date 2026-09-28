@@ -1,11 +1,10 @@
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { expect, test } from '../playwright';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
+import {
+  approveReferencePlugin,
+  buildReferencePlugin,
+  installReferencePlugin
+} from './referencePlugin';
 
 // tests/plugins/mock-plugin-upstream.mjs, which accepts only the headers the
 // reference plugin's hosting adaptation declares.
@@ -35,24 +34,10 @@ let digest = '';
 // The reference plugin, linked against the fake upstream and labelled apart
 // from the default build the install journey uses.
 test.beforeAll(() => {
-  module = join(mkdtempSync(join(tmpdir(), 'olp-plugin-')), 'reference.wasm');
-  execFileSync(
-    'go',
-    [
-      'build',
-      '-buildmode=c-shared',
-      `-ldflags=-X=main.upstream=${upstream.address} -X=main.version=${version}`,
-      '-o',
-      module,
-      './sdk/plugin/reference'
-    ],
-    {
-      cwd: fileURLToPath(new URL('../../..', import.meta.url)),
-      env: { ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', CGO_ENABLED: '0' },
-      stdio: 'inherit'
-    }
-  );
-  digest = createHash('sha256').update(readFileSync(module)).digest('hex');
+  ({ module, digest } = buildReferencePlugin({
+    upstream: upstream.address,
+    version
+  }));
 });
 
 test('an operator connects a provider through an approved plugin profile', async ({
@@ -67,26 +52,13 @@ test('an operator connects a provider through an approved plugin profile', async
 
   // An owner installs the plugin and approves the origins it declares,
   // including the one its profile's address uses.
-  await page.goto('/plugins');
-  await page.getByLabel('Plugin module (.wasm)').setInputFiles(module);
-  await page.getByRole('button', { name: 'Install plugin' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Installed reference ${version}.`
-  );
-  const plugin = page.getByRole('article', { name: `reference ${version}` });
+  const plugin = await installReferencePlugin(page, module, version);
   await expect(
     plugin
       .getByRole('row', { name: /^reference-chat / })
       .getByRole('cell', { name: upstream.address, exact: true })
   ).toBeVisible();
-  await plugin.getByRole('button', { name: 'Review and approve' }).click();
-  await plugin
-    .getByRole('region', { name: 'Approve these origins?' })
-    .getByRole('button', { name: 'Approve origins' })
-    .click();
-  await expect(page.getByRole('status')).toContainText(
-    `Approved reference ${version}.`
-  );
+  await approveReferencePlugin(page, plugin, version);
 
   // The provider wizard offers the plugin's profile and digest, then the
   // static credential. The profile's address is the endpoint.

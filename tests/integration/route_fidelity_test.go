@@ -37,6 +37,10 @@ func transformed(draft map[string]any) map[string]any {
 	draft["fidelity"] = map[string]any{"mode": "transformed"}
 	return draft
 }
+func strictDraft(draft map[string]any) map[string]any {
+	draft["fidelity"] = map[string]any{"mode": "strict"}
+	return draft
+}
 func requireFieldError(t *testing.T, problem map[string]any, field string) {
 	t.Helper()
 	errors, _ := problem["errors"].(map[string]any)

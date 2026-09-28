@@ -125,6 +125,13 @@ export function pluginProblem(error: unknown): string {
   return field ? `${message} (${field})` : message;
 }
 
+/** The name and version that identify a plugin build to its owner. */
+export function pluginTitle(plugin: {
+  manifest: { name: string; version: string };
+}): string {
+  return `${plugin.manifest.name} ${plugin.manifest.version}`;
+}
+
 /** The first twelve digest characters, enough to tell installs apart. */
 export function shortDigest(digest: string): string {
   return digest.slice(0, 12);

@@ -4,6 +4,7 @@
   import type { Provider } from './api';
   import type { ProviderEditValues, RunProviderAction } from './providerEditor';
   import { getConfigurationSchemas, listProviderProfiles } from './profiles';
+  import { providerKeys } from './providerKeys';
   import NativeValueField from './NativeValueField.svelte';
   import NativeMapEditor from './NativeMapEditor.svelte';
   import OperationDefaultsEditor from './OperationDefaultsEditor.svelte';
@@ -30,7 +31,7 @@
     onChange: () => void;
   } = $props();
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   const schemas = createQuery(() => ({

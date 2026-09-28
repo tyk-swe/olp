@@ -15,8 +15,9 @@ import {
   startGrantEnrollment,
   type GrantEnrollment
 } from './grants';
-import { listProviderModelPage, type ProviderKindCapability } from './models';
+import { listProviderModelPage } from './models';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
+import { pluginSpec } from './test/pluginFixtures';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -38,23 +39,6 @@ vi.mock('./models', async (original) => ({
 
 const digest = 'e'.repeat(64);
 const principal = 'operator@reference.example';
-
-const pluginSpec: ProviderKindCapability = {
-  kind: 'plugin',
-  label: 'Provider plugin',
-  description: 'A profile an installed provider plugin supplies.',
-  default_auth_mode: 'static_credential',
-  auth_modes: [
-    {
-      mode: 'static_credential',
-      label: 'Static credential',
-      credential: 'required'
-    },
-    { mode: 'grant', label: 'Grant', credential: 'grant' }
-  ],
-  fields: [],
-  presets: []
-};
 
 const provider: Provider = {
   id: 'provider-account',
@@ -116,6 +100,14 @@ const enrollment: GrantEnrollment = {
   expires_at: '2026-09-27T06:10:00Z'
 };
 
+const completion = {
+  provider_id: provider.id,
+  etag: 'v4',
+  credential_id: 'credential-2',
+  credential_version: 2,
+  principal
+};
+
 const slots = {
   etag: 'slots-v1',
   connection_usage: null,
@@ -163,6 +155,14 @@ const slots = {
       lapsed: false,
       active_credential_version_id: null
     }
+  }
+};
+
+const lapsedSlots: typeof slots = {
+  ...slots,
+  health: {
+    ...slots.health,
+    'slot-default': { ...slots.health['slot-default'], lapsed: true }
   }
 };
 
@@ -221,6 +221,10 @@ function set(selector: string, value: string) {
   flushSync();
 }
 
+function submit(form: Element) {
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
 function pool() {
   return host.querySelector('[aria-labelledby="credential-pool-heading"]')!;
 }
@@ -274,13 +278,7 @@ describe('grant re-enrollment in the credential pool', () => {
         },
         { ...firstVersion, draft_selected: false }
       ]);
-      return {
-        provider_id: provider.id,
-        etag: 'v4',
-        credential_id: 'credential-2',
-        credential_version: 2,
-        principal
-      };
+      return completion;
     });
     await reenrollDefaultSlot();
     expect(versions().textContent).toContain(`Observed principal ${principal}`);
@@ -293,9 +291,7 @@ describe('grant re-enrollment in the credential pool', () => {
 
     const callback = 'http://127.0.0.1:1455/callback?code=signed-in&state=s1';
     set('#grant-input', ` ${callback} `);
-    panel()!
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit(panel()!.querySelector('form')!);
     await vi.waitFor(() => {
       flushSync();
       expect(pool().querySelector('[role="status"]')?.textContent).toContain(
@@ -324,9 +320,7 @@ describe('grant re-enrollment in the credential pool', () => {
     );
     await reenrollDefaultSlot();
     set('#grant-input', 'code#s1');
-    panel()!
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit(panel()!.querySelector('form')!);
     await vi.waitFor(() => {
       flushSync();
       expect(pool().querySelector('[role="alert"]')?.textContent).toContain(
@@ -371,16 +365,7 @@ describe('grant re-enrollment in the credential pool', () => {
     vi.mocked(startGrantEnrollment).mockResolvedValue(device);
     vi.mocked(pollGrantEnrollment)
       .mockResolvedValueOnce({ status: 'pending', interval: 10 })
-      .mockResolvedValueOnce({
-        status: 'completed',
-        completion: {
-          provider_id: provider.id,
-          etag: 'v4',
-          credential_id: 'credential-2',
-          credential_version: 2,
-          principal
-        }
-      });
+      .mockResolvedValueOnce({ status: 'completed', completion });
     await openProvider();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     button(pool(), 'Enroll grant')!.click();
@@ -415,13 +400,7 @@ describe('grant re-enrollment in the credential pool', () => {
 
   it('shows a lapsed grant with its re-enroll action on the credential pool and versions', async () => {
     const lapsedAt = '2026-09-27T06:45:00Z';
-    pooled = {
-      ...slots,
-      health: {
-        ...slots.health,
-        'slot-default': { ...slots.health['slot-default'], lapsed: true }
-      }
-    };
+    pooled = lapsedSlots;
     vi.mocked(listProviderCredentials).mockResolvedValue([
       { ...firstVersion, grant: { ...grant, lapsed_at: lapsedAt } }
     ]);
@@ -461,13 +440,7 @@ describe('grant re-enrollment in the credential pool', () => {
   });
 
   it('disables a slot whose grant lapsed, keeping its credential version rather than binding it again', async () => {
-    pooled = {
-      ...slots,
-      health: {
-        ...slots.health,
-        'slot-default': { ...slots.health['slot-default'], lapsed: true }
-      }
-    };
+    pooled = lapsedSlots;
     // Like OLP, which binds the credential version a slot write names and
     // refuses a lapsed one, while a write naming none keeps the slot's.
     let written: (typeof slots.items)[number] | undefined;
@@ -503,9 +476,7 @@ describe('grant re-enrollment in the credential pool', () => {
     )!;
     enabled.checked = false;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
-    pool()
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit(pool().querySelector('form')!);
     await vi.waitFor(() => {
       flushSync();
       expect(pool().querySelector('li')?.textContent).toContain('Disabled');
@@ -521,13 +492,7 @@ describe('grant re-enrollment in the credential pool', () => {
   });
 
   it('re-enrolls a lapsed slot by device authorization, showing its lapse beside the panel until the new version is staged', async () => {
-    pooled = {
-      ...slots,
-      health: {
-        ...slots.health,
-        'slot-default': { ...slots.health['slot-default'], lapsed: true }
-      }
-    };
+    pooled = lapsedSlots;
     const device: GrantEnrollment = {
       id: 'enrollment-3',
       provider_id: provider.id,
@@ -551,16 +516,7 @@ describe('grant re-enrollment in the credential pool', () => {
             slots.items[1]
           ]
         };
-        return {
-          status: 'completed',
-          completion: {
-            provider_id: provider.id,
-            etag: 'v4',
-            credential_id: 'credential-2',
-            credential_version: 2,
-            principal
-          }
-        };
+        return { status: 'completed', completion };
       });
     await openProvider();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

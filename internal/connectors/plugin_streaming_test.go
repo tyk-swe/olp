@@ -1,7 +1,6 @@
 package connectors
 
 import (
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -24,13 +23,9 @@ func TestForcedStreamingNeedsADialectOLPAggregates(t *testing.T) {
 	if p, _ := c.Profile(); p.Strict || !c.ForcesStreaming() {
 		t.Fatalf("a profile forcing streaming serves strict routes: %+v", p)
 	}
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var published Config
-	if err = json.Unmarshal(encoded, &published); err != nil || !published.ForcesStreaming() || !reflect.DeepEqual(published.Plugin.hosting, c.Plugin.hosting) {
-		t.Fatalf("forced streaming did not survive publication: %s %v", encoded, err)
+	published, encoded := publish(t, c)
+	if !published.ForcesStreaming() || !reflect.DeepEqual(published.Plugin.hosting, c.Plugin.hosting) {
+		t.Fatalf("forced streaming did not survive publication: %s", encoded)
 	}
 	if pluginConfig(t, pluginManifest()).ForcesStreaming() || (Config{}).ForcesStreaming() {
 		t.Fatal("a connector without forced streaming forces it")

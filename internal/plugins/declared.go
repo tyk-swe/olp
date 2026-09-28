@@ -67,6 +67,10 @@ const (
 	sectionDataCount = 12
 )
 
+// wasmHeader is the magic number and version every WebAssembly module begins
+// with.
+const wasmHeader = "\x00asm\x01\x00\x00\x00"
+
 // declare bounds every allocation-driving declaration, including nested
 // vectors and strings, before wazero decodes it. Semantic validation and
 // instruction validation remain wazero's responsibility.
@@ -76,7 +80,7 @@ func declare(module []byte) (declarations, error) {
 	}
 	budget := uint64(maxModuleEntries)
 	r := reader{data: module, budget: &budget}
-	if header := r.bytes(8); r.err != nil || string(header) != "\x00asm\x01\x00\x00\x00" {
+	if header := r.bytes(8); r.err != nil || string(header) != wasmHeader {
 		return declarations{}, errNotModule
 	}
 	var d declarations

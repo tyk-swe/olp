@@ -10,6 +10,7 @@
     pluginProfileGroups,
     type ProviderProfilePlugin
   } from './profiles';
+  import { providerKeys } from './providerKeys';
   import {
     selectPluginProfile,
     type ProviderEditValues
@@ -31,7 +32,7 @@
   } = $props();
 
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   const groups = $derived(pluginProfileGroups(profiles.data ?? []));

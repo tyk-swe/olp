@@ -17,6 +17,7 @@ type logLine struct {
 	Level   string            `json:"level"`
 	Message string            `json:"msg"`
 	Attrs   map[string]string `json:"plugin_attrs"`
+	Error   string            `json:"error"`
 }
 
 func logLines(t *testing.T, logged *bytes.Buffer) []logLine {

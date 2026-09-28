@@ -74,7 +74,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	case parent.Err() != nil:
 		return parent.Err()
 	case ctx.Err() != nil:
-		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", e.tier.limits.Time))
+		return refuseTimedOut(e.tier.limits.Time)
 	}
 	return refuseStopped(err.Error())
 }
@@ -222,7 +222,7 @@ type pending struct {
 // executable, whose digest it checks, in a process group of its own.
 func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, error) {
 	path, _, err := u.lookup(name)
-	if refusal, ok := errors.AsType[*Error](err); ok && refusal.Code == CodeExecutableUnknown {
+	if isCode(err, CodeExecutableUnknown) {
 		return nil, refuse(CodeExecutableChanged, "The unconfined plugin directory no longer holds the plugin's executable.")
 	}
 	if err != nil {

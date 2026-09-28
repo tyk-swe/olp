@@ -17,7 +17,8 @@ import {
   continueGrantEnrollment,
   pollGrantEnrollment,
   startGrantEnrollment,
-  type GrantEnrollment
+  type GrantEnrollment,
+  type GrantEnrollmentCompletion
 } from './grants';
 import {
   listProviderCredentials,
@@ -26,6 +27,7 @@ import {
 import { listProviderModelPage, type ProviderKindCapability } from './models';
 import type { ProviderProfile } from './profiles';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
+import { pluginSpec, referenceProfile } from './test/pluginFixtures';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -56,42 +58,16 @@ const digest = 'e'.repeat(64);
 const authorizationURL =
   'https://login.example.com/authorize?client_id=olp-reference&state=s1&code_challenge=c&code_challenge_method=S256';
 
-const pluginSpec: ProviderKindCapability = {
-  kind: 'plugin',
-  label: 'Provider plugin',
-  description: 'A profile an installed provider plugin supplies.',
-  default_auth_mode: 'static_credential',
-  auth_modes: [
-    {
-      mode: 'static_credential',
-      label: 'Static credential',
-      credential: 'required'
-    },
-    { mode: 'grant', label: 'Grant', credential: 'grant' }
-  ],
-  fields: [{ field: 'model', label: 'Probe model', required: true }],
-  presets: []
+const probeSpec: ProviderKindCapability = {
+  ...pluginSpec,
+  fields: [{ field: 'model', label: 'Probe model', required: true }]
 };
 
-const referenceGrantChat: ProviderProfile = {
+const referenceGrantChat = referenceProfile(digest, {
   id: 'reference-grant-chat',
-  revision: digest,
   label: 'Reference Chat Completions with sign-in',
-  kind: 'plugin',
-  dialect: 'openai-chat',
-  dialect_revision: 'unversioned-2026-09-22',
-  hosting: 'plugin',
-  authentication: ['grant'],
-  transport: 'http',
-  operations: ['generation'],
-  operation_dialects: { generation: 'openai-chat' },
-  default_schemas: {},
-  semantic_headers: ['Openai-Beta'],
-  query_settings: [],
-  documentation: '',
-  strict: true,
-  plugin: { digest, name: 'reference', version: '0.1.0' }
-};
+  authentication: ['grant']
+});
 
 const saved: Provider = {
   id: 'provider-account',
@@ -129,6 +105,13 @@ const enrolled: Provider = {
   etag: 'v2',
   draft_credential_id: 'credential-1',
   draft_credential_version: 1
+};
+const completion: GrantEnrollmentCompletion = {
+  provider_id: saved.id,
+  etag: 'v2',
+  credential_id: 'credential-1',
+  credential_version: 1,
+  principal: 'operator@reference.example'
 };
 
 /** The credential version a completed grant enrollment staged on the draft. */
@@ -178,7 +161,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(providerKeys.kinds(), [pluginSpec]);
+  client.setQueryData(providerKeys.kinds(), [probeSpec]);
   client.setQueryData(['provider-vendors'], []);
   client.setQueryData(['provider-configuration-schemas'], {});
   client.setQueryData(projectKeys.memberships, []);
@@ -231,13 +214,14 @@ function submit(form: Element) {
   form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
 
-/** Fills the Connection stage for the reference plugin's grant profile. */
-async function connectionStage() {
+/** Fills the Connection stage for one of the reference plugin's profiles, its
+ * grant profile by default. */
+async function connectionStage(profileId = 'reference-grant-chat') {
   component = mount(PluginProviderProbe, { target: host, props: { client } });
   flushSync();
   await settle();
   set('input[name="kind"][value="plugin"]', 'plugin', 'change');
-  set('#provider-plugin-profile', `reference-grant-chat@${digest}`, 'change');
+  set('#provider-plugin-profile', `${profileId}@${digest}`, 'change');
   set('#provider-name', 'Reference account');
   set('#initial-model', 'reference-model');
 }
@@ -251,13 +235,7 @@ describe('grant enrollment in the provider wizard', () => {
     vi.mocked(copyText).mockResolvedValue(true);
     vi.mocked(continueGrantEnrollment).mockImplementation(async () => {
       provider = enrolled;
-      return {
-        provider_id: saved.id,
-        etag: 'v2',
-        credential_id: 'credential-1',
-        credential_version: 1,
-        principal: 'operator@reference.example'
-      };
+      return completion;
     });
     await connectionStage();
 
@@ -381,13 +359,7 @@ function saveButton() {
 async function enrollThenReturn() {
   vi.mocked(continueGrantEnrollment).mockImplementation(async () => {
     provider = enrolled;
-    return {
-      provider_id: saved.id,
-      etag: 'v2',
-      credential_id: 'credential-1',
-      credential_version: 1,
-      principal: 'operator@reference.example'
-    };
+    return completion;
   });
   await connectionStage();
   submit(host.querySelector('form')!);
@@ -511,13 +483,7 @@ describe('saving the Connection stage of a draft that holds a credential', () =>
     vi.mocked(listProviderCredentials).mockResolvedValue([
       { ...grantVersion, grant: null }
     ]);
-    component = mount(PluginProviderProbe, { target: host, props: { client } });
-    flushSync();
-    await settle();
-    set('input[name="kind"][value="plugin"]', 'plugin', 'change');
-    set('#provider-plugin-profile', `reference-chat@${digest}`, 'change');
-    set('#provider-name', 'Reference account');
-    set('#initial-model', 'reference-model');
+    await connectionStage('reference-chat');
     set('#provider-secret', 'static-secret');
     submit(host.querySelector('form')!);
     await vi.waitFor(() => {
@@ -583,16 +549,7 @@ describe('grant enrollment by device authorization', () => {
       .mockResolvedValueOnce({ status: 'pending', interval: 10 })
       .mockImplementationOnce(async () => {
         provider = enrolled;
-        return {
-          status: 'completed',
-          completion: {
-            provider_id: saved.id,
-            etag: 'v2',
-            credential_id: 'credential-1',
-            credential_version: 1,
-            principal: 'operator@reference.example'
-          }
-        };
+        return { status: 'completed', completion };
       });
     await deviceAuthorization();
 

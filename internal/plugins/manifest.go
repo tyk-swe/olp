@@ -10,8 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -105,9 +103,7 @@ func invalidManifest(field, message string) *Error {
 }
 
 func displayText(text string, least, most int) bool {
-	n := utf8.RuneCountInString(text)
-	return utf8.ValidString(text) && n >= least && n <= most && strings.TrimSpace(text) == text &&
-		!strings.ContainsFunc(text, unicode.IsControl)
+	return connectors.PlainText(text, least, most) && strings.TrimSpace(text) == text
 }
 
 // canonicalOrigin reports whether origin is an http or https origin written
@@ -119,10 +115,9 @@ func canonicalOrigin(origin string) bool {
 	}
 	if port := u.Port(); port != "" {
 		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port ||
-			(u.Scheme == "https" && n == 443) || (u.Scheme == "http" && n == 80) {
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
 			return false
 		}
 	}
-	return origin == strings.ToLower(u.Scheme+"://"+u.Host)
+	return origin == connectors.Origin(u)
 }

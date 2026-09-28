@@ -3,8 +3,6 @@ package plugins
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -39,12 +37,6 @@ func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
 	return startRuntime(t, Interpreted, limits, log)
 }
 
-// newEngineRuntime starts a runtime on engine that discards plugin output.
-func newEngineRuntime(t *testing.T, engine Engine, limits Limits) *Runtime {
-	t.Helper()
-	return startRuntime(t, engine, limits, nil)
-}
-
 func fixture(t *testing.T, behaviour string) []byte {
 	return testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
 }
@@ -69,8 +61,7 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer loaded.Close(t.Context())
-	sum := sha256.Sum256(module)
-	if loaded.Digest != hex.EncodeToString(sum[:]) {
+	if loaded.Digest != digestOf(module) {
 		t.Fatalf("digest %s is not the module's SHA-256", loaded.Digest)
 	}
 	manifest, err := r.Inspect(t.Context(), module)
@@ -123,7 +114,7 @@ func TestInspectRefusesModulesOLPCannotInstall(t *testing.T) {
 		code, field string
 	}{
 		"not WebAssembly": {func(*testing.T) []byte { return []byte("plugin") }, CodeModuleInvalid, ""},
-		"not a plugin":    {func(*testing.T) []byte { return []byte("\x00asm\x01\x00\x00\x00") }, CodeModuleInvalid, ""},
+		"not a plugin":    {func(*testing.T) []byte { return []byte(wasmHeader) }, CodeModuleInvalid, ""},
 		"another ABI version": {func(t *testing.T) []byte {
 			return testutil.BuildPlugin(t, "./internal/plugins/testdata/otherabi")
 		}, CodeABIUnsupported, ""},

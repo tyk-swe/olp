@@ -108,10 +108,7 @@ func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Pro
 	// including a failed follow-up after the token endpoint succeeded.
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: installed.Manifest.Origins, Client: client}}, &grant)
-	refusedBeforeStart := false
-	if refusal, ok := errors.AsType[*Error](err); ok {
-		refusedBeforeStart = refusal.Code == CodeExecutableChanged || refusal.Code == CodeExecutableInvalid
-	}
+	refusedBeforeStart := isCode(err, CodeExecutableChanged) || isCode(err, CodeExecutableInvalid)
 	if err != nil && (installed.Executable == "" && !connected.Load() || refusedBeforeStart) {
 		err = notSent(err)
 	}

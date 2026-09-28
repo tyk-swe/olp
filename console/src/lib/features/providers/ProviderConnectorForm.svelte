@@ -9,6 +9,7 @@
   import type { FieldIssue } from '$lib/api/http';
   import { listProviderVendors } from '$lib/features/providers/api';
   import { listProviderProfiles } from '$lib/features/providers/profiles';
+  import { providerKeys } from '$lib/features/providers/providerKeys';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
     emptyProviderOptions,
@@ -79,7 +80,7 @@
     requiresCredential(selectedSpec, draft.authMode)
   );
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   const grantRequired = $derived(requiresGrant(selectedSpec, draft.authMode));

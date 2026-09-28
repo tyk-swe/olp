@@ -28,7 +28,7 @@ type hostile struct {
 var hostileTypes = [][]byte{{0x60, 0, 1, 0x7f}, {0x60, 1, 0x7f, 1, 0x7f}, {0x60, 2, 0x7f, 0x7f, 1, 0x7e}, {0x60, 0, 0}}
 
 func (h hostile) module() []byte {
-	module := []byte("\x00asm\x01\x00\x00\x00")
+	module := []byte(wasmHeader)
 	module = append(module, wasmSection(sectionType, wasmVector(hostileTypes...))...)
 	if h.imports != nil {
 		module = append(module, wasmSection(sectionImport, wasmVector(h.imports...))...)
@@ -118,7 +118,7 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 	r := newTestRuntime(t, DefaultLimits, nil)
 	for name, section := range sections {
 		t.Run(name, func(t *testing.T) {
-			module := append([]byte("\x00asm\x01\x00\x00\x00"), section...)
+			module := append([]byte(wasmHeader), section...)
 			var before, after runtime.MemStats
 			runtime.ReadMemStats(&before)
 			_, err := r.Load(t.Context(), module)
@@ -140,7 +140,7 @@ func TestHostileModuleIsOtherwiseAPlugin(t *testing.T) {
 	t.Parallel()
 	benign := hostile{tables: [][]byte{funcrefTable(maxTableElements)}, call: []byte{0x42, 0}, functions: 2, eachLocals: maxFunctionLocals}
 	for _, engine := range []Engine{Interpreted, Compiled} {
-		r := newEngineRuntime(t, engine, DefaultLimits)
+		r := startRuntime(t, engine, DefaultLimits, nil)
 		m, err := r.Load(t.Context(), benign.module())
 		if err != nil {
 			t.Fatal(err)
@@ -198,7 +198,7 @@ func TestACallPastItsStackLimitFails(t *testing.T) {
 	limits.Stack = 1 << 20
 	for _, engine := range []Engine{Interpreted, Compiled} {
 		for name, call := range map[string][]byte{"deep": recurse, "wide": operands} {
-			r := newEngineRuntime(t, engine, limits)
+			r := startRuntime(t, engine, limits, nil)
 			m, err := r.Load(t.Context(), hostile{call: call}.module())
 			if err != nil {
 				t.Fatal(err)

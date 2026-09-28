@@ -94,11 +94,6 @@ func digestOf(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func isCode(err error, code string) bool {
-	refusal, ok := errors.AsType[*Error](err)
-	return ok && refusal.Code == code
-}
-
 // An executable that doesn't speak the ABI over stdio, or speaks another
 // version of it, is refused when the owner reviews it.
 func TestUnconfinedTierRefusesExecutablesThatDontSpeakItsABI(t *testing.T) {

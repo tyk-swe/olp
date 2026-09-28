@@ -137,9 +137,7 @@ func TestPluginSigningHookSignsEveryUpstreamRequest(t *testing.T) {
 	}
 
 	// Signing changes only authorization, so the profile serves strict routes.
-	draft := fidelityDraft("reference-signed", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Reference signed")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-signed", created["id"])), "Reference signed")
 	h.refresh()
 
 	status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-signed", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})

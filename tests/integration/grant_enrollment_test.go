@@ -71,7 +71,7 @@ func TestGrantEnrollmentCreatesACredentialVersionThatGatewaysServe(t *testing.T)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 
 	// A grant authenticates the provider, so no pasted credential does.
 	pasted := map[string]any{"name": "Pasted", "credential": "static", "configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "reference-grant-chat", "profile_revision": digest}}
@@ -143,9 +143,7 @@ func TestGrantEnrollmentCreatesACredentialVersionThatGatewaysServe(t *testing.T)
 		t.Fatal(err)
 	}
 	certifyPluginProvider(t, h, owner, path)
-	draft := fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Account")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))), "Account")
 	h.refresh()
 	served, _, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), version.ID)
 	if err != nil || !strings.Contains(string(served), issued[0]) || strings.Contains(string(served), issued[1]) {
@@ -169,7 +167,7 @@ func TestGrantEnrollmentContinuesOnAnotherControlReplica(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	enrollment := startGrantEnrollment(t, h, owner, path)
 	var stored []byte
@@ -194,7 +192,7 @@ func TestGrantEnrollmentRefusesAStateMismatchAnExpiredOrReusedSession(t *testing
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 
 	// Another sign-in's callback fails the state check, and the enrollment is
@@ -294,7 +292,7 @@ func TestPluginHTTPTakesTheProviderNetworkPath(t *testing.T) {
 		io.Copy(client, target)
 	}))
 	t.Cleanup(proxy.Close)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	path := grantProvider(t, h, owner, digest, map[string]any{"network": map[string]any{"proxy_url": proxy.URL}})
 	enrollment := startGrantEnrollment(t, h, owner, path)
 	continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
@@ -324,7 +322,7 @@ func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 
 	elsewhere := newGrantUpstream(t, authority)
@@ -345,9 +343,7 @@ func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 		t.Fatalf("completed %v", completed)
 	}
 	certifyPluginProvider(t, h, owner, path)
-	draft := fidelityDraft("reference-regional", strings.TrimPrefix(path, "/api/v1/providers/"))
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Regional")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-regional", strings.TrimPrefix(path, "/api/v1/providers/"))), "Regional")
 	h.refresh()
 	before := len(upstream.receivedPaths())
 	status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-regional", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})

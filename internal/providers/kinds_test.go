@@ -44,7 +44,6 @@ func TestPluginProvidersTakeNoKindDefaults(t *testing.T) {
 		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
 		Hosting: abi.Hosting{Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Token {credential}"}},
 	})
-	cfg.Endpoint = new(cfg.plugin.Address(nil))
 	if err := cfg.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +73,6 @@ func TestPluginProviderOptionsFollowTheirProfile(t *testing.T) {
 		cfg := Configuration{Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: digest, Options: Options{PluginOptions: options}}
 		cfg.Normalize()
 		pinAcme(t, &cfg, "https://api.acme.example", profile)
-		cfg.Endpoint = new(cfg.plugin.Address(cfg.Options.PluginOptions))
 		return cfg
 	}
 	cfg := configured(map[string]string{"account": "acme", "region": ""})

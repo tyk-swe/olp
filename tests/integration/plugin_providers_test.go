@@ -177,6 +177,13 @@ func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upst
 	return installPlugin(t, h, owner, testutil.BuildPlugin(t, "./sdk/plugin/reference", append([]string{"-X=main.upstream=" + upstream.URL + "/v1", "-X=main.version=" + version}, ldflags...)...))
 }
 
+// installGrantPlugin installs the reference plugin built against a grant
+// upstream and the authority whose access tokens the upstream accepts.
+func installGrantPlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string) string {
+	t.Helper()
+	return installReferencePlugin(t, h, owner, upstream, version, "-X=main.authority="+upstream.authority.URL)
+}
+
 // installPlugin installs a plugin module, approves its origins, and returns
 // its digest.
 func installPlugin(t *testing.T, h *accessHarness, owner *browser, module []byte) string {
@@ -281,9 +288,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("reference-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Reference")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-strict", created["id"])), "Reference")
 	h.refresh()
 
 	before := len(upstream.received())
@@ -307,7 +312,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	}
 
 	// The published snapshot carries the pinned digest and the profile's
-	// hosting adaptation, so gateways need nothing else.
+	// hosting adaptation, so a gateway serves the provider from its release.
 	var snapshot []byte
 	if err := h.Pool.QueryRow(t.Context(), "SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&snapshot); err != nil {
 		t.Fatal(err)
@@ -426,9 +431,7 @@ func TestPluginProfileDiscoversModelsAndClassifiesFailuresAsDeclared(t *testing.
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("reference-quota", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	key := publishRoute(t, h, owner, draft, "Reference")
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-quota", created["id"])), "Reference")
 	h.refresh()
 	chat := func(prompt string) (int, any) {
 		status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-quota", "messages": []any{map[string]any{"role": "user", "content": prompt}}})

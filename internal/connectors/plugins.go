@@ -70,7 +70,8 @@ type Plugin struct {
 
 // A PluginProfile is a provider profile a provider plugin declares: a
 // built-in dialect placed at an upstream by the plugin's hosting adaptation.
-// OLP runs the adaptation itself; no plugin code runs per request. Its
+// OLP runs the adaptation itself; plugin code runs per request only in a
+// signing hook, or in an unconfined plugin that carries the traffic. Its
 // revision is the plugin's digest, so moving a provider to another build of
 // the plugin is a new profile revision. A PluginProfile never changes.
 type PluginProfile struct {
@@ -342,9 +343,9 @@ func parseOptions(declared []abi.Option) (map[string]*regexp.Regexp, error) {
 			return nil, &ProfileError{Field: field + ".name", Message: "Name the option with 1–64 lowercase letters, digits and underscores, starting with a letter."}
 		case slices.ContainsFunc(declared[:i], func(prior abi.Option) bool { return prior.Name == option.Name }):
 			return nil, &ProfileError{Field: field + ".name", Message: "Declare each option once."}
-		case !plainText(option.Label, 1, 100):
+		case !PlainText(option.Label, 1, 100):
 			return nil, &ProfileError{Field: field + ".label", Message: "Label the option with 1–100 characters, without control characters."}
-		case !plainText(option.Description, 0, 500):
+		case !PlainText(option.Description, 0, 500):
 			return nil, &ProfileError{Field: field + ".description", Message: "Describe the option in at most 500 characters, without control characters."}
 		case len(option.Enum) > 0 && option.Pattern != "":
 			return nil, &ProfileError{Field: field + ".pattern", Message: "Declare an enum or a pattern, not both: the enum already fixes the values."}
@@ -369,9 +370,11 @@ func parseOptions(declared []abi.Option) (map[string]*regexp.Regexp, error) {
 }
 
 // validOptionValue reports whether value is one an option may take.
-func validOptionValue(value string) bool { return plainText(value, 1, 256) }
+func validOptionValue(value string) bool { return PlainText(value, 1, 256) }
 
-func plainText(text string, least, most int) bool {
+// PlainText reports whether text is valid UTF-8 of least to most characters,
+// without control characters.
+func PlainText(text string, least, most int) bool {
 	n := utf8.RuneCountInString(text)
 	return utf8.ValidString(text) && n >= least && n <= most && !strings.ContainsFunc(text, unicode.IsControl)
 }
@@ -396,14 +399,11 @@ func optionsSchema(declared []abi.Option) json.RawMessage {
 		if !option.Optional {
 			required = append(required, option.Name)
 		}
-		name, _ := json.Marshal(option.Name)
 		value, _ := json.Marshal(schema)
 		if i > 0 {
 			properties.WriteByte(',')
 		}
-		properties.Write(name)
-		properties.WriteByte(':')
-		properties.Write(value)
+		writeMember(&properties, option.Name, value)
 	}
 	properties.WriteByte('}')
 	schema, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": json.RawMessage(properties.Bytes())})

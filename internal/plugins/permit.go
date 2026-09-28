@@ -79,7 +79,7 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !digestPattern.MatchString(input.Digest) {
+	if !ValidDigest(input.Digest) {
 		return access.Reply{}, access.Invalid("digest", "Name the executable by the lowercase hexadecimal SHA-256 digest you reviewed.")
 	}
 	if !input.AcknowledgeRisk {

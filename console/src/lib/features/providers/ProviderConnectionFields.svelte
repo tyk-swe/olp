@@ -1,6 +1,7 @@
 <script lang="ts" generics="Values extends ProviderEditValues">
   import { createQuery } from '@tanstack/svelte-query';
   import { listProviderProfiles } from './profiles';
+  import { providerKeys } from './providerKeys';
   import type { ProviderKindCapability } from './models';
   import {
     authOptionsFor,
@@ -30,7 +31,7 @@
     onChange?: () => void;
   } = $props();
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal),
     enabled: Boolean(values.profileId)
   }));

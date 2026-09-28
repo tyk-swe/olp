@@ -46,7 +46,6 @@ func TestForcedStreamingCertifiesNonStreamingTuplesFromTheStream(t *testing.T) {
 		ID: "acme-responses", Label: "Acme Responses", Dialect: "openai-responses",
 		Hosting: abi.Hosting{Address: upstream.URL + "/v1", Headers: map[string]string{"Authorization": "Token {credential}"}, ForceStreaming: true},
 	})
-	cfg.Endpoint = new(cfg.plugin.Address(nil))
 	for _, mode := range []string{ModeUnary, ModeStreaming} {
 		if err := New(nil, loopbackPolicy(), nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "acme-large", CapabilityInput{Operation: OperationGeneration, Surface: "openai", Mode: mode}, 4096); err != nil {
 			t.Fatalf("%s certification: %v", mode, err)

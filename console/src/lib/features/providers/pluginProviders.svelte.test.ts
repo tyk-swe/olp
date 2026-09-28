@@ -13,6 +13,7 @@ import {
 import { listProviderModelPage, type ProviderKindCapability } from './models';
 import type { ProviderProfile } from './profiles';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
+import { referenceProfile } from './test/pluginFixtures';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -56,25 +57,7 @@ const pluginSpec: ProviderKindCapability = {
   presets: []
 };
 
-const referenceChat: ProviderProfile = {
-  id: 'reference-chat',
-  revision: digest,
-  label: 'Reference Chat Completions',
-  kind: 'plugin',
-  dialect: 'openai-chat',
-  dialect_revision: 'unversioned-2026-09-22',
-  hosting: 'plugin',
-  authentication: ['static_credential'],
-  transport: 'http',
-  operations: ['generation'],
-  operation_dialects: { generation: 'openai-chat' },
-  default_schemas: {},
-  semantic_headers: ['Openai-Beta'],
-  query_settings: [],
-  documentation: '',
-  strict: true,
-  plugin: { digest, name: 'reference', version: '0.1.0' }
-};
+const referenceChat = referenceProfile(digest);
 const workspaceChat: ProviderProfile = {
   ...referenceChat,
   id: 'reference-workspace-chat',
@@ -274,7 +257,7 @@ describe('provider wizard with a plugin profile', () => {
       'Probe model'
     );
 
-    choose(select, `reference-chat@${digest}`);
+    choosePluginProfile('reference-chat');
     const pinned = host.querySelector('[aria-label="Pinned plugin"]')!;
     expect(pinned.textContent).toContain('reference 0.1.0');
     expect(pinned.textContent).toContain(digest);

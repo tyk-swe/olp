@@ -57,8 +57,9 @@ account, model, region, and credential.
 ## Provider lifecycle
 
 A provider is created as a draft with its configuration and a credential unless
-the authentication mode is `none`, `adc`, `default_chain`, or `azure_default`.
-The console wizard then:
+the authentication mode is `none`, `adc`, `default_chain`, `azure_default`, or a
+plugin's `grant`, whose credential versions come from
+[grant enrollment](plugins.md#grant-enrollment). The console wizard then:
 
 1. **Probes** the connection (`POST /providers/{id}/probe`), which lists
    upstream models or proves a configured deployment/model when that vendor
@@ -258,7 +259,8 @@ catalogue entry is not `strict`, or one that needs translation fails with
 transformed. A [plugin profile](plugins.md#providers-from-plugin-profiles) that
 changes only authorization, address and declared headers is strict, including
 one whose signing hook adds headers; one whose envelope or rewrites change the
-dialect's bodies, or that forces upstream streaming, is not. Strict routes also
+dialect's bodies, that forces upstream streaming, or whose unconfined plugin
+[carries its traffic](plugins.md#carrying-traffic), is not. Strict routes also
 refuse `redact` content-policy rules.
 
 Declare a route transformed to translate between dialects, redact content, use
@@ -348,8 +350,8 @@ matching observations; they are preferences, not response guarantees.
 Eligibility filtering precedes ordering and `max_attempts`. Each actual
 credential attempt consumes the route's budget, which can exceed target count.
 Fallback never restarts a committed stream or an ambiguously created media job,
-nor a request an unconfined plugin carried unless the plugin reported it
-[not sent](plugins.md#carrying-traffic).
+nor a request an unconfined plugin carried whose outcome is unknown; see
+[carrying traffic](plugins.md#carrying-traffic).
 
 ## Explain and observe
 
