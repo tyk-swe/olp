@@ -2,6 +2,7 @@ package providerinvoke
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -151,6 +152,24 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 			abi.Rewrite{Op: abi.RewriteSet, Path: "/previous_response_id", Value: json.RawMessage(`"resp_authorized"`)}, false},
 		"replace authorized reference": {`,"store":true,"previous_response_id":"resp_authorized"`,
 			abi.Rewrite{Op: abi.RewriteSet, Path: "/previous_response_id", Value: json.RawMessage(`"resp_other"`)}, true},
+		"introduce item reference": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":"item_reference","id":"msg_private"}]`)}, true},
+		"introduce implicit item reference": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"id":"msg_private"}]`)}, true},
+		"introduce null type item reference": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":null,"id":"msg_private"}]`)}, true},
+		"introduce file reference": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"role":"user","content":[{"type":"input_file","file_id":"file_private"}]}]`)}, true},
+		"introduce image reference in tool output": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","file_id":"file_private"}]}]`)}, true},
+		"introduce screenshot reference in tool output": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_private"}}]`)}, true},
+		"inline item with ID": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":"message","id":"msg_inline","role":"assistant","content":"answer"}]`)}, false},
+		"inline file": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"role":"user","content":[{"type":"input_file","file_data":"data:text/plain;base64,aGk="}]}]`)}, false},
+		"opaque tool output": {`,"store":false`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/input", Value: json.RawMessage(`[{"type":"function_call_output","call_id":"call_1","output":"{\"type\":\"item_reference\",\"id\":\"msg_private\"}"}]`)}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			digest := strings.Repeat("ab", 32)
@@ -170,6 +189,12 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 			prepared, err := Prepare(request, cfg, "model", nil)
 			if (err != nil) != tc.refused {
 				t.Fatalf("prepared %s: %v", prepared.Prepared.Document().Raw(), err)
+			}
+			if tc.refused {
+				var rejected *openai.RequestError
+				if !errors.As(err, &rejected) || rejected.Code != "unsupported_parameter" || rejected.Param != "provider_profile" {
+					t.Fatalf("expected a provider profile refusal, got %v", err)
+				}
 			}
 		})
 	}

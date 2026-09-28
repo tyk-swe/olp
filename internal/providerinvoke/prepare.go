@@ -116,6 +116,13 @@ func checkStateRewrites(before, after oif.Document, wire openai.Family) error {
 	fields := []string{"store"}
 	switch wire {
 	case openai.FamilyResponses:
+		from, _ := before.Root().Lookup("input")
+		to, _ := after.Root().Lookup("input")
+		if from.Raw() != to.Raw() {
+			if err := openai.ValidateResponsesInput(to.Bytes()); err != nil {
+				return fmt.Errorf("the plugin profile's rewrite of /input is invalid: %w", err)
+			}
+		}
 		fields = append(fields, "background", "previous_response_id", "conversation")
 	case openai.FamilyChat:
 	default:

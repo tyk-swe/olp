@@ -8,12 +8,15 @@ import {
   installPlugin,
   listPlugins,
   listUnconfinedExecutables,
+  permitUnconfinedPlugin,
+  reviewUnconfinedExecutable,
   uninstallPlugin,
   type Plugin
 } from '$lib/features/plugins/api';
 import PluginsProbe from './test/PluginsProbe.svelte';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
+vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({
     role: role.current,
@@ -27,6 +30,8 @@ vi.mock('$lib/features/plugins/api', async (original) => ({
   installPlugin: vi.fn(),
   listPlugins: vi.fn(),
   listUnconfinedExecutables: vi.fn(),
+  permitUnconfinedPlugin: vi.fn(),
+  reviewUnconfinedExecutable: vi.fn(),
   uninstallPlugin: vi.fn()
 }));
 
@@ -176,6 +181,13 @@ it('explains a typed refusal with the manifest field it concerns', async () => {
 });
 
 it('approves exactly the reviewed origins, then uninstalls', async () => {
+  // The provider wizard left a fresh, inactive catalogue in the shared cache.
+  const catalogue = {
+    queryKey: ['provider-profiles'],
+    queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    staleTime: Infinity
+  };
+  await client.fetchQuery(catalogue);
   vi.mocked(listPlugins)
     .mockResolvedValueOnce(listed([pending]))
     .mockResolvedValueOnce(listed([approved]))
@@ -191,6 +203,7 @@ it('approves exactly the reviewed origins, then uninstalls', async () => {
   expect(
     [...review.querySelectorAll('li')].map((item) => item.textContent)
   ).toEqual(pending.manifest.origins);
+  catalogue.queryFn.mockResolvedValue(['reference-chat']);
   button('Approve origins').click();
   await settle();
   expect(approvePlugin).toHaveBeenCalledWith(pending);
@@ -201,12 +214,66 @@ it('approves exactly the reviewed origins, then uninstalls', async () => {
       (item) => item.textContent?.trim() === 'Review and approve'
     )
   ).toBe(false);
+  expect(await client.fetchQuery(catalogue)).toEqual(['reference-chat']);
 
+  catalogue.queryFn.mockResolvedValue([]);
   button('Uninstall').click();
   await settle();
   expect(confirm).toHaveBeenCalled();
   expect(uninstallPlugin).toHaveBeenCalledWith(approved);
   expect(host.textContent).toContain('No plugins installed');
+  expect(await client.fetchQuery(catalogue)).toEqual([]);
+});
+
+it('refreshes the cached profile catalogue after permitting an unconfined plugin', async () => {
+  const catalogue = {
+    queryKey: ['provider-profiles'],
+    queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    staleTime: Infinity
+  };
+  await client.fetchQuery(catalogue);
+  vi.stubGlobal('location', {
+    ...window.location,
+    search: '?reauthenticated=plugin_permit'
+  });
+  const executable = {
+    name: 'reference',
+    digest: approved.digest,
+    size_bytes: approved.size_bytes,
+    permitted: false
+  };
+  const review = {
+    ...executable,
+    abi_version: approved.abi_version,
+    manifest: approved.manifest
+  };
+  const unconfined = { ...approved, executable: executable.name };
+  vi.mocked(listPlugins)
+    .mockResolvedValueOnce(listed([], true))
+    .mockResolvedValue(listed([unconfined], true));
+  vi.mocked(listUnconfinedExecutables)
+    .mockResolvedValueOnce([executable])
+    .mockResolvedValue([{ ...executable, permitted: true }]);
+  vi.mocked(reviewUnconfinedExecutable).mockResolvedValue(review);
+  vi.mocked(permitUnconfinedPlugin).mockResolvedValue(unconfined);
+  render();
+  await settle();
+  host
+    .querySelector<HTMLButtonElement>('[aria-label="Review reference"]')!
+    .click();
+  await settle();
+  host
+    .querySelector<HTMLInputElement>('.acknowledge input[type="checkbox"]')!
+    .click();
+  flushSync();
+  catalogue.queryFn.mockResolvedValue(['reference-chat']);
+  button('Permit unconfined plugin').click();
+  await settle();
+  expect(permitUnconfinedPlugin).toHaveBeenCalledWith(review);
+  expect(
+    host.querySelector('.unconfined .success-banner')?.textContent
+  ).toContain('Permitted reference 0.1.0.');
+  expect(await client.fetchQuery(catalogue)).toEqual(['reference-chat']);
 });
 
 it('explains an uninstall refused because providers pin the plugin', async () => {

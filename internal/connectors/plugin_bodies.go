@@ -144,12 +144,11 @@ func (e *envelope) unwrap(body []byte) []byte {
 
 // envelopeStream unwraps each event of an upstream's server-sent events.
 // Events are bounded by the event limit, as the dialect's codec bounds them,
-// and an event never grows: it is re-encoded in its shortest form, with the
-// event ID only when it changes.
+// and a frame never grows: it is re-encoded in its shortest form, keeping
+// control frames and their IDs separate from subsequent data frames.
 type envelopeStream struct {
 	envelope *envelope
 	events   *sse.Decoder
-	id       *string
 	pending  []byte
 }
 
@@ -158,16 +157,12 @@ func (s *envelopeStream) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 	for len(s.pending) == 0 {
-		event, err := s.events.Next()
+		event, err := s.events.NextFrame()
 		if err != nil {
 			return 0, err
 		}
-		event.Data = string(s.envelope.unwrap([]byte(event.Data)))
-		if event.ID != nil && s.id != nil && *event.ID == *s.id {
-			// The decoder carries the last ID onto every event, as clients do.
-			event.ID = nil
-		} else {
-			s.id = event.ID
+		if !event.Control {
+			event.Data = string(s.envelope.unwrap([]byte(event.Data)))
 		}
 		s.pending = event.Encode()
 	}

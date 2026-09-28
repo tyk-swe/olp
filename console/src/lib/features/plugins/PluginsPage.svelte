@@ -41,8 +41,15 @@
     return plugin.approved_at ? 'Approved' : 'Pending approval';
   }
 
-  /** Runs an owner's action, then shows the plugins and unconfined
-   * executables as they are now, even once OLP refused it: another owner may
+  async function refreshPlugins() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: pluginKeys.root }),
+      queryClient.invalidateQueries({ queryKey: ['provider-profiles'] })
+    ]);
+  }
+
+  /** Runs an owner's action, then refreshes the profile catalogue, plugins
+   * and unconfined executables, even once OLP refused it: another owner may
    * have changed the plugin meanwhile, and trying again needs its ETag. */
   async function run(label: string, action: () => Promise<void>) {
     busy = label;
@@ -54,7 +61,7 @@
         ? 'This plugin changed meanwhile. Review it as it is now, then try again.'
         : (pluginProblem(cause) ?? errorMessage(cause));
     } finally {
-      await queryClient.invalidateQueries({ queryKey: pluginKeys.root });
+      await refreshPlugins();
       busy = '';
     }
   }
@@ -343,7 +350,7 @@
   <UnconfinedPlugins
     enabled={plugins.data.unconfined_plugins_enabled}
     {canManage}
-    onPermitted={() => plugins.refetch()}
+    onPermitted={refreshPlugins}
   />
 {/if}
 

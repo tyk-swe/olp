@@ -17,6 +17,8 @@ type Frame struct {
 	Data    string  `json:"data"`
 	ID      *string `json:"id"`
 	RetryMS *uint64 `json:"retry_ms"`
+	// Control marks a frame without data lines, which does not dispatch an event.
+	Control bool `json:"-"`
 }
 
 // DecodeError identifies invalid SSE framing without classifying reader or
@@ -68,10 +70,27 @@ func NewDecoder(r io.Reader, maxEventBytes int) *Decoder {
 // Next returns the next event, or io.EOF once the stream ends. An event's ID
 // is the last one the stream set, as SSE clients track it.
 func (d *Decoder) Next() (Frame, error) {
+	for {
+		frame, err := d.NextFrame()
+		if err != nil {
+			return Frame{}, err
+		}
+		if !frame.Control {
+			frame.ID = d.id
+			return frame, nil
+		}
+	}
+}
+
+// NextFrame returns the next data or control frame with only the fields that
+// frame set. Re-encoding these frames preserves ID-only frames and their byte
+// limits without adding an inherited ID to a later data frame.
+func (d *Decoder) NextFrame() (Frame, error) {
 	if d.err != nil {
 		return Frame{}, d.err
 	}
 	var event *string
+	var id *string
 	var retry *uint64
 	var data []string
 	for d.scanner.Scan() {
@@ -81,8 +100,8 @@ func (d *Decoder) Next() (Frame, error) {
 			return Frame{}, d.err
 		}
 		if line == "" {
-			if len(data) > 0 {
-				return Frame{Event: event, Data: strings.Join(data, "\n"), ID: d.id, RetryMS: retry}, nil
+			if len(data) > 0 || event != nil || id != nil || retry != nil {
+				return Frame{Event: event, Data: strings.Join(data, "\n"), ID: id, RetryMS: retry, Control: len(data) == 0}, nil
 			}
 			event, retry = nil, nil
 			continue
@@ -103,7 +122,8 @@ func (d *Decoder) Next() (Frame, error) {
 			}
 		case "id":
 			if !strings.ContainsRune(value, '\x00') {
-				d.id = &value
+				id = &value
+				d.id = id
 			}
 		case "retry":
 			if value != "" && strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
@@ -120,19 +140,21 @@ func (d *Decoder) Next() (Frame, error) {
 	return Frame{}, d.err
 }
 
-// Encode writes the event in its shortest wire form, with a data line for
-// each line of its data, so it never takes more bytes than the fields it
-// carries did on the wire.
+// Encode writes the frame in its shortest wire form, with a data line for
+// each line of its data unless it is a control frame. It never takes more
+// bytes than the fields it carries did on the wire.
 func (f Frame) Encode() []byte {
 	var b bytes.Buffer
 	field := func(name, value string) {
 		b.WriteString(name)
-		b.WriteByte(':')
-		if strings.HasPrefix(value, " ") {
-			// Decoding removes one leading space.
-			b.WriteByte(' ')
+		if value != "" {
+			b.WriteByte(':')
+			if strings.HasPrefix(value, " ") {
+				// Decoding removes one leading space.
+				b.WriteByte(' ')
+			}
+			b.WriteString(value)
 		}
-		b.WriteString(value)
 		b.WriteByte('\n')
 	}
 	if f.Event != nil {
@@ -144,8 +166,10 @@ func (f Frame) Encode() []byte {
 	if f.RetryMS != nil {
 		field("retry", strconv.FormatUint(*f.RetryMS, 10))
 	}
-	for line := range strings.SplitSeq(f.Data, "\n") {
-		field("data", line)
+	if !f.Control {
+		for line := range strings.SplitSeq(f.Data, "\n") {
+			field("data", line)
+		}
 	}
 	b.WriteByte('\n')
 	return b.Bytes()

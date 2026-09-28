@@ -242,7 +242,9 @@ them is present but not an object, OLP refuses the request with an
 Rewrites cannot introduce provider state or replace an authorized stateful
 reference. They may disable storage, but cannot enable it, remove or null a
 Responses `store: false`, enable background work, or introduce a conversation
-or a different previous response.
+or a different previous response. Rewritten Responses input must contain full
+inline items and file data or URLs; account-scoped item and file references
+remain unsupported.
 
 ### Model discovery
 

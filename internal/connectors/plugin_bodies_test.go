@@ -126,6 +126,37 @@ func TestPluginEnvelopeUnwrapsEachStreamEvent(t *testing.T) {
 	}
 }
 
+func TestPluginEnvelopePreservesSeparateIDFramesAtEventLimit(t *testing.T) {
+	c := pluginConfig(t, envelopedManifest())
+	payload := `{"candidates":[{"content":{"parts":[{"text":"` + strings.Repeat("x", 64) + `"}]}}]}`
+	dataFrame := "data:{\"response\":" + payload + "}\n\n"
+	id := strings.Repeat("i", len(dataFrame)-len("id:\n\n"))
+	for name, prior := range map[string]string{"initial ID": "", "changed ID": "id:old\ndata:{\"response\":{}}\n\n"} {
+		t.Run(name, func(t *testing.T) {
+			upstream := prior + "id:" + id + "\n\n" + dataFrame + "id:\n\n" + dataFrame
+			for _, width := range []int{1, len(upstream)} {
+				var events []sse.Frame
+				err := sse.Decode(c.StreamPayload(testutil.Fragmented([]byte(upstream), width), len(dataFrame)), len(dataFrame), func(frame sse.Frame) error {
+					events = append(events, frame)
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("width=%d: rejected frames within the event limit: %v", width, err)
+				}
+				emptyID := ""
+				want := []sse.Frame{{ID: &id, Data: payload}, {ID: &emptyID, Data: payload}}
+				if prior != "" {
+					oldID := "old"
+					want = append([]sse.Frame{{ID: &oldID, Data: `{}`}}, want...)
+				}
+				if !reflect.DeepEqual(events, want) {
+					t.Fatalf("width=%d: events=%+v, want %+v", width, events, want)
+				}
+			}
+		})
+	}
+}
+
 // prepared is a prepared Responses request with body as its document.
 func prepared(t *testing.T, body string) oif.Prepared {
 	t.Helper()
