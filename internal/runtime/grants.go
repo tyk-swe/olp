@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -53,22 +54,8 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 		return fmt.Errorf("grants: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, "SELECT credential_id::text,generation FROM olp.provider_grants WHERE credential_id=ANY($1::uuid[])", slices.Collect(maps.Keys(providers)))
+	generations, err := ReadGrantGenerations(ctx, tx, slices.Collect(maps.Keys(providers)))
 	if err != nil {
-		return fmt.Errorf("grants: %w", err)
-	}
-	generations := map[string]int64{}
-	for rows.Next() {
-		var credentialID string
-		var generation int64
-		if err = rows.Scan(&credentialID, &generation); err != nil {
-			rows.Close()
-			return fmt.Errorf("grants: %w", err)
-		}
-		generations[credentialID] = generation
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
 		return fmt.Errorf("grants: %w", err)
 	}
 	m.mu.RLock()
@@ -152,30 +139,64 @@ func (m *Manager) serveGrants(served map[string]servedGrant) {
 
 // grantSecret returns the secret the manager serves for a credential version
 // with a grant: the one holding the grant's current access token.
-func (m *Manager) grantSecret(credentialID string) ([]byte, bool) {
+func (m *Manager) grantSecret(credentialID string) (servedGrant, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	grant, ok := m.grants[credentialID]
-	return grant.secret, ok
+	return grant, ok
+}
+
+// GrantGeneration returns the generation currently served by this gateway,
+// or zero for a credential without a served grant.
+func (m *Manager) GrantGeneration(credentialID string) int64 {
+	grant, _ := m.grantSecret(credentialID)
+	return grant.generation
+}
+
+// ReadGrantGenerations reads the generations of the named credentials' grants.
+// Static credentials are absent and therefore have generation zero.
+func ReadGrantGenerations(ctx context.Context, q access.Queryer, credentials []string) (map[string]int64, error) {
+	generations := map[string]int64{}
+	if len(credentials) == 0 {
+		return generations, nil
+	}
+	rows, err := q.Query(ctx, "SELECT credential_id::text,generation FROM olp.provider_grants WHERE credential_id=ANY($1::uuid[])", credentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credentialID string
+		var generation int64
+		if err = rows.Scan(&credentialID, &generation); err != nil {
+			return nil, err
+		}
+		generations[credentialID] = generation
+	}
+	return generations, rows.Err()
 }
 
 // CredentialRefused tells the manager that the upstream refused a credential
-// version's secret. For a version with a grant, it asks workers to refresh the
-// grant early, once per access token it served; the request runs apart from
-// the caller. A version that may no longer serve, such as one whose grant
-// lapsed, is not refreshed.
-func (m *Manager) CredentialRefused(credentialID string) {
+// version's secret of the dispatched generation. It asks workers to refresh
+// its grant early, once per access token served; the request runs apart from
+// the caller. Stale generations and versions that may no longer serve, such
+// as one whose grant lapsed, are not refreshed.
+func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 	if m.Eligibility(credentialID) != Eligible {
 		return
 	}
 	m.mu.Lock()
 	grant, ok := m.grants[credentialID]
-	requested := ok && m.refreshRequested[credentialID] == grant.generation
-	if ok && !requested {
+	if !ok || generation != grant.generation {
+		m.mu.Unlock()
+		return
+	}
+	requested := m.refreshRequested[credentialID] == grant.generation
+	if !requested {
 		m.refreshRequested[credentialID] = grant.generation
 	}
 	m.mu.Unlock()
-	if !ok || requested {
+	if requested {
 		return
 	}
 	go func() {

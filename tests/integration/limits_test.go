@@ -841,7 +841,7 @@ func TestLimitsProviderSlotsShareQuotaAndCooldownsAcrossGateways(t *testing.T) {
 	}
 
 	credential := uuid.NewString()
-	scope := limits.CredentialScope(uuid.NewString(), &credential)
+	scope := limits.CredentialScope(uuid.NewString(), &credential, 0)
 	if err := a.Cooldown(t.Context(), scope, 2*time.Second); err != nil {
 		t.Fatalf("Cooldown: %v", err)
 	}

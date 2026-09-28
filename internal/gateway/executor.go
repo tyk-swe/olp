@@ -112,6 +112,8 @@ type execution struct {
 	firstByte  *time.Duration // request start to the first payload byte the client received
 	lease      *limits.Lease  // the API key reservation, settled once the request ends
 	dispatched bool           // at least one attempt was handed to a provider
+	// grantGeneration belongs to the token read for the current attempt.
+	grantGeneration int64
 	// sensitive holds every credential value applied to an upstream request
 	// during this execution; provider-derived text passes through it.
 	sensitive egress.Sensitive
@@ -340,7 +342,7 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
 	out := make([]runtime.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot)))) {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)
@@ -1011,9 +1013,13 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 	})
 }
 
-func credentialHealthKey(slot *runtime.Slot) string {
+func credentialHealthKey(slot *runtime.Slot, generation int64) string {
 	if slot.CredentialID != nil {
-		return "credential:" + *slot.CredentialID
+		key := "credential:" + *slot.CredentialID
+		if generation != 0 {
+			key += ":" + strconv.FormatInt(generation, 10)
+		}
+		return key
 	}
 	return "credential:ambient"
 }

@@ -70,10 +70,12 @@ type Runtime interface {
 	Release() *runtime.Release
 	Authenticate(secret string) (access.Authority, error)
 	runtime.Credentials
+	// GrantGeneration is the generation of the token currently served.
+	GrantGeneration(credentialID string) int64
 	// CredentialRefused reports that the upstream refused a credential
 	// version's secret, so that a grant beneath the version is refreshed
 	// early.
-	CredentialRefused(credentialID string)
+	CredentialRefused(credentialID string, generation int64)
 }
 
 // Server serves the native OpenAI surface from pinned runtime releases.

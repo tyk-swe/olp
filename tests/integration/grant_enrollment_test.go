@@ -149,7 +149,7 @@ func TestGrantEnrollmentCreatesACredentialVersionThatGatewaysServe(t *testing.T)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Account", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-account"}}, idem(uuid.NewString()), 201)["secret"].(string)
 	h.refresh()
-	served, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), version.ID)
+	served, _, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), version.ID)
 	if err != nil || !strings.Contains(string(served), issued[0]) || strings.Contains(string(served), issued[1]) {
 		t.Fatalf("the credential source serves %s: %v", served, err)
 	}

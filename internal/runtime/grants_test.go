@@ -33,6 +33,23 @@ func TestAReleaseWithoutGrantProvidersPollsNoGrants(t *testing.T) {
 	}
 }
 
+func TestCredentialRefusalUsesTheDispatchedGrantGeneration(t *testing.T) {
+	m := credentialManager(t, time.Now())
+	credential := uuid.NewString()
+	m.serveGrants(map[string]servedGrant{credential: {generation: 1, secret: []byte("first")}})
+	secret, generation, err := m.Secret(t.Context(), nil, credential)
+	if err != nil || string(secret) != "first" || generation != 1 {
+		t.Fatal("the dispatched secret and generation did not match")
+	}
+	m.serveGrants(map[string]servedGrant{credential: {generation: 2, secret: []byte("replacement")}})
+	// There is no database pool: an incorrectly attributed refresh would
+	// also try to use it. Stale failures must cause no background work.
+	m.CredentialRefused(credential, generation)
+	if len(m.refreshRequested) != 0 || m.GrantGeneration(credential) != 2 {
+		t.Fatal("the stale attempt requested a refresh of its replacement")
+	}
+}
+
 // Ending the cooldowns of refreshed grants runs apart from the poll that
 // found them refreshed, which a slow shared store must not hold up: one
 // notifier at a time tells GrantRefreshed of every refreshed grant, including

@@ -77,11 +77,19 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 // or slot cooldown when distributed coordination is configured, or this
 // replica's local cooldown when it is not.
 func (s *Server) cooling(ctx context.Context, providerID string, slot *runtime.Slot) bool {
+	generation := s.slotGrantGeneration(slot)
 	if s.Admission.ready() {
-		return s.Admission.cooling(ctx, providerID, slot)
+		return s.Admission.cooling(ctx, providerID, slot, generation)
 	}
 	return s.health.coolingDown(providerID, slot.ID) ||
-		s.health.coolingDown(providerID, credentialHealthKey(slot))
+		s.health.coolingDown(providerID, credentialHealthKey(slot, generation))
+}
+
+func (s *Server) slotGrantGeneration(slot *runtime.Slot) int64 {
+	if slot.CredentialID == nil {
+		return 0
+	}
+	return s.Runtime.GrantGeneration(*slot.CredentialID)
 }
 
 // gateSlot is the shared pre-dispatch boundary every new upstream attempt
@@ -133,34 +141,41 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 // upstream failure and reports whether the provider's remaining slots should
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
-func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, failure *attemptFailure) bool {
+func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, failure *attemptFailure) bool {
 	if failure.dispatched && slot.CredentialID != nil &&
 		(failure.class == classCredential || failure.status == http.StatusUnauthorized) {
 		// The upstream refused the credential, whatever rule classified the
 		// failure: a grant beneath it is refreshed early, which ends the
 		// cooldown (GrantRefreshed).
-		s.Runtime.CredentialRefused(*slot.CredentialID)
+		s.Runtime.CredentialRefused(*slot.CredentialID, generation)
 	}
 	switch failure.class {
 	case classCredential:
-		s.health.cooldown(providerID, credentialHealthKey(slot), credentialCooldown)
-		s.Admission.cooldown(ctx, providerID, slot, credentialCooldown, true)
+		if generation != s.slotGrantGeneration(slot) {
+			return false
+		}
+		// The poll may install a replacement while the shared store is
+		// recording this cooldown. Its generation keeps that write scoped
+		// to the refused token, including across gateway replicas.
+		s.health.cooldown(providerID, credentialHealthKey(slot, generation), credentialCooldown)
+		s.Admission.cooldown(ctx, providerID, slot, generation, credentialCooldown, true)
 	case classRateLimit:
 		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
-		s.Admission.cooldown(ctx, providerID, slot, cooldownDuration(failure.retryAfter), false)
+		s.Admission.cooldown(ctx, providerID, slot, generation, cooldownDuration(failure.retryAfter), false)
 	default:
 		return true
 	}
 	return false
 }
 
-// GrantRefreshed ends the cooldown a credential failure put a credential
-// version with a grant in, once this gateway serves the grant's refreshed
-// access token: the token the upstream refused is replaced. Every gateway
-// ends the shared cooldown when it reloads the token, so a replica that was
-// still serving the refused token and refused again meanwhile does not keep
-// the version out of service.
+// GrantRefreshed retires the previous token's cooldown. Serving uses the new
+// generation's scope immediately, so this cleanup may wait on the shared
+// store without holding up the refreshed token.
 func (s *Server) GrantRefreshed(providerID, credentialID string) {
-	s.health.endCooldown(providerID, credentialHealthKey(&runtime.Slot{CredentialID: &credentialID}))
-	s.Admission.endCredentialCooldown(context.Background(), providerID, credentialID)
+	// Cleanup is best-effort: older generations are already ineligible and
+	// their cooldowns expire. A delayed notifier must never clear a refusal
+	// of the newly served token.
+	generation := max(0, s.Runtime.GrantGeneration(credentialID)-1)
+	s.health.endCooldown(providerID, credentialHealthKey(&runtime.Slot{CredentialID: &credentialID}, generation))
+	s.Admission.endCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }

@@ -122,7 +122,7 @@ func TestALapsedGrantFailsOverUntilItIsReenrolled(t *testing.T) {
 		}
 	}
 	// A lapsed grant is never refreshed again, even when asked.
-	h.Runtime.CredentialRefused(credentialID)
+	h.Runtime.CredentialRefused(credentialID, 1)
 	if grant := readGrant(t, h, credentialID); grant.refresh != nil {
 		t.Fatalf("a refresh of the lapsed grant was requested: %+v", grant)
 	}
@@ -163,7 +163,7 @@ func TestALapsedGrantFailsOverUntilItIsReenrolled(t *testing.T) {
 	if account := servedBy(); account != operator.Subject {
 		t.Fatalf("after re-enrollment the route served as %s", account)
 	}
-	if served, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), reenrolled["credential_id"].(string)); err != nil || len(served) == 0 {
+	if served, _, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), reenrolled["credential_id"].(string)); err != nil || len(served) == 0 {
 		t.Fatalf("the re-enrolled grant is not served: %v", err)
 	}
 }

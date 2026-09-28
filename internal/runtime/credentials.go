@@ -42,8 +42,10 @@ var ErrCredentialUnavailable = errors.New("credential unavailable")
 type Credentials interface {
 	// Eligibility reports whether a credential version may serve now.
 	Eligibility(credentialID string) Eligibility
-	// Secret returns the usable secret of a credential slot's version.
-	Secret(ctx context.Context, release *Release, credentialID string) ([]byte, error)
+	// Secret returns a credential slot's usable secret and the generation
+	// of the grant that supplied it, or zero for a static credential. The
+	// generation is read together with the secret and travels with an attempt.
+	Secret(ctx context.Context, release *Release, credentialID string) ([]byte, int64, error)
 	// NetworkSecret returns the usable secret of a provider's network
 	// credential.
 	NetworkSecret(ctx context.Context, release *Release, providerID, credentialID string) ([]byte, error)
@@ -91,24 +93,35 @@ func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[st
 // installed it, or with its grant's current access token when it has a grant.
 // A version the release does not name, such as a historical revision's, is
 // read from the secret authority.
-func (m *Manager) Secret(ctx context.Context, release *Release, credentialID string) ([]byte, error) {
+func (m *Manager) Secret(ctx context.Context, release *Release, credentialID string) ([]byte, int64, error) {
 	if err := m.eligible(credentialID); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if secret, ok := m.grantSecret(credentialID); ok {
-		return secret, nil
+	if grant, ok := m.grantSecret(credentialID); ok {
+		return grant.secret, grant.generation, nil
 	}
 	if secret, ok := release.Credential(credentialID); ok {
-		return secret, nil
+		return secret, 0, nil
 	}
 	if m.keys == nil {
-		return nil, fmt.Errorf("credential %s is not installed: %w", credentialID, ErrCredentialUnavailable)
+		return nil, 0, fmt.Errorf("credential %s is not installed: %w", credentialID, ErrCredentialUnavailable)
 	}
-	secret, err := m.keys.Read(ctx, m.pool, m.installation, credentialID, secrets.ProviderCredential)
+	// Historical credentials may not be among the grants this release
+	// polls. Read their token and generation from the same database snapshot.
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, fmt.Errorf("credential %s: %w: %w", credentialID, ErrCredentialUnavailable, err)
+		return nil, 0, err
 	}
-	return secret, nil
+	defer tx.Rollback(ctx)
+	generations, err := ReadGrantGenerations(ctx, tx, []string{credentialID})
+	if err != nil {
+		return nil, 0, err
+	}
+	secret, err := m.keys.Read(ctx, tx, m.installation, credentialID, secrets.ProviderCredential)
+	if err != nil {
+		return nil, 0, fmt.Errorf("credential %s: %w: %w", credentialID, ErrCredentialUnavailable, err)
+	}
+	return secret, generations[credentialID], nil
 }
 
 // NetworkSecret serves an eligible network credential like Secret. A retained

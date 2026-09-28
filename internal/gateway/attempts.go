@@ -72,6 +72,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 					continue
 				}
 				used++
+				x.grantGeneration = 0
 				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, used)
 				// Only work handed to an upstream spends the request's key
 				// reservation. Local failures remain refundable.
@@ -84,7 +85,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 				if failure == nil {
 					return attemptOutcome[Result]{result: result, committed: fact.Committed}
 				}
-				next = s.cooldownFailure(ctx, provider.ID, &slot, failure)
+				next = s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure)
 				if failure.overall || !failoverAllowed(failure.class, failure.committed) {
 					return attemptOutcome[Result]{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
 				}

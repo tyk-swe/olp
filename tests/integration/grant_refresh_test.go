@@ -168,8 +168,8 @@ func TestWorkersRefreshGrantsAheadOfExpiryAndGatewaysServeTheNewAccessToken(t *t
 		t.Fatal(err)
 	}
 	h.refresh()
-	served, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), credentialID)
-	if err != nil || !strings.Contains(string(served), access) || strings.Contains(string(served), refresh) {
+	served, generation, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), credentialID)
+	if err != nil || generation != 2 || !strings.Contains(string(served), access) || strings.Contains(string(served), refresh) {
 		t.Fatalf("the credential source serves %s: %v", served, err)
 	}
 	before := len(upstream.received())
@@ -303,6 +303,89 @@ func TestAnUpstreamCredentialFailureRefreshesTheGrantEarly(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("after the refresh, the slot answered %d", status)
 		}
+	}
+}
+
+// The old attempt's refusal arrives after the gateway installs a replacement
+// token. It must neither refresh that healthy token nor cool its credential.
+func TestLateCredentialRefusalDoesNotPenalizeARefreshedGrant(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	upstream := newGrantUpstream(t, authority)
+	arrived, resume := make(chan struct{}), make(chan struct{})
+	var block atomic.Bool
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(resume) }) }
+	defer unblock()
+	delayed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if block.Swap(false) {
+			close(arrived)
+			select {
+			case <-resume:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		upstream.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(delayed.Close)
+	digest := installReferencePlugin(t, h, owner, &pluginUpstream{Server: delayed}, "0.1.0", "-X=main.authority="+authority.URL)
+	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
+	refresher := grantRefresher(t, h)
+	// Compile and instantiate before the request's deadline starts, including
+	// under the race detector. Only the refresh itself holds the attempt open.
+	if _, err := refresher.Plugins.Manifest(t.Context(), digest); err != nil {
+		t.Fatal(err)
+	}
+	refreshed := make(chan struct{})
+	h.Runtime.GrantRefreshed = func(providerID, credentialID string) {
+		h.Gateway.GrantRefreshed(providerID, credentialID)
+		close(refreshed)
+	}
+	block.Store(true)
+	type refusal struct {
+		status int
+		code   string
+	}
+	status := make(chan refusal, 1)
+	go func() {
+		code, body, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-account", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+		failure, _ := body["error"].(map[string]any)
+		name, _ := failure["code"].(string)
+		status <- refusal{code, name}
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old attempt never reached the upstream")
+	}
+	authority.RevokeAccessTokens()
+	dueNow(t, h, credentialID)
+	if !pass(t, refresher) {
+		t.Fatal("the grant was not refreshed")
+	}
+	h.refresh()
+	select {
+	case <-refreshed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the gateway did not install the replacement")
+	}
+	scheduled := readGrant(t, h, credentialID)
+	unblock()
+	select {
+	case failure := <-status:
+		if failure.status != http.StatusBadGateway || failure.code != "upstream_authentication_failed" {
+			t.Fatalf("the old attempt did not report the upstream credential refusal: %+v", failure)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old attempt never finished")
+	}
+	if code := chat(t, h, key); code != http.StatusOK {
+		t.Errorf("the late refusal cooled the replacement: status %d", code)
+	}
+	if current := readGrant(t, h, credentialID); current.generation != 2 || current.refresh == nil || !current.refresh.Equal(*scheduled.refresh) {
+		t.Errorf("the late refusal rescheduled the replacement: before %v, after %v", scheduled.refresh, current.refresh)
 	}
 }
 

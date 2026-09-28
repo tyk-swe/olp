@@ -49,7 +49,7 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 	provider, slot, network, historical := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	release := &Release{credentials: map[string][]byte{slot: []byte("slot-secret"), network: []byte("network-secret")}}
 	m := credentialManager(t, time.Now())
-	if secret, err := m.Secret(t.Context(), release, slot); err != nil || string(secret) != "slot-secret" {
+	if secret, _, err := m.Secret(t.Context(), release, slot); err != nil || string(secret) != "slot-secret" {
 		t.Fatalf("installed slot credential: %q %v", secret, err)
 	}
 	if secret, err := m.NetworkSecret(t.Context(), release, provider, network); err != nil || string(secret) != "network-secret" {
@@ -58,8 +58,11 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 	// Without a secret authority (a mounted gateway), only what a release
 	// installed can serve.
 	for _, read := range []func() ([]byte, error){
-		func() ([]byte, error) { return m.Secret(t.Context(), release, historical) },
-		func() ([]byte, error) { return m.Secret(t.Context(), nil, slot) },
+		func() ([]byte, error) {
+			secret, _, err := m.Secret(t.Context(), release, historical)
+			return secret, err
+		},
+		func() ([]byte, error) { secret, _, err := m.Secret(t.Context(), nil, slot); return secret, err },
 		func() ([]byte, error) { return m.NetworkSecret(t.Context(), release, provider, historical) },
 	} {
 		if secret, err := read(); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
@@ -70,7 +73,7 @@ func TestCredentialSourceServesOnlyEligibleSecrets(t *testing.T) {
 	lapsed := authorityManager(time.Now(), map[string]Eligibility{slot: Lapsed, network: Revoked})
 	stale := credentialManager(t, time.Now().Add(-AuthorityStaleAfter-time.Second))
 	for _, m := range []*Manager{revoked, lapsed, stale} {
-		if secret, err := m.Secret(t.Context(), release, slot); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
+		if secret, _, err := m.Secret(t.Context(), release, slot); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
 			t.Fatalf("served an ineligible slot credential: %q %v", secret, err)
 		}
 		if secret, err := m.NetworkSecret(t.Context(), release, provider, network); !errors.Is(err, ErrCredentialUnavailable) || secret != nil {
@@ -86,8 +89,8 @@ func TestARefusedCredentialRequestsNoRefreshOfALapsedGrant(t *testing.T) {
 	lapsed, revoked := uuid.NewString(), uuid.NewString()
 	m := authorityManager(time.Now(), map[string]Eligibility{lapsed: Lapsed, revoked: Revoked})
 	m.grants = map[string]servedGrant{lapsed: {generation: 3}, revoked: {generation: 1}}
-	m.CredentialRefused(lapsed)
-	m.CredentialRefused(revoked)
+	m.CredentialRefused(lapsed, 3)
+	m.CredentialRefused(revoked, 1)
 	if len(m.refreshRequested) != 0 {
 		t.Fatalf("refreshes requested for versions that may not serve: %v", m.refreshRequested)
 	}

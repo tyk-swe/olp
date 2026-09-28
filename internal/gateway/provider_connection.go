@@ -8,13 +8,17 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-// slotSecret asks the credential source for a credential slot's usable
-// secret. A slot without a credential version authenticates without one.
-func (s *Server) slotSecret(ctx context.Context, release *runtime.Release, slot runtime.Slot) ([]byte, error) {
+// slotSecret asks for a credential slot's usable secret and remembers its
+// grant generation for this attempt. A slot without a credential version
+// authenticates without one.
+func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot) ([]byte, error) {
+	x.grantGeneration = 0
 	if slot.CredentialID == nil {
 		return nil, nil
 	}
-	return s.Runtime.Secret(ctx, release, *slot.CredentialID)
+	secret, generation, err := s.Runtime.Secret(ctx, x.request.release, *slot.CredentialID)
+	x.grantGeneration = generation
+	return secret, err
 }
 
 // applySlotCredential prepares an upstream request with a credential slot:
@@ -23,7 +27,7 @@ func (s *Server) slotSecret(ctx context.Context, release *runtime.Release, slot 
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
 func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, slot runtime.Slot, body []byte) error {
-	secret, err := s.slotSecret(ctx, x.request.release, slot)
+	secret, err := s.slotSecret(ctx, x, slot)
 	if err != nil {
 		return err
 	}

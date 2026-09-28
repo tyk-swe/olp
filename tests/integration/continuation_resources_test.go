@@ -240,7 +240,8 @@ func TestHistoricalPinChecksLiveRevocationAndSecretExpiry(t *testing.T) {
 	// A historical revision's credential version is one no pinned release
 	// installed, so the credential source reads it from the secret authority.
 	read := func() ([]byte, error) {
-		return h.Runtime.Secret(t.Context(), nil, *res.CredentialID)
+		secret, _, err := h.Runtime.Secret(t.Context(), nil, *res.CredentialID)
+		return secret, err
 	}
 	if err := resolve(); err != nil {
 		t.Fatalf("live pin: %v", err)

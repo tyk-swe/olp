@@ -83,24 +83,27 @@ func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
 
 // Secret serves eligible credentials the pinned release installed. The fake's
 // secret authority, for callers that pin no release, is its current release.
-func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, error) {
+func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
 	if f.Eligibility(id) != runtime.Eligible {
-		return nil, runtime.ErrCredentialUnavailable
+		return nil, 0, runtime.ErrCredentialUnavailable
 	}
 	if release == nil {
 		release = f.Release()
 	}
 	if secret, ok := release.Credential(id); ok {
-		return secret, nil
+		return secret, 0, nil
 	}
-	return nil, runtime.ErrCredentialUnavailable
+	return nil, 0, runtime.ErrCredentialUnavailable
 }
 
 func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
-	return f.Secret(ctx, release, id)
+	secret, _, err := f.Secret(ctx, release, id)
+	return secret, err
 }
 
-func (f *fakeRuntime) CredentialRefused(id string) {
+func (f *fakeRuntime) GrantGeneration(string) int64 { return 0 }
+
+func (f *fakeRuntime) CredentialRefused(id string, _ int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refused = append(f.refused, id)
@@ -505,9 +508,9 @@ type unreadableSecrets struct {
 	credentialID string
 }
 
-func (u unreadableSecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, error) {
+func (u unreadableSecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
 	if id == u.credentialID {
-		return nil, runtime.ErrCredentialUnavailable
+		return nil, 0, runtime.ErrCredentialUnavailable
 	}
 	return u.fakeRuntime.Secret(ctx, release, id)
 }
@@ -532,12 +535,12 @@ type authoritySecrets struct {
 	credentialID string
 }
 
-func (a authoritySecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, error) {
+func (a authoritySecrets) Secret(ctx context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
 	if id != a.credentialID {
 		return a.fakeRuntime.Secret(ctx, release, id)
 	}
 	<-ctx.Done()
-	return nil, fmt.Errorf("credential %s: %w: %w", id, runtime.ErrCredentialUnavailable, ctx.Err())
+	return nil, 0, fmt.Errorf("credential %s: %w: %w", id, runtime.ErrCredentialUnavailable, ctx.Err())
 }
 
 func TestInterruptedSecretReadIsNotACredentialFailure(t *testing.T) {

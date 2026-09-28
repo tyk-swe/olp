@@ -626,7 +626,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
 	defer cancel()
 
-	secret, err := s.slotSecret(actx, x.request.release, slot)
+	secret, err := s.slotSecret(actx, x, slot)
 	if err != nil {
 		return fail(classCredential, nil)
 	}

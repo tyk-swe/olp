@@ -269,7 +269,7 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 			return nil, 0, "media_job_credential_" + string(eligibility)
 		}
 		var err error
-		secret, err = s.Credentials.Secret(ctx, nil, credentialID)
+		secret, _, err = s.Credentials.Secret(ctx, nil, credentialID)
 		if err != nil || len(secret) == 0 {
 			return nil, 0, "media_job_runtime_unavailable"
 		}

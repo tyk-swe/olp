@@ -35,9 +35,9 @@ func TestCredentialRotationClears401ButRetains429(t *testing.T) {
 	h := newHealthTracker(func() time.Time { return now })
 	oldID, newID := "old-version", "new-version"
 	slot := runtime.Slot{ID: "logical-slot", CredentialID: &oldID}
-	h.cooldown("provider", credentialHealthKey(&slot), credentialCooldown)
+	h.cooldown("provider", credentialHealthKey(&slot, 0), credentialCooldown)
 	slot.CredentialID = &newID
-	if h.coolingDown("provider", credentialHealthKey(&slot)) {
+	if h.coolingDown("provider", credentialHealthKey(&slot, 0)) {
 		t.Fatal("old version sidelined rotated credential")
 	}
 	h.cooldown("provider", slot.ID, rateLimitCooldown)

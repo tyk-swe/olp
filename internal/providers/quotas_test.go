@@ -66,7 +66,7 @@ func TestSlotQuotasReportLiveCountersUnderTheSharedNames(t *testing.T) {
 		cooling: map[string]bool{limits.SlotScope(quotaSlot): true},
 	}
 	server := &Server{Quotas: source, Log: slog.New(slog.DiscardHandler)}
-	connection := server.quotas(context.Background(), quotaProvider, slots, published, health)
+	connection := server.quotas(context.Background(), quotaProvider, slots, published, nil, health)
 
 	want := map[string]any{"requests_this_minute": int64(7), "tokens_this_minute": int64(900), "concurrent_requests": int64(2)}
 	usage, ok := connection.(map[string]any)
@@ -92,7 +92,7 @@ func TestSlotQuotasReportLiveCountersUnderTheSharedNames(t *testing.T) {
 	}
 	credential := quotaCredential
 	if len(source.scopes) != 1 || len(source.scopes[0]) != 2 ||
-		source.scopes[0][0] != limits.CredentialScope(quotaProvider, &credential) ||
+		source.scopes[0][0] != limits.CredentialScope(quotaProvider, &credential, 0) ||
 		source.scopes[0][1] != limits.SlotScope(quotaSlot) {
 		t.Fatalf("cooldown scopes %v", source.scopes)
 	}
@@ -109,7 +109,7 @@ func TestSlotQuotasStayUnknownWithoutAReadableSource(t *testing.T) {
 			if source != nil {
 				server.Quotas = source
 			}
-			if connection := server.quotas(context.Background(), quotaProvider, slots, published, health); connection != nil {
+			if connection := server.quotas(context.Background(), quotaProvider, slots, published, nil, health); connection != nil {
 				t.Fatalf("connection usage %v, want unknown", connection)
 			}
 			entry := health[quotaSlot].(map[string]any)
@@ -120,5 +120,23 @@ func TestSlotQuotasStayUnknownWithoutAReadableSource(t *testing.T) {
 				t.Fatalf("slot health lost its stored fields: %v", entry)
 			}
 		})
+	}
+}
+
+func TestSlotQuotasReadThePublishedGrantsGeneration(t *testing.T) {
+	slots, published, health := quotaFixture()
+	credential := quotaCredential
+	old := limits.CredentialScope(quotaProvider, &credential, 1)
+	current := limits.CredentialScope(quotaProvider, &credential, 2)
+	source := &stubQuotas{cooling: map[string]bool{old: true}}
+	server := &Server{Quotas: source, Log: slog.New(slog.DiscardHandler)}
+	server.quotas(t.Context(), quotaProvider, slots, published, map[string]int64{credential: 2}, health)
+	if health[quotaSlot].(map[string]any)["cooling_down"] != false || source.scopes[0][0] != current {
+		t.Fatal("the management health read a superseded grant's cooldown")
+	}
+	source.cooling[current] = true
+	server.quotas(t.Context(), quotaProvider, slots, published, map[string]int64{credential: 2}, health)
+	if health[quotaSlot].(map[string]any)["cooling_down"] != true {
+		t.Fatal("the management health missed the current grant's cooldown")
 	}
 }

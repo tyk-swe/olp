@@ -126,6 +126,13 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 				delete(p.buckets, k)
 			}
 		}
+		// Grant generations have separate cooldowns. Retire expired ones
+		// even when a gateway missed intermediate refresh notifications.
+		for key, until := range p.cooldowns {
+			if !now.Before(until) {
+				delete(p.cooldowns, key)
+			}
+		}
 	}
 	b.attempts++
 	b.latency += fact.Duration
