@@ -60,7 +60,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, e.tier.limits.Time)
 	defer cancel()
-	out := newOutput(e.tier.log.With("plugin_digest", e.Digest, "plugin_method", call.Method), call.Secrets)
+	out := call.output(e.tier.log, e.Digest)
 	defer out.close()
 	p, err := e.process(ctx)
 	var response abi.Response
@@ -103,7 +103,7 @@ func (e *Executable) stream(ctx context.Context, call Call) (*streamed, error) {
 	default:
 		return nil, refuse(CodeFailed, "The plugin stopped: "+err.Error()+".")
 	}
-	out := newOutput(e.tier.log.With("plugin_digest", e.Digest, "plugin_method", call.Method), call.Secrets)
+	out := call.output(e.tier.log, e.Digest)
 	context.AfterFunc(ctx, out.close)
 	result, err := p.stream(call.context(ctx, out), request, call.Secrets)
 	if err != nil {

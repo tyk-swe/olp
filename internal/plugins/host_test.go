@@ -230,6 +230,79 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 	}
 }
 
+// A failure diagnostic is plugin output too: its code and message are
+// redacted and bounded, and spend the same budget as the call's other logs.
+func TestPluginFailureDiagnosticsShareTheCallLogBudget(t *testing.T) {
+	for _, tier := range []string{"confined", "unconfined"} {
+		for _, records := range []int{0, 6, 7, 8} {
+			t.Run(tier+"/"+strconv.Itoa(records), func(t *testing.T) {
+				var logged bytes.Buffer
+				var mu sync.Mutex
+				log := slog.New(slog.NewJSONHandler(&lockedWriter{&mu, &logged}, nil))
+				var host *Host
+				digest := fixtureDigest
+				if tier == "confined" {
+					host, _ = newTestHost(t, Interpreted, DefaultLimits, log, fixture(t, "well-behaved"))
+				} else {
+					u, file := unconfinedFixture(t, DefaultLimits, log)
+					host, digest = newUnconfinedHost(t, u, file), file.Digest
+				}
+				for range 2 {
+					mu.Lock()
+					logged.Reset()
+					mu.Unlock()
+					_, err := host.Sign(t.Context(), digest, fixtureProvider, signRequest(fmt.Sprintf("large-failure:%d", records), nil), []string{fixtureSecret})
+					if reported, ok := errors.AsType[*abi.Error](err); !ok || !strings.HasPrefix(reported.Code, "[REDACTED]failure") {
+						t.Fatal("the plugin's reported failure was not returned and redacted")
+					}
+					mu.Lock()
+					output := bytes.Clone(logged.Bytes())
+					mu.Unlock()
+					if bytes.Contains(output, []byte(fixtureSecret)) {
+						t.Fatal("a failure diagnostic disclosed its credential")
+					}
+					spent, warnings, failures := 0, 0, 0
+					for _, raw := range bytes.Split(bytes.TrimSpace(output), []byte("\n")) {
+						var line struct {
+							logLine
+							Error string `json:"error"`
+						}
+						if err := json.Unmarshal(raw, &line); err != nil {
+							t.Fatal(err)
+						}
+						if strings.Contains(line.Message, "exceeded its budget") {
+							warnings++
+							continue
+						}
+						if line.Message == "plugin call failed" {
+							failures++
+						}
+						spent += recordCost + len(line.Message)
+						if line.Error != "" {
+							if line.Attrs == nil {
+								line.Attrs = map[string]string{}
+							}
+							line.Attrs["error"] = line.Error
+						}
+						for key, value := range line.Attrs {
+							spent += len(key) + len(value)
+							if len(value) > maxLogText+len("…") {
+								t.Errorf("failure attribute %q logged %d bytes", key, len(value))
+							}
+						}
+					}
+					if spent > maxCallLog || warnings > 1 {
+						t.Errorf("plugin logs spent %d bytes of a %d byte budget, with %d warnings", spent, maxCallLog, warnings)
+					}
+					if records <= 6 && failures != 1 || records >= 7 && (failures != 0 || warnings != 1) {
+						t.Errorf("after %d records the call logged %d failures and %d budget warnings", records, failures, warnings)
+					}
+				}
+			})
+		}
+	}
+}
+
 // A grant's refresh reaches the plugin's approved origins, and only those,
 // through the client the caller gives it, on behalf of the grant's provider.
 func TestGrantRefreshReachesOnlyTheApprovedOrigins(t *testing.T) {
@@ -343,7 +416,7 @@ func (c *heldCode) Close(context.Context) error {
 }
 
 func TestHostEvictsExcessCodeWhenItsFinalCallFinishes(t *testing.T) {
-	host := &Host{hosted: map[string]*hosted{}}
+	host := NewHost(newTestRuntime(t, DefaultLimits, nil), nil, nil)
 	loaded := make(chan struct{})
 	close(loaded)
 	started := make(chan struct{})

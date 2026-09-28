@@ -275,7 +275,7 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 // reinstalled build, serves their credential versions only after a new grant
 // enrollment.
 func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, error) {
-	rows, err := tx.Query(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+	rows, err := tx.Query(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,updated_at=now()
 		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND c.plugin_digest=$1 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
 		RETURNING g.credential_id::text, old.refresh_token_id::text`, digest)
 	if err != nil {

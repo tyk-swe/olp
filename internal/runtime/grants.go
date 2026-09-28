@@ -217,11 +217,12 @@ func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 // RequestRefresh asks workers to refresh the grant beneath a credential
 // version at once, because the upstream refused the access token of its
 // generation. It changes nothing once a refresh replaced that token, while a
-// failed refresh backs off, or when the grant can't be refreshed, such as a
-// lapsed grant.
+// refresh is in flight or backs off, or when the grant can't be refreshed,
+// such as a lapsed grant.
 func RequestRefresh(ctx context.Context, db *pgxpool.Pool, credentialID string, generation int64) error {
 	_, err := db.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=now()
-		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,
+		WHERE credential_id=$1 AND generation=$2 AND refresh_token_id IS NOT NULL AND refresh_attempt_id IS NULL
+			AND refresh_failures=0 AND (refresh_at IS NULL OR refresh_at>now())`,
 		credentialID, generation)
 	return err
 }

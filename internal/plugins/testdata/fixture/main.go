@@ -66,7 +66,8 @@ var calls atomic.Int64
 
 // Sign signs as the credential's prefix up to a colon says: "loop" never
 // returns, "allocate" exhausts memory, "exit" stops the plugin, "fail" reports
-// a failure holding the credential, "log" logs the credential, "stderr" writes
+// a failure holding the credential, "large-failure:N" logs N records and
+// reports oversized failure diagnostics, "log" logs the credential, "stderr" writes
 // the credential to standard error just after it answers, "wait" returns once
 // its call is cancelled, "header:Name" returns that header,
 // and "option:name" returns X-Fixture-Option, the provider's profile and value
@@ -88,6 +89,12 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 		os.Exit(3)
 	case "fail":
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_failed", Message: "signing with " + r.Credential + " failed"}
+	case "large-failure":
+		records, _ := strconv.Atoi(rest)
+		for range records {
+			plugin.Log.InfoContext(ctx, strings.Repeat("x", 2<<10))
+		}
+		return plugin.SignResult{}, &plugin.Error{Code: secret + strings.Repeat("failure", 4<<10), Message: secret + strings.Repeat("é", 32<<10)}
 	case "log":
 		plugin.Log.InfoContext(ctx, "signing with "+r.Credential, "url", r.URL)
 	case "stderr":

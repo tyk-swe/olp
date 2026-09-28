@@ -277,6 +277,15 @@ type Call struct {
 	Secrets []string
 	// HTTP, when set, grants the call the http capability.
 	HTTP *HTTP
+	// out shares the Host's failure diagnostics with the code's log budget.
+	out *output
+}
+
+func (c Call) output(log *slog.Logger, digest string) *output {
+	if c.out != nil {
+		return c.out
+	}
+	return newOutput(log.With("plugin_digest", digest, "plugin_method", c.Method), c.Secrets)
 }
 
 // Call serves call on an instance of the module and decodes its result into
@@ -358,7 +367,7 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, m.runtime.limits.Time)
 	defer cancel()
-	out := newOutput(m.runtime.log.With("plugin_digest", m.Digest, "plugin_method", call.Method), call.Secrets)
+	out := call.output(m.runtime.log, m.Digest)
 	defer out.close()
 	ctx = call.context(ctx, out)
 	ctx = context.WithValue(ctx, stackKey{}, &stack{limit: uint64(m.runtime.limits.Stack) / 8})

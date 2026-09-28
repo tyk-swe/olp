@@ -44,7 +44,7 @@ func unconfinedFixture(t *testing.T, limits Limits, log *slog.Logger) (*Unconfin
 // file in the unconfined tier u.
 func newUnconfinedHost(t *testing.T, u *Unconfined, file ExecutableFile) *Host {
 	t.Helper()
-	r, err := NewRuntime(t.Context(), Interpreted, DefaultLimits, slog.New(slog.DiscardHandler))
+	r, err := NewRuntime(t.Context(), Interpreted, DefaultLimits, u.log)
 	if err != nil {
 		t.Fatal(err)
 	}

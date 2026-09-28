@@ -33,14 +33,16 @@ func (h *Host) Carry(ctx context.Context, digest string, provider abi.Provider, 
 	}
 	entry := h.use(digest)
 	call, cancel := context.WithCancel(ctx)
+	invocation := Call{Method: abi.MethodCarry, Params: request, Provider: &provider, Secrets: secrets}
+	invocation.out = invocation.output(h.runtime.log, digest)
 	end := sync.OnceFunc(func() {
 		cancel()
 		h.done(entry)
 	})
-	head, result, err := h.carry(call, entry, Call{Method: abi.MethodCarry, Params: request, Provider: &provider, Secrets: secrets})
+	head, result, err := h.carry(call, entry, invocation)
 	if err != nil {
 		end()
-		h.failed(ctx, digest, abi.MethodCarry, err)
+		h.failed(ctx, invocation.out, abi.MethodCarry, err)
 		return nil, err
 	}
 	header := http.Header{}
@@ -49,7 +51,7 @@ func (h *Host) Carry(ctx context.Context, digest string, provider abi.Provider, 
 			header.Add(name, value)
 		}
 	}
-	body := &carriedBody{result: result, held: head.Body, end: end, failed: func(err error) { h.failed(call, digest, abi.MethodCarry, err) }}
+	body := &carriedBody{result: result, held: head.Body, end: end, failed: func(err error) { h.failed(call, invocation.out, abi.MethodCarry, err) }}
 	return &http.Response{
 		Status: fmt.Sprintf("%d %s", head.Status, http.StatusText(head.Status)), StatusCode: head.Status,
 		Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1, Header: header, Body: body, ContentLength: -1, Request: req,

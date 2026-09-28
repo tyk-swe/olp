@@ -340,8 +340,13 @@ grant: one that pins the plugin build that enrolled it and selects its
 credential version in a credential slot, the provider's active revision before
 its draft. It runs with that configuration's options and over its network
 path, and its HTTP reaches only the plugin's approved origins. A per-grant
-PostgreSQL advisory lock keeps the refresh to one worker, so a refresh token
-that rotates is spent once however many workers run.
+PostgreSQL advisory lock keeps the refresh to one worker. Before dispatching
+the token, the worker records an in-flight attempt in PostgreSQL, so losing
+the lock's session cannot let another worker reuse that token. Only that
+attempt may record its result. If its outcome is still missing after two
+minutes, allowing for refresh and storage retries, the next worker lapses the
+grant without reusing the token. An early refresh request from a gateway
+cannot shorten that deadline.
 
 A grant that no configuration uses any more, such as a credential version that
 re-enrolling its slot replaced, or one enrolled for a draft that moved to
@@ -524,7 +529,8 @@ refresh are also granted HTTP, which reaches only the plugin's approved
 origins, over the provider's network path (its proxy, trust roots and network
 credential) and the egress policy; a redirect comes back to the plugin rather
 than being followed. What a plugin logs, including its standard output and
-standard error, reaches OLP's log with the secret values of the call redacted,
+standard error and reported failure diagnostics, reaches OLP's log through the
+same per-call output budget, with the secret values of the call redacted,
 such as the refresh token a grant refresh receives, attributed by
 `plugin_digest` and `plugin_method`.
 

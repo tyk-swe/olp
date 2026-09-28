@@ -21,7 +21,8 @@ const workerAgent = "olp-worker"
 // be refreshed, which lapses it: the plugin reports that the upstream won't
 // refresh it, or that it refreshes no grants; the plugin that enrolled it is
 // no longer installed, or no longer approved, which only reinstalling it and
-// enrolling again could undo; or the refresh authorizes another account.
+// enrolling again could undo; the refresh authorizes another account; or an
+// abandoned refresh left a token whose outcome is unknown.
 // Every other failure is transient, including an unconfined plugin that the
 // deployment's configuration or image does not serve: that may differ between
 // replicas during a rolling deployment, and is undone by deploying again.
@@ -32,7 +33,7 @@ func permanent(failure error) bool {
 	if refusal, ok := errors.AsType[*plugins.Error](failure); ok {
 		return refusal.Code == plugins.CodeNotInstalled || refusal.Code == plugins.CodeNotApproved
 	}
-	return errors.Is(failure, errAnotherAccount)
+	return errors.Is(failure, errAnotherAccount) || errors.Is(failure, errRefreshInterrupted)
 }
 
 // lapse records, in tx, that a grant lapsed for reason: it can no longer be
@@ -48,8 +49,10 @@ func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) (bool, er
 	if err := serialize(ctx, tx); err != nil {
 		return false, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,
-		refresh_failures=refresh_failures+1,refresh_failure=$3,updated_at=now() WHERE credential_id=$1 AND refresh_token_id=$2`, g.credentialID, g.refreshTokenID, reason)
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,
+		refresh_failures=refresh_failures+1,refresh_failure=$3,updated_at=now()
+		WHERE credential_id=$1 AND refresh_token_id=$2 AND refresh_attempt_id IS NOT DISTINCT FROM $4::uuid`,
+		g.credentialID, g.refreshTokenID, reason, g.refreshAttemptID)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
@@ -73,7 +76,7 @@ func retire(ctx context.Context, tx pgx.Tx, g *dueGrant) (bool, error) {
 	if err := serialize(ctx, tx); err != nil {
 		return false, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,updated_at=now()
 		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND g.credential_id=$1 AND g.refresh_token_id=$2 AND `+using+` IS NULL`,
 		g.credentialID, g.refreshTokenID)
 	if err != nil || tag.RowsAffected() == 0 {
@@ -112,7 +115,7 @@ func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
 // the grant again. A version without a grant has nothing to end.
 func Revoke(ctx context.Context, tx pgx.Tx, credentialID string) error {
 	var refreshTokenID *string
-	err := tx.QueryRow(ctx, `UPDATE olp.provider_grants SET refresh_token_id=NULL,refresh_at=NULL,updated_at=now()
+	err := tx.QueryRow(ctx, `UPDATE olp.provider_grants SET refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,updated_at=now()
 		WHERE credential_id=$1 RETURNING old.refresh_token_id::text`, credentialID).Scan(&refreshTokenID)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && refreshTokenID == nil {
 		return nil

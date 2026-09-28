@@ -142,21 +142,22 @@ func (h *Host) PreparePinned(ctx context.Context) error {
 // and decodes its result into result. The callers of hosted code, such as a
 // gateway attempt, record only that it failed, so the Host logs why.
 func (h *Host) Call(ctx context.Context, digest string, call Call, result any) error {
+	call.out = call.output(h.runtime.log, digest)
 	entry := h.use(digest)
 	defer h.done(entry)
 	code, err := entry.wait(ctx)
 	if err == nil {
 		err = code.Call(ctx, call, result)
 	}
-	h.failed(ctx, digest, call.Method, err)
+	h.failed(ctx, call.out, call.Method, err)
 	return err
 }
 
-// failed logs why a call of method on the plugin with digest failed, unless
+// failed logs why a call of method failed within its output budget, unless
 // its caller stopped waiting for it, or it is a device authorization's poll
 // finding the device not approved yet, which its caller expects every
 // interval.
-func (h *Host) failed(ctx context.Context, digest, method string, err error) {
+func (h *Host) failed(ctx context.Context, out *output, method string, err error) {
 	if err == nil || ctx.Err() != nil {
 		return
 	}
@@ -164,7 +165,7 @@ func (h *Host) failed(ctx context.Context, digest, method string, err error) {
 		(reported.Code == abi.CodeAuthorizationPending || reported.Code == abi.CodeSlowDown) {
 		return
 	}
-	h.runtime.log.Warn("plugin call failed", "plugin_digest", digest, "plugin_method", method, "error", err)
+	out.record(abi.LogRecord{Level: "warn", Message: "plugin call failed", Attrs: map[string]string{"error": err.Error()}})
 }
 
 // Evict drops the code the Host keeps for the plugin with digest, which its

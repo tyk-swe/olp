@@ -80,6 +80,7 @@ func servingGrant(t *testing.T, h *accessHarness, owner *browser, path string) (
 type grantState struct {
 	generation       int64
 	refreshToken     *string
+	attempt          *string
 	expires, refresh *time.Time
 	lapsed           *time.Time
 	failures         int
@@ -90,9 +91,9 @@ type grantState struct {
 func readGrant(t *testing.T, h *accessHarness, credentialID string) grantState {
 	t.Helper()
 	var g grantState
-	if err := h.Pool.QueryRow(t.Context(), `SELECT generation,refresh_token_id::text,expires_at,refresh_at,lapsed_at,refresh_failures,refresh_failure,
+	if err := h.Pool.QueryRow(t.Context(), `SELECT generation,refresh_token_id::text,refresh_attempt_id::text,expires_at,refresh_at,lapsed_at,refresh_failures,refresh_failure,
 		(SELECT count(*) FROM olp.secrets s WHERE s.id=g.refresh_token_id AND s.purpose=$2) FROM olp.provider_grants g WHERE credential_id=$1`, credentialID, secrets.ProviderGrantRefresh).
-		Scan(&g.generation, &g.refreshToken, &g.expires, &g.refresh, &g.lapsed, &g.failures, &g.failure, &g.refreshTokens); err != nil {
+		Scan(&g.generation, &g.refreshToken, &g.attempt, &g.expires, &g.refresh, &g.lapsed, &g.failures, &g.failure, &g.refreshTokens); err != nil {
 		t.Fatal(err)
 	}
 	return g
@@ -185,6 +186,130 @@ func TestWorkersRefreshGrantsAheadOfExpiryAndGatewaysServeTheNewAccessToken(t *t
 	}
 	if releasesAfter != releases || authorityAfter != authoritySequence || h.Runtime.Authority().Sequence != authoritySequence {
 		t.Fatalf("the refresh published a release (%d, was %d) or advanced authority (%d, was %d)", releasesAfter, releases, authorityAfter, authoritySequence)
+	}
+}
+
+// Losing the advisory lock's session while the upstream rotates a token
+// must not let another worker spend it again or discard the rotated tokens.
+func TestGrantRefreshSurvivesLossOfItsLockSession(t *testing.T) {
+	for _, outcome := range []string{"completed", "abandoned", "revoked", "uninstalled"} {
+		t.Run(outcome, func(t *testing.T) { testGrantRefreshLockLoss(t, outcome) })
+	}
+}
+
+func testGrantRefreshLockLoss(t *testing.T, outcome string) {
+	t.Helper()
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	refreshing, release := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	var refreshes atomic.Int64
+	delayed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("grant_type") == "refresh_token" && refreshes.Add(1) == 1 {
+			response := httptest.NewRecorder()
+			authority.Config.Handler.ServeHTTP(response, r)
+			close(refreshing)
+			<-release
+			for key, values := range response.Header() {
+				w.Header()[key] = values
+			}
+			w.WriteHeader(response.Code)
+			w.Write(response.Body.Bytes())
+			return
+		}
+		authority.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(delayed.Close)
+	defer resume()
+	upstream := newGrantUpstream(t, authority)
+	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+delayed.URL)
+	var upgrade string
+	if outcome == "uninstalled" {
+		upgrade = installReferencePlugin(t, h, owner, upstream, "0.2.0", "-X=main.authority="+delayed.URL)
+	}
+	path := grantProvider(t, h, owner, digest, nil)
+	credentialID := enrollGrant(t, h, owner, path)
+	first, second := grantRefresher(t, h), grantRefresher(t, h)
+	dueNow(t, h, credentialID)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		first.Pass(t.Context())
+	}()
+	select {
+	case <-refreshing:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the first refresh did not reach the upstream")
+	}
+	var terminated bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT pg_terminate_backend(pid, 5000) FROM pg_locks
+		WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminating the refresh lock session: %v (terminated %v)", err, terminated)
+	}
+	inFlight := readGrant(t, h, credentialID)
+	if inFlight.attempt == nil || inFlight.refresh == nil || !inFlight.refresh.After(time.Now()) {
+		t.Fatalf("the in-flight refresh has no durable attempt and deadline: %+v", inFlight)
+	}
+	if err := runtime.RequestRefresh(t.Context(), h.Pool, credentialID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if after := readGrant(t, h, credentialID); after.refresh == nil || !after.refresh.Equal(*inFlight.refresh) {
+		t.Fatal("a gateway's early refresh request changed the in-flight attempt's deadline")
+	}
+	pass(t, second)
+	if refreshes.Load() != 1 {
+		t.Errorf("workers dispatched %d refreshes with the same rotating token", refreshes.Load())
+	}
+	switch outcome {
+	case "abandoned":
+		// Time passing beyond both the refresh and storage limits recovers
+		// a lost attempt by lapsing it, without spending the token again.
+		dueNow(t, h, credentialID)
+		if !pass(t, second) {
+			t.Fatal("the abandoned refresh was not recovered")
+		}
+	case "revoked":
+		detail := h.want(owner, "GET", path, nil, nil, 200)
+		h.want(owner, "POST", path+"/credentials/"+credentialID+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	case "uninstalled":
+		moveToBuild(t, h, owner, path, upgrade)
+		plugin := h.want(owner, "GET", "/api/v1/plugins/"+digest, nil, nil, 200)
+		h.want(owner, "DELETE", "/api/v1/plugins/"+digest, nil, etagHeader(plugin), 204)
+	}
+	resume()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the first worker did not record the rotated tokens")
+	}
+	grant := readGrant(t, h, credentialID)
+	if grant.attempt != nil || refreshes.Load() != 1 || len(authority.Reused()) != 0 {
+		t.Fatal("the attempt was not cleared or its rotating token was reused")
+	}
+	if outcome != "completed" {
+		if grant.generation != 1 || grant.refreshToken != nil || grant.refresh != nil {
+			t.Fatalf("a late refresh revived an ended grant: %+v", grant)
+		}
+		if outcome == "abandoned" && (grant.lapsed == nil || grant.failure == nil || !strings.Contains(*grant.failure, "outcome was lost")) {
+			t.Fatalf("an abandoned attempt did not lapse the grant: %+v", grant)
+		}
+		if pass(t, second) {
+			t.Fatal("an ended grant was refreshed again")
+		}
+		return
+	}
+	if grant.generation != 2 || grant.lapsed != nil || grant.refreshTokens != 1 {
+		t.Fatalf("after losing the lock session the grant is %+v", grant)
+	}
+	dueNow(t, h, credentialID)
+	if !pass(t, second) || readGrant(t, h, credentialID).generation != 3 {
+		t.Fatal("the rotated token could not refresh the grant again")
 	}
 }
 
@@ -437,7 +562,7 @@ func TestGrantRefreshTakesTheProviderNetworkPathAndRetriesWithBackoff(t *testing
 	}
 	grant := readGrant(t, h, credentialID)
 	if grant.generation != 2 || grant.failures != 1 || grant.failure == nil || !strings.Contains(*grant.failure, abi.CodeHTTPFailed) ||
-		grant.refreshTokens != 1 || grant.refresh == nil || time.Until(*grant.refresh) < 20*time.Second || grant.lapsed != nil {
+		grant.refreshTokens != 1 || grant.refresh == nil || time.Until(*grant.refresh) < 20*time.Second || grant.lapsed != nil || grant.attempt != nil {
 		t.Fatalf("after a transient failure the grant is %+v", grant)
 	}
 	if pass(t, refresher) {
