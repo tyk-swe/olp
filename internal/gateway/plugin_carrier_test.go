@@ -140,8 +140,8 @@ func TestOnlyCarriedFailuresReportedNotSentFailOver(t *testing.T) {
 
 	fail("lost")
 	resp, body := h.chat(fullKey, nil)
-	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "ambiguous_upstream_result" || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
-		t.Fatalf("status %d body %v a=%d b=%d", resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "ambiguous_upstream_result" || resp.Header.Get("X-Should-Retry") != "false" || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
+		t.Fatalf("status %d body %v retry=%q a=%d b=%d", resp.StatusCode, body, resp.Header.Get("X-Should-Retry"), h.mock.count("a"), h.mock.count("b"))
 	}
 	if env := h.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].Class != classAmbiguous {
 		t.Fatalf("attempts %+v", env.Attempts)
@@ -149,8 +149,8 @@ func TestOnlyCarriedFailuresReportedNotSentFailOver(t *testing.T) {
 
 	fail("")
 	h.mock.set("a", status(http.StatusServiceUnavailable, `{"error":{"message":"down","type":"server_error"}}`))
-	if resp, body = h.chat(fullKey, nil); resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "ambiguous_upstream_result" || h.mock.count("b") != 0 {
-		t.Fatalf("status %d body %v b=%d", resp.StatusCode, body, h.mock.count("b"))
+	if resp, body = h.chat(fullKey, nil); resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "ambiguous_upstream_result" || resp.Header.Get("X-Should-Retry") != "false" || h.mock.count("b") != 0 {
+		t.Fatalf("status %d body %v retry=%q b=%d", resp.StatusCode, body, resp.Header.Get("X-Should-Retry"), h.mock.count("b"))
 	}
 
 	fail("not sent")

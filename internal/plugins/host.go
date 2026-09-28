@@ -306,8 +306,9 @@ func (h *Host) load(digest string, entry *hosted) {
 		entry.verified = time.Now()
 		evicted = h.evict()
 	}
-	h.mu.Unlock()
+	// Publish completion before eviction can take ownership of the code.
 	close(entry.loaded)
+	h.mu.Unlock()
 	for _, c := range evicted {
 		c.Close(ctx)
 	}

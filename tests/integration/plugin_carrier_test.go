@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -169,5 +171,22 @@ func TestUnconfinedPluginCarriesATargetsTraffic(t *testing.T) {
 	status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, chat("carrier:fail", false))
 	if status != 502 || h.gatewayCode(status, reply) != "ambiguous_upstream_result" || fallback.chats.Load() != chats+1 || upstream.carried.Load() != sent+1 {
 		t.Fatalf("a request the plugin failed after sending: %d %v", status, reply)
+	}
+
+	// Default SDK retries must not repeat work whose result the carrier lost,
+	// for either a unary request or a stream that failed before its first event.
+	if _, err := os.Stat(filepath.Join("..", "sdk-smoke", "node_modules", "openai")); err != nil {
+		t.Fatal("official OpenAI JavaScript SDK is missing; run pnpm install --frozen-lockfile")
+	}
+	chats, sent = fallback.chats.Load(), upstream.carried.Load()
+	cmd := exec.CommandContext(t.Context(), "node", "tests/sdk-smoke/carried-retry.mjs")
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "OLP_CARRIER_ORIGIN="+h.HTTP.URL, "OLP_CARRIER_KEY="+key, "OLP_CARRIER_ROUTE=carried")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("official SDK repeated ambiguous carried work: %v %s", err, output)
+	}
+	if upstream.carried.Load() != sent+2 || fallback.chats.Load() != chats {
+		t.Fatalf("official SDK sent %d carried requests and %d fallback requests", upstream.carried.Load()-sent, fallback.chats.Load()-chats)
 	}
 }

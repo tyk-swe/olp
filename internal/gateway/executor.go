@@ -196,7 +196,7 @@ type attemptFailure struct {
 	quota        string              // a quota this gateway enforces rejected the attempt
 	contractCode string              // safe runtime interaction guard violation
 	policyCode   string              // local output policy refusal after upstream completion
-	noRetry      bool                // strict outcome uncertainty must not suggest client retries
+	noRetry      bool                // outcome uncertainty must not suggest client retries
 	// credentialRefused survives ambiguity so a grant can refresh without
 	// allowing this attempt to fail over.
 	credentialRefused bool
@@ -534,8 +534,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			cancel()
 		}
 
-		if fact.Interaction != nil {
+		if fact.Interaction != nil || fact.Carried {
 			f.noRetry = f.dispatched
+		}
+		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = string(f.acceptance)
 		}
 		f.class = class

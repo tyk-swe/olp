@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -442,6 +443,48 @@ func TestHostEvictsTheLeastRecentlyUsedIdleCode(t *testing.T) {
 	evicted := host.evict()
 	if len(evicted) != 1 || evicted[0].(*Module).Digest != "1" || len(host.hosted) != maxHosted || host.hosted["0"] == nil {
 		t.Fatalf("evicted %v, kept %d", evicted, len(host.hosted))
+	}
+}
+
+// Uninstall can evict code just as loading finishes. Once both operations
+// return, the host must have released the module and its initial instance.
+func TestHostEvictsCodeAsLoadingFinishes(t *testing.T) {
+	for _, operation := range []string{"evict", "close"} {
+		t.Run(operation, func(t *testing.T) {
+			host, _ := newTestHost(t, Interpreted, DefaultLimits, nil, (hostile{call: []byte{0x42, 0}}).module())
+			for i := range 1000 {
+				entry := &hosted{loaded: make(chan struct{})}
+				host.mu.Lock()
+				host.hosted[fixtureDigest] = entry
+				host.mu.Unlock()
+				var wg sync.WaitGroup
+				wg.Go(func() { host.load(fixtureDigest, entry) })
+				wg.Go(func() {
+					for {
+						host.mu.Lock()
+						ready := entry.code != nil || entry.err != nil
+						host.mu.Unlock()
+						if ready {
+							if operation == "evict" {
+								host.Evict(fixtureDigest)
+							} else {
+								host.Close(t.Context())
+							}
+							return
+						}
+						runtime.Gosched()
+					}
+				})
+				wg.Wait()
+				if entry.err != nil {
+					t.Fatal(entry.err)
+				}
+				module := entry.code.(*Module)
+				if !module.closed || len(module.idle) != 0 {
+					t.Fatalf("iteration %d: evicted module closed=%v, retained %d instances", i, module.closed, len(module.idle))
+				}
+			}
+		})
 	}
 }
 
