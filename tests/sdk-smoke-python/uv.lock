@@ -236,7 +236,7 @@ requests = [
 
 [[package]]
 name = "google-genai"
-version = "2.22.0"
+version = "2.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -250,9 +250,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/f1/f2f31b2a6bd826bc2cb73068df880954a026474c03a4315637d20cc13965/google_genai-2.22.0.tar.gz", hash = "sha256:9fa3b5d9ddb635005d8ab2d6206fb2b3d7204b66965bbce7de13ecd1a866ebcd", size = 684719, upload-time = "2026-09-02T18:06:02.906Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/0a/a3b7856ca840031d4393dbdd97b67fe811b20061315ed68b67b5c85ca80d/google_genai-2.25.0.tar.gz", hash = "sha256:ab603baa5eee0205926ad0f8d7f93e0400df6d67650e99c33e01ab228ea16ad6", size = 699564, upload-time = "2026-09-22T17:23:01.238Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/96/0120d214958cb54f2b9c48da9f564a0e6eae269e9dd702415fb1d0551cc7/google_genai-2.22.0-py3-none-any.whl", hash = "sha256:c514001c45470cc0a942440ae1b8215445d12bfb6c373aac94637127e1f74ec6", size = 1088792, upload-time = "2026-09-02T18:06:00.629Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/a8/178dbb9d1d6cac721b01592e291146a024bae5ee3224e36569348921dd6c/google_genai-2.25.0-py3-none-any.whl", hash = "sha256:2e8f3a5f76ed00d5ffc3153f6089bc7d3511054eed53ad9cfc6095a7dc59b028", size = 1159631, upload-time = "2026-09-22T17:22:59.291Z" },
 ]
 
 [[package]]
@@ -405,7 +405,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = "==1.4.0" },
-    { name = "google-genai", specifier = "==2.22.0" },
+    { name = "google-genai", specifier = "==2.25.0" },
     { name = "openai", specifier = "==3.8.0" },
 ]
 

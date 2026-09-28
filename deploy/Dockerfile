@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS go-build
+FROM golang:1.27.1-trixie@sha256:433790e515d27dc6003e847e644cc0af956985cf315c1c58a3b73ee2dd305183 AS go-build
 ARG TARGETARCH
 ARG OLP_VERSION
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
@@ -23,7 +23,7 @@ RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v
     cp "$glide_dir/LICENSE" /out/GLIDE-LICENSE && \
     cp "$glide_dir/THIRD_PARTY_LICENSES_GO" /out/GLIDE-THIRD-PARTY-LICENSES
 
-FROM node:26.8.2-alpine@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868 AS console-build
+FROM node:26.10.0-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS console-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV CI=true
 WORKDIR /src
