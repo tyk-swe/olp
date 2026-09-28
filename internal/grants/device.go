@@ -85,11 +85,7 @@ func (e *Enrollment) authorizeDevice(manifest abi.Manifest, device abi.DeviceAut
 		e.interval = defaultInterval
 	}
 	device.Interval = seconds(e.interval)
-	if device.ExpiresIn < seconds(maxDeviceTTL) {
-		e.ExpiresAt = time.Now().Add(time.Duration(device.ExpiresIn) * time.Second)
-	} else {
-		e.ExpiresAt = time.Now().Add(maxDeviceTTL)
-	}
+	e.ExpiresAt = time.Now().Add(time.Duration(min(device.ExpiresIn, seconds(maxDeviceTTL))) * time.Second)
 	e.Device = &device
 	return nil
 }
@@ -173,8 +169,9 @@ func stands(ctx context.Context, q access.Queryer, providerID, id, principal str
 // Poll runs one poll step of a device authorization Watch claimed on its
 // usable plugin, confined or unconfined: the plugin asks the upstream whether
 // the operator approved the device, on behalf of the provider with its option
-// values, reaching the plugin's approved origins through client. It returns the grant once the operator approved, checked
-// like an exchanged one; until then it fails with the error Settle records.
+// values, reaching the plugin's approved origins through client. It returns the
+// grant once the operator approved, checked like an exchanged one; until then
+// it fails with the error Settle records.
 func Poll(ctx context.Context, host *plugins.Host, e Enrollment, options map[string]string, client *http.Client) (abi.Grant, error) {
 	var grant abi.Grant
 	call := plugins.Call{

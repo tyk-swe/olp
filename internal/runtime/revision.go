@@ -81,13 +81,13 @@ type PublishedTarget struct {
 
 // ProviderRevision contains scanned metadata and the stored documents of one
 // provider revision. The caller selects the revision and its current state,
-// and the plugin a plugin provider's revision pins, which PluginColumn
-// selects.
+// and the installed plugin a plugin provider's revision pins, which
+// PluginColumn selects.
 type ProviderRevision struct {
 	ID, RevisionID, Name, State  string
 	ProjectID                    *string
 	Configuration, Models, Slots []byte
-	Plugin                       []byte
+	InstalledPlugin              []byte
 }
 
 // PluginColumn selects the plugin that the provider revision r pins, as a
@@ -110,7 +110,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	}
 	var plugin *connectors.PluginProfile
 	if err == nil && cfg.Kind == connectors.KindPlugin {
-		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.Plugin, cfg.ProfileID)
+		plugin, err = connectors.DecodePluginProfile(cfg.ProfileRevision, revision.InstalledPlugin, cfg.ProfileID)
 	}
 	if err != nil {
 		return Provider{}, fmt.Errorf("provider %s revision: %w", revision.ID, err)

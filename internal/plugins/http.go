@@ -39,7 +39,7 @@ var ownedHeaders = []string{"Host", "Content-Length", "Transfer-Encoding", "Conn
 func serveHTTP(ctx context.Context, params json.RawMessage) (json.RawMessage, *abi.Error) {
 	grant, _ := ctx.Value(httpKey{}).(*HTTP)
 	if grant == nil {
-		return nil, &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + abi.CapabilityHTTP + "."}
+		return nil, noCapability(abi.CapabilityHTTP)
 	}
 	var request abi.HTTPRequest
 	if json.Unmarshal(params, &request) != nil {
@@ -63,10 +63,7 @@ func serveHTTP(ctx context.Context, params json.RawMessage) (json.RawMessage, *a
 	if len(body) > maxHTTPBody {
 		return nil, &abi.Error{Code: abi.CodeHTTPFailed, Message: "The response body exceeds 512 KiB."}
 	}
-	data, err := json.Marshal(abi.HTTPResponse{Status: response.StatusCode, Header: response.Header, Body: body})
-	if err != nil {
-		return nil, &abi.Error{Code: abi.CodeInternal, Message: "OLP could not encode the response."}
-	}
+	data, _ := json.Marshal(abi.HTTPResponse{Status: response.StatusCode, Header: response.Header, Body: body})
 	return data, nil
 }
 
@@ -94,7 +91,8 @@ func (h *HTTP) request(ctx context.Context, r abi.HTTPRequest) (*http.Request, *
 		return invalid("OLP can't send this request.")
 	}
 	for name, values := range r.Header {
-		if !httpguts.ValidHeaderFieldName(name) || slices.Contains(ownedHeaders, http.CanonicalHeaderKey(name)) || strings.HasPrefix(http.CanonicalHeaderKey(name), "Proxy-") {
+		canonical := http.CanonicalHeaderKey(name)
+		if !httpguts.ValidHeaderFieldName(name) || slices.Contains(ownedHeaders, canonical) || strings.HasPrefix(canonical, "Proxy-") {
 			return invalid("Header " + name + " is not one a plugin may set.")
 		}
 		for _, value := range values {

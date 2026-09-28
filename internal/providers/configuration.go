@@ -47,7 +47,7 @@ type Options struct {
 
 // Configuration is the stored connection configuration; it is the contract's
 // ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
-// as the profile revision; pin resolves that plugin profile.
+// as the profile revision; Pin resolves that plugin profile.
 type Configuration struct {
 	ProviderID      string   `json:"-"`
 	ProfileID       string   `json:"profile_id,omitempty"`

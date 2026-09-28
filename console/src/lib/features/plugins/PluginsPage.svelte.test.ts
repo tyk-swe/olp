@@ -18,11 +18,7 @@ import PluginsProbe from './test/PluginsProbe.svelte';
 const role = vi.hoisted(() => ({ current: 'owner' }));
 vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
-  useRole: () => ({
-    role: role.current,
-    can: (capability: string) =>
-      role.current === 'owner' || capability === 'configuration.read'
-  })
+  useRole: () => ({ can: () => role.current === 'owner' })
 }));
 vi.mock('$lib/features/plugins/api', async (original) => ({
   ...(await original<typeof import('$lib/features/plugins/api')>()),
@@ -72,6 +68,7 @@ const approved: Plugin = {
   approved_at: '2026-09-27T06:05:00Z',
   etag: '44444444-4444-4444-4444-444444444444'
 };
+const unconfined: Plugin = { ...approved, executable: 'reference' };
 
 function listed(items: Plugin[], unconfinedPluginsEnabled = false) {
   return { items, unconfined_plugins_enabled: unconfinedPluginsEnabled };
@@ -120,6 +117,26 @@ function button(name: string): HTMLButtonElement {
   );
   if (!found) throw new Error(`no ${name} button`);
   return found;
+}
+
+// Caches a fresh, inactive catalogue, as the provider wizard leaves it.
+async function seedCatalogue() {
+  const catalogue = {
+    queryKey: ['provider-profiles'],
+    queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    staleTime: Infinity
+  };
+  await client.fetchQuery(catalogue);
+  return catalogue;
+}
+
+function etagMismatch() {
+  return new ApiProblem({
+    type: 'https://openllmproxy.dev/problems/etag_mismatch',
+    title: 'Precondition Failed',
+    status: 412,
+    detail: 'This record changed. Reload it before saving.'
+  });
 }
 
 function upload(file: File) {
@@ -181,13 +198,7 @@ it('explains a typed refusal with the manifest field it concerns', async () => {
 });
 
 it('approves exactly the reviewed origins, then uninstalls', async () => {
-  // The provider wizard left a fresh, inactive catalogue in the shared cache.
-  const catalogue = {
-    queryKey: ['provider-profiles'],
-    queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
-    staleTime: Infinity
-  };
-  await client.fetchQuery(catalogue);
+  const catalogue = await seedCatalogue();
   vi.mocked(listPlugins)
     .mockResolvedValueOnce(listed([pending]))
     .mockResolvedValueOnce(listed([approved]))
@@ -226,12 +237,7 @@ it('approves exactly the reviewed origins, then uninstalls', async () => {
 });
 
 it('refreshes the cached profile catalogue after permitting an unconfined plugin', async () => {
-  const catalogue = {
-    queryKey: ['provider-profiles'],
-    queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
-    staleTime: Infinity
-  };
-  await client.fetchQuery(catalogue);
+  const catalogue = await seedCatalogue();
   vi.stubGlobal('location', {
     ...window.location,
     search: '?reauthenticated=plugin_permit'
@@ -247,7 +253,6 @@ it('refreshes the cached profile catalogue after permitting an unconfined plugin
     abi_version: approved.abi_version,
     manifest: approved.manifest
   };
-  const unconfined = { ...approved, executable: executable.name };
   vi.mocked(listPlugins)
     .mockResolvedValueOnce(listed([], true))
     .mockResolvedValue(listed([unconfined], true));
@@ -305,12 +310,7 @@ it('shows the current plugin after another owner changed it, so trying again sen
   // Like OLP, which refuses an ETag other than the plugin's current one.
   vi.mocked(uninstallPlugin).mockImplementation(async (plugin) => {
     if (plugin.etag === approved.etag) return;
-    throw new ApiProblem({
-      type: 'https://openllmproxy.dev/problems/etag_mismatch',
-      title: 'Precondition Failed',
-      status: 412,
-      detail: 'This record changed. Reload it before saving.'
-    });
+    throw etagMismatch();
   });
   render();
   await settle();
@@ -334,14 +334,7 @@ it('shows a plugin another owner approved meanwhile as approved', async () => {
   vi.mocked(listPlugins)
     .mockResolvedValueOnce(listed([pending]))
     .mockResolvedValue(listed([approved]));
-  vi.mocked(approvePlugin).mockRejectedValue(
-    new ApiProblem({
-      type: 'https://openllmproxy.dev/problems/etag_mismatch',
-      title: 'Precondition Failed',
-      status: 412,
-      detail: 'This record changed. Reload it before saving.'
-    })
-  );
+  vi.mocked(approvePlugin).mockRejectedValue(etagMismatch());
   render();
   await settle();
 
@@ -357,7 +350,6 @@ it('shows a plugin another owner approved meanwhile as approved', async () => {
 });
 
 it('shows the executable of an uninstalled unconfined plugin as no longer permitted', async () => {
-  const unconfined: Plugin = { ...approved, executable: 'reference' };
   const executable = {
     name: 'reference',
     digest: unconfined.digest,
@@ -407,7 +399,6 @@ it('shows plugins read-only to other roles', async () => {
 });
 
 it('marks a permitted unconfined plugin and shows the tier enabled', async () => {
-  const unconfined: Plugin = { ...approved, executable: 'reference' };
   vi.mocked(listPlugins).mockResolvedValue(listed([unconfined], true));
   role.current = 'viewer';
   render();

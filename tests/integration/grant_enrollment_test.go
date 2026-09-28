@@ -145,9 +145,7 @@ func TestGrantEnrollmentCreatesACredentialVersionThatGatewaysServe(t *testing.T)
 	certifyPluginProvider(t, h, owner, path)
 	draft := fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))
 	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Account", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-account"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, draft, "Account")
 	h.refresh()
 	served, _, err := h.Runtime.Secret(t.Context(), h.Runtime.Release(), version.ID)
 	if err != nil || !strings.Contains(string(served), issued[0]) || strings.Contains(string(served), issued[1]) {
@@ -349,9 +347,7 @@ func TestGrantServesAtTheBaseURLItsTokenResponseNames(t *testing.T) {
 	certifyPluginProvider(t, h, owner, path)
 	draft := fidelityDraft("reference-regional", strings.TrimPrefix(path, "/api/v1/providers/"))
 	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Regional", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-regional"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, draft, "Regional")
 	h.refresh()
 	before := len(upstream.receivedPaths())
 	status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-regional", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})

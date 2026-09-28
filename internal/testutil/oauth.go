@@ -68,6 +68,9 @@ type OAuthServer struct {
 // pending device are always told to slow down.
 const DeviceInterval = 30 * time.Second
 
+// deviceLifetime is how long an OAuthServer's device authorizations last.
+const deviceLifetime = 10 * time.Minute
+
 type oauthCode struct {
 	identity                      OAuthIdentity
 	clientID, redirect, challenge string
@@ -202,7 +205,7 @@ func (s *OAuthServer) deviceCode(w http.ResponseWriter, r *http.Request) {
 	}
 	var b [4]byte
 	rand.Read(b[:])
-	device := &oauthDevice{clientID: r.PostForm.Get("client_id"), userCode: fmt.Sprintf("%X-%X", b[:2], b[2:]), expires: time.Now().Add(10 * time.Minute)}
+	device := &oauthDevice{clientID: r.PostForm.Get("client_id"), userCode: fmt.Sprintf("%X-%X", b[:2], b[2:]), expires: time.Now().Add(deviceLifetime)}
 	code := oauthToken()
 	s.mu.Lock()
 	s.devices[code] = device
@@ -210,7 +213,7 @@ func (s *OAuthServer) deviceCode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"device_code": code, "user_code": device.userCode, "verification_uri": s.URL + "/device",
-		"expires_in": 600, "interval": int(DeviceInterval / time.Second),
+		"expires_in": int(deviceLifetime / time.Second), "interval": int(DeviceInterval / time.Second),
 	})
 }
 

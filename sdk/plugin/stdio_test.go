@@ -1,3 +1,5 @@
+//go:build !wasip1
+
 package plugin
 
 import (
@@ -57,6 +59,16 @@ func (o *olp) read() abi.Frame {
 	return frame
 }
 
+// response reads the next frame, which must be the response to call id.
+func (o *olp) response(id uint64) abi.Response {
+	o.t.Helper()
+	frame := o.read()
+	if frame.ID != id || frame.Response == nil {
+		o.t.Fatalf("frame %+v, want the response to call %d", frame, id)
+	}
+	return *frame.Response
+}
+
 func signCall(id uint64, credential string) abi.Frame {
 	params, _ := json.Marshal(SignRequest{Profile: "acme-chat", Method: "POST", URL: "https://api.acme.example/v1", Credential: credential})
 	return abi.Frame{ID: id, Request: &abi.Request{Method: abi.MethodSign, Params: params, Provider: &Provider{Profile: "acme-chat"}}}
@@ -78,11 +90,11 @@ func TestServeAnswersCallsConcurrentlyOverStdio(t *testing.T) {
 	}
 	o.write(signCall(1, "wait"))
 	o.write(signCall(2, "sk-acme"))
-	if answered := o.read(); answered.ID != 2 || answered.Response == nil || string(answered.Response.Result) != `{"headers":{"X-Signature":"sk-acme"}}` {
+	if answered := o.response(2); string(answered.Result) != `{"headers":{"X-Signature":"sk-acme"}}` {
 		t.Fatalf("call 2 answered %+v", answered)
 	}
 	o.write(abi.Frame{ID: 1, Cancel: true})
-	if answered := o.read(); answered.ID != 1 || answered.Response == nil || answered.Response.Error == nil || answered.Response.Error.Code != "cancelled" {
+	if answered := o.response(1); answered.Error == nil || answered.Error.Code != "cancelled" {
 		t.Fatalf("call 1 answered %+v", answered)
 	}
 }
@@ -108,7 +120,7 @@ func TestCapabilityRequestsNameTheirCallOverStdio(t *testing.T) {
 		}
 		o.write(abi.Frame{ID: request.ID, Response: &abi.Response{}})
 	}
-	if answered := o.read(); answered.ID != 7 || answered.Response == nil || answered.Response.Error != nil {
+	if answered := o.response(7); answered.Error != nil {
 		t.Fatalf("call 7 answered %+v", answered)
 	}
 }
@@ -173,7 +185,7 @@ func TestCarrierStreamsTheResponseOverStdio(t *testing.T) {
 		}
 	}
 	upstream.Close()
-	if answered := o.read(); answered.ID != 3 || answered.Response == nil || answered.Response.Error != nil {
+	if answered := o.response(3); answered.Error != nil {
 		t.Fatalf("call 3 answered %+v", answered)
 	}
 }
@@ -193,7 +205,7 @@ func TestCarryCancellationReachesTheCarrier(t *testing.T) {
 	o.read()
 	o.write(carryCall(1, "https://api.acme.example/connecting"))
 	o.write(abi.Frame{ID: 1, Cancel: true})
-	if answered := o.read(); answered.ID != 1 || answered.Response == nil || answered.Response.Error == nil || answered.Response.Error.Code != abi.CodeNotSent {
+	if answered := o.response(1); answered.Error == nil || answered.Error.Code != abi.CodeNotSent {
 		t.Fatalf("call 1 answered %+v", answered)
 	}
 	o.write(carryCall(2, "https://api.acme.example/streaming"))
@@ -201,7 +213,7 @@ func TestCarryCancellationReachesTheCarrier(t *testing.T) {
 		t.Fatalf("head %+v", head)
 	}
 	o.write(abi.Frame{ID: 2, Cancel: true})
-	if answered := o.read(); answered.ID != 2 || answered.Response == nil || answered.Response.Error == nil || answered.Response.Error.Code != abi.CodeInternal {
+	if answered := o.response(2); answered.Error == nil || answered.Error.Code != abi.CodeInternal {
 		t.Fatalf("call 2 answered %+v", answered)
 	}
 }

@@ -44,7 +44,7 @@
   }));
 
   let review = $state<UnconfinedExecutableReview | null>(null);
-  const reviewed = $derived(
+  const reviewTitle = $derived(
     review ? `${review.manifest.name} ${review.manifest.version}` : ''
   );
   let acknowledged = $state(false);
@@ -82,7 +82,7 @@
     try {
       review = await reviewUnconfinedExecutable(name);
     } catch (cause) {
-      error = pluginProblem(cause) ?? errorMessage(cause);
+      error = pluginProblem(cause);
     } finally {
       busy = '';
     }
@@ -160,11 +160,10 @@
     } catch (cause) {
       if (needsReauthentication(cause)) {
         verified = false;
-        busy = '';
         await reauthenticate();
         return;
       }
-      error = pluginProblem(cause) ?? errorMessage(cause);
+      error = pluginProblem(cause);
     } finally {
       busy = '';
     }
@@ -259,7 +258,7 @@
     {/if}
     {#if review}
       <section class="review" aria-labelledby="unconfined-review-heading">
-        <h3 id="unconfined-review-heading">Review {reviewed}</h3>
+        <h3 id="unconfined-review-heading">Review {reviewTitle}</h3>
         {#if review.manifest.description}<p>
             {review.manifest.description}
           </p>{/if}

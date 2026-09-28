@@ -108,7 +108,7 @@ func TestPluginProfileForcingStreamingServesNonStreamingCallers(t *testing.T) {
 			t.Fatalf("the owner reviews %v", p)
 		}
 	}
-	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
+	approvePlugin(t, h, owner, installed)
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
 		if p := profile.(map[string]any); p["id"] == "reference-streaming" && p["strict"] != false {
 			t.Fatalf("catalogued %v", p)
@@ -121,9 +121,7 @@ func TestPluginProfileForcingStreamingServesNonStreamingCallers(t *testing.T) {
 	// The upstream refuses anything but a stream, so certifying the unary
 	// capability proves that certification aggregates the stream too.
 	certifyPluginProvider(t, h, owner, "/api/v1/providers/"+created["id"].(string))
-	route := h.want(owner, "POST", "/api/v1/route-drafts", transformed(fidelityDraft("streaming-only", created["id"])), idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Streaming only", "scopes": []string{"inference"}, "allowed_routes": []string{"streaming-only"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, transformed(fidelityDraft("streaming-only", created["id"])), "Streaming only")
 	price := map[string]any{"provider_kind": "plugin", "provider_id": created["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "2", "output_per_million": "4"}
 	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{price}}, idem(uuid.NewString()), 201)
 	h.refresh()

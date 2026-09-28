@@ -11,8 +11,9 @@ import (
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
-// subscribeToLapses subscribes a webhook destination to grant lapses and
-// returns the number of deliveries enqueued so far.
+// subscribeToLapses subscribes a webhook destination to grant lapses, allowing
+// the loopback webhook through the server's egress policy, and returns a
+// function that counts the deliveries enqueued so far.
 func subscribeToLapses(t *testing.T, h *accessHarness, owner *browser) func() int {
 	t.Helper()
 	h.Server.Egress = alertPolicy()

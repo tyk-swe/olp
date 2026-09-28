@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -20,12 +19,14 @@ import (
 
 const fixtureSecret = "sk-fixture-secret"
 
-func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
+// startRuntime starts a runtime on engine, closed with the test, that discards
+// plugin output unless log is given.
+func startRuntime(t testing.TB, engine Engine, limits Limits, log *slog.Logger) *Runtime {
 	t.Helper()
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
-	r, err := NewRuntime(t.Context(), Interpreted, limits, log)
+	r, err := NewRuntime(t.Context(), engine, limits, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,15 +34,15 @@ func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
 	return r
 }
 
+func newTestRuntime(t *testing.T, limits Limits, log *slog.Logger) *Runtime {
+	t.Helper()
+	return startRuntime(t, Interpreted, limits, log)
+}
+
 // newEngineRuntime starts a runtime on engine that discards plugin output.
 func newEngineRuntime(t *testing.T, engine Engine, limits Limits) *Runtime {
 	t.Helper()
-	r, err := NewRuntime(t.Context(), engine, limits, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { r.Close(context.Background()) })
-	return r
+	return startRuntime(t, engine, limits, nil)
 }
 
 func fixture(t *testing.T, behaviour string) []byte {
@@ -138,6 +139,15 @@ func TestInspectRefusesModulesOLPCannotInstall(t *testing.T) {
 	}
 }
 
+// Limits under which the fixture's "loop" and "allocate" behaviours stop
+// a call, on one instance. The time limit leaves time enough to instantiate
+// the module under the race detector; the memory limit's time is generous,
+// so the memory limit is what stops the call.
+var (
+	timeLimits   = Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}
+	memoryLimits = Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}
+)
+
 // A call past its limits fails with a typed error and takes nothing else
 // down: the runtime keeps serving calls afterwards.
 func TestCallPastItsLimitsFailsCleanly(t *testing.T) {
@@ -146,10 +156,8 @@ func TestCallPastItsLimitsFailsCleanly(t *testing.T) {
 		behaviour, code string
 		limits          Limits
 	}{
-		// Time enough to instantiate the module under the race detector;
-		// generous time elsewhere, so the memory limit is what stops the call.
-		"time":   {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}},
-		"memory": {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}},
+		"time":   {"loop", CodeTimedOut, timeLimits},
+		"memory": {"allocate", CodeFailed, memoryLimits},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -191,7 +199,7 @@ func TestPluginOutputReachesTheLogRedacted(t *testing.T) {
 		}
 		err = m.Call(t.Context(), Call{Method: abi.MethodManifest, Secrets: []string{fixtureSecret}}, nil)
 		if behaviour == "panic" {
-			if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != abi.CodeInternal {
+			if !reported(err, abi.CodeInternal) {
 				t.Fatalf("a panicking plugin reported %v", err)
 			}
 		} else if err != nil {

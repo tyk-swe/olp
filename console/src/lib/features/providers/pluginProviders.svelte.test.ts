@@ -220,27 +220,38 @@ function choosePluginKind() {
   );
 }
 
+function choosePluginProfile(id: string) {
+  choose(
+    host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
+    `${id}@${digest}`
+  );
+}
+
 function submit() {
   host
     .querySelector('form')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
 
+function mockCreatedProvider(discovered: number) {
+  const saved: Provider = { ...pluginProvider, id: 'provider-new' };
+  vi.mocked(createProvider).mockResolvedValue(saved.id);
+  vi.mocked(listProviderModelPage).mockResolvedValue({
+    provider: saved,
+    items: [],
+    nextCursor: null
+  });
+  vi.mocked(probeProvider).mockResolvedValue({
+    succeeded: true,
+    detail: `Reached the upstream; ${discovered} models listed.`,
+    probe_type: 'models',
+    discovered_models: discovered
+  } as ProviderProbe);
+}
+
 describe('provider wizard with a plugin profile', () => {
   it('offers approved plugin profiles with their build, then the static credential', async () => {
-    const saved: Provider = { ...pluginProvider, id: 'provider-new' };
-    vi.mocked(createProvider).mockResolvedValue(saved.id);
-    vi.mocked(listProviderModelPage).mockResolvedValue({
-      provider: saved,
-      items: [],
-      nextCursor: null
-    });
-    vi.mocked(probeProvider).mockResolvedValue({
-      succeeded: true,
-      detail: 'Reached the upstream; 1 models listed.',
-      probe_type: 'models',
-      discovered_models: 1
-    } as ProviderProbe);
+    mockCreatedProvider(1);
     render();
     await settle();
 
@@ -272,9 +283,7 @@ describe('provider wizard with a plugin profile', () => {
     type('#provider-name', 'Reference upstream');
     type('#initial-model', 'reference-model');
     type('#provider-secret', 'reference-secret');
-    host
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit();
     await vi.waitFor(() => expect(createProvider).toHaveBeenCalledOnce());
     const [input] = vi.mocked(createProvider).mock.calls[0]!;
     expect(input.configuration).toMatchObject({
@@ -297,35 +306,18 @@ describe('provider wizard with a plugin profile', () => {
       ['provider-profiles'],
       [openAiChat, { ...referenceChat, model_discovery: true }]
     );
-    const saved: Provider = { ...pluginProvider, id: 'provider-new' };
-    vi.mocked(createProvider).mockResolvedValue(saved.id);
-    vi.mocked(listProviderModelPage).mockResolvedValue({
-      provider: saved,
-      items: [],
-      nextCursor: null
-    });
-    vi.mocked(probeProvider).mockResolvedValue({
-      succeeded: true,
-      detail: 'Reached the upstream; 3 models listed.',
-      probe_type: 'models',
-      discovered_models: 3
-    } as ProviderProbe);
+    mockCreatedProvider(3);
     render();
     await settle();
 
     choosePluginKind();
-    choose(
-      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
-      `reference-chat@${digest}`
-    );
+    choosePluginProfile('reference-chat');
     expect(host.querySelector('label[for="initial-model"]')?.textContent).toBe(
       'Seed model (optional)'
     );
     type('#provider-name', 'Reference upstream');
     type('#provider-secret', 'reference-secret');
-    host
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit();
     await vi.waitFor(() => expect(createProvider).toHaveBeenCalledOnce());
     expect(vi.mocked(createProvider).mock.calls[0]![0].model).toBeUndefined();
     await vi.waitFor(() => {
@@ -350,9 +342,7 @@ describe('provider wizard with a plugin profile', () => {
     expect(
       host.querySelector<HTMLAnchorElement>('a[href$="/plugins"]')
     ).not.toBeNull();
-    host
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit();
     await settle();
     expect(createProvider).not.toHaveBeenCalled();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
@@ -364,10 +354,7 @@ describe('provider wizard with a plugin profile', () => {
 describe('provider wizard with plugin profile options', () => {
   function chooseWorkspaceProfile() {
     choosePluginKind();
-    choose(
-      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
-      `reference-workspace-chat@${digest}`
-    );
+    choosePluginProfile('reference-workspace-chat');
   }
 
   function fillConnection() {
@@ -472,10 +459,7 @@ describe('provider wizard with plugin profile options', () => {
     await settle();
     chooseWorkspaceProfile();
     type('#provider-option-workspace', 'acme');
-    choose(
-      host.querySelector<HTMLSelectElement>('#provider-plugin-profile')!,
-      `reference-chat@${digest}`
-    );
+    choosePluginProfile('reference-chat');
     expect(host.querySelector('fieldset.plugin-options')).toBeNull();
     fillConnection();
     submit();
@@ -486,17 +470,11 @@ describe('provider wizard with plugin profile options', () => {
 });
 
 describe('provider detail', () => {
+  const modelPage = { provider: pluginProvider, items: [], nextCursor: null };
+
   it('shows the plugin a plugin provider pins', async () => {
-    client.setQueryData(providerKeys.models(pluginProvider.id), {
-      provider: pluginProvider,
-      items: [],
-      nextCursor: null
-    });
-    vi.mocked(listProviderModelPage).mockResolvedValue({
-      provider: pluginProvider,
-      items: [],
-      nextCursor: null
-    });
+    client.setQueryData(providerKeys.models(pluginProvider.id), modelPage);
+    vi.mocked(listProviderModelPage).mockResolvedValue(modelPage);
     render(pluginProvider.id);
     await settle();
 
@@ -518,16 +496,8 @@ describe('provider detail', () => {
       ['provider-profiles'],
       [openAiChat, { ...referenceChat, model_discovery: true }]
     );
-    client.setQueryData(providerKeys.models(pluginProvider.id), {
-      provider: pluginProvider,
-      items: [],
-      nextCursor: null
-    });
-    vi.mocked(listProviderModelPage).mockResolvedValue({
-      provider: pluginProvider,
-      items: [],
-      nextCursor: null
-    });
+    client.setQueryData(providerKeys.models(pluginProvider.id), modelPage);
+    vi.mocked(listProviderModelPage).mockResolvedValue(modelPage);
     render(pluginProvider.id);
     await settle();
 

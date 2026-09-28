@@ -71,9 +71,7 @@ func servingGrant(t *testing.T, h *accessHarness, owner *browser, path string) (
 	certifyPluginProvider(t, h, owner, path)
 	draft := fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))
 	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Account", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-account"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, draft, "Account")
 	h.refresh()
 	return credentialID, key
 }

@@ -30,9 +30,7 @@ import (
 // otherwise stall every command the gateway sends on a shared connection.
 func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger) func() {
 	var wg sync.WaitGroup
-	if mediaService != nil {
-		wg.Go(func() { mediaService.RunReconciler(ctx) })
-	}
+	wg.Go(func() { mediaService.RunReconciler(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })

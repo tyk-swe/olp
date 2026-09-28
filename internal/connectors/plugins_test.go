@@ -45,6 +45,21 @@ func pluginConfig(t *testing.T, manifest abi.Manifest) Config {
 	return Config{Plugin: plugin, Kind: KindPlugin, AuthMode: AuthStaticCredential, ProfileID: manifest.Profiles[0].ID, ProfileRevision: pluginDigest, Endpoint: plugin.Address(nil)}
 }
 
+// publish returns c as a published snapshot carries it, with the snapshot's
+// JSON.
+func publish(t *testing.T, c Config) (Config, []byte) {
+	t.Helper()
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published Config
+	if err = json.Unmarshal(encoded, &published); err != nil {
+		t.Fatalf("decoded %s: %v", encoded, err)
+	}
+	return published, encoded
+}
+
 // optionsManifest declares a profile whose hosting adaptation uses options.
 func optionsManifest() abi.Manifest {
 	manifest := pluginManifest()
@@ -122,11 +137,7 @@ func TestPluginHostingRejectsCredentialsItCannotPlace(t *testing.T) {
 func TestPluginProfileCatalogueEntry(t *testing.T) {
 	anthropic := pluginManifest()
 	anthropic.Profiles[0].Dialect = "anthropic-messages"
-	plugin, err := NewPluginProfile(pluginDigest, anthropic, "acme-chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := plugin.Profile()
+	p := pluginConfig(t, anthropic).Plugin.Profile()
 	if p.Kind != KindPlugin || p.Revision != pluginDigest || p.Hosting != "plugin" || !p.Strict || p.Transport != "http" ||
 		*p.Plugin != (Plugin{Digest: pluginDigest, Name: "acme", Version: "1.0.0"}) ||
 		!slices.Equal(p.Authentication, []string{AuthStaticCredential}) || !slices.Equal(p.Operations, []string{"generation"}) {
@@ -147,23 +158,16 @@ func TestPluginProfileCatalogueEntry(t *testing.T) {
 
 func TestPluginProfileSurvivesPublication(t *testing.T) {
 	c := pluginConfig(t, pluginManifest())
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Config
-	if err = json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if err = decoded.ValidateProfile(); err != nil || decoded.Plugin.Address(nil) != c.Plugin.Address(nil) {
+	decoded, encoded := publish(t, c)
+	if err := decoded.ValidateProfile(); err != nil || decoded.Plugin.Address(nil) != c.Plugin.Address(nil) {
 		t.Fatalf("decoded %s: %v", encoded, err)
 	}
 	req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
-	if _, err = NewAuth(&egress.Policy{}).Apply(context.Background(), req, decoded, []byte("secret"), nil); err != nil || req.Header.Get("Authorization") != "Token secret" {
+	if _, err := NewAuth(&egress.Policy{}).Apply(context.Background(), req, decoded, []byte("secret"), nil); err != nil || req.Header.Get("Authorization") != "Token secret" {
 		t.Fatalf("decoded profile placed %v: %v", req.Header, err)
 	}
 	tampered := strings.Replace(string(encoded), `{credential}"`, `{password}"`, 1)
-	if err = json.Unmarshal([]byte(tampered), &decoded); err == nil {
+	if err := json.Unmarshal([]byte(tampered), &decoded); err == nil {
 		t.Fatal("decoded a hosting adaptation OLP does not run")
 	}
 }
@@ -195,14 +199,7 @@ func TestUnconfinedPluginProfileSurvivesPublication(t *testing.T) {
 // unchanged through publication, with the classes that govern failover.
 func TestPluginProfileDeclaresDiscoveryAndClassification(t *testing.T) {
 	c := pluginConfig(t, pluginManifest())
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var published Config
-	if err = json.Unmarshal(encoded, &published); err != nil {
-		t.Fatal(err)
-	}
+	published, _ := publish(t, c)
 	for _, c := range []Config{c, published} {
 		profile, _ := c.Profile()
 		discovery, declared := c.Plugin.Discovery()
@@ -417,18 +414,14 @@ func TestPluginOptionsFillTheHostingAdaptation(t *testing.T) {
 		t.Fatal("the endpoint kept the address of other options")
 	}
 	// Published snapshots carry the options with the profile.
-	encoded, _ := json.Marshal(c)
-	var decoded Config
-	if err = json.Unmarshal(encoded, &decoded); err != nil || decoded.Validate(&egress.Policy{}) != nil || !maps.Equal(decoded.PluginOptions, c.PluginOptions) {
-		t.Fatalf("decoded %s: %v", encoded, err)
+	decoded, encoded := publish(t, c)
+	if decoded.Validate(&egress.Policy{}) != nil || !maps.Equal(decoded.PluginOptions, c.PluginOptions) {
+		t.Fatalf("decoded %s", encoded)
 	}
 }
 
 func TestPluginOptionValuesFollowTheirDeclaration(t *testing.T) {
-	plugin, err := NewPluginProfile(pluginDigest, optionsManifest(), "acme-chat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	plugin := pluginConfig(t, optionsManifest()).Plugin
 	valid := map[string]string{"account": "acme", "region": "us"}
 	if err := plugin.ValidateOptions(valid); err != nil {
 		t.Fatal(err)
@@ -471,10 +464,7 @@ func TestPluginOptionValuesFollowTheirDeclaration(t *testing.T) {
 }
 
 func TestPluginProfileCataloguesItsOptionsSchema(t *testing.T) {
-	plugin, err := NewPluginProfile(pluginDigest, optionsManifest(), "acme-chat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	plugin := pluginConfig(t, optionsManifest()).Plugin
 	want := `{"additionalProperties":false,"properties":{` +
 		`"account":{"description":"The Acme account that serves requests.","maxLength":256,"minLength":1,"title":"Account","type":"string"},` +
 		`"region":{"enum":["us","eu"],"maxLength":256,"minLength":1,"title":"Region","type":"string"},` +
@@ -487,10 +477,7 @@ func TestPluginProfileCataloguesItsOptionsSchema(t *testing.T) {
 	reordered := optionsManifest()
 	options := reordered.Profiles[0].Options
 	options[0], options[2] = options[2], options[0]
-	plugin, err = NewPluginProfile(pluginDigest, reordered, "acme-chat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	plugin = pluginConfig(t, reordered).Plugin
 	if schema := string(plugin.Profile().OptionsSchema); strings.Index(schema, `"team"`) > strings.Index(schema, `"account"`) {
 		t.Fatalf("options schema lost the declared order: %s", schema)
 	}
@@ -620,14 +607,7 @@ func TestPluginGrantBaseURLAddressesEachCredentialVersion(t *testing.T) {
 	if err := c.Validate(&egress.Policy{}); err != nil || c.Endpoint != "https://grant.invalid/v2/eu" {
 		t.Fatalf("endpoint %s: %v", c.Endpoint, err)
 	}
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var published Config
-	if err = json.Unmarshal(encoded, &published); err != nil {
-		t.Fatal(err)
-	}
+	published, _ := publish(t, c)
 	for base, want := range map[string]string{
 		"https://api.acme.example":           "https://api.acme.example/v2/eu/chat/completions?placement=eu-acct&project=p",
 		"https://eu.acme.example/regions/1/": "https://eu.acme.example/regions/1/v2/eu/chat/completions?placement=eu-acct&project=p",

@@ -372,7 +372,7 @@ func TestCustomDeviceAuthorizationVariantEnrollsThroughPluginSteps(t *testing.T)
 	authority := newDeviceLoginAuthority(t)
 	module := testutil.BuildPlugin(t, "./tests/integration/testdata/devicelogin", "-X=main.authority="+authority.URL)
 	installed := h.want(owner, "POST", "/api/v1/plugins", module, wasm, 201)
-	h.want(owner, "POST", "/api/v1/plugins/"+digestOf(module)+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
+	approvePlugin(t, h, owner, installed)
 	path := deviceProvider(t, h, owner, digestOf(module), "devicelogin-chat")
 
 	enrollment := startGrantEnrollment(t, h, owner, path)

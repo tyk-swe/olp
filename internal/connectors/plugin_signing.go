@@ -35,12 +35,12 @@ var ErrSigningUnavailable = errors.New("the plugin's signing hook is unavailable
 
 // sign runs the profile's signing hook, if it declares one, over a finished
 // request of a provider with options, handing it the static credential or the
-// grant's access token, and adds the headers it returns. It
-// returns their values, which it treats like the credential: they are
-// redacted wherever upstream text is recorded, and the hook's own output never
-// reveals secrets. The request is not sent unless its hook succeeds. A failure
-// the plugin reports is an authentication failure (ErrAuthentication); any
-// other is ErrSigningUnavailable.
+// grant's access token, and adds the headers it returns. It returns their
+// values, which it treats like the credential: they are redacted wherever
+// upstream text is recorded, and the hook's own output never reveals secrets.
+// The request is not sent unless its hook succeeds. A failure the plugin
+// reports is an authentication failure (ErrAuthentication); any other is
+// ErrSigningUnavailable.
 func (p *PluginProfile) sign(ctx context.Context, signer Signer, options map[string]string, req *http.Request, credential, body []byte, secrets []string) ([]string, error) {
 	if !p.declared.Signing {
 		return nil, nil

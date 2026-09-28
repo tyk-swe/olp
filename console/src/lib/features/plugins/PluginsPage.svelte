@@ -59,7 +59,7 @@
     } catch (cause) {
       error = isEtagMismatch(cause)
         ? 'This plugin changed meanwhile. Review it as it is now, then try again.'
-        : (pluginProblem(cause) ?? errorMessage(cause));
+        : pluginProblem(cause);
     } finally {
       await refreshPlugins();
       busy = '';

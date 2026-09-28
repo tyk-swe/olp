@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -43,18 +41,14 @@ func TestForcedStreamingCertifiesNonStreamingTuplesFromTheStream(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	manifest, _ := json.Marshal(connectors.InstalledPlugin{Manifest: abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{upstream.URL}, Profiles: []abi.Profile{{
+	cfg := Configuration{ProviderID: "acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-responses", ProfileRevision: strings.Repeat("ab", 32)}
+	pinAcme(t, &cfg, upstream.URL, abi.Profile{
 		ID: "acme-responses", Label: "Acme Responses", Dialect: "openai-responses",
 		Hosting: abi.Hosting{Address: upstream.URL + "/v1", Headers: map[string]string{"Authorization": "Token {credential}"}, ForceStreaming: true},
-	}}}})
-	cfg := Configuration{ProviderID: "acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-responses", ProfileRevision: strings.Repeat("ab", 32)}
-	if err := cfg.pinned(manifest); err != nil {
-		t.Fatal(err)
-	}
+	})
 	cfg.Endpoint = new(cfg.plugin.Address(nil))
-	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	for _, mode := range []string{ModeUnary, ModeStreaming} {
-		if err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "acme-large", CapabilityInput{Operation: OperationGeneration, Surface: "openai", Mode: mode}, 4096); err != nil {
+		if err := New(nil, loopbackPolicy(), nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "acme-large", CapabilityInput{Operation: OperationGeneration, Surface: "openai", Mode: mode}, 4096); err != nil {
 			t.Fatalf("%s certification: %v", mode, err)
 		}
 	}

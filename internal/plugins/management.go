@@ -223,8 +223,7 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	etag := plugin.Etag.String()
-	if err = access.Match(r, etag); err != nil {
+	if err = access.Match(r, plugin.Etag.String()); err != nil {
 		return access.Reply{}, err
 	}
 	// Provider writes hold the same installation lock, so no revision can pin

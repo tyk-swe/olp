@@ -30,28 +30,42 @@ func (h *harness) servePlugin(profile abi.Profile) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.pinPlugin(plugin)
+	h.pinPlugin(plugin, nil)
 }
 
-// pinPlugin moves the harness's first provider onto a plugin's profile.
-func (h *harness) pinPlugin(plugin *connectors.PluginProfile) {
+// pinPlugin moves the harness's first provider onto a plugin's profile, with
+// credential as its secret unless that is nil.
+func (h *harness) pinPlugin(plugin *connectors.PluginProfile, credential []byte) {
 	h.t.Helper()
 	profile := plugin.Profile()
-	var err error
+	h.reissue(func(provider *runtime.Provider) {
+		provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, profile.Authentication[0], plugin
+		provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, profile.Revision, plugin.Address(nil)
+	}, credential)
+}
+
+// reissue publishes a release in which the harness's first provider is
+// edited, with credential as its secret unless that is nil.
+func (h *harness) reissue(edit func(*runtime.Provider), credential []byte) {
+	h.t.Helper()
 	secrets := map[string][]byte{}
 	for id, provider := range h.rt.release.Snapshot.Providers {
 		for _, slot := range provider.Slots {
 			secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
 		}
 		if provider.Slots[0].ID == h.slotA {
-			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
-			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, profile.Revision, plugin.Address(nil)
+			edit(&provider)
 			h.rt.release.Snapshot.Providers[id] = provider
 		}
 	}
-	if h.rt.release, err = runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets); err != nil {
+	if credential != nil {
+		secrets[h.credA] = credential
+	}
+	release, err := runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
+	if err != nil {
 		h.t.Fatal(err)
 	}
+	h.rt.release = release
 }
 
 // A plugin profile's envelope wraps what the gateway sends, after its

@@ -83,7 +83,9 @@ type Limits struct {
 type Provider struct {
 	Network *egress.ConnectionOptions `json:"network,omitempty"`
 	// Plugin is the plugin profile a plugin provider pins as its profile
-	// revision, which publication resolves so that gateways need no plugin.
+	// revision, which publication resolves from the installed plugin. A
+	// gateway serves the provider from its release and loads the plugin only
+	// to run its signing hook and carry its traffic.
 	Plugin            *connectors.PluginProfile        `json:"plugin,omitempty"`
 	ProfileID         string                           `json:"profile_id,omitempty"`
 	ProfileRevision   string                           `json:"profile_revision,omitempty"`

@@ -503,9 +503,15 @@ func capability(ctx context.Context, request abi.Request) abi.Response {
 	case abi.CapabilityHTTP:
 		response.Result, response.Error = serveHTTP(ctx, request.Params)
 	default:
-		response.Error = &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + request.Method + "."}
+		response.Error = noCapability(request.Method)
 	}
 	return response
+}
+
+// noCapability is the failure of a request for a capability the call is not
+// granted, which reads the same for one OLP does not have.
+func noCapability(name string) *abi.Error {
+	return &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + name + "."}
 }
 
 // lend writes a message into a buffer the plugin allocates for it.

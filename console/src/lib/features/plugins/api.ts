@@ -1,10 +1,15 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ApiProblem, ensureSuccess, fieldIssues, result } from '$lib/api/http';
+import {
+  ApiProblem,
+  ensureSuccess,
+  errorMessage,
+  fieldIssues,
+  result
+} from '$lib/api/http';
 
 export type Plugin = components['schemas']['Plugin'];
 export type PluginList = components['schemas']['PluginListResponse'];
-export type PluginProfile = components['schemas']['PluginProfile'];
 export type UnconfinedExecutable =
   components['schemas']['UnconfinedExecutable'];
 export type UnconfinedExecutableReview =
@@ -111,13 +116,13 @@ export function needsReauthentication(error: unknown): boolean {
 }
 
 /**
- * Explains why OLP refused a plugin, naming the manifest field a typed
+ * Explains why a plugin request failed, naming the manifest field a typed
  * refusal points at.
  */
-export function pluginProblem(error: unknown): string | null {
-  if (!(error instanceof ApiProblem)) return null;
+export function pluginProblem(error: unknown): string {
+  const message = errorMessage(error);
   const field = fieldIssues(error)[0]?.field;
-  return field ? `${error.message} (${field})` : error.message;
+  return field ? `${message} (${field})` : message;
 }
 
 /** The first twelve digest characters, enough to tell installs apart. */

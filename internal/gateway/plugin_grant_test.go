@@ -6,10 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -35,21 +32,7 @@ func TestPluginGrantBaseURLPlacesEachAttempt(t *testing.T) {
 				base = strings.Replace(base, "127.0.0.1", "127.0.0.2", 1)
 			}
 			grant, _ := json.Marshal(connectors.GrantCredential{AccessToken: "at-123", Facts: map[string]string{"api_base": base}})
-			secrets := map[string][]byte{}
-			for id, provider := range h.rt.release.Snapshot.Providers {
-				for _, slot := range provider.Slots {
-					secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
-				}
-				if provider.Slots[0].ID == h.slotA {
-					provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthGrant, plugin
-					provider.ProfileID, provider.ProfileRevision, provider.Endpoint = profile.ID, digest, plugin.Address(nil)
-					h.rt.release.Snapshot.Providers[id] = provider
-				}
-			}
-			secrets[h.credA] = grant
-			if h.rt.release, err = runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets); err != nil {
-				t.Fatal(err)
-			}
+			h.pinPlugin(plugin, grant)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/a/v1/chat/completions" || r.Host != strings.TrimPrefix(h.upstream.URL, "http://") || r.Header.Get("Authorization") != "Bearer at-123" {
 					t.Errorf("the upstream received %s %s with %v", r.Host, r.URL, r.Header)

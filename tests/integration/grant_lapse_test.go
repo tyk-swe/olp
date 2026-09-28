@@ -49,9 +49,7 @@ func TestALapsedGrantFailsOverUntilItIsReenrolled(t *testing.T) {
 	draft := fidelityDraft("reference-pool", lapsingID)
 	draft["fidelity"] = map[string]any{"mode": "strict"}
 	draft["targets"] = append(draft["targets"].([]any), map[string]any{"provider_id": fallbackID, "provider_model": vendorModel, "priority": 1, "weight": 1, "timeout_ms": 5000})
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Pool", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-pool"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, draft, "Pool")
 	h.refresh()
 	// servedBy sends a request through the route, one attempt at most, and
 	// returns the account whose access token served it.

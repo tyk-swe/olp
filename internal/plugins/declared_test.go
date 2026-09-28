@@ -47,8 +47,8 @@ func (h hostile) module() []byte {
 	if h.tables != nil {
 		module = append(module, wasmSection(sectionTable, wasmVector(h.tables...))...)
 	}
-	module = append(module, wasmSection(5, wasmVector([]byte{0x00, 2}))...)
-	module = append(module, wasmSection(7, wasmVector(
+	module = append(module, wasmSection(sectionMemory, wasmVector([]byte{0x00, 2}))...)
+	module = append(module, wasmSection(sectionExport, wasmVector(
 		append(wasmName("memory"), 0x02, 0),
 		append(wasmName(abi.ExportVersion), 0x00, 0),
 		append(wasmName(abi.ExportAlloc), 0x00, 1),
@@ -90,23 +90,20 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 	const huge = 1 << 20
 	count := wasmLEB(huge)
 	sections := map[string][]byte{
-		"imports":             wasmSection(2, count),
-		"globals":             wasmSection(6, count),
-		"exports":             wasmSection(7, count),
-		"elements":            wasmSection(9, count),
-		"data":                wasmSection(11, count),
-		"element functions":   wasmSection(9, append([]byte{1, 0, 0x41, 0, 0x0b}, count...)),
-		"element expressions": wasmSection(9, append([]byte{1, 4, 0x41, 0, 0x0b}, count...)),
-		"data bytes":          wasmSection(11, append([]byte{1, 1}, wasmLEB(32<<20)...)),
-		"export name":         wasmSection(7, append([]byte{1}, wasmLEB(32<<20)...)),
-		"custom name":         wasmSection(0, wasmLEB(32<<20)),
-		"function names":      wasmSection(0, append(wasmName("name"), wasmSection(1, count)...)),
-		"local functions":     wasmSection(0, append(wasmName("name"), wasmSection(2, count)...)),
-		"local names":         wasmSection(0, append(wasmName("name"), wasmSection(2, append([]byte{1, 0}, count...))...)),
-		"type parameters":     wasmSection(1, append([]byte{1, 0x60}, count...)),
-		"type results":        wasmSection(1, append([]byte{1, 0x60, 0}, count...)),
-		"module name":         wasmSection(0, append(wasmName("name"), wasmSection(0, wasmLEB(32<<20))...)),
-		"function name":       wasmSection(0, append(wasmName("name"), wasmSection(1, append([]byte{1, 0}, wasmLEB(32<<20)...))...)),
+		"imports":         wasmSection(2, count),
+		"globals":         wasmSection(6, count),
+		"exports":         wasmSection(7, count),
+		"elements":        wasmSection(9, count),
+		"data":            wasmSection(11, count),
+		"export name":     wasmSection(7, append([]byte{1}, wasmLEB(32<<20)...)),
+		"custom name":     wasmSection(0, wasmLEB(32<<20)),
+		"function names":  wasmSection(0, append(wasmName("name"), wasmSection(1, count)...)),
+		"local functions": wasmSection(0, append(wasmName("name"), wasmSection(2, count)...)),
+		"local names":     wasmSection(0, append(wasmName("name"), wasmSection(2, append([]byte{1, 0}, count...))...)),
+		"type parameters": wasmSection(1, append([]byte{1, 0x60}, count...)),
+		"type results":    wasmSection(1, append([]byte{1, 0x60, 0}, count...)),
+		"module name":     wasmSection(0, append(wasmName("name"), wasmSection(0, wasmLEB(32<<20))...)),
+		"function name":   wasmSection(0, append(wasmName("name"), wasmSection(1, append([]byte{1, 0}, wasmLEB(32<<20)...))...)),
 	}
 	for flags, prefix := range [][]byte{
 		{0, 0x41, 0, 0x0b}, {1, 0}, {2, 0, 0x41, 0, 0x0b, 0}, {3, 0},

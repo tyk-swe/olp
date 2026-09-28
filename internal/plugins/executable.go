@@ -61,7 +61,6 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, e.tier.limits.Time)
 	defer cancel()
 	out := call.output(e.tier.log, e.Digest)
-	defer out.close()
 	p, err := e.process(ctx)
 	var response abi.Response
 	if err == nil {
@@ -77,7 +76,7 @@ func (e *Executable) Call(ctx context.Context, call Call, result any) error {
 	case ctx.Err() != nil:
 		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", e.tier.limits.Time))
 	}
-	return refuse(CodeFailed, "The plugin stopped: "+err.Error()+".")
+	return refuseStopped(err.Error())
 }
 
 // stream serves call, whose result the plugin streams in parts before its
@@ -99,15 +98,14 @@ func (e *Executable) stream(ctx context.Context, call Call) (*streamed, error) {
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
 	case start.Err() != nil:
-		return nil, refuse(CodeTimedOut, fmt.Sprintf("The plugin did not start within its %s time limit.", e.tier.limits.Time))
+		return nil, refuseStartTimeout(e.tier.limits.Time)
 	default:
-		return nil, refuse(CodeFailed, "The plugin stopped: "+err.Error()+".")
+		return nil, refuseStopped(err.Error())
 	}
 	out := call.output(e.tier.log, e.Digest)
-	context.AfterFunc(ctx, out.close)
 	result, err := p.stream(call.context(ctx, out), request, call.Secrets)
 	if err != nil {
-		return nil, refuse(CodeFailed, "The plugin stopped: "+err.Error()+".")
+		return nil, refuseStopped(err.Error())
 	}
 	return result, nil
 }
@@ -160,7 +158,7 @@ func (e *Executable) launch(l *launch) {
 	defer cancel()
 	p, err := e.tier.start(ctx, e.name, e.Digest)
 	if err != nil && ctx.Err() != nil {
-		err = refuse(CodeTimedOut, fmt.Sprintf("The plugin did not start within its %s time limit.", e.tier.limits.Time))
+		err = refuseStartTimeout(e.tier.limits.Time)
 	}
 	e.mu.Lock()
 	e.starting = nil
@@ -433,7 +431,7 @@ func (p *process) stop(reason string) {
 			call.watchdog.Stop()
 		}
 		if call.result != nil {
-			call.result.fail(refuse(CodeFailed, "The plugin stopped: "+reason+"."))
+			call.result.fail(refuseStopped(reason))
 		}
 	}
 	close(p.done)
@@ -453,9 +451,9 @@ func (p *process) failure() error {
 }
 
 // read reads what the plugin writes to standard output: first its ABI
-// version, which it reports to hello, then responses and capability
-// requests, until the plugin and whatever it started close standard output,
-// or until reap stops waiting for them.
+// version, which it reports to hello, then responses, parts of them and
+// capability requests, until the plugin and whatever it started close
+// standard output, or until reap stops waiting for them.
 func (p *process) read(frames *bufio.Reader, hello chan<- error) {
 	defer p.reading.Done()
 	frame, err := readFrame(frames)
@@ -516,18 +514,7 @@ func (p *process) receive(frames *bufio.Reader) string {
 		case err != nil:
 			return err.Error()
 		case frame.Response != nil:
-			call := p.forget(frame.ID)
-			switch {
-			case call == nil:
-			case call.result != nil:
-				if call.watchdog != nil {
-					call.watchdog.Stop()
-				}
-				call.result.end(*frame.Response)
-			default:
-				call.watchdog.Stop()
-				call.reply <- *frame.Response
-			}
+			p.respond(frame.ID, *frame.Response)
 		case frame.Part != nil:
 			if violation := p.deliver(frame.ID, frame.Part); violation != "" {
 				return violation
@@ -541,6 +528,23 @@ func (p *process) receive(frames *bufio.Reader) string {
 		default:
 			return "a frame is neither a response, a part of one nor a capability request"
 		}
+	}
+}
+
+// respond hands a response the plugin sent to the call it answers.
+func (p *process) respond(id uint64, response abi.Response) {
+	call := p.forget(id)
+	switch {
+	case call == nil:
+		// A call OLP no longer awaits.
+	case call.result != nil:
+		if call.watchdog != nil {
+			call.watchdog.Stop()
+		}
+		call.result.end(response)
+	default:
+		call.watchdog.Stop()
+		call.reply <- response
 	}
 }
 

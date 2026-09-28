@@ -32,9 +32,10 @@ const modelValue = "model"
 // make to a prepared request.
 const hostingRewrite oif.Origin = "hosting_rewrite"
 
-// boundMembers are the request members OLP binds in each plugin dialect: the
-// model a target serves and the delivery, and its usage reporting, the caller
-// chose. Rewrites leave them alone.
+// boundMembers are the request members OLP binds in the plugin dialects that
+// carry them in the body: the model a target serves and the delivery, and its
+// usage reporting, the caller chose. Rewrites leave them alone. Gemini
+// addresses its model and delivery in the URL, so it binds none.
 var boundMembers = map[string][]string{
 	"openai-chat":        {"model", "stream", "stream_options"},
 	"openai-responses":   {"model", "stream"},
@@ -301,8 +302,6 @@ func (r rewrite) change(request oif.Document) (oif.Change, bool, error) {
 			return oif.Change{}, false, nil
 		case found && r.op == abi.RewriteDelete:
 			change.Remove = true
-		case found:
-			change.Value = string(r.value)
 		default:
 			change.Value = string(r.value)
 			for _, missing := range slices.Backward(r.path[i+1:]) {

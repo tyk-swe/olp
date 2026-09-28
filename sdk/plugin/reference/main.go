@@ -113,7 +113,13 @@ func (reference) Manifest() plugin.Manifest {
 				Address: "{grant.api_base}",
 				Headers: map[string]string{"Authorization": "Bearer {credential}", "X-Reference-Account": "{grant.account}", "X-Reference-Client": "olp"},
 			},
-		}, streamingProfile(api, headers), deviceChat()},
+		}, {
+			ID: "reference-streaming", Label: "Reference Responses, streaming only", Dialect: "openai-responses",
+			// The upstream's /streaming/v1 serves only streaming requests. OLP
+			// streams every request of the profile and aggregates the stream
+			// for callers that don't stream.
+			Hosting: plugin.Hosting{Address: api + "/streaming/v1", Headers: headers, ForceStreaming: true},
+		}, deviceChat()},
 	}
 }
 

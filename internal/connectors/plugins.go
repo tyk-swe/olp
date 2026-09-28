@@ -574,7 +574,7 @@ func parseAddress(text string, known func(name string) error) (address template,
 	}
 	// Go's URL parser refuses braces everywhere but the path.
 	u, err := url.Parse(fixed)
-	if len(text) > 2048 || err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(fixed, "#") {
+	if len(text) > 2048 || err != nil || !plainHTTPURL(u) || strings.Contains(fixed, "#") {
 		return template{}, "", &ProfileError{Field: "hosting.address", Message: "Declare the address as an http or https URL without credentials, query or fragment, such as https://api.example.com/v1. Options may appear in its path, such as {options.account}."}
 	}
 	return address, base, nil
@@ -711,7 +711,7 @@ func (p *PluginProfile) PlacesGrant(facts map[string]string) error {
 // canonical form.
 func (p *PluginProfile) baseURL(value string) (*url.URL, error) {
 	base, err := url.Parse(value)
-	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+	if err != nil || !plainHTTPURL(base) {
 		return nil, fmt.Errorf("grant fact %s holds no base URL", p.hosting.base)
 	}
 	origin := Origin(base)
@@ -720,6 +720,12 @@ func (p *PluginProfile) baseURL(value string) (*url.URL, error) {
 	}
 	base.Host = strings.TrimPrefix(origin, base.Scheme+"://")
 	return base, nil
+}
+
+// plainHTTPURL reports whether u is an http or https URL with a host, without
+// credentials, query or fragment.
+func plainHTTPURL(u *url.URL) bool {
+	return (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
 }
 
 // Origin returns a URL's origin in the canonical form plugin manifests

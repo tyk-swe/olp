@@ -119,15 +119,16 @@ async function deviceAuthorization(request, response, url) {
     if (!form.get('client_id'))
       return oauthError(response, 400, 'invalid_request', 'no client');
     const deviceCode = secret();
-    const userCode = randomBytes(4).toString('hex').toUpperCase();
+    const hex = randomBytes(4).toString('hex').toUpperCase();
+    const userCode = `${hex.slice(0, 4)}-${hex.slice(4)}`;
     devices.set(deviceCode, {
       clientId: form.get('client_id'),
-      userCode: `${userCode.slice(0, 4)}-${userCode.slice(4)}`,
+      userCode,
       decision: ''
     });
     return json(response, 200, {
       device_code: deviceCode,
-      user_code: devices.get(deviceCode).userCode,
+      user_code: userCode,
       verification_uri: `${origin}/oauth/device`,
       expires_in: 600,
       interval: 1

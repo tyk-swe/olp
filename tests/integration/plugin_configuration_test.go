@@ -79,7 +79,7 @@ func TestConfigurationPromotionOfPluginProviders(t *testing.T) {
 	if planned := plan(nil); !blocked(planned, "plugin_not_approved") {
 		t.Fatalf("the plan does not wait for approval: %v", planned)
 	}
-	destination.want(operator, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
+	approvePlugin(t, destination, operator, installed)
 
 	// The static credential binds like any other secret; a grant can't.
 	planned := plan(nil)
