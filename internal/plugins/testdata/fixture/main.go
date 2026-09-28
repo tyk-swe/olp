@@ -26,6 +26,7 @@ import (
 const secret = "sk-fixture-secret"
 
 var behaviour string
+var upstream = "https://api.example.com/v1"
 
 type fixture struct{}
 
@@ -33,9 +34,9 @@ func (fixture) Manifest() plugin.Manifest {
 	m := plugin.Manifest{
 		Name:    "fixture",
 		Version: "1.0.0",
-		Origins: []string{"https://api.example.com"},
+		Origins: []string{strings.TrimSuffix(upstream, "/v1")},
 		Profiles: []plugin.Profile{{ID: "fixture-chat", Label: "Fixture Chat", Dialect: "openai-chat", Hosting: plugin.Hosting{
-			Address: "https://api.example.com/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"},
+			Address: upstream, Headers: map[string]string{"Authorization": "Bearer {credential}"},
 		}, Signing: true}},
 	}
 	switch behaviour {
@@ -69,7 +70,8 @@ var calls atomic.Int64
 // a failure holding the credential, "large-failure:N" logs N records and
 // reports oversized failure diagnostics, "log" logs the credential, "stderr" writes
 // the credential to standard error just after it answers, "wait" returns once
-// its call is cancelled, "header:Name" returns that header,
+// its call is cancelled, "header:Name" returns that header, "credential-header"
+// returns a reserved header containing the credential in its name,
 // and "option:name" returns X-Fixture-Option, the provider's profile and value
 // of that option. Anything else returns X-Fixture-Signature and
 // X-Fixture-Calls, this instance's count of signed requests.
@@ -107,6 +109,8 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_cancelled", Message: "the call was cancelled"}
 	case "header":
 		return plugin.SignResult{Headers: map[string]string{rest: "fixture"}}, nil
+	case "credential-header":
+		return plugin.SignResult{Headers: map[string]string{"X-OLP-" + r.Credential: "fixture"}}, nil
 	case "option":
 		provider, ok := plugin.ProviderOf(ctx)
 		if !ok {

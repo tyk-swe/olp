@@ -143,7 +143,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 // other failure belongs to the endpoint the siblings share.
 func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, failure *attemptFailure) bool {
 	if failure.dispatched && slot.CredentialID != nil &&
-		(failure.class == classCredential || failure.status == http.StatusUnauthorized) {
+		(failure.credentialRefused || failure.class == classCredential || failure.status == http.StatusUnauthorized) {
 		// The upstream refused the credential, whatever rule classified the
 		// failure: a grant beneath it is refreshed early, which ends the
 		// cooldown (GrantRefreshed).

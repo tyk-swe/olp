@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -431,6 +432,55 @@ func TestAnUpstreamCredentialFailureRefreshesTheGrantEarly(t *testing.T) {
 	}
 }
 
+func TestAnAmbiguousStreamCredentialFailureRefreshesAGrantWithoutExpiry(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	authority.IssueFor(0)
+	upstream := newGrantUpstream(t, authority)
+	healthy := upstream.Server.Config.Handler
+	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authority.Authorized(r); !ok {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"error\":{\"message\":\"expired token\",\"type\":\"authentication_error\",\"code\":\"invalid_api_key\"}}\n\n")
+			return
+		}
+		healthy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Server.Close)
+	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
+	if grant := readGrant(t, h, credentialID); grant.expires != nil || grant.refresh != nil {
+		t.Fatalf("the grant already has an expiry or scheduled refresh: %+v", grant)
+	}
+	stream := func() (int, []byte) {
+		status, body, _ := h.gatewayRaw("POST", "/v1/chat/completions", key,
+			strings.NewReader(`{"model":"reference-account","messages":[{"role":"user","content":"hi"}],"stream":true}`),
+			map[string]string{"Content-Type": "application/json"})
+		return status, body
+	}
+	authority.RevokeAccessTokens()
+	if status, body := stream(); status != http.StatusBadGateway || !strings.Contains(string(body), "ambiguous_upstream_result") {
+		t.Fatalf("the strict stream did not retain its ambiguous outcome: %d %s", status, body)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		grant := readGrant(t, h, credentialID)
+		if grant.refresh != nil && !grant.refresh.After(time.Now()) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stream's credential refusal requested no early refresh")
+		}
+	}
+	if !pass(t, grantRefresher(t, h)) || readGrant(t, h, credentialID).generation != 2 {
+		t.Fatal("the refused grant was not refreshed")
+	}
+	h.refresh()
+	if status, body := stream(); status != http.StatusOK || !strings.Contains(string(body), "data: [DONE]") {
+		t.Fatalf("the refreshed grant did not serve the stream: %d %s", status, body)
+	}
+}
+
 // The old attempt's refusal arrives after the gateway installs a replacement
 // token. It must neither refresh that healthy token nor cool its credential.
 func TestLateCredentialRefusalDoesNotPenalizeARefreshedGrant(t *testing.T) {
@@ -459,8 +509,10 @@ func TestLateCredentialRefusalDoesNotPenalizeARefreshedGrant(t *testing.T) {
 	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	refresher := grantRefresher(t, h)
 	// Compile and instantiate before the request's deadline starts, including
-	// under the race detector. Only the refresh itself holds the attempt open.
-	if _, err := refresher.Plugins.Manifest(t.Context(), digest); err != nil {
+	// under the race detector. Reading the stored manifest does not load code;
+	// call the plugin so only the refresh itself holds the attempt open.
+	var manifest abi.Manifest
+	if err := refresher.Plugins.Call(t.Context(), digest, plugins.Call{Method: abi.MethodManifest}, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	refreshed := make(chan struct{})

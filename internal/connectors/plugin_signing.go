@@ -75,7 +75,8 @@ func (p *PluginProfile) sign(ctx context.Context, signer Signer, options map[str
 		// one, it never replaces anything the request already carries.
 		if !ConfigurableHeader(name) || slices.ContainsFunc(p.profile.SemanticHeaders, func(semantic string) bool { return strings.EqualFold(semantic, name) }) ||
 			len(req.Header.Values(name)) > 0 || !httpguts.ValidHeaderFieldValue(value) {
-			return nil, fmt.Errorf("%w: the plugin's signing hook returned header %q, which a signature can't add", ErrSigningUnavailable, name)
+			// The hook may put credentials in the name as well as the value.
+			return nil, fmt.Errorf("%w: the plugin's signing hook returned a header which a signature can't add", ErrSigningUnavailable)
 		}
 		req.Header.Set(name, value)
 		signed = append(signed, value)

@@ -182,3 +182,30 @@ func TestPluginSigningFailuresFailTheRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectedSigningHeaderNamesDoNotRevealCredentials(t *testing.T) {
+	for _, grant := range []bool{false, true} {
+		t.Run(fmt.Sprintf("grant_%t", grant), func(t *testing.T) {
+			const token = "signing-secret"
+			manifest, credential := signingManifest(), []byte(token)
+			if grant {
+				manifest = grantManifest()
+				manifest.Profiles[0].Signing = true
+				credential = grantCredential(t, token, map[string]string{"account": "a", "project": "p"})
+			}
+			signer := &recordingSigner{headers: map[string]string{"X-OLP-" + token: "rejected"}}
+			req, _ := http.NewRequest(http.MethodPost, "https://api.acme.example/v2/chat/completions", nil)
+			cfg := pluginConfig(t, manifest)
+			if grant {
+				cfg.AuthMode, cfg.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+			}
+			_, err := signingAuth(signer).Apply(t.Context(), req, cfg, credential, nil)
+			if !errors.Is(err, ErrSigningUnavailable) {
+				t.Fatalf("want signing unavailable, got %v", err)
+			}
+			if strings.Contains(err.Error(), token) {
+				t.Fatal("the rejected header's name revealed the credential")
+			}
+		})
+	}
+}

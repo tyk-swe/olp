@@ -197,6 +197,9 @@ type attemptFailure struct {
 	contractCode string              // safe runtime interaction guard violation
 	policyCode   string              // local output policy refusal after upstream completion
 	noRetry      bool                // strict outcome uncertainty must not suggest client retries
+	// credentialRefused survives ambiguity so a grant can refresh without
+	// allowing this attempt to fail over.
+	credentialRefused bool
 	// aggregateTooLarge reports a forced stream whose non-streaming result
 	// exceeded the response size limit.
 	aggregateTooLarge bool
@@ -365,13 +368,14 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 // attemptState tracks why an attempt context ended and what the attempt
 // established about its upstream exchange.
 type attemptState struct {
-	parent     context.Context
-	classifier upstream.Classifier
-	reason     atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
-	dispatched atomic.Bool  // request bytes may have reached the upstream
-	status     int          // the unsuccessful status the upstream answered with
-	accepted   bool         // the upstream answered with success
-	settled    bool         // the upstream's complete result arrived
+	parent            context.Context
+	classifier        upstream.Classifier
+	reason            atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
+	dispatched        atomic.Bool  // request bytes may have reached the upstream
+	status            int          // the unsuccessful status the upstream answered with
+	accepted          bool         // the upstream answered with success
+	settled           bool         // the upstream's complete result arrived
+	credentialRefused bool         // classification before unresolved work becomes ambiguous
 }
 
 // trace supplies the dispatch evidence of a net/http request.
@@ -390,7 +394,9 @@ func (st *attemptState) rejected(status int, stated *openai.UpstreamError) strin
 	st.status = status
 	e := st.evidence()
 	e.Error = stated
-	return string(st.classifier.Classify(e).Class)
+	outcome := st.classifier.Classify(e)
+	st.credentialRefused = outcome.CredentialRefused
+	return string(outcome.Class)
 }
 
 // classify classifies an exchange that err ended: an in-band error the
@@ -403,7 +409,9 @@ func (st *attemptState) classify(err error, committed bool) string {
 	} else {
 		e.Interrupted, e.Err = st.interrupted(err), err
 	}
-	return string(st.classifier.Classify(e).Class)
+	outcome := st.classifier.Classify(e)
+	st.credentialRefused = outcome.CredentialRefused
+	return string(outcome.Class)
 }
 
 // interrupted reports why the gateway ended the exchange: the caller's
@@ -517,6 +525,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			f = &attemptFailure{}
 		}
 		f.dispatched = st.dispatched.Load()
+		f.credentialRefused = st.credentialRefused
 		f.acceptance = st.evidence().Acceptance()
 		f.accepted = st.accepted
 		if x.continuation != nil && x.continuation.resource != nil {

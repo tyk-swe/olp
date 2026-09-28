@@ -138,12 +138,16 @@ func (r Rule) matches(e Evidence) bool {
 type Outcome struct {
 	Class      Class
 	Acceptance Acceptance
+	// CredentialRefused preserves the credential failure even when unresolved
+	// work makes its routing class ambiguous.
+	CredentialRefused bool
 }
 
 // Classify classifies an exchange that ended without the result its call
 // needed.
 func (c Classifier) Classify(e Evidence) Outcome {
 	outcome := Outcome{Class: c.class(e), Acceptance: e.Acceptance()}
+	outcome.CredentialRefused = outcome.Class == Credential
 	if c.AtMostOnce && outcome.Acceptance.Unresolved() {
 		switch outcome.Class {
 		// Every failover-eligible class, whether a built-in rule or a

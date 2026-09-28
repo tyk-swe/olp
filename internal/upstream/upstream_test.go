@@ -64,7 +64,7 @@ func TestClassifyStatusRejections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.classifier.Classify(Evidence{Reached: true, Status: tc.status, Error: tc.stated})
-			if got.Class != tc.want {
+			if got.Class != tc.want || got.CredentialRefused != (tc.want == Credential) {
 				t.Fatalf("class %q, want %q", got.Class, tc.want)
 			}
 		})
@@ -123,7 +123,7 @@ func TestClassifyInBandErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stated := tc.stated
 			got := tc.classifier.Classify(Evidence{Reached: true, Accepted: true, Error: &stated, Committed: tc.committed})
-			if got.Class != tc.want || got.Acceptance != Accepted {
+			if got.Class != tc.want || got.Acceptance != Accepted || got.CredentialRefused != (tc.want == Credential) {
 				t.Fatalf("outcome %+v, want class %q accepted", got, tc.want)
 			}
 		})
@@ -167,7 +167,7 @@ func TestDeclaredClassificationPrecedesTheBuiltInRules(t *testing.T) {
 		{"transport failures state nothing", Evidence{Reached: true, Err: errors.New("connection reset")}, Connect},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := declared.Classify(tc.evidence); got.Class != tc.want || got.Acceptance != tc.evidence.Acceptance() {
+			if got := declared.Classify(tc.evidence); got.Class != tc.want || got.Acceptance != tc.evidence.Acceptance() || got.CredentialRefused != (tc.want == Credential) {
 				t.Fatalf("outcome %+v, want class %q", got, tc.want)
 			}
 		})
@@ -180,11 +180,15 @@ func TestDeclaredClassificationPrecedesTheBuiltInRules(t *testing.T) {
 		t.Fatalf("a later matching rule did not decide: %q", got)
 	}
 	once := Classifier{AtMostOnce: true, Declared: []Rule{{Status: 400, Class: ServerError}, {Type: "busy", Class: ServerError}}}
-	if got := once.Classify(Evidence{Reached: true, Status: 400}); got != (Outcome{ServerError, Terminal}) {
+	if got := once.Classify(Evidence{Reached: true, Status: 400}); got != (Outcome{Class: ServerError, Acceptance: Terminal}) {
 		t.Fatalf("a retryable rejection the upstream settled %+v", got)
 	}
-	if got := once.Classify(Evidence{Reached: true, Accepted: true, Error: stated("busy", "")}); got != (Outcome{Ambiguous, Accepted}) {
+	if got := once.Classify(Evidence{Reached: true, Accepted: true, Error: stated("busy", "")}); got != (Outcome{Class: Ambiguous, Acceptance: Accepted}) {
 		t.Fatalf("a retryable in-band failure of accepted work %+v", got)
+	}
+	declared.AtMostOnce = true
+	if got := declared.Classify(Evidence{Reached: true, Accepted: true, Error: stated("", "account_suspended")}); got != (Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}) {
+		t.Fatalf("an ambiguous declared credential failure lost its refusal: %+v", got)
 	}
 }
 
@@ -220,18 +224,20 @@ func TestAtMostOnceCallsNeverFailOverUnresolvedWork(t *testing.T) {
 		evidence Evidence
 		want     Outcome
 	}{
-		{"unsent connect failure fails over", Evidence{Err: errors.New("dial")}, Outcome{Connect, NotSent}},
-		{"sent connect failure", Evidence{Reached: true, Err: errors.New("reset")}, Outcome{Ambiguous, Unknown}},
-		{"timeout after acceptance", Evidence{Reached: true, Accepted: true, Interrupted: context.DeadlineExceeded}, Outcome{Ambiguous, Accepted}},
-		{"server failure", Evidence{Reached: true, Status: 502}, Outcome{Ambiguous, Unknown}},
-		{"in-band server failure", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "overloaded_error"}}, Outcome{Ambiguous, Accepted}},
-		{"stated rate limit", Evidence{Reached: true, Status: 429}, Outcome{RateLimit, Terminal}},
-		{"stated credential rejection", Evidence{Reached: true, Status: 401}, Outcome{Credential, Terminal}},
-		{"context rejection", Evidence{Reached: true, Status: 400, Error: &openai.UpstreamError{Code: "prompt_too_long"}}, Outcome{ContextWindow, Terminal}},
-		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "rate_limit_error"}}, Outcome{Ambiguous, Accepted}},
-		{"caller cancellation", Evidence{Reached: true, Interrupted: context.Canceled}, Outcome{Cancelled, Unknown}},
-		{"malformed accepted result", Evidence{Reached: true, Accepted: true, Err: &openai.ProtocolError{}}, Outcome{Protocol, Accepted}},
-		{"failure after the result settled", Evidence{Reached: true, Accepted: true, Settled: true, Err: errors.New("commit")}, Outcome{Connect, Terminal}},
+		{"unsent connect failure fails over", Evidence{Err: errors.New("dial")}, Outcome{Class: Connect, Acceptance: NotSent}},
+		{"sent connect failure", Evidence{Reached: true, Err: errors.New("reset")}, Outcome{Class: Ambiguous, Acceptance: Unknown}},
+		{"timeout after acceptance", Evidence{Reached: true, Accepted: true, Interrupted: context.DeadlineExceeded}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
+		{"server failure", Evidence{Reached: true, Status: 502}, Outcome{Class: Ambiguous, Acceptance: Unknown}},
+		{"in-band server failure", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "overloaded_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
+		{"stated rate limit", Evidence{Reached: true, Status: 429}, Outcome{Class: RateLimit, Acceptance: Terminal}},
+		{"stated credential rejection", Evidence{Reached: true, Status: 401}, Outcome{Class: Credential, Acceptance: Terminal, CredentialRefused: true}},
+		{"in-band credential rejection", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "authentication_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
+		{"credential rejection after commit", Evidence{Reached: true, Accepted: true, Committed: true, Error: &openai.UpstreamError{Code: "invalid_api_key"}}, Outcome{Class: Ambiguous, Acceptance: Accepted, CredentialRefused: true}},
+		{"context rejection", Evidence{Reached: true, Status: 400, Error: &openai.UpstreamError{Code: "prompt_too_long"}}, Outcome{Class: ContextWindow, Acceptance: Terminal}},
+		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "rate_limit_error"}}, Outcome{Class: Ambiguous, Acceptance: Accepted}},
+		{"caller cancellation", Evidence{Reached: true, Interrupted: context.Canceled}, Outcome{Class: Cancelled, Acceptance: Unknown}},
+		{"malformed accepted result", Evidence{Reached: true, Accepted: true, Err: &openai.ProtocolError{}}, Outcome{Class: Protocol, Acceptance: Accepted}},
+		{"failure after the result settled", Evidence{Reached: true, Accepted: true, Settled: true, Err: errors.New("commit")}, Outcome{Class: Connect, Acceptance: Terminal}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := once.Classify(tc.evidence); got != tc.want {
@@ -239,7 +245,7 @@ func TestAtMostOnceCallsNeverFailOverUnresolvedWork(t *testing.T) {
 			}
 		})
 	}
-	if got := (Classifier{}).Classify(Evidence{Reached: true, Status: 502}); got != (Outcome{ServerError, Unknown}) {
+	if got := (Classifier{}).Classify(Evidence{Reached: true, Status: 502}); got != (Outcome{Class: ServerError, Acceptance: Unknown}) {
 		t.Fatalf("repeatable server failure %+v", got)
 	}
 }

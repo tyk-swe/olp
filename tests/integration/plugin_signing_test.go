@@ -23,8 +23,41 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
+
+func TestRejectedSigningHeadersDoNotExposeCredentialsInProviderDiagnostics(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	viewer := h.invite(owner, "viewer@example.com", "viewer")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a request with a rejected signing header reached the upstream")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.upstream="+upstream.URL+"/v1"))
+	const credential = "credential-header:probe-secret"
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Rejected signing header", "credential": credential, "model": vendorModel,
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "static_credential", "profile_id": "fixture-chat", "profile_revision": digest},
+	}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + created["id"].(string)
+	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(created), 200)
+	if probe["succeeded"] != false {
+		t.Fatalf("the rejected signing header did not fail the probe: %v", probe)
+	}
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	if detail["last_probe_status"] != "failed" || detail["last_probe_detail"] != probe["detail"] {
+		t.Fatal("the failed probe diagnostic was not persisted")
+	}
+	health := h.want(viewer, "GET", "/api/v1/provider-health", nil, nil, 200)
+	for surface, result := range map[string]any{"probe": probe, "provider": detail, "viewer health": health} {
+		if strings.Contains(fmt.Sprint(result), credential) {
+			t.Errorf("%s revealed the signing credential", surface)
+		}
+	}
+}
 
 // signedUpstream is the fictional upstream of the reference plugin's signed
 // profile: an OpenAI Chat Completions server that authenticates each request
