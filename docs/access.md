@@ -75,8 +75,9 @@ tokens must have a verified email and valid signature, issuer, audience, expiry,
 and nonce. Email collisions require explicit linking after recent
 authentication. Enrollment/link/unlink and plugin-permit proofs expire after
 five minutes, are purpose/resource-bound, and are consumed once; an OIDC
-reauthentication for `plugin_permit` returns to the Plugins page. Authentication-method changes
-rotate the current session and revoke prior sessions.
+reauthentication for `plugin_permit` returns to the Plugins page.
+Authentication-method changes rotate the current session and revoke prior
+sessions.
 
 Only the explicit `oidctest` build tag permits a loopback HTTP issuer; no
 environment variable relaxes OIDC transport checks. The integration runner
@@ -127,13 +128,15 @@ inactive or OIDC-deauthorized, loses operations the creator's current role does
 not hold, and reaches only the creator's projects when the creator has an
 assigned access scope. Nothing is revoked, so a creator who regains authority
 also restores their tokens; see
-[the decision](adr/0005-management-tokens-act-within-their-creators-authority.md). Token administration itself —
-create, list, read, revoke — is always session-owner-only; no management token
-can manage tokens. Installing, approving, permitting and uninstalling
-[provider plugins](plugins.md) is session-owner-only in the same way, while any
-role or token with `read` can list plugins and their declarations. Permitting an
-unconfined plugin also takes a recent authentication for `plugin_permit`. Revocation and expiry take effect immediately and audit
-records attribute machine actions to the token rather than to a member.
+[the decision](adr/0005-management-tokens-act-within-their-creators-authority.md).
+Token administration itself — create, list, read, revoke — is always
+session-owner-only; no management token can manage tokens. Installing,
+approving, permitting and uninstalling [provider plugins](plugins.md) is
+session-owner-only in the same way, while any role or token with `read` can list
+plugins and their declarations. Permitting an unconfined plugin also takes a
+recent authentication for `plugin_permit`. Revocation and expiry take effect
+immediately and audit records attribute machine actions to the token rather than
+to a member.
 
 Omitting `project_ids` creates an all-projects token. An explicit list limits
 access to those projects with manager-equivalent project access, still bounded

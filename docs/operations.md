@@ -319,9 +319,10 @@ deployment termination budget.
 
 Delivery and replay evidence is retained for seven days plus five minutes of
 clock-skew grace. A late entry is recorded as uncertain completeness, never
-silently counted twice. Size PostgreSQL for up to `sustained_requests_per_second
-* 604800` receipt rows. During a delivery incident, restore/reconcile the Stream
-within seven days; do not extend the window by suspending maintenance.
+silently counted twice. Size PostgreSQL for up to
+`sustained_requests_per_second * 604800` receipt rows. During a delivery
+incident, restore/reconcile the Stream within seven days; do not extend the
+window by suspending maintenance.
 
 ### Queue durability
 

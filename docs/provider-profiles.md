@@ -248,10 +248,10 @@ First-party contract references consulted for these compositions:
 A gateway using `OLP_CONNECTOR_CONFIG_FILE` without database decryption keys may
 supply `network_credential_file` beside `credential_file` in each mounted
 provider entry. A plugin provider mounts its static credential the same way;
-its profile comes from the plugin its published revision pins. The network file contains the same private JSON shape as the
-creation API. Its configured credential UUID must match the published provider's
-network reference; mounting a file cannot create authority. For an explicit
-profile the mounted configuration must match the published model-significant
-and network settings; only secret material is supplied locally. Current
-revocation still applies, and mounted secret values are excluded from
-serialization and diagnostic formatting.
+its profile comes from the plugin its published revision pins. The network file
+contains the same private JSON shape as the creation API. Its configured
+credential UUID must match the published provider's network reference; mounting
+a file cannot create authority. For an explicit profile the mounted
+configuration must match the published model-significant and network settings;
+only secret material is supplied locally. Current revocation still applies, and
+mounted secret values are excluded from serialization and diagnostic formatting.

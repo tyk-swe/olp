@@ -287,9 +287,10 @@ credential authority export a stable `credential_ref` of
 digest (`profile_revision`), never the module. Every slot of a provider that
 authenticates with a [grant](plugins.md#grant-enrollment) exports its
 `credential_ref`, enrolled or not, and no grant material: no tokens, observed
-principal or grant facts. Slot `allowed_api_keys` restrictions are not portable — API keys are
-installation-local — so export always emits an empty list and import rejects a
-non-empty one; re-establish them on the destination after creating keys.
+principal or grant facts. Slot `allowed_api_keys` restrictions are not portable
+— API keys are installation-local — so export always emits an empty list and
+import rejects a non-empty one; re-establish them on the destination after
+creating keys.
 
 Every exported route carries an explicit
 [fidelity](provider-routing.md#route-fidelity) mode. A route entry without

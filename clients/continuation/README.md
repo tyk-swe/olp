@@ -26,7 +26,7 @@ to 24 hours. It is scoped to that key, route, provider revision, serving
 identity, parent branch and live credential permission. Recovery requires the
 same key and contract header:
 
-```
+```http
 GET /v1/continuation-submissions/{timestamp.UUID}
 GET /v1/continuations/{continuation_<uuid>}
 X-OLP-Continuation: chat-anthropic-tools-v1
@@ -36,13 +36,13 @@ Authorization: Bearer <api-key>
 A ready recovery contains the standard assistant message and the original
 recorded unary body or streaming chunks; it contains no opaque native
 signature. `recoverSubmission` / `recover_submission` call this read-only
-endpoint after a lost response. An accepted request that never committed a ready delivery returns
-`continuation_outcome_unknown` and **must not** be resent under a new
-submission identity as if it were known unused. The provider may have accepted
-work before the gateway saw a terminal result. OLP does not promise exactly
-once provider work or tool execution. A changed history, missing tool result,
-changed control, expired or tampered handle, or revoked key/credential fails
-closed. Ordinary text observations may arrive before the encrypted ready
+endpoint after a lost response. An accepted request that never committed a ready
+delivery returns `continuation_outcome_unknown` and **must not** be resent under
+a new submission identity as if it were known unused. The provider may have
+accepted work before the gateway saw a terminal result. OLP does not promise
+exactly once provider work or tool execution. A changed history, missing tool
+result, changed control, expired or tampered handle, or revoked key/credential
+fails closed. Ordinary text observations may arrive before the encrypted ready
 commit; ordinary actionable tool chunks arrive only after it.
 
 The helper rejects unsupported SDK versions before sending a request. A bare

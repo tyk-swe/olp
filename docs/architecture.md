@@ -55,9 +55,9 @@ so snapshots carry its plugin profile and gateways read no manifest; a
 profile's signing hook runs on the code `plugins.Host` loads by digest: a
 confined plugin's module on wazero, or an unconfined plugin's executable as a
 subprocess speaking the ABI over stdio, where the deployment enables the
-unconfined tier. Their callers still own SQL,
-transactions, authorization, credential checks, and operation eligibility. Publication alone
-drops empty provider limits; retained resources preserve the stored limits.
+unconfined tier. Their callers still own SQL, transactions, authorization,
+credential checks, and operation eligibility. Publication alone drops empty
+provider limits; retained resources preserve the stored limits.
 
 The console usage feature owns `PricingRevisionsPanel`, including its queries,
 form, decimal validation, submission, and pagination. Settings keeps the panel
@@ -126,8 +126,9 @@ composition root own the other unary operations, and `internal/mediacontract`,
 own their surfaces. The planner still owns policy coverage, profile compatibility,
 source requirements and client continuation; `internal/providerinvoke` owns the
 transformed admission path. See
-[the source decision](adr/0001-immutable-operation-sources.md) and
-[route fidelity](adr/0002-strict-or-transformed-route-fidelity.md).
+[the source decision](adr/0001-immutable-operation-sources.md),
+[route fidelity](adr/0002-strict-or-transformed-route-fidelity.md) and
+[recoverable continuation](adr/0003-resource-owned-recoverable-continuation.md).
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
 events; retries and deduplication support recovery. Durable media jobs and

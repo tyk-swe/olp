@@ -183,8 +183,9 @@ route fails over. Report a credential you can't sign with as a `*plugin.Error`
 with a code of your own, such as `credential_expired`: that alone makes the
 attempt a credential failure, which cools the credential's slot down. A plain
 error, a panic or anything past the limits reports the `internal` code or
-none, and blames nothing on the credential. A plugin that declares a signing profile without
-implementing `Signer` reports no manifest, so OLP refuses to install it.
+none, and blames nothing on the credential. A plugin that declares a signing
+profile without implementing `Signer` reports no manifest, so OLP refuses to
+install it.
 
 Signing adds plugin code to every request. It runs in about two milliseconds
 for a small body, and its cost grows with the body, which crosses the ABI as

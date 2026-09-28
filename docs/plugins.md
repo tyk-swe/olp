@@ -173,8 +173,8 @@ carry over.
 A gateway serving from [mounted connectors](configuration.md#mounted-connectors)
 mounts a plugin provider's static credential with `credential_file`. The
 mounted `configuration` must match the published revision, including its
-`profile_revision`, endpoint and plugin options. A mounted gateway refuses a provider that
-authenticates with a grant.
+`profile_revision`, endpoint and plugin options. A mounted gateway refuses a
+provider that authenticates with a grant.
 
 ### Options
 
@@ -470,12 +470,13 @@ provider's profile and options, and carry neither the module nor grant
 material. To apply an export on another installation, install and approve the
 same build there, or permit it for an unconfined plugin on a deployment that
 enables the [tier](#unconfined-plugins-experimental): until then, the plan
-reports a `plugin` blocker for the digest. A static plugin credential binds through `secret_bindings` like any
-other secret. A credential slot a grant backs imports without a credential: the
-plan lists it for grant enrollment, and the imported provider activates once
-grant enrollment, the credential pool's **Enroll grant** on each slot, has given
-its serving slots credential versions. A slot already holding a grant that
-another build enrolled is listed for grant enrollment too.
+reports a `plugin` blocker for the digest. A static plugin credential binds
+through `secret_bindings` like any other secret. A credential slot a grant backs
+imports without a credential: the plan lists it for grant enrollment, and the
+imported provider activates once grant enrollment, the credential pool's
+**Enroll grant** on each slot, has given its serving slots credential versions.
+A slot already holding a grant that another build enrolled is listed for grant
+enrollment too.
 
 ## Uninstalling
 
