@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -127,6 +129,52 @@ func TestServedButUnreadableAttemptLeavesBillingUncertain(t *testing.T) {
 	}
 	if a.UsageObserved || a.UsageComplete || !a.BillingUncertain {
 		t.Fatalf("an attempt the upstream served was treated as certain: %+v", a)
+	}
+}
+
+func TestStrictUnreadableUnaryResultLeavesBillingUncertain(t *testing.T) {
+	for name, body := range map[string]string{
+		"invalid JSON":   `{"data":`,
+		"invalid result": `{"data":"invalid"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			testStrictUnreadableUnaryResult(t, body)
+		})
+	}
+}
+
+func testStrictUnreadableUnaryResult(t *testing.T, body string) {
+	t.Helper()
+	h := strictHarness(t, func(snapshot *runtime.Snapshot) {
+		for id, provider := range snapshot.Providers {
+			provider.Capabilities = []runtime.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+			snapshot.Providers[id] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{"embeddings"}
+		snapshot.Routes[routeSlug] = route
+	})
+	h.mock.set("a", status(http.StatusOK, body))
+	resp := h.do(t.Context(), http.MethodPost, "/v1/embeddings", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hi"}`), nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s dispatches=%d/%d", resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+	}
+	env := h.sink.last(t)
+	if len(env.Attempts) != 1 {
+		t.Fatalf("attempts %+v", env.Attempts)
+	}
+	a := env.Attempts[0]
+	if a.Interaction == nil || a.Interaction.UpstreamState != usage.UpstreamTerminal || a.Interaction.ClientState != usage.ClientUnobserved {
+		t.Errorf("complete upstream response lost its interaction evidence: %+v", a.Interaction)
+	}
+	if a.Status != http.StatusOK || a.UsageObserved || a.UsageComplete || !a.BillingUncertain {
+		t.Errorf("an accepted but unreadable result settled billing: %+v", a)
+	}
+	x := &execution{estimate: 100, facts: env.Attempts}
+	if got := *x.settledTokens(); got != x.estimate {
+		t.Errorf("unmetered accepted work settled %d tokens, want estimate %d", got, x.estimate)
 	}
 }
 

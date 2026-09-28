@@ -180,7 +180,7 @@ func (e *Executable) launch(l *launch) {
 // process is one run of an unconfined plugin's executable.
 type process struct {
 	cmd     *exec.Cmd
-	stdin   io.Writer
+	stdin   io.WriteCloser
 	log     *slog.Logger
 	limit   time.Duration
 	writing sync.Mutex
@@ -335,11 +335,13 @@ func (p *process) stream(ctx context.Context, request abi.Request, secrets []str
 	id := p.next
 	p.calls[id] = call
 	p.mu.Unlock()
+	// Arm cancellation before writing: a carrier may stop reading stdin,
+	// holding send and every other writer until the watchdog stops it.
+	context.AfterFunc(ctx, func() { p.cancel(id, ctx.Err()) })
 	if err := p.send(abi.Frame{ID: id, Request: &request}); err != nil {
 		p.stop("OLP could not write to it")
 		return nil, p.failure()
 	}
-	context.AfterFunc(ctx, func() { p.cancel(id, ctx.Err()) })
 	return call.result, nil
 }
 
@@ -421,6 +423,9 @@ func (p *process) stop(reason string) {
 		kill(p.cmd.Process.Pid)
 	}
 	p.mu.Unlock()
+	// Closing the host's pipe interrupts a blocked write even if another
+	// process still holds the plugin's read end.
+	_ = p.stdin.Close()
 	for _, call := range calls {
 		if call.watchdog != nil {
 			call.watchdog.Stop()

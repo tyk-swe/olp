@@ -188,6 +188,7 @@ type attemptFailure struct {
 	retryAfter   time.Duration
 	upstream     *openai.UpstreamError
 	acceptance   upstream.Acceptance // what the exchange established about the upstream's work
+	accepted     bool                // a successful response began, even if its result could not be metered
 	overall      bool                // the route deadline, not the attempt deadline, expired
 	dispatched   bool                // the request reached the upstream before the failure
 	quota        string              // a quota this gateway enforces rejected the attempt
@@ -208,13 +209,14 @@ const (
 // billingUncertain reports whether the upstream may have served and billed
 // work this attempt cannot account for. Anything already delivered to the
 // client was served, and work the upstream may hold is what its acceptance
-// leaves unresolved: a stated rejection costs nothing, a 5xx may have done
-// the work its status denied, and a failure that never left this gateway is
-// free. The acceptance, not the class, decides: a declared rule changes how
-// the failure is routed, never what was billed. A failure built without
-// classified evidence falls back to its class.
+// leaves unresolved. A successful response may be billable even when its
+// result is terminal but unreadable. A stated rejection costs nothing, a 5xx
+// may have done the work its status denied, and a failure that never left this
+// gateway is free. Exchange evidence, not the class, decides: a declared rule
+// changes how the failure is routed, never what was billed. A failure built
+// without classified evidence falls back to its class.
 func (f *attemptFailure) billingUncertain() bool {
-	if f.committed {
+	if f.committed || f.accepted {
 		return true
 	}
 	if f.acceptance != "" {
@@ -514,6 +516,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 		f.dispatched = st.dispatched.Load()
 		f.acceptance = st.evidence().Acceptance()
+		f.accepted = st.accepted
 		if x.continuation != nil && x.continuation.resource != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			_ = s.Resources.MarkUnknown(cleanup, x.continuation.resource)

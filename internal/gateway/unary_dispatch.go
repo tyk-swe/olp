@@ -37,6 +37,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		}
 		f.dispatched = state.dispatched.Load()
 		f.acceptance = state.evidence().Acceptance()
+		f.accepted = state.accepted
 		f.noRetry = f.dispatched
 		f.class = class
 		fact.Class = class

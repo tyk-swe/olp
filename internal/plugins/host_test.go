@@ -305,6 +305,73 @@ func TestHostEvictsTheLeastRecentlyUsedIdleCode(t *testing.T) {
 	}
 }
 
+type heldCode struct {
+	started chan struct{}
+	close   func()
+}
+
+func (c *heldCode) Call(ctx context.Context, _ Call, _ any) error {
+	c.started <- struct{}{}
+	<-ctx.Done()
+	return nil
+}
+
+func (c *heldCode) Close(context.Context) error {
+	c.close()
+	return nil
+}
+
+func TestHostEvictsExcessCodeWhenItsFinalCallFinishes(t *testing.T) {
+	host := &Host{hosted: map[string]*hosted{}}
+	loaded := make(chan struct{})
+	close(loaded)
+	started := make(chan struct{})
+	var closed []string
+	for i := range maxHosted + 1 {
+		digest := strconv.Itoa(i)
+		host.hosted[digest] = &hosted{loaded: loaded, verified: time.Now(), code: &heldCode{started: started, close: func() {
+			if !host.mu.TryLock() {
+				t.Error("the host closed evicted code while holding its mutex")
+				return
+			}
+			defer host.mu.Unlock()
+			closed = append(closed, digest)
+		}}}
+	}
+	start := func(digest string) func() {
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if err := host.Call(ctx, digest, Call{}, nil); err != nil {
+				t.Error(err)
+			}
+		}()
+		<-started
+		return func() {
+			cancel()
+			<-done
+		}
+	}
+	finish := make([]func(), maxHosted+1)
+	for i := range finish {
+		finish[i] = start(strconv.Itoa(i))
+	}
+	last := start("0")
+	finish[0]()
+	if len(host.hosted) != maxHosted+1 || len(closed) != 0 {
+		t.Fatalf("code still in use was evicted: kept %d, closed %v", len(host.hosted), closed)
+	}
+	last()
+	for _, done := range finish[1:] {
+		done()
+	}
+	if len(host.hosted) != maxHosted || !slices.Equal(closed, []string{"0"}) {
+		t.Fatalf("idle excess code was retained: kept %d, closed %v", len(host.hosted), closed)
+	}
+}
+
 // BenchmarkSign measures the per-request overhead of a signing hook: the
 // reference plugin signing chat requests on instances the host keeps.
 //

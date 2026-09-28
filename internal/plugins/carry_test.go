@@ -245,6 +245,62 @@ func TestAPluginThatIgnoresACancelledCarryIsStopped(t *testing.T) {
 	}
 }
 
+// A carrier that stops reading stdin cannot keep a large request, or another
+// call waiting to write, alive after cancellation and the watchdog's limit.
+func TestCarryCancellationInterruptsABlockedRequestWrite(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits
+	limits.Time = time.Second
+	u := NewUnconfined(t.TempDir(), limits, slog.New(slog.DiscardHandler))
+	file := script(t, u, "unread", `echo '{"abi_version":1}'
+read call
+echo '{"id":1,"response":{"result":{}}}'
+dd bs=1 count=1 of=/dev/null 2>/dev/null
+touch writing
+exec sleep 60`)
+	host := newUnconfinedHost(t, u, file)
+	if _, err := sign(t, host, file.Digest, "sk-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	finished := make(chan error, 2)
+	for range 2 {
+		go func() {
+			resp, err := carry(ctx, host, file.Digest, "https://api.example.com", strings.Repeat("x", 1<<20))
+			if resp != nil {
+				resp.Body.Close()
+			}
+			finished <- err
+		}()
+	}
+	// The carrier reads one byte of the first request, then leaves the rest
+	// unread. Cancel only once the large write has actually reached stdin.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(u.dir, "writing")); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the carried request never reached the plugin's stdin")
+		}
+	}
+	cancel()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for range 2 {
+		select {
+		case err := <-finished:
+			if !errors.Is(err, connectors.ErrNotSent) {
+				t.Fatalf("a request the plugin never read failed with %v", err)
+			}
+		case <-timeout.C:
+			t.Fatal("a blocked request write retained a cancelled carried call")
+		}
+	}
+}
+
 // OLP holds a streamed result's parts for its reader without holding up the
 // plugin, but not without bound: a reader too far behind loses the result
 // after the parts it holds.

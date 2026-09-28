@@ -243,7 +243,14 @@ func (h *Host) use(digest string) *hosted {
 func (h *Host) done(entry *hosted) {
 	h.mu.Lock()
 	entry.calls--
+	var evicted []code
+	if entry.calls == 0 {
+		evicted = h.evict()
+	}
 	h.mu.Unlock()
+	for _, c := range evicted {
+		c.Close(context.Background())
+	}
 }
 
 // load reads a plugin and prepares its code: it compiles a confined plugin's
