@@ -19,6 +19,11 @@ const maxHosted = 16
 // loadTimeout bounds reading and preparing one plugin's code.
 const loadTimeout = 2 * time.Minute
 
+// usableRecheck bounds how long the Host serves a plugin's cached code before
+// observing again that the plugin remains usable, so its uninstall on another
+// replica stops the code here too.
+const usableRecheck = 30 * time.Second
+
 // Host runs the code of installed plugins, by digest, for the processes that
 // serve providers: a plugin profile's signing hook runs once per upstream
 // request, and an unconfined plugin may carry the request itself (Carry); a
@@ -54,6 +59,10 @@ type hosted struct {
 	// calls counts the calls using the code, and used orders its uses.
 	calls int
 	used  uint64
+	// verified is when the plugin's usability was last observed; checking
+	// marks a recheck of it in flight.
+	verified time.Time
+	checking bool
 }
 
 // NewHost returns a Host that runs confined plugins' modules on runtime and,
@@ -158,6 +167,28 @@ func (h *Host) failed(ctx context.Context, digest, method string, err error) {
 	h.runtime.log.Warn("plugin call failed", "plugin_digest", digest, "plugin_method", method, "error", err)
 }
 
+// Evict drops the code the Host keeps for the plugin with digest, which its
+// uninstall calls once committed, so this replica's cached copy stops serving
+// and an unconfined plugin's process stops running. Other replicas' caches
+// observe the removal when the usability of their copy is next rechecked.
+func (h *Host) Evict(digest string) {
+	h.mu.Lock()
+	entry := h.hosted[digest]
+	delete(h.hosted, digest)
+	h.mu.Unlock()
+	if entry == nil {
+		return
+	}
+	select {
+	case <-entry.loaded:
+		if entry.code != nil {
+			entry.code.Close(context.Background())
+		}
+	default:
+		// Still loading: its load closes the code it produced.
+	}
+}
+
 // Close releases the code of every plugin the Host holds, stopping unconfined
 // plugins' processes.
 func (h *Host) Close(ctx context.Context) {
@@ -188,7 +219,9 @@ func (entry *hosted) wait(ctx context.Context) (code, error) {
 }
 
 // use returns the plugin's code for a call, starting to load it when the
-// Host holds none. The call's done ends its use.
+// Host holds none, and rechecking the usability of a code held long enough
+// that the plugin may have been uninstalled on another replica. The call's
+// done ends its use.
 func (h *Host) use(digest string) *hosted {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -197,6 +230,9 @@ func (h *Host) use(digest string) *hosted {
 		entry = &hosted{loaded: make(chan struct{})}
 		h.hosted[digest] = entry
 		go h.load(digest, entry)
+	} else if entry.code != nil && !entry.checking && time.Since(entry.verified) >= usableRecheck {
+		entry.checking = true
+		go h.recheck(digest, entry)
 	}
 	h.clock++
 	entry.calls, entry.used = entry.calls+1, h.clock
@@ -229,16 +265,50 @@ func (h *Host) load(digest string, entry *hosted) {
 	h.mu.Lock()
 	entry.err = err
 	var evicted []code
-	if err != nil {
-		delete(h.hosted, digest)
-	} else {
+	switch {
+	case err != nil:
+		if h.hosted[digest] == entry {
+			delete(h.hosted, digest)
+		}
+	case h.hosted[digest] != entry:
+		// Evicted while loading: the code it produced serves nobody.
+		entry.err = refuse(CodeNotInstalled, "The plugin is no longer installed.")
+		evicted = append(evicted, loaded)
+	default:
 		entry.code = loaded
+		entry.verified = time.Now()
 		evicted = h.evict()
 	}
 	h.mu.Unlock()
 	close(entry.loaded)
 	for _, c := range evicted {
 		c.Close(ctx)
+	}
+}
+
+// recheck observes whether the plugin a cached entry serves remains usable,
+// evicting it and closing its code when a refusal — such as the plugin's
+// uninstall on another replica — says it does not. Any other failure is no
+// removal, and the entry stays until the check next comes due.
+func (h *Host) recheck(digest string, entry *hosted) {
+	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	defer cancel()
+	_, err := Usable(ctx, h.db, h.unconfined, digest)
+	h.mu.Lock()
+	entry.checking = false
+	_, refused := errors.AsType[*Error](err)
+	switch {
+	case err == nil || !refused:
+		entry.verified = time.Now()
+	case h.hosted[digest] == entry:
+		delete(h.hosted, digest)
+	default:
+		refused = false
+	}
+	h.mu.Unlock()
+	if refused {
+		h.runtime.log.Warn("cached plugin stopped: it is no longer usable", "plugin_digest", digest, "error", err)
+		entry.code.Close(ctx)
 	}
 }
 

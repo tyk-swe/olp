@@ -715,6 +715,9 @@ describe('plugin providers', () => {
       revision: digest,
       authentication: ['static_credential']
     });
+    // Pinning a profile or build drops a credential typed for a previous pin.
+    expect(draft.credential).toBe('');
+    draft.credential = 'secret';
     // Until the catalogue says the profile discovers models, it declares them.
     expect(requiresProbeModel(draft, pluginSpec)).toBe(true);
     expect(requiresProbeModel(draft, pluginSpec, [profile()])).toBe(true);
@@ -754,5 +757,7 @@ describe('plugin providers', () => {
     });
     expect(draft.authMode).toBe('static_credential');
     expect(requiresGrant(pluginSpec, draft.authMode)).toBe(false);
+    // The pasted credential does not carry to the newly pinned profile.
+    expect(draft.credential).toBe('');
   });
 });

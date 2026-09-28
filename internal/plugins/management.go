@@ -55,8 +55,9 @@ func (s *Management) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/plugins/{plugin_digest}/approve", s.approve)
 	s.Access.Route(mux, "DELETE /api/v1/plugins/{plugin_digest}", s.uninstall)
 	s.Access.Route(mux, "GET /api/v1/unconfined-plugins", s.executables)
-	// Running an executable to read its manifest can take seconds.
-	s.Access.Route(mux, "GET /api/v1/unconfined-plugins/{executable}", s.review, access.MaxBody(64<<10), access.Deadline(time.Minute))
+	// Running an executable to read its manifest can take seconds, and runs
+	// only for a caller that proved the session's CSRF token.
+	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/review", s.review, access.MaxBody(64<<10), access.Deadline(time.Minute))
 	s.Access.Route(mux, "POST /api/v1/unconfined-plugins/{executable}/permit", s.permit, access.MaxBody(64<<10), access.Deadline(time.Minute))
 }
 
@@ -255,7 +256,13 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.uninstall", "plugin", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+	reply, err := access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+	if err == nil {
+		// The plugin's cached code here stops; every other replica's copy is
+		// evicted when its next usability recheck observes the removal.
+		s.Host.Evict(digest)
+	}
+	return reply, err
 }
 
 // retireGrants retires, as a plugin build is uninstalled, the unrevoked

@@ -36,7 +36,7 @@ func TestOwnerPermitsAnUnconfinedPluginThatSignsRequests(t *testing.T) {
 	if code := problemCode(t, disabled.want(owner, "GET", "/api/v1/unconfined-plugins", nil, nil, 404)); code != "unconfined_plugins_disabled" {
 		t.Fatalf("listing executables without the tier: %s", code)
 	}
-	disabled.want(owner, "GET", "/api/v1/unconfined-plugins/reference", nil, nil, 404)
+	disabled.want(owner, "POST", "/api/v1/unconfined-plugins/reference/review", nil, nil, 404)
 
 	// With the tier, the owner sees the executable and reviews its manifest;
 	// no one else does.
@@ -45,18 +45,18 @@ func TestOwnerPermitsAnUnconfinedPluginThatSignsRequests(t *testing.T) {
 	}
 	operator := h.invite(owner, "operator@example.com", "operator")
 	h.want(operator, "GET", "/api/v1/unconfined-plugins", nil, nil, 403)
-	h.want(operator, "GET", "/api/v1/unconfined-plugins/reference", nil, nil, 403)
+	h.want(operator, "POST", "/api/v1/unconfined-plugins/reference/review", nil, nil, 403)
 	items := h.want(owner, "GET", "/api/v1/unconfined-plugins", nil, nil, 200)["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["name"] != "reference" || items[0].(map[string]any)["permitted"] != false {
 		t.Fatalf("executables %v", items)
 	}
 	digest := items[0].(map[string]any)["digest"].(string)
-	review := h.want(owner, "GET", "/api/v1/unconfined-plugins/reference", nil, nil, 200)
+	review := h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/review", nil, nil, 200)
 	manifest := review["manifest"].(map[string]any)
 	if review["digest"] != digest || manifest["name"] != "reference" || !slices.ContainsFunc(manifest["profiles"].([]any), func(p any) bool { return p.(map[string]any)["id"] == "reference-signed-chat" }) {
 		t.Fatalf("review %v", review)
 	}
-	h.want(owner, "GET", "/api/v1/unconfined-plugins/missing", nil, nil, 404)
+	h.want(owner, "POST", "/api/v1/unconfined-plugins/missing/review", nil, nil, 404)
 
 	// Permitting takes the owner's acknowledgement of the risk and a recent
 	// authentication, for the build the owner reviewed.
@@ -158,7 +158,7 @@ func TestUnconfinedPluginEnrollsAndRefreshesAGrant(t *testing.T) {
 	dir := t.TempDir()
 	testutil.BuildExecutablePlugin(t, filepath.Join(dir, "reference"), "./sdk/plugin/reference", "-X=main.upstream="+upstream.URL+"/v1", "-X=main.authority="+authority.URL)
 	h := newUnconfinedHarness(t, base.Pool, base.DBURL, dir)
-	digest := h.want(owner, "GET", "/api/v1/unconfined-plugins/reference", nil, nil, 200)["digest"].(string)
+	digest := h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/review", nil, nil, 200)["digest"].(string)
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
 	h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/permit", map[string]any{"digest": digest, "acknowledge_risk": true}, nil, 201)
 

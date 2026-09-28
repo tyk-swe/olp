@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -395,9 +396,12 @@ type slotRow struct {
 	CredentialRevoked bool
 	// CredentialPlugin is the digest of the plugin build whose grant
 	// enrollment created the credential version, or "" for a pasted one.
-	CredentialPlugin     string
-	CredentialLapsed     bool
-	CredentialPrincipal  string
+	CredentialPlugin    string
+	CredentialLapsed    bool
+	CredentialPrincipal string
+	// CredentialFacts are the grant facts the credential version reported at
+	// enrollment — what it serves as beyond its principal.
+	CredentialFacts      map[string]string
 	Restrictions         slotRestrictions
 	Limits               Limits
 	ValidatedAt          *time.Time
@@ -411,7 +415,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),g.lapsed_at IS NOT NULL,coalesce(c.principal,''),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),g.lapsed_at IS NOT NULL,coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -419,13 +423,16 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 	var slots []slotRow
 	for rows.Next() {
 		var row slotRow
-		var restrictions, limits []byte
+		var facts, restrictions, limits []byte
 		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialLapsed, &row.CredentialPrincipal, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialLapsed, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
-		if err = json.Unmarshal(restrictions, &row.Restrictions); err == nil {
+		if err = json.Unmarshal(facts, &row.CredentialFacts); err == nil {
+			err = json.Unmarshal(restrictions, &row.Restrictions)
+		}
+		if err == nil {
 			err = json.Unmarshal(limits, &row.Limits)
 		}
 		if err != nil {
@@ -463,9 +470,19 @@ func (row *slotRow) observedPrincipal() string {
 	return row.CredentialPrincipal
 }
 
+// observedFacts are the grant facts the slot's credential version serves
+// with, cleared like its principal when the version serves no more.
+func (row *slotRow) observedFacts() map[string]string {
+	if row.CredentialRevoked || row.CredentialLapsed {
+		return nil
+	}
+	return row.CredentialFacts
+}
+
 // onePrincipal refuses to activate credential slots that observe different
-// principals, naming each slot's. Every slot of a provider revision serves as
-// one upstream account (ADR 0008), so re-enrolling that account is a
+// principals or serving environments (their grants' facts), naming each
+// slot's principal. Every slot of a provider revision serves as one upstream
+// account and environment (ADR 0008), so re-enrolling that account is a
 // credential rotation and several accounts are pooled through several
 // providers.
 func onePrincipal(slots []slotRow, cfg *Configuration) error {
@@ -473,6 +490,7 @@ func onePrincipal(slots []slotRow, cfg *Configuration) error {
 		return nil
 	}
 	var first string
+	var firstFacts map[string]string
 	var observed []string
 	mixed := false
 	for i := range slots {
@@ -480,16 +498,17 @@ func onePrincipal(slots []slotRow, cfg *Configuration) error {
 		if principal == "" {
 			continue
 		}
+		facts := slots[i].observedFacts()
 		if first == "" {
-			first = principal
+			first, firstFacts = principal, facts
 		}
-		mixed = mixed || principal != first
+		mixed = mixed || principal != first || !maps.Equal(facts, firstFacts)
 		observed = append(observed, "slot "+slots[i].Name+" observes "+principal)
 	}
 	if !mixed {
 		return nil
 	}
-	return access.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account: re-enroll these slots with the same account, and pool other accounts through other providers.")
+	return access.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
 }
 
 func (row *slotRow) published(authMode string) runtime.RevisionSlot {

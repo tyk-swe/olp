@@ -573,7 +573,7 @@ identity.
 | Operation | Purpose |
 | --- | --- |
 | `GET /api/v1/unconfined-plugins` | Lists the executables, without running them, and whether each build is permitted; `503 unconfined_plugin_dir_unreadable` when OLP can't read the directory. |
-| `GET /api/v1/unconfined-plugins/{executable}` | Runs the executable and returns its digest and manifest. |
+| `POST /api/v1/unconfined-plugins/{executable}/review` | Runs the executable and returns its digest and manifest. Running one takes the session's CSRF proof, so nothing a browser fetches on its own can run it. |
 | `POST /api/v1/unconfined-plugins/{executable}/permit` | Permits the build with the digest the owner reviewed: `{"digest": "…", "acknowledge_risk": true}`. |
 
 Reviewing refuses an executable as installing refuses a module, with a `422`

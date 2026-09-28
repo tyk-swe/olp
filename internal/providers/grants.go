@@ -198,11 +198,19 @@ func (s *Server) exchangeGrant(r *http.Request, current *record, enrollment gran
 	return s.stageGrant(r, current, enrollment, grant)
 }
 
+// stageGrantTimeout bounds storing a grant the upstream already granted:
+// the work must outlive the request that obtained it, or a caller that went
+// away would lose a grant only its enrollment can use.
+const stageGrantTimeout = 15 * time.Second
+
 // stageGrant completes a grant enrollment under the mutation lock: it holds
 // the grant beneath a new credential version of the provider and binds that
 // version to the enrollment's credential slot, like a rotation.
 func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (access.Reply, error) {
 	a := s.Access
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	tx, err := a.Begin(r)
 	if err != nil {
 		return access.Reply{}, err

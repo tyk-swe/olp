@@ -146,7 +146,9 @@ func (c Classifier) Classify(e Evidence) Outcome {
 	outcome := Outcome{Class: c.class(e), Acceptance: e.Acceptance()}
 	if c.AtMostOnce && outcome.Acceptance.Unresolved() {
 		switch outcome.Class {
-		case Connect, Timeout, ServerError:
+		// Every failover-eligible class, whether a built-in rule or a
+		// declared one produced it.
+		case Connect, Timeout, RateLimit, ServerError, Credential, ContextWindow:
 			outcome.Class = Ambiguous
 		}
 	}

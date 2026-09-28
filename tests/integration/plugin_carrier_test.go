@@ -94,7 +94,7 @@ func TestUnconfinedPluginCarriesATargetsTraffic(t *testing.T) {
 	dir := t.TempDir()
 	testutil.BuildExecutablePlugin(t, filepath.Join(dir, "carrier"), "./internal/plugins/testdata/carrier", "-X=main.upstream="+upstream.URL+"/v1")
 	h := newUnconfinedHarness(t, base.Pool, base.DBURL, dir)
-	review := h.want(owner, "GET", "/api/v1/unconfined-plugins/carrier", nil, nil, 200)
+	review := h.want(owner, "POST", "/api/v1/unconfined-plugins/carrier/review", nil, nil, 200)
 	if profile := review["manifest"].(map[string]any)["profiles"].([]any)[0].(map[string]any); profile["carries_traffic"] != true {
 		t.Fatalf("the owner reviewed %v", profile)
 	}

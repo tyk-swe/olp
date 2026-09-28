@@ -81,8 +81,8 @@ export async function listUnconfinedExecutables(
 export async function reviewUnconfinedExecutable(
   name: string
 ): Promise<UnconfinedExecutableReview> {
-  const { data, error, response } = await apiClient.GET(
-    '/api/v1/unconfined-plugins/{executable}',
+  const { data, error, response } = await apiClient.POST(
+    '/api/v1/unconfined-plugins/{executable}/review',
     { params: { path: { executable: name } } }
   );
   return result(data, error, response);

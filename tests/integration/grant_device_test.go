@@ -265,7 +265,7 @@ func TestDeviceAuthorizationEnrollsAnySlotThroughAnUnconfinedPlugin(t *testing.T
 	dir := t.TempDir()
 	testutil.BuildExecutablePlugin(t, filepath.Join(dir, "reference"), "./sdk/plugin/reference", "-X=main.upstream="+upstream.URL+"/v1", "-X=main.authority="+authority.URL)
 	h := newUnconfinedHarness(t, base.Pool, base.DBURL, dir)
-	digest := h.want(owner, "GET", "/api/v1/unconfined-plugins/reference", nil, nil, 200)["digest"].(string)
+	digest := h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/review", nil, nil, 200)["digest"].(string)
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "plugin_permit"}, nil, 204)
 	h.want(owner, "POST", "/api/v1/unconfined-plugins/reference/permit", map[string]any{"digest": digest, "acknowledge_risk": true}, nil, 201)
 	path := deviceProvider(t, h, owner, digest, "reference-device-chat")

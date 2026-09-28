@@ -21,6 +21,9 @@ const (
 	maxFunctionLocals = 1 << 12
 	// maxModuleLocals bounds the locals of all of a module's functions.
 	maxModuleLocals = 1 << 22
+	// maxFunctions bounds the functions a module declares, before its
+	// function and code sections allocate for them.
+	maxFunctions = 1 << 16
 	// frameOverhead is what a frame holds beyond its function's values, such
 	// as its return address, in stack values.
 	frameOverhead = 4
@@ -208,6 +211,10 @@ func (r *reader) imports() (uint32, error) {
 // module defines.
 func (r *reader) functions() []uint32 {
 	n := r.u32()
+	if n > maxFunctions {
+		r.err = refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d functions. A plugin may declare at most %d.", n, maxFunctions))
+		return nil
+	}
 	var types []uint32
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		types = append(types, r.u32())
@@ -240,10 +247,14 @@ func (r *reader) tables() error {
 	return nil
 }
 
-// codes reads the code section and refuses a function whose locals exceed
-// maxFunctionLocals, or locals in all that exceed maxModuleLocals.
+// codes reads the code section and refuses more than maxFunctions functions,
+// a function whose locals exceed maxFunctionLocals, or locals in all that
+// exceed maxModuleLocals.
 func (r *reader) codes() ([]function, error) {
 	n := r.u32()
+	if n > maxFunctions {
+		return nil, refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d functions. A plugin may declare at most %d.", n, maxFunctions))
+	}
 	var codes []function
 	var total uint64
 	for i := uint32(0); i < n && r.err == nil; i++ {

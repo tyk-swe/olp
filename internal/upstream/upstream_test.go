@@ -228,7 +228,7 @@ func TestAtMostOnceCallsNeverFailOverUnresolvedWork(t *testing.T) {
 		{"stated rate limit", Evidence{Reached: true, Status: 429}, Outcome{RateLimit, Terminal}},
 		{"stated credential rejection", Evidence{Reached: true, Status: 401}, Outcome{Credential, Terminal}},
 		{"context rejection", Evidence{Reached: true, Status: 400, Error: &openai.UpstreamError{Code: "prompt_too_long"}}, Outcome{ContextWindow, Terminal}},
-		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "rate_limit_error"}}, Outcome{RateLimit, Accepted}},
+		{"in-band rate limit", Evidence{Reached: true, Accepted: true, Error: &openai.UpstreamError{Type: "rate_limit_error"}}, Outcome{Ambiguous, Accepted}},
 		{"caller cancellation", Evidence{Reached: true, Interrupted: context.Canceled}, Outcome{Cancelled, Unknown}},
 		{"malformed accepted result", Evidence{Reached: true, Accepted: true, Err: &openai.ProtocolError{}}, Outcome{Protocol, Accepted}},
 		{"failure after the result settled", Evidence{Reached: true, Accepted: true, Settled: true, Err: errors.New("commit")}, Outcome{Connect, Terminal}},

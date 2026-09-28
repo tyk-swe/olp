@@ -308,11 +308,12 @@ export function requiresProbeModel(
  * Pins a plugin profile: its identity and the digest of the plugin build that
  * supplies it, and the authentication it declares, a static credential or a
  * grant. A plugin provider's endpoint is that profile's address, which the
- * server sets, so any address of a previous pin is cleared. Option values
- * carry over to the options the new profile also declares.
+ * server sets, so any address of a previous pin is cleared, and a credential
+ * typed for one profile or build is never submitted as another's. Option
+ * values carry over to the options the new profile also declares.
  */
 export function selectPluginProfile(
-  values: ProviderEditValues,
+  values: ProviderEditValues & { credential?: string },
   profile:
     | Pick<
         ProviderProfile,
@@ -320,6 +321,12 @@ export function selectPluginProfile(
       >
     | undefined
 ): void {
+  if (
+    values.profileId !== (profile?.id ?? '') ||
+    values.profileRevision !== (profile?.revision ?? '')
+  ) {
+    values.credential = '';
+  }
   values.profileId = profile?.id ?? '';
   values.profileRevision = profile?.revision ?? '';
   values.endpoint = '';

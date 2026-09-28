@@ -23933,87 +23933,6 @@
         ]
       }
     },
-    "/api/v1/unconfined-plugins/{executable}": {
-      "get": {
-        "description": "Runs an executable in the unconfined plugin directory to read the manifest it declares, for an owner to review before permitting it. OLP refuses an executable that doesn't speak the plugin ABI over standard input and output, was built for another ABI version, or declares an invalid manifest.",
-        "operationId": "review_unconfined_executable",
-        "parameters": [
-          {
-            "description": "File name of the executable in the unconfined plugin directory",
-            "in": "path",
-            "name": "executable",
-            "required": true,
-            "schema": {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnconfinedExecutableReview"
-                }
-              }
-            },
-            "description": "The executable and its manifest"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Authentication required"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Caller is not a session-authenticated owner"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": [
-              "manage_plugins",
-              "installation"
-            ]
-          }
-        ],
-        "tags": [
-          "plugins"
-        ]
-      }
-    },
     "/api/v1/unconfined-plugins/{executable}/permit": {
       "post": {
         "description": "Permits an executable as an unconfined plugin, which providers may then pin by its digest. An unconfined plugin runs with native privileges, so permitting takes an owner who reauthenticated for plugin_permit within five minutes and acknowledges that risk. OLP runs the executable again and refuses the permission if it no longer has the reviewed digest.",
@@ -24134,6 +24053,88 @@
               }
             },
             "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/review": {
+      "post": {
+        "description": "Runs an executable in the unconfined plugin directory to read the manifest it declares, for an owner to review before permitting it. OLP refuses an executable that doesn't speak the plugin ABI over standard input and output, was built for another ABI version, or declares an invalid manifest.",
+        "operationId": "review_unconfined_executable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableReview"
+                }
+              }
+            },
+            "description": "The executable and its manifest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
           }
         },
         "security": [

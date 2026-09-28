@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -133,15 +134,17 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
 func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, failure *attemptFailure) bool {
+	if failure.dispatched && slot.CredentialID != nil &&
+		(failure.class == classCredential || failure.status == http.StatusUnauthorized) {
+		// The upstream refused the credential, whatever rule classified the
+		// failure: a grant beneath it is refreshed early, which ends the
+		// cooldown (GrantRefreshed).
+		s.Runtime.CredentialRefused(*slot.CredentialID)
+	}
 	switch failure.class {
 	case classCredential:
 		s.health.cooldown(providerID, credentialHealthKey(slot), credentialCooldown)
 		s.Admission.cooldown(ctx, providerID, slot, credentialCooldown, true)
-		if failure.dispatched && slot.CredentialID != nil {
-			// The upstream refused the credential: a grant beneath it is
-			// refreshed early, which ends the cooldown (GrantRefreshed).
-			s.Runtime.CredentialRefused(*slot.CredentialID)
-		}
 	case classRateLimit:
 		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
 		s.Admission.cooldown(ctx, providerID, slot, cooldownDuration(failure.retryAfter), false)

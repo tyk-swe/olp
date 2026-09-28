@@ -160,8 +160,11 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = providers.Err(); err != nil {
 		return nil, err
 	}
+	// A lapsed grant serves no more: the slot's credential reads as absent, so
+	// a grant provider plans its enrollment again.
 	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,coalesce(c.plugin_digest,'')
-        FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL`)
+        FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM olp.provider_grants g WHERE g.credential_id=c.id AND g.lapsed_at IS NOT NULL)`)
 	if err != nil {
 		return nil, err
 	}
