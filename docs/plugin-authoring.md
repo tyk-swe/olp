@@ -239,6 +239,10 @@ Member names in envelopes and paths are 1–128 letters, digits, `_`, `-` and
 `.`. Setting or defaulting a member creates the objects above it; if one of
 them is present but not an object, OLP refuses the request with an
 `unsupported_parameter` error on `provider_profile` instead of sending it.
+Rewrites cannot introduce provider state or replace an authorized stateful
+reference. They may disable storage, but cannot enable it, remove or null a
+Responses `store: false`, enable background work, or introduce a conversation
+or a different previous response.
 
 ### Model discovery
 

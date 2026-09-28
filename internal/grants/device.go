@@ -108,8 +108,8 @@ func Watch(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 	var interval int64
 	err := tx.QueryRow(ctx, `UPDATE olp.grant_enrollments SET poll_at=now()+$4::integer*interval '1 second'
 		WHERE id=$1 AND provider_id=$2 AND started_by=$3 AND continued_at IS NULL AND expires_at>now() AND poll_at<=now()
-		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,poll_interval`, id, providerID, principal, seconds(pollLease)).
-		Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt, &interval)
+		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,poll_interval,expected_credential_id::text`, id, providerID, principal, seconds(pollLease)).
+		Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt, &interval, &e.ExpectedCredentialID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if ended, err := expire(ctx, tx, providerID, id, principal); err != nil || ended {
 			return nil, Standing{Status: Expired, Ended: ended}, err

@@ -24,6 +24,67 @@ func enrollSlot(t *testing.T, h *accessHarness, owner *browser, path, slot strin
 	return continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
 }
 
+func TestGrantEnrollmentRejectsReplacedSlotBinding(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	for _, binding := range []string{"unbound", "bound"} {
+		t.Logf("starting with a %s slot", binding)
+		authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-reference"})
+		older := startGrantEnrollment(t, h, owner, path)
+		olderCallback := signIn(t, older).String()
+		newer := startGrantEnrollment(t, h, owner, path)
+		authority.SignInAs(testutil.OAuthIdentity{Subject: "colleague@reference.example", Account: "acct-colleague"})
+		completed := continueGrantEnrollment(h, owner, path, newer, signIn(t, newer).String(), 201)
+		if completed["principal"] != "colleague@reference.example" {
+			t.Fatalf("newer enrollment: %v", completed)
+		}
+		if refusal := continueGrantEnrollment(h, owner, path, older, olderCallback, 409); problemCode(t, refusal) != "grant_enrollment_stale" {
+			t.Fatalf("older enrollment: %v", refusal)
+		}
+		slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)["items"].([]any)
+		if slot := slots[0].(map[string]any); slot["credential_version_id"] != completed["credential_id"] {
+			t.Fatalf("older enrollment replaced the slot binding: %v", slot)
+		}
+		credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+		if float64(len(credentials)) != completed["credential_version"] {
+			t.Fatalf("stale enrollment created a credential: %v", credentials)
+		}
+	}
+}
+
+func TestDeviceGrantEnrollmentRejectsReplacedSlotBinding(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := deviceProvider(t, h, owner, digest, "reference-device-chat")
+	for _, binding := range []string{"unbound", "bound"} {
+		t.Logf("starting with a %s slot", binding)
+		older := startGrantEnrollment(t, h, owner, path)
+		device := older["device"].(map[string]any)
+		testutil.DecideDevice(t, device["verification_url"].(string), device["user_code"].(string), "approve")
+		completed := enrollByDevice(t, h, owner, path, "")
+		pollDue(t, h, older)
+		if refusal := pollGrantEnrollment(h, owner, path, older, 409); problemCode(t, refusal) != "grant_enrollment_stale" {
+			t.Fatalf("older device enrollment: %v", refusal)
+		}
+		if refusal := pollGrantEnrollment(h, owner, path, older, 409); problemCode(t, refusal) != "grant_enrollment_used" {
+			t.Fatalf("polled a stale device enrollment again: %v", refusal)
+		}
+		slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)["items"].([]any)
+		if slot := slots[0].(map[string]any); slot["credential_version_id"] != completed["credential_id"] {
+			t.Fatalf("older device enrollment replaced the slot binding: %v", slot)
+		}
+		credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+		if float64(len(credentials)) != completed["credential_version"] {
+			t.Fatalf("stale device enrollment created a credential: %v", credentials)
+		}
+	}
+}
+
 // activateEnrolled validates the model access of newly enrolled slots and
 // activates the provider draft, answering with the given status.
 func activateEnrolled(t *testing.T, h *accessHarness, owner *browser, path string, status int, slots ...string) map[string]any {

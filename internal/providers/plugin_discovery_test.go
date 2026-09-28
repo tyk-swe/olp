@@ -108,6 +108,45 @@ func TestPluginDiscoveryRefusesBrokenContinuations(t *testing.T) {
 	}
 }
 
+func TestPluginDiscoveryPreservesEscapedAddressOptions(t *testing.T) {
+	for _, account := range []string{"team/prod", "team?prod", "team%2Fprod"} {
+		t.Run(account, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.EscapedPath())
+				if r.URL.Query().Get("page") == "" {
+					fmt.Fprint(w, `{"items":[{"slug":"first"}],"next":"second/page"}`)
+				} else {
+					if r.URL.Query().Get("page") != "second/page" {
+						t.Errorf("discovery cursor: %s", r.URL)
+					}
+					fmt.Fprint(w, `{"items":[{"slug":"second"}]}`)
+				}
+			}))
+			defer server.Close()
+			plugin, err := connectors.NewPluginProfile(strings.Repeat("ab", 32), abi.Manifest{Name: "acme", Version: "1.0.0", Origins: []string{server.URL}, Profiles: []abi.Profile{{
+				ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat", Options: []abi.Option{{Name: "account", Label: "Account"}},
+				Hosting: abi.Hosting{
+					Address: server.URL + "/accounts/{options.account}/v1", Headers: map[string]string{"Authorization": "Token {credential}"},
+					Discovery: &abi.Discovery{Path: "/models", Models: "items", ID: "slug", Pagination: &abi.Pagination{Parameter: "page", Cursor: "next"}},
+				},
+			}}}, "acme-chat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			options := map[string]string{"account": account}
+			endpoint := plugin.Address(options)
+			cfg := &Configuration{ProviderID: "provider-acme", Kind: KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-chat", ProfileRevision: strings.Repeat("ab", 32), Endpoint: &endpoint, Options: Options{PluginOptions: options}, plugin: plugin}
+			cfg.Normalize()
+			models, err := New(nil, loopbackPolicy(), nil).listModelFacts(t.Context(), cfg, []byte("secret"))
+			want := strings.TrimPrefix(endpoint, server.URL) + "/models"
+			if err != nil || len(models) != 2 || !slices.Equal(paths, []string{want, want}) {
+				t.Fatalf("discovery: models=%v error=%v paths=%q want=%q", models, err, paths, want)
+			}
+		})
+	}
+}
+
 // Without a declared listing, operators declare a plugin provider's models,
 // and discovery certifies each.
 func TestPluginProvidersWithoutDiscoveryCertifyDeclaredModels(t *testing.T) {

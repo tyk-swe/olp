@@ -135,3 +135,42 @@ func TestPluginProfileRewritesThePreparedRequestOutsideItsEnvelope(t *testing.T)
 		t.Fatalf("sent %s", sent)
 	}
 }
+
+func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fields  string
+		rewrite abi.Rewrite
+		refused bool
+	}{
+		"preserve storage": {`,"store":true`, abi.Rewrite{Op: abi.RewriteSet, Path: "/store", Value: json.RawMessage(`true`)}, false},
+		"disable storage":  {`,"store":true`, abi.Rewrite{Op: abi.RewriteSet, Path: "/store", Value: json.RawMessage(`false`)}, false},
+		"implicit storage": {`,"store":true`, abi.Rewrite{Op: abi.RewriteDelete, Path: "/store"}, false},
+		"disable background work": {`,"store":true,"background":true`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/background", Value: json.RawMessage(`false`)}, false},
+		"preserve authorized reference": {`,"store":true,"previous_response_id":"resp_authorized"`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/previous_response_id", Value: json.RawMessage(`"resp_authorized"`)}, false},
+		"replace authorized reference": {`,"store":true,"previous_response_id":"resp_authorized"`,
+			abi.Rewrite{Op: abi.RewriteSet, Path: "/previous_response_id", Value: json.RawMessage(`"resp_other"`)}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			digest := strings.Repeat("ab", 32)
+			plugin, err := connectors.NewPluginProfile(digest, abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{{
+				ID: "acme-responses", Label: "Acme Responses", Dialect: "openai-responses", Hosting: abi.Hosting{
+					Address: "https://api.acme.example/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}, Rewrites: []abi.Rewrite{tc.rewrite},
+				},
+			}}}, "acme-responses")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := connectors.Config{Plugin: plugin, Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileID: "acme-responses", ProfileRevision: digest, Endpoint: plugin.Address(nil)}
+			request, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"route","input":"hi"`+tc.fields+`}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := Prepare(request, cfg, "model", nil)
+			if (err != nil) != tc.refused {
+				t.Fatalf("prepared %s: %v", prepared.Prepared.Document().Raw(), err)
+			}
+		})
+	}
+}

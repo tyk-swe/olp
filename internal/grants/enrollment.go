@@ -33,6 +33,9 @@ const maxSession = 16 << 10
 // approves the device upstream while status requests poll it.
 type Enrollment struct {
 	ID, ProviderID, SlotID string
+	// ExpectedCredentialID is the slot's binding when enrollment started,
+	// or nil for an unbound slot. Completion replaces only that binding.
+	ExpectedCredentialID *string
 	// PluginDigest and ProfileID identify the plugin profile the grant is
 	// enrolled for.
 	PluginDigest, ProfileID string
@@ -94,9 +97,9 @@ func (e Enrollment) Save(ctx context.Context, tx pgx.Tx, a *access.Server) error
 	if e.Device != nil {
 		interval = new(seconds(e.interval))
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at,poll_interval,poll_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8::integer,now()+$8::integer*interval '1 second')`,
-		e.ID, e.ProviderID, e.SlotID, e.PluginDigest, e.ProfileID, e.StartedBy, e.ExpiresAt, interval)
+	_, err := tx.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at,poll_interval,poll_at,expected_credential_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8::integer,now()+$8::integer*interval '1 second',$9)`,
+		e.ID, e.ProviderID, e.SlotID, e.PluginDigest, e.ProfileID, e.StartedBy, e.ExpiresAt, interval, e.ExpectedCredentialID)
 	return err
 }
 
@@ -110,7 +113,8 @@ func Claim(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 	e := Enrollment{ID: id, ProviderID: providerID, StartedBy: principal}
 	err := tx.QueryRow(ctx, `UPDATE olp.grant_enrollments SET continued_at=now()
 		WHERE id=$1 AND provider_id=$2 AND started_by=$3 AND continued_at IS NULL AND expires_at>now() AND poll_interval IS NULL
-		RETURNING slot_id::text,plugin_digest,profile_id,expires_at`, id, providerID, principal).Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt)
+		RETURNING slot_id::text,plugin_digest,profile_id,expires_at,expected_credential_id::text`, id, providerID, principal).
+		Scan(&e.SlotID, &e.PluginDigest, &e.ProfileID, &e.ExpiresAt, &e.ExpectedCredentialID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return e, unavailable(ctx, tx, providerID, id, principal)
 	}

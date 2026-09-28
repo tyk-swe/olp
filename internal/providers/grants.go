@@ -72,9 +72,11 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 		return access.Reply{}, err
 	}
 	var slotID string
+	var expectedCredentialID *string
 	for _, slot := range slots {
 		if slot.ID == input.SlotID || input.SlotID == "" && slot.Default {
 			slotID = slot.ID
+			expectedCredentialID = slot.CredentialID
 		}
 	}
 	if slotID == "" {
@@ -86,7 +88,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 	}
 	// The plugin may reach the upstream, so the step runs outside the
 	// installation mutation lock; saving rechecks the draft.
-	enrollment, err := grants.Start(r.Context(), s.Plugins, grants.Enrollment{ProviderID: id, SlotID: slotID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
+	enrollment, err := grants.Start(r.Context(), s.Plugins, grants.Enrollment{ProviderID: id, SlotID: slotID, ExpectedCredentialID: expectedCredentialID, PluginDigest: cfg.ProfileRevision, ProfileID: cfg.ProfileID, StartedBy: p.ID}, cfg.Options.PluginOptions, client)
 	if err != nil {
 		if audited := s.auditFailedGrantEnrollment(r, p.Actor(), id); audited != nil {
 			return access.Reply{}, audited
@@ -238,7 +240,8 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if err = enrollment.Complete(r.Context(), tx, credentialID); err != nil {
 		return access.Reply{}, err
 	}
-	bound, err := tx.Exec(r.Context(), "UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL WHERE provider_id=$1 AND id=$2", current.ID, enrollment.SlotID, credentialID)
+	bound, err := tx.Exec(r.Context(), `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
+		WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, current.ID, enrollment.SlotID, credentialID, enrollment.ExpectedCredentialID)
 	if err != nil {
 		return access.Reply{}, err
 	}

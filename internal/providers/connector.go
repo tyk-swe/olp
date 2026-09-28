@@ -205,7 +205,9 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 		if !ok {
 			return modelListing{}, false, nil
 		}
-		listing := modelListing{path: declared.Path, models: declared.Models, id: declared.ID}
+		// Keep the rendered address's escaped option segments. call validates
+		// absolute URLs without rebuilding their path from a normalized base.
+		listing := modelListing{path: strings.TrimRight(value(cfg.Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
 		if pagination := declared.Pagination; pagination != nil {
 			listing.cursor, listing.more, listing.parameter = pagination.Cursor, pagination.More, pagination.Parameter
 		}
