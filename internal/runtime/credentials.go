@@ -89,10 +89,10 @@ func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[st
 	return ineligible, rows.Err()
 }
 
-// Secret serves an eligible credential version from the release that
-// installed it, or with its grant's current access token when it has a grant.
-// A version the release does not name, such as a historical revision's, is
-// read from the secret authority.
+// Secret serves an eligible static credential from the release that installed
+// it. Grant-backed versions use their current access token from the poll, or
+// the secret authority when no longer polled. Static versions the release does
+// not name, such as a historical revision's, also use the secret authority.
 func (m *Manager) Secret(ctx context.Context, release *Release, credentialID string) ([]byte, int64, error) {
 	if err := m.eligible(credentialID); err != nil {
 		return nil, 0, err

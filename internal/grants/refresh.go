@@ -247,10 +247,11 @@ func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentia
 		if errors.Is(err, errRefreshNotClaimed) {
 			return false, nil
 		}
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
-		return true, r.fail(ctx, conn, &g, err)
+		// Keep known-unsent evidence even when shutdown cancelled dispatch,
+		// so the token stays retryable. Ambiguous outcomes remain fenced.
+		record, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
+		defer cancel()
+		return true, r.fail(record, conn, &g, err)
 	}
 	return true, r.store(ctx, &g, grant)
 }

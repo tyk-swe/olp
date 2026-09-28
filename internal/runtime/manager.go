@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -333,6 +334,12 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
 			}
 			release.credentials[id] = secret
+		}
+		// Grant tokens rotate beneath the pinned credential version. Only
+		// static credentials belong in the release's cache; Secret reads
+		// grants from the poll or authority even after a newer publication.
+		if provider.AuthMode == connectors.AuthGrant {
+			continue
 		}
 		for _, slot := range provider.Slots {
 			if slot.CredentialID == nil {

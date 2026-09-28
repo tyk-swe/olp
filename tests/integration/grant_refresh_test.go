@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -187,6 +189,115 @@ func TestWorkersRefreshGrantsAheadOfExpiryAndGatewaysServeTheNewAccessToken(t *t
 	}
 	if releasesAfter != releases || authorityAfter != authoritySequence || h.Runtime.Authority().Sequence != authoritySequence {
 		t.Fatalf("the refresh published a release (%d, was %d) or advanced authority (%d, was %d)", releasesAfter, releases, authorityAfter, authoritySequence)
+	}
+}
+
+// A request keeps its pinned release across publication, but the grant below
+// its credential version keeps rotating independently of that release.
+func TestPinnedReleaseServesCurrentGrantAfterCredentialReplacement(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	credentialID, _ := servingGrant(t, h, owner, path)
+	pinned := h.Runtime.Release()
+	original, generation, err := h.Runtime.Secret(t.Context(), pinned, credentialID)
+	if err != nil || generation != 1 {
+		t.Fatalf("the enrolled grant was not served: generation %d, %v", generation, err)
+	}
+
+	dueNow(t, h, credentialID)
+	if !pass(t, grantRefresher(t, h)) {
+		t.Fatal("the grant was not refreshed")
+	}
+	h.refresh()
+	current, generation, err := h.Runtime.Secret(t.Context(), pinned, credentialID)
+	if err != nil || generation != 2 || bytes.Equal(current, original) {
+		t.Fatalf("the refreshed grant was not installed: generation %d, %v", generation, err)
+	}
+
+	provider := pinned.Snapshot.Providers[strings.TrimPrefix(path, "/api/v1/providers/")]
+	enrollSlot(t, h, owner, path, provider.DefaultSlotID)
+	activateEnrolled(t, h, owner, path, 200, provider.DefaultSlotID)
+	h.refresh()
+	if h.Runtime.Release() == pinned || h.Runtime.GrantGeneration(credentialID) != 0 || h.Runtime.Eligibility(credentialID) != runtime.Eligible {
+		t.Fatal("publication did not remove the eligible old credential from the polled grant set")
+	}
+	for name, release := range map[string]*runtime.Release{"pinned": pinned, "historical": nil} {
+		served, generation, err := h.Runtime.Secret(t.Context(), release, credentialID)
+		if err != nil || generation != 2 || !bytes.Equal(served, current) {
+			t.Errorf("%s release served a stale grant: generation %d, current token %v, %v", name, generation, bytes.Equal(served, current), err)
+		}
+	}
+}
+
+// Cancel exactly after the database commits the refresh claim and before the
+// plugin can dispatch HTTP, without relying on worker scheduling or sleeps.
+type cancelClaimedRefresh struct {
+	cancel context.CancelFunc
+}
+
+type refreshClaimContextKey struct{}
+
+func (tracer cancelClaimedRefresh) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(data.SQL, "UPDATE olp.provider_grants SET refresh_attempt_id=") {
+		return context.WithValue(ctx, refreshClaimContextKey{}, true)
+	}
+	return ctx
+}
+
+func (tracer cancelClaimedRefresh) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if ctx.Value(refreshClaimContextKey{}) == true && data.Err == nil && data.CommandTag.RowsAffected() == 1 {
+		tracer.cancel()
+	}
+}
+
+func TestCancelledUnsentGrantRefreshKeepsItsTokenRetryable(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	var refreshes atomic.Int64
+	counted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("grant_type") == "refresh_token" {
+			refreshes.Add(1)
+		}
+		authority.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(counted.Close)
+	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+counted.URL)
+	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
+	refresher := grantRefresher(t, h)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	config := h.Pool.Config()
+	config.ConnConfig.Tracer = cancelClaimedRefresh{cancel: cancel}
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	refresher.Pool = pool
+
+	dueNow(t, h, credentialID)
+	refresher.Pass(ctx)
+	if ctx.Err() == nil || refreshes.Load() != 0 {
+		t.Fatal("the pass was not cancelled before HTTP dispatch")
+	}
+	grant := readGrant(t, h, credentialID)
+	if grant.attempt != nil || grant.generation != 1 || grant.lapsed != nil || grant.refreshTokens != 1 || grant.failures != 1 || grant.refresh == nil || time.Until(*grant.refresh) < 20*time.Second {
+		t.Errorf("the known-unsent refresh was not scheduled for retry: %+v", grant)
+	}
+	// Another worker can reuse the token once backoff ends, including after
+	// the abandoned-attempt recovery deadline would have elapsed.
+	dueNow(t, h, credentialID)
+	if !pass(t, grantRefresher(t, h)) || readGrant(t, h, credentialID).generation != 2 || refreshes.Load() != 1 || len(authority.Reused()) != 0 {
+		t.Fatal("cancellation lapsed an unsent grant instead of retrying it")
 	}
 }
 
