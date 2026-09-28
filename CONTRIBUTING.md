@@ -45,8 +45,7 @@ docker compose -f deploy/compose.dev.yaml stop
 ```
 
 Development storage uses schema `olp` and Valkey namespace
-`olp:<installation UUID>:`. OLP makes no upgrade promises during 0.x (see
-[ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md)), so a change
+`olp:<installation UUID>:`. OLP makes no upgrade promises during 0.x, so a change
 may require a fresh database. Remove the development volumes and start again:
 
 ```sh

@@ -483,9 +483,8 @@ func (row *slotRow) observedFacts() map[string]string {
 // onePrincipal refuses to activate credential slots that observe different
 // principals or serving environments (their grants' facts), naming each
 // slot's principal. Every slot of a provider revision serves as one upstream
-// account and environment (ADR 0008), so re-enrolling that account is a
-// credential rotation and several accounts are pooled through several
-// providers.
+// account and environment, so re-enrolling that account is a credential
+// rotation and several accounts are pooled through several providers.
 func onePrincipal(slots []slotRow, cfg *Configuration) error {
 	if !cfg.Grant() {
 		return nil

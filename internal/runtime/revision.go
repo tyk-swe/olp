@@ -34,7 +34,7 @@ type RevisionSlot struct {
 	// ObservedPrincipal is the upstream principal grant enrollment observed
 	// for the slot's unrevoked credential version, if a grant backs it.
 	// Activation publishes a revision only when its slots observe one
-	// principal (ADR 0008), which becomes the provider's.
+	// principal, which becomes the provider's.
 	ObservedPrincipal string `json:"observed_principal,omitempty"`
 }
 

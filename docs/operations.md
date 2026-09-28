@@ -509,8 +509,7 @@ certify a managed service's PITR implementation. See the
 Each installation starts from an empty PostgreSQL database and uses its own
 Valkey namespace. During 0.x, OLP makes no compatibility, upgrade,
 mixed-version or rollback promises: any release may change the management API,
-configuration and storage, and a release may require a fresh installation. See
-[ADR 0004](adr/0004-no-compatibility-promises-during-0x.md).
+configuration and storage, and a release may require a fresh installation.
 
 Run one version across every process mode. To run a new release against an
 existing database, take a [drained backup](#backup-and-restore), stop every

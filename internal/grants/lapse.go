@@ -37,8 +37,8 @@ func permanent(failure error) bool {
 }
 
 // lapse records, in tx, that a grant lapsed for reason: it can no longer be
-// refreshed (ADR 0008). The grant's refresh token is discarded and nothing
-// refreshes it again, the lapse is audited with the worker as the actor, each
+// refreshed. The grant's refresh token is discarded and nothing refreshes it
+// again, the lapse is audited with the worker as the actor, each
 // notification rule subscribed to grant lapses is sent one delivery of it, and
 // key authority advances, so gateways stop serving the grant's credential
 // version within one authority poll. Lapse is terminal: only a new grant

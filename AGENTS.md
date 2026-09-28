@@ -64,20 +64,6 @@ Keep migrations forward-only and sequential; update Helm values, schema, and
 templates together.
 
 During 0.x, write code for the storage, configuration and API formats the
-current version produces; [ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md)
-records the no-compatibility-promises policy. Compatibility with providers and
-the official OpenAI, Anthropic and Gemini SDKs is the product and stays intact.
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live in GitHub Issues. Read `docs/agents/issue-tracker.md` before tracker operations.
-
-### Triage labels
-
-Use the five default triage labels. Read `docs/agents/triage-labels.md` before assigning triage roles.
-
-### Domain docs
-
-Single-context: root `CONTEXT.md` and `docs/adr/`. Before exploring the codebase, read `docs/agents/domain.md`.
+current version produces; OLP makes no compatibility promises. Compatibility
+with providers and the official OpenAI, Anthropic and Gemini SDKs is the product
+and stays intact.

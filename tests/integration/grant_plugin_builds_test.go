@@ -45,9 +45,9 @@ func retirements(t *testing.T, h *accessHarness, owner *browser) []any {
 	return h.want(owner, "GET", "/api/v1/audit?action=provider.grant.retire", nil, nil, 200)["items"].([]any)
 }
 
-// A grant serves only the plugin build that enrolled it (ADR 0007): a
-// provider moved to another build refuses the grant its slot holds until the
-// slot is enrolled again, as a configuration plan pinning that build does.
+// A grant serves only the plugin build that enrolled it: a provider moved to
+// another build refuses the grant its slot holds until the slot is enrolled
+// again, as a configuration plan pinning that build does.
 // Until the provider is activated with the new build, its active revision
 // serves and keeps its grant refreshed; then a worker retires the grant no
 // configuration uses instead of refreshing it, and notifies nobody.

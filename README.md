@@ -8,8 +8,7 @@ OpenAI-compatible endpoints.
 
 OpenLLMProxy 0.1.0 is a work in progress. During 0.x it makes no compatibility,
 upgrade, mixed-version or rollback promises: any release may change the
-management API, configuration and storage. See
-[ADR 0004](docs/adr/0004-no-compatibility-promises-during-0x.md).
+management API, configuration and storage.
 
 ## Develop locally
 

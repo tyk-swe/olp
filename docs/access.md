@@ -127,8 +127,7 @@ creator's current authority: it fails authentication while the creator is
 inactive or OIDC-deauthorized, loses operations the creator's current role does
 not hold, and reaches only the creator's projects when the creator has an
 assigned access scope. Nothing is revoked, so a creator who regains authority
-also restores their tokens; see
-[the decision](adr/0005-management-tokens-act-within-their-creators-authority.md).
+also restores their tokens.
 Token administration itself — create, list, read, revoke — is always
 session-owner-only; no management token can manage tokens. Installing,
 approving, permitting and uninstalling [provider plugins](plugins.md) is
@@ -180,8 +179,7 @@ recovery error that does not confirm whether the address exists.
 
 Every management route is authorized before its handler runs, from the
 security requirement the [management contract](../openapi/management.json)
-declares for it; see
-[the decision](adr/0006-management-routes-are-authorized-from-the-contract.md).
+declares for it.
 The session response lists the operations the member may perform, and the
 console offers an action only when the requirement of the call it leads to
 admits the member, so an assigned member never sees installation pages it

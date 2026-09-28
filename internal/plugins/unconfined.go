@@ -16,10 +16,10 @@ import (
 )
 
 // Unconfined is the experimental unconfined tier of a deployment that enables
-// it (ADR 0007): the directory of its image that holds the executables of
-// unconfined plugins. OLP runs an unconfined plugin as a subprocess with the
-// operating system's privileges, speaking the plugin ABI over standard input
-// and output. Only a deployment setting names the directory, so nothing the
+// it: the directory of its image that holds the executables of unconfined
+// plugins. OLP runs an unconfined plugin as a subprocess with the operating
+// system's privileges, speaking the plugin ABI over standard input and output.
+// Only a deployment setting names the directory, so nothing the
 // management API does enables the tier; an owner then permits each plugin.
 type Unconfined struct {
 	dir    string

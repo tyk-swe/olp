@@ -8,10 +8,9 @@ implements. The reference plugin in
 minimal plugin to start from.
 
 Plugins build with the Go version in OLP's `go.mod`. During 0.x the plugin ABI
-carries no compatibility promise
-([ADR 0004](adr/0004-no-compatibility-promises-during-0x.md)): build a plugin with
-the SDK from the OLP version that will run it, because OLP refuses a module built
-for another ABI version at install.
+carries no compatibility promise: build a plugin with the SDK from the OLP
+version that will run it, because OLP refuses a module built for another ABI
+version at install.
 
 ## A minimal plugin
 

@@ -13,7 +13,7 @@ import (
 
 // The events a notification rule subscribes its destination to. A budget
 // threshold concerns an API key's or budget group's spend; a provider event,
-// such as a grant lapse (ADR 0008), concerns the whole installation.
+// such as a grant lapse, concerns the whole installation.
 const (
 	BudgetThresholdEvent = "budget.threshold"
 	GrantLapsedEvent     = "provider.grant.lapsed"

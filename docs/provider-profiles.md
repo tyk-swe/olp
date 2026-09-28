@@ -232,10 +232,9 @@ A trusted in-process `connectors.RegisterProfile` can add a provider using an
 existing component composition and model bindings. The registry validates the
 composition. Executable configuration comes from
 [provider plugins](plugins.md) instead: WASM modules an owner installs, whose
-profiles name a built-in dialect and whose code OLP runs confined
-([ADR 0007](adr/0007-confined-provider-plugins.md)). A plugin never defines a
-dialect, so adding a new dialect or lifecycle still requires its own
-codec/runner and scoped behavioral evidence.
+profiles name a built-in dialect and whose code OLP runs confined. A plugin
+never defines a dialect, so adding a new dialect or lifecycle still requires its
+own codec/runner and scoped behavioral evidence.
 
 First-party contract references consulted for these compositions:
 [OpenAI API migration](https://developers.openai.com/api/docs/guides/migrate-to-responses),

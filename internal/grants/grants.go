@@ -1,5 +1,5 @@
-// Package grants holds grants beneath immutable credential versions (ADR
-// 0008) and runs grant enrollment through provider plugins.
+// Package grants holds grants beneath immutable credential versions and runs
+// grant enrollment through provider plugins.
 //
 // A grant is rotating upstream authorization a provider plugin obtains for an
 // operator's upstream account. Grant enrollment creates an ordinary credential

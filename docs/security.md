@@ -24,7 +24,7 @@ describes.
 | Principal | Credential | Verified by | Reaches |
 | --- | --- | --- | --- |
 | Member | The `__Host-olp_session` cookie, with a CSRF proof on unsafe methods and an allowed `Origin` | `access.Server.Authenticate` | The management operations of its role, within its [access scope](#project-boundaries) |
-| Management token | `Authorization: Bearer olpm_…` | `access.Server.Authenticate` | Its delegated operations that its creator can still perform ([ADR 0005](adr/0005-management-tokens-act-within-their-creators-authority.md)) |
+| Management token | `Authorization: Bearer olpm_…` | `access.Server.Authenticate` | Its delegated operations that its creator can still perform |
 | API key | The location its SDK uses; see [gateway keys](#gateway-keys) | `gateway/credentials.go` | Inference and model reads on its permitted routes within one project boundary |
 | Bootstrap token | `X-OLP-Setup-Token` | `access` setup | Creating the first owner, once |
 
@@ -39,7 +39,6 @@ contract does not declare cannot be mounted. Handlers may demand more with
 `Principal.Authorize`, such as the operation a record's project implies, never
 less. Mutations call `Reauthorize` inside their transaction, after the
 installation lock, so they commit only under authority that is still current.
-See [ADR 0006](adr/0006-management-routes-are-authorized-from-the-contract.md).
 
 `internal/access/policy.go` decides who holds each operation:
 

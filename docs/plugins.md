@@ -6,8 +6,7 @@ defines a dialect: codecs and interaction contracts stay first-party. Plugins
 are confined: OLP runs their code on [wazero](https://wazero.io) and grants
 every capability they have, unless a deployment enables the experimental
 [unconfined tier](#unconfined-plugins-experimental).
-[ADR 0007](adr/0007-confined-provider-plugins.md) records the design; the
-[authoring guide](plugin-authoring.md) covers writing one.
+The [authoring guide](plugin-authoring.md) covers writing one.
 
 This page covers installing, reviewing and approving plugins, creating
 providers from their profiles, enrolling grants, promoting plugin providers
@@ -39,7 +38,7 @@ plugin limits and reads the manifest it declares. It refuses the upload with a
 | Code | Reason |
 | --- | --- |
 | `plugin_module_invalid` | Not WebAssembly, not a plugin, a WASI command instead of a reactor, it imports something OLP does not provide, or it declares more than the runtime allows (see [Confinement and limits](#confinement-and-limits)). |
-| `plugin_abi_unsupported` | Built for another plugin ABI version. During 0.x the ABI carries no compatibility promise ([ADR 0004](adr/0004-no-compatibility-promises-during-0x.md)); rebuild the plugin with the SDK of this OLP version. |
+| `plugin_abi_unsupported` | Built for another plugin ABI version. During 0.x the ABI carries no compatibility promise; rebuild the plugin with the SDK of this OLP version. |
 | `plugin_manifest_invalid` | The manifest is invalid or declares something this OLP does not understand. The problem's `errors` names the field, such as `manifest.origins[0]` or `manifest.profiles[0].hosting.headers.Authorization`. |
 | `plugin_dialect_unknown` | A declared profile names a dialect plugin profiles can't serve, such as `manifest.profiles[0].dialect`. |
 | `plugin_timed_out`, `plugin_failed` | The module exceeded its time limit, or trapped, exited or exhausted its memory, while starting or reporting its manifest. |
@@ -245,8 +244,7 @@ Some upstreams, such as subscription backends, authorize an account rather than
 issue an API key, and rotate that authorization. A profile that declares a
 grant authenticates providers with one: rotating upstream authorization the
 plugin obtains when an operator signs in to the upstream account, which OLP
-holds beneath an ordinary, immutable credential version
-([ADR 0008](adr/0008-grants-beneath-immutable-credentials.md)).
+holds beneath an ordinary, immutable credential version.
 
 In the provider wizard's Connection stage, choosing such a profile replaces the
 credential field with grant enrollment. After saving the draft, the plugin
@@ -432,8 +430,7 @@ activation like a rotation. Validate the slot's model access, then test and
 activate the provider.
 
 The observed principal is part of the provider's serving identity, in place of
-any principal a serving binding declares
-([ADR 0008](adr/0008-grants-beneath-immutable-credentials.md)):
+any principal a serving binding declares:
 
 - Every credential slot of a provider revision observes the same principal.
   Activation refuses slots whose credential versions observe different
@@ -454,8 +451,7 @@ targets of one route.
 
 A grant serves only the plugin build that enrolled it, which its credential
 version records: a build is known by its digest, since any build's manifest may
-claim any name, and a plugin gets only its own grant
-([ADR 0007](adr/0007-confined-provider-plugins.md)). Moving a provider to
+claim any name, and a plugin gets only its own grant. Moving a provider to
 another build of its plugin, an upgrade included, therefore takes a new grant
 enrollment for each of its credential slots: until then, probing, validating
 or activating a slot that holds the other build's grant is refused with
