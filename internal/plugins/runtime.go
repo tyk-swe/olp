@@ -101,6 +101,9 @@ func NewRuntime(ctx context.Context, engine Engine, limits Limits, log *slog.Log
 	// Without reference types, a module has at most one table, which never
 	// grows, so declare bounds every table (declared.go).
 	config = config.WithCoreFeatures(api.CoreFeaturesV2 &^ api.CoreFeatureReferenceTypes).
+		// Debug metadata is not part of the ABI. Do not run an additional
+		// DWARF decoder over untrusted custom-section payloads.
+		WithDebugInfoEnabled(false).
 		WithMemoryLimitPages(limits.Memory / wasmPage).
 		WithCloseOnContextDone(true)
 	r := &Runtime{engine: wazero.NewRuntimeWithConfig(ctx, config), limits: limits, log: log}

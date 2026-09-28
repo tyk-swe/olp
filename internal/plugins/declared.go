@@ -9,9 +9,9 @@ import (
 	"github.com/tetratelabs/wazero/experimental"
 )
 
-// Bounds on what a module may declare. wazero allocates a table's elements
-// and a function's locals as the module declares them, before any limit
-// applies, so OLP reads these declarations before wazero compiles a module.
+// Bounds on what a module may declare. wazero allocates declared vectors,
+// byte strings, tables and locals before validating their contents, so OLP
+// reads their lengths and checks their framing before compilation.
 // A Go plugin declares one table of a few thousand elements and functions of
 // fewer than twenty locals.
 const (
@@ -27,6 +27,10 @@ const (
 	// maxTypes bounds a module's function types the same way, before its
 	// type section allocates for them.
 	maxTypes = 1 << 16
+	// maxVectorEntries bounds other decoded vectors, including nested
+	// element and name vectors. Their combined count is bounded as well.
+	maxVectorEntries = 1 << 16
+	maxModuleEntries = 1 << 20
 	// frameOverhead is what a frame holds beyond its function's values, such
 	// as its return address, in stack values.
 	frameOverhead = 4
@@ -46,19 +50,30 @@ type declarations struct {
 
 // Section IDs of the binary format.
 const (
-	sectionType     = 1
-	sectionImport   = 2
-	sectionFunction = 3
-	sectionTable    = 4
-	sectionCode     = 10
+	sectionCustom    = 0
+	sectionType      = 1
+	sectionImport    = 2
+	sectionFunction  = 3
+	sectionTable     = 4
+	sectionMemory    = 5
+	sectionGlobal    = 6
+	sectionExport    = 7
+	sectionStart     = 8
+	sectionElement   = 9
+	sectionCode      = 10
+	sectionData      = 11
+	sectionDataCount = 12
 )
 
-// declare reads what a module declares and refuses a module whose tables or
-// locals exceed OLP's bounds, or that imports anything but functions. It
-// reads only the sections it bounds, and leaves validating the module to
-// wazero.
+// declare bounds every allocation-driving declaration, including nested
+// vectors and strings, before wazero decodes it. Semantic validation and
+// instruction validation remain wazero's responsibility.
 func declare(module []byte) (declarations, error) {
-	r := reader{data: module}
+	if len(module) > maxModuleBytes {
+		return declarations{}, errNotModule
+	}
+	budget := uint64(maxModuleEntries)
+	r := reader{data: module, budget: &budget}
 	if header := r.bytes(8); r.err != nil || string(header) != "\x00asm\x01\x00\x00\x00" {
 		return declarations{}, errNotModule
 	}
@@ -66,13 +81,20 @@ func declare(module []byte) (declarations, error) {
 	var params, results []uint32
 	var types []uint32
 	var codes []function
+	var seen uint16
 	for r.len() > 0 && r.err == nil {
 		id := r.byte()
-		section := reader{data: r.bytes(r.u32())}
+		section := reader{data: r.bytes(r.u32()), budget: &budget}
 		if r.err != nil {
 			break
 		}
+		if id > sectionDataCount || (id != sectionCustom && seen&(1<<id) != 0) {
+			return declarations{}, errNotModule
+		}
+		seen |= 1 << id
 		switch id {
+		case sectionCustom:
+			section.custom()
 		case sectionType:
 			params, results = section.types()
 		case sectionImport:
@@ -87,11 +109,26 @@ func declare(module []byte) (declarations, error) {
 			if err := section.tables(); err != nil {
 				return declarations{}, err
 			}
+		case sectionMemory:
+			section.memory()
+		case sectionGlobal:
+			section.globals()
+		case sectionExport:
+			section.exports()
+		case sectionStart, sectionDataCount:
+			section.u32()
+		case sectionElement:
+			section.elements()
 		case sectionCode:
 			var err error
 			if codes, err = section.codes(); err != nil {
 				return declarations{}, err
 			}
+		case sectionData:
+			section.segments()
+		}
+		if section.len() != 0 {
+			section.fail()
 		}
 		if section.err != nil {
 			r.err = section.err
@@ -127,8 +164,9 @@ type function struct {
 // reader reads the binary format. After a malformed read, err is set and
 // every later read returns zero values.
 type reader struct {
-	data []byte
-	err  error
+	data   []byte
+	err    error
+	budget *uint64
 }
 
 func (r *reader) len() int { return len(r.data) }
@@ -172,23 +210,85 @@ func (r *reader) u32() uint32 {
 	return 0
 }
 
+// vector bounds a decoded vector before either preflight or wazero allocates
+// it. Every entry needs at least one byte, even before semantic validation.
+func (r *reader) vector(limit uint32) uint32 {
+	n := r.u32()
+	if r.err != nil || n > limit || uint64(n) > uint64(r.len()) || uint64(n) > *r.budget {
+		r.fail()
+		return 0
+	}
+	*r.budget -= uint64(n)
+	return n
+}
+
+// valueType reads the single-byte value types in the enabled core features.
+// Typed references and GC types are not enabled and must not misalign the
+// following allocation-driving lengths.
+func (r *reader) valueType() {
+	switch r.byte() {
+	case 0x7f, 0x7e, 0x7d, 0x7c, 0x7b, 0x70, 0x6f:
+	default:
+		r.fail()
+	}
+}
+
+// integer skips a signed constant's LEB128 immediate; wazero validates its
+// value and sign bits. Unsigned lengths and indices always use u32 instead.
+func (r *reader) integer(bytes int) {
+	for range bytes {
+		if r.byte()&0x80 == 0 {
+			return
+		}
+	}
+	r.fail()
+}
+
+func (r *reader) expression() {
+	for r.err == nil {
+		switch r.byte() {
+		case 0x0b: // end
+			return
+		case 0x41: // i32.const
+			r.integer(5)
+		case 0x42: // i64.const
+			r.integer(10)
+		case 0x43: // f32.const
+			r.bytes(4)
+		case 0x44: // f64.const
+			r.bytes(8)
+		case 0x23, 0xd2: // global.get, ref.func
+			r.u32()
+		case 0xd0: // ref.null
+			r.valueType()
+		case 0xfd: // v128.const
+			if r.byte() != 0x0c {
+				r.fail()
+			}
+			r.bytes(16)
+		default:
+			r.fail()
+		}
+	}
+}
+
 // types reads the type section: each function type's parameter and result
 // counts.
 func (r *reader) types() (params, results []uint32) {
-	n := r.u32()
-	if n > maxTypes {
-		r.err = refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d function types. A plugin may declare at most %d.", n, maxTypes))
-		return nil, nil
-	}
+	n := r.vector(maxTypes)
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		if r.byte() != 0x60 {
 			r.fail()
 			break
 		}
-		p := r.u32()
-		r.bytes(p)
-		q := r.u32()
-		r.bytes(q)
+		p := r.vector(maxFunctionLocals)
+		for j := uint32(0); j < p && r.err == nil; j++ {
+			r.valueType()
+		}
+		q := r.vector(maxFunctionLocals)
+		for j := uint32(0); j < q && r.err == nil; j++ {
+			r.valueType()
+		}
 		params, results = append(params, p), append(results, q)
 	}
 	return params, results
@@ -198,7 +298,7 @@ func (r *reader) types() (params, results []uint32) {
 // provides only functions, so a module importing anything else is refused.
 func (r *reader) imports() (uint32, error) {
 	var functions uint32
-	n := r.u32()
+	n := r.vector(maxFunctions)
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		module := r.bytes(r.u32())
 		name := r.bytes(r.u32())
@@ -217,11 +317,7 @@ func (r *reader) imports() (uint32, error) {
 // functions reads the function section: the type of each function the
 // module defines.
 func (r *reader) functions() []uint32 {
-	n := r.u32()
-	if n > maxFunctions {
-		r.err = refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d functions. A plugin may declare at most %d.", n, maxFunctions))
-		return nil
-	}
+	n := r.vector(maxFunctions)
 	var types []uint32
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		types = append(types, r.u32())
@@ -254,23 +350,143 @@ func (r *reader) tables() error {
 	return nil
 }
 
+func (r *reader) memory() {
+	n := r.vector(1)
+	if n == 0 {
+		return
+	}
+	flags := r.byte()
+	if flags > 1 { // Shared and 64-bit memory are not enabled.
+		r.fail()
+		return
+	}
+	r.u32()
+	if flags == 1 {
+		r.u32()
+	}
+}
+
+func (r *reader) globals() {
+	n := r.vector(maxVectorEntries)
+	for i := uint32(0); i < n && r.err == nil; i++ {
+		r.valueType()
+		r.byte() // mutability
+		r.expression()
+	}
+}
+
+func (r *reader) exports() {
+	n := r.vector(maxVectorEntries)
+	for i := uint32(0); i < n && r.err == nil; i++ {
+		r.bytes(r.u32()) // name
+		r.byte()         // kind
+		r.u32()          // index
+	}
+}
+
+func (r *reader) elements() {
+	n := r.vector(maxVectorEntries)
+	for i := uint32(0); i < n && r.err == nil; i++ {
+		flags := r.u32()
+		if flags > 7 {
+			r.fail()
+			return
+		}
+		if flags&1 == 0 { // active segment
+			if flags&2 != 0 {
+				r.u32() // table index
+			}
+			r.expression()
+		}
+		if flags != 0 && flags != 4 {
+			if flags&4 == 0 {
+				if r.byte() != 0 { // elemkind: function indices
+					r.fail()
+				}
+			} else {
+				r.valueType()
+			}
+		}
+		entries := r.vector(maxVectorEntries)
+		for j := uint32(0); j < entries && r.err == nil; j++ {
+			if flags&4 == 0 {
+				r.u32()
+			} else {
+				r.expression()
+			}
+		}
+	}
+}
+
+func (r *reader) segments() {
+	n := r.vector(maxVectorEntries)
+	for i := uint32(0); i < n && r.err == nil; i++ {
+		switch r.u32() {
+		case 0:
+			r.expression()
+		case 1: // passive segment
+		case 2:
+			r.u32() // memory index
+			r.expression()
+		default:
+			r.fail()
+		}
+		r.bytes(r.u32())
+	}
+}
+
+func (r *reader) custom() {
+	name := r.bytes(r.u32())
+	if string(name) != "name" {
+		// Other custom payloads are opaque; debug information is disabled.
+		r.bytes(uint32(r.len()))
+		return
+	}
+	for r.len() > 0 && r.err == nil {
+		id := r.byte()
+		sub := reader{data: r.bytes(r.u32()), budget: r.budget}
+		switch id {
+		case 0: // module name
+			sub.bytes(sub.u32())
+		case 1: // function names
+			sub.names()
+		case 2: // local names, grouped by function
+			n := sub.vector(maxFunctions)
+			for i := uint32(0); i < n && sub.err == nil; i++ {
+				sub.u32()
+				sub.names()
+			}
+		default: // wazero skips other name subsections.
+			sub.bytes(uint32(sub.len()))
+		}
+		if sub.err != nil || sub.len() != 0 {
+			r.fail()
+		}
+	}
+}
+
+func (r *reader) names() {
+	n := r.vector(maxVectorEntries)
+	for i := uint32(0); i < n && r.err == nil; i++ {
+		r.u32()          // index
+		r.bytes(r.u32()) // name
+	}
+}
+
 // codes reads the code section and refuses more than maxFunctions functions,
 // a function whose locals exceed maxFunctionLocals, or locals in all that
 // exceed maxModuleLocals.
 func (r *reader) codes() ([]function, error) {
-	n := r.u32()
-	if n > maxFunctions {
-		return nil, refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d functions. A plugin may declare at most %d.", n, maxFunctions))
-	}
+	n := r.vector(maxFunctions)
 	var codes []function
 	var total uint64
 	for i := uint32(0); i < n && r.err == nil; i++ {
-		body := reader{data: r.bytes(r.u32())}
+		body := reader{data: r.bytes(r.u32()), budget: r.budget}
 		var c function
-		declared := body.u32()
+		declared := body.vector(maxVectorEntries)
 		for j := uint32(0); j < declared && body.err == nil; j++ {
 			c.locals += uint64(body.u32())
-			body.byte()
+			body.valueType()
 			if c.locals > maxFunctionLocals {
 				return nil, refuse(CodeModuleInvalid, fmt.Sprintf("The module declares a function of more than %d locals.", maxFunctionLocals))
 			}

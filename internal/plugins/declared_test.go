@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"bytes"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -82,6 +83,56 @@ func wasmBody(locals [][]byte, instructions ...byte) []byte {
 
 // funcrefTable declares a funcref table of min elements and no maximum.
 func funcrefTable(min uint32) []byte { return append([]byte{0x70, 0x00}, wasmLEB(min)...) }
+
+// Tiny malformed uploads must fail before the decoder allocates their claimed
+// vectors, including vectors and byte strings nested inside sections.
+func TestLoadBoundsDecoderAllocations(t *testing.T) {
+	const huge = 1 << 20
+	count := wasmLEB(huge)
+	sections := map[string][]byte{
+		"imports":             wasmSection(2, count),
+		"globals":             wasmSection(6, count),
+		"exports":             wasmSection(7, count),
+		"elements":            wasmSection(9, count),
+		"data":                wasmSection(11, count),
+		"element functions":   wasmSection(9, append([]byte{1, 0, 0x41, 0, 0x0b}, count...)),
+		"element expressions": wasmSection(9, append([]byte{1, 4, 0x41, 0, 0x0b}, count...)),
+		"data bytes":          wasmSection(11, append([]byte{1, 1}, wasmLEB(32<<20)...)),
+		"export name":         wasmSection(7, append([]byte{1}, wasmLEB(32<<20)...)),
+		"custom name":         wasmSection(0, wasmLEB(32<<20)),
+		"function names":      wasmSection(0, append(wasmName("name"), wasmSection(1, count)...)),
+		"local functions":     wasmSection(0, append(wasmName("name"), wasmSection(2, count)...)),
+		"local names":         wasmSection(0, append(wasmName("name"), wasmSection(2, append([]byte{1, 0}, count...))...)),
+		"type parameters":     wasmSection(1, append([]byte{1, 0x60}, count...)),
+		"type results":        wasmSection(1, append([]byte{1, 0x60, 0}, count...)),
+		"module name":         wasmSection(0, append(wasmName("name"), wasmSection(0, wasmLEB(32<<20))...)),
+		"function name":       wasmSection(0, append(wasmName("name"), wasmSection(1, append([]byte{1, 0}, wasmLEB(32<<20)...))...)),
+	}
+	for flags, prefix := range [][]byte{
+		{0, 0x41, 0, 0x0b}, {1, 0}, {2, 0, 0x41, 0, 0x0b, 0}, {3, 0},
+		{4, 0x41, 0, 0x0b}, {5, 0x70}, {6, 0, 0x41, 0, 0x0b, 0x70}, {7, 0x70},
+	} {
+		sections[fmt.Sprintf("element form %d", flags)] = wasmSection(9, append(append([]byte{1}, prefix...), count...))
+	}
+	for flags, prefix := range [][]byte{{0, 0x41, 0, 0x0b}, {1}, {2, 0, 0x41, 0, 0x0b}} {
+		sections[fmt.Sprintf("data form %d", flags)] = wasmSection(11, append(append([]byte{1}, prefix...), wasmLEB(32<<20)...))
+	}
+	// No parallel tests: TotalAlloc measures this process.
+	r := newTestRuntime(t, DefaultLimits, nil)
+	for name, section := range sections {
+		t.Run(name, func(t *testing.T) {
+			module := append([]byte("\x00asm\x01\x00\x00\x00"), section...)
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			_, err := r.Load(t.Context(), module)
+			runtime.ReadMemStats(&after)
+			wantError(t, err, CodeModuleInvalid, "")
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 1<<20 {
+				t.Fatalf("a %d-byte malformed module allocated %d bytes before rejection", len(module), allocated)
+			}
+		})
+	}
+}
 
 // recurse is olp_call's instructions calling itself, forever.
 var recurse = []byte{0x20, 0, 0x20, 1, 0x10, 2}
