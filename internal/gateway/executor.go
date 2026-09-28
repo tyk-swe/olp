@@ -187,12 +187,13 @@ type attemptFailure struct {
 	committed    bool
 	retryAfter   time.Duration
 	upstream     *openai.UpstreamError
-	overall      bool   // the route deadline, not the attempt deadline, expired
-	dispatched   bool   // the request reached the upstream before the failure
-	quota        string // a quota this gateway enforces rejected the attempt
-	contractCode string // safe runtime interaction guard violation
-	policyCode   string // local output policy refusal after upstream completion
-	noRetry      bool   // strict outcome uncertainty must not suggest client retries
+	acceptance   upstream.Acceptance // what the exchange established about the upstream's work
+	overall      bool                // the route deadline, not the attempt deadline, expired
+	dispatched   bool                // the request reached the upstream before the failure
+	quota        string              // a quota this gateway enforces rejected the attempt
+	contractCode string              // safe runtime interaction guard violation
+	policyCode   string              // local output policy refusal after upstream completion
+	noRetry      bool                // strict outcome uncertainty must not suggest client retries
 	// aggregateTooLarge reports a forced stream whose non-streaming result
 	// exceeded the response size limit.
 	aggregateTooLarge bool
@@ -206,15 +207,18 @@ const (
 
 // billingUncertain reports whether the upstream may have served and billed
 // work this attempt cannot account for. Anything already delivered to the
-// client was served, and a request that reached the upstream may have been
-// processed in full even though its result never came back. A rejection the
-// upstream stated — a bad request, an exhausted quota, a refused credential —
-// costs nothing, and neither does a failure that never left this gateway.
-// The phase, not the class, decides: classConnect covers every transport
-// failure here, including a connection lost long after the request was sent.
+// client was served, and work the upstream may hold is what its acceptance
+// leaves unresolved: a stated rejection costs nothing, a 5xx may have done
+// the work its status denied, and a failure that never left this gateway is
+// free. The acceptance, not the class, decides: a declared rule changes how
+// the failure is routed, never what was billed. A failure built without
+// classified evidence falls back to its class.
 func (f *attemptFailure) billingUncertain() bool {
 	if f.committed {
 		return true
+	}
+	if f.acceptance != "" {
+		return f.acceptance.Unresolved()
 	}
 	switch f.class {
 	case classRateLimit, classUpstreamClient, classCredential, classContextWindow:
@@ -509,6 +513,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			f = &attemptFailure{}
 		}
 		f.dispatched = st.dispatched.Load()
+		f.acceptance = st.evidence().Acceptance()
 		if x.continuation != nil && x.continuation.resource != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			_ = s.Resources.MarkUnknown(cleanup, x.continuation.resource)
@@ -517,7 +522,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 
 		if fact.Interaction != nil {
 			f.noRetry = f.dispatched
-			fact.Interaction.UpstreamState = string(st.evidence().Acceptance())
+			fact.Interaction.UpstreamState = string(f.acceptance)
 		}
 		f.class = class
 		fact.Class = class

@@ -241,7 +241,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
 		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	received := s.now().Sub(fact.StartedAt)
@@ -270,7 +270,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
 	}
@@ -876,7 +876,8 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil); err != nil {
+	cfg := p.provider.Connector()
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, nil); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}
@@ -888,7 +889,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	resp, err := client.Do(req)
 	if err != nil {
 		pipeR.CloseWithError(err)
-		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
+		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
 		return nil, finish(string(class), &attemptFailure{dispatched: true})
 	}
 	// A provider may reply before consuming the entire multipart body. Close
@@ -916,7 +917,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 	resp.Body.Close()
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
+	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
 		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
 	}

@@ -161,10 +161,11 @@ func (s *stream) Write(p []byte) (int, error) {
 			s.pending = append(s.pending, line...)
 		}
 		if !complete {
-			// A line too long to redact whole is logged by its start and the
-			// rest of it dropped, so no secret is split across records.
+			// A line too long to redact whole is dropped entirely: the
+			// redactor only knows complete credentials, and a fragment can
+			// hold the part of one a split left inside it.
 			if len(s.pending) > maxCallLog {
-				s.flush()
+				s.pending = s.pending[:0]
 				s.dropping = true
 			}
 			return n, nil

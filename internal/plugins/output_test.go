@@ -82,7 +82,7 @@ func TestOutputStreamsLogOneRecordPerLine(t *testing.T) {
 		}
 		messages = append(messages, line.Message)
 	}
-	want := []string{"first [REDACTED] line", "second line", "unfinished", strings.Repeat("y", maxLogText) + "…", "last"}
+	want := []string{"first [REDACTED] line", "second line", "unfinished", "last"}
 	if strings.Join(messages, "|") != strings.Join(want, "|") {
 		t.Fatalf("stream records %q, want %q", messages, want)
 	}

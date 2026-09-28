@@ -24,6 +24,9 @@ const (
 	// maxFunctions bounds the functions a module declares, before its
 	// function and code sections allocate for them.
 	maxFunctions = 1 << 16
+	// maxTypes bounds a module's function types the same way, before its
+	// type section allocates for them.
+	maxTypes = 1 << 16
 	// frameOverhead is what a frame holds beyond its function's values, such
 	// as its return address, in stack values.
 	frameOverhead = 4
@@ -173,6 +176,10 @@ func (r *reader) u32() uint32 {
 // counts.
 func (r *reader) types() (params, results []uint32) {
 	n := r.u32()
+	if n > maxTypes {
+		r.err = refuse(CodeModuleInvalid, fmt.Sprintf("The module declares %d function types. A plugin may declare at most %d.", n, maxTypes))
+		return nil, nil
+	}
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		if r.byte() != 0x60 {
 			r.fail()

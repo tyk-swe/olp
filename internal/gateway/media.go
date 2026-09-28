@@ -577,8 +577,9 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		f.class = class
 		fact.Class = class
 		fact.Committed = f.committed
+		f.acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.status, Accepted: fact.Status == http.StatusOK}.Acceptance()
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status, Accepted: fact.Status == http.StatusOK}.Acceptance())
+			fact.Interaction.UpstreamState = string(f.acceptance)
 			if f.committed {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}

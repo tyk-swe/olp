@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // videoCreate reserves a durable local job before the non-idempotent upstream
@@ -518,6 +519,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 			retryAfter: failure.RetryAfter,
 			upstream:   failure.Upstream,
 			dispatched: failure.Dispatched,
+			acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
 		}
 		fact.recordEvidence(f.billingUncertain())
 		s.health.record(record.ProviderID, fact)

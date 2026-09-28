@@ -619,14 +619,16 @@ func (p *process) output() *output {
 func (p *process) logStderr(stderr io.Reader) {
 	defer p.reading.Done()
 	lines := bufio.NewReaderSize(stderr, maxCallLog)
+	// dropping marks an oversized line's tail: the redactor only knows
+	// complete credentials, and a fragment can hold the part of one a split
+	// left inside it, so nothing of an oversized line is ever recorded.
 	dropping := false
 	for {
 		line, err := lines.ReadSlice('\n')
-		if text := bytes.TrimRight(line, "\r\n"); !dropping && len(text) > 0 {
+		complete := err == nil || errors.Is(err, io.EOF)
+		if text := bytes.TrimRight(line, "\r\n"); complete && !dropping && len(text) > 0 {
 			p.output().record(abi.LogRecord{Level: "info", Message: string(text), Attrs: map[string]string{"stream": "stderr"}})
 		}
-		// A line too long to redact whole is logged by its start and the
-		// rest of it dropped, so no secret is split across records.
 		switch {
 		case errors.Is(err, bufio.ErrBufferFull):
 			dropping = true

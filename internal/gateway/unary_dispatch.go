@@ -36,6 +36,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 			f = &attemptFailure{}
 		}
 		f.dispatched = state.dispatched.Load()
+		f.acceptance = state.evidence().Acceptance()
 		f.noRetry = f.dispatched
 		f.class = class
 		fact.Class = class
@@ -45,7 +46,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 			fact.RetryAfter = &v
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(state.evidence().Acceptance())
+			fact.Interaction.UpstreamState = string(f.acceptance)
 		}
 		fact.recordEvidence(f.billingUncertain())
 		finish()

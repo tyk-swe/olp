@@ -135,11 +135,14 @@ func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 }
 
 // due returns the credential versions whose grants are due a refresh, the
-// longest due first.
+// longest due first, and those no configuration uses, which are retired
+// independently of when their next refresh would have been: a grant whose
+// access token carries no expiry is never due at all.
 func (r *Refresher) due(ctx context.Context) ([]string, error) {
 	rows, err := r.Pool.Query(ctx, `SELECT g.credential_id::text FROM olp.provider_grants g
 		JOIN olp.provider_credentials c ON c.id=g.credential_id
-		WHERE g.refresh_at<=now() AND g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
+		WHERE g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
+			AND (g.refresh_at<=now() OR `+using+` IS NULL)
 		ORDER BY g.refresh_at LIMIT $1`, refreshesPerPass)
 	if err != nil {
 		return nil, err
@@ -196,15 +199,16 @@ type refreshConfiguration struct {
 }
 
 // refreshLocked refreshes a grant this connection holds the lock of, if it
-// is still due: a worker that refreshed it meanwhile scheduled its next
-// refresh. It records the outcome on the grant. A grant no configuration
-// uses is retired instead.
+// is still due or still unused: a worker that refreshed or retired it
+// meanwhile scheduled its next refresh or ended it. It records the outcome
+// on the grant. A grant no configuration uses is retired instead.
 func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentialID string) (bool, error) {
 	g := dueGrant{credentialID: credentialID}
 	var configuration *refreshConfiguration
 	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,`+using+`
 		FROM olp.provider_grants g JOIN olp.provider_credentials c ON c.id=g.credential_id
-		WHERE g.credential_id=$1 AND g.refresh_at<=now() AND g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL`, credentialID).
+		WHERE g.credential_id=$1 AND g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
+			AND (g.refresh_at<=now() OR `+using+` IS NULL)`, credentialID).
 		Scan(&g.providerID, &g.digest, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
