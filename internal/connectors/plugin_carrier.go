@@ -32,8 +32,8 @@ type Carrier interface {
 	Carry(ctx context.Context, digest string, provider abi.Provider, req *http.Request, secrets []string) (*http.Response, error)
 }
 
-// ErrNotSent marks a failure to carry a request that never reached the
-// upstream, so another attempt can't repeat its work.
+// ErrNotSent marks a failed request that never reached the upstream, so
+// another attempt can't repeat its work.
 var ErrNotSent = errors.New("the request was not sent")
 
 // CarriedByPlugin reports whether the connector's plugin carries its upstream

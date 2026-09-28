@@ -456,3 +456,78 @@ func TestUnconfinedPluginStandardErrorIsRedactedAfterItsResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestUnconfinedProcessLogsShareOneBudget(t *testing.T) {
+	for _, source := range []string{"stderr", "context-free", "mixed", "redaction updates", "concurrent"} {
+		t.Run(source, func(t *testing.T) {
+			var logged bytes.Buffer
+			p := &process{log: slog.New(slog.NewJSONHandler(&logged, nil)), calls: map[uint64]*pending{}}
+			message := strings.Repeat("x", 100)
+			emit := func(i int) {
+				if source == "redaction updates" || source == "concurrent" {
+					p.mu.Lock()
+					p.calls[1] = &pending{secrets: []string{fmt.Sprintf("secret-%d", i)}}
+					p.mu.Unlock()
+				}
+				if source == "stderr" || (source == "mixed" || source == "concurrent") && i%2 == 0 {
+					p.reading.Add(1)
+					p.logStderr(strings.NewReader(message + "\n"))
+				} else {
+					callOutput(p.grants(0)).record(abi.LogRecord{Message: message})
+				}
+			}
+			var wg sync.WaitGroup
+			for i := range 1000 {
+				if source == "concurrent" {
+					wg.Go(func() { emit(i) })
+				} else {
+					emit(i)
+				}
+			}
+			wg.Wait()
+			spent, warnings := 0, 0
+			for _, line := range logLines(t, &logged) {
+				if line.Level == "WARN" {
+					warnings++
+					continue
+				}
+				spent += recordCost + len(line.Message)
+				for key, value := range line.Attrs {
+					spent += len(key) + len(value)
+				}
+			}
+			if spent == 0 || spent > maxCallLog || warnings != 1 {
+				t.Fatalf("process logs spent %d bytes of a %d byte budget, with %d warnings", spent, maxCallLog, warnings)
+			}
+		})
+	}
+}
+
+func TestUnconfinedProcessLogRedactionTracksItsCalls(t *testing.T) {
+	var logged bytes.Buffer
+	p := &process{log: slog.New(slog.NewJSONHandler(&logged, nil)), limit: time.Minute,
+		calls: map[uint64]*pending{}, ended: map[string]time.Time{}}
+	write := func(message string) {
+		p.reading.Add(1)
+		p.logStderr(strings.NewReader(message + "\n"))
+	}
+	write("before any call")
+	p.calls[1] = &pending{secrets: []string{"first-secret"}}
+	write("active first-secret")
+	p.end(p.calls[1])
+	delete(p.calls, 1)
+	p.calls[2] = &pending{secrets: []string{"second-secret"}}
+	callOutput(p.grants(0)).record(abi.LogRecord{Message: "ended first-secret; active second-secret"})
+	p.ended["first-secret"] = time.Now().Add(-time.Second)
+	write("expired first-secret; active second-secret")
+	lines := logLines(t, &logged)
+	want := []string{"before any call", "active [REDACTED]", "ended [REDACTED]; active [REDACTED]", "expired first-secret; active [REDACTED]"}
+	if len(lines) != len(want) {
+		t.Fatalf("got %d records, want %d", len(lines), len(want))
+	}
+	for i, message := range want {
+		if lines[i].Message != message {
+			t.Errorf("record %d: got %q, want %q", i, lines[i].Message, message)
+		}
+	}
+}

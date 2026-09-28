@@ -372,8 +372,14 @@ refresh the grant at once. Once the gateway serves the refreshed token, the
 cooldown ends and the slot serves again. An upstream that doesn't say when its
 access tokens expire gets a refresh only this way.
 
-A refresh that fails is retried after 30 seconds, doubling with each failure
-up to ten minutes, while the version keeps serving its last access token. A
+A refresh that fails before its token could have been spent is retried after
+30 seconds, doubling with each failure up to ten minutes, while the version
+keeps serving its last access token. For a confined plugin, OLP tracks every
+HTTP request in the refresh: once a connection is available, a failed refresh
+keeps its attempt fence, including a lost token response or a failed follow-up
+request. Native traffic cannot be observed this way, so an unconfined plugin's
+failure also keeps the fence unless OLP refused it before it could start.
+The grant lapses after the attempt deadline without reusing its token. A
 plugin reports a grant the upstream will no longer refresh, such as one whose
 refresh token was revoked, as `invalid_grant`. That failure is permanent, as is
 a refresh that authorizes another account than the grant's, a plugin that
@@ -637,7 +643,9 @@ secret values, within the same bounds as a confined plugin's. Its standard
 error, and records it logs without a call, are logged a line at a time with
 the plugin's digest, redacted of the secret values of every call in flight or
 answered within the last 10 seconds, since standard error may reach OLP after
-the response it preceded.
+the response it preceded. Standard error and records without a call share one
+16 KiB allowance for the process's lifetime; changing calls or redaction values
+does not renew it.
 
 ### Carrying traffic
 

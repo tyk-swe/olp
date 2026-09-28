@@ -160,7 +160,8 @@ type GrantRefresher interface {
 	// token, and returns the refresh token that replaces it when the upstream
 	// rotates it. It reports a grant the upstream will no longer refresh,
 	// such as one whose refresh token was revoked, as an *Error with code
-	// abi.CodeInvalidGrant; OLP retries any other failure.
+	// abi.CodeInvalidGrant. OLP retries other failures only when it knows the
+	// token was not spent; an ambiguous outcome eventually lapses the grant.
 	RefreshGrant(ctx context.Context, refresh GrantRefresh) (Grant, error)
 }
 

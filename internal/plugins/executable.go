@@ -194,6 +194,8 @@ type process struct {
 	// ended holds the secret values of calls that ended, until when OLP
 	// still redacts them from the plugin's standard error.
 	ended map[string]time.Time
+	// out retains the process's allowance for stderr and context-free logs.
+	out *output
 	// reason says why the process stopped; done is closed once it is set.
 	reason string
 	done   chan struct{}
@@ -606,6 +608,7 @@ func (p *process) grants(id uint64) context.Context {
 // every call awaiting it, and of calls that ended within the time limit.
 func (p *process) output() *output {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	now := time.Now()
 	var secrets []string
 	for _, call := range p.calls {
@@ -616,8 +619,12 @@ func (p *process) output() *output {
 			secrets = append(secrets, secret)
 		}
 	}
-	p.mu.Unlock()
-	return newOutput(p.log, secrets)
+	if p.out == nil {
+		p.out = newOutput(p.log, secrets)
+	} else {
+		p.out.redactSecrets(secrets)
+	}
+	return p.out
 }
 
 // logStderr logs what the plugin writes to standard error, a line at a time.

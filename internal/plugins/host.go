@@ -3,13 +3,17 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -90,14 +94,29 @@ func (h *Host) Manifest(ctx context.Context, digest string) (abi.Manifest, error
 // RefreshGrant runs the grant refresh of the plugin with digest for a grant
 // of provider, granting it HTTP to the plugin's approved origins through
 // client, the provider's network path, and redacting secrets from what the
-// plugin logs and reports.
+// plugin logs and reports. A failure wraps connectors.ErrNotSent only when
+// OLP knows the refresh could not have spent its token. A confined plugin can
+// reach the upstream only through its HTTP capability; an unconfined plugin
+// can reach it itself, so absence of HTTP activity proves nothing there.
 func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Provider, refresh abi.GrantRefresh, client *http.Client, secrets []string) (abi.Grant, error) {
 	var grant abi.Grant
-	manifest, err := h.Manifest(ctx, digest)
+	installed, err := usable(ctx, h.db, h.unconfined, digest, false)
 	if err != nil {
-		return grant, err
+		return grant, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
 	}
-	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: manifest.Origins, Client: client}}, &grant)
+	var connected atomic.Bool
+	// Once a connection is available, even a failed write may have sent part
+	// of the request. Keep this evidence across every request of the refresh,
+	// including a failed follow-up after the token endpoint succeeded.
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
+	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: installed.Manifest.Origins, Client: client}}, &grant)
+	refusedBeforeStart := false
+	if refusal, ok := errors.AsType[*Error](err); ok {
+		refusedBeforeStart = refusal.Code == CodeExecutableChanged || refusal.Code == CodeExecutableInvalid
+	}
+	if err != nil && (installed.Executable == "" && !connected.Load() || refusedBeforeStart) {
+		err = fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+	}
 	return grant, err
 }
 

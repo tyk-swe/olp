@@ -107,10 +107,11 @@ func (r *Refresher) Run(ctx context.Context) {
 
 // Pass refreshes the grants due a refresh now, or retires those no
 // configuration uses. A grant another worker is refreshing is left to it. A
-// refresh that fails is recorded on its grant and retried with backoff, unless
-// the failure is permanent and lapses the grant; the pass fails only when it
-// can't read or record grants. It reports whether it refreshed or retired a
-// grant or recorded a failure.
+// refresh that fails is recorded on its grant and retried with backoff only
+// when its token is safe to reuse. An ambiguous attempt stays fenced until
+// its recovery deadline, and a permanent failure lapses the grant. The pass
+// fails only when it can't read or record grants. It reports whether it
+// refreshed or retired a grant or recorded a failure.
 func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 	due, err := r.due(ctx)
 	if err != nil {
@@ -386,11 +387,19 @@ func (r *Refresher) write(ctx context.Context, g *dueGrant, served []byte, refre
 }
 
 // fail records a failed refresh on its grant. A transient failure is retried
-// after a backoff that grows with each failure. A permanent one lapses the
-// grant.
+// after a backoff only when OLP knows the token was not spent. Otherwise the
+// attempt stays fenced until its recovery deadline. A permanent failure
+// lapses the grant.
 func (r *Refresher) fail(ctx context.Context, conn *pgx.Conn, g *dueGrant, failure error) error {
 	reason := clip(failure.Error(), maxRefreshFailure)
 	if !permanent(failure) {
+		if g.refreshAttemptID != nil && !errors.Is(failure, connectors.ErrNotSent) {
+			r.Log.Warn("grant refresh outcome unknown; its token stays fenced until the attempt deadline", "provider_id", g.providerID, "credential_id", g.credentialID, "reason", reason)
+			_, err := conn.Exec(ctx, `UPDATE olp.provider_grants SET refresh_failures=refresh_failures+1,refresh_failure=$3,updated_at=now()
+				WHERE credential_id=$1 AND refresh_token_id=$2 AND refresh_attempt_id=$4`,
+				g.credentialID, g.refreshTokenID, reason, g.refreshAttemptID)
+			return err
+		}
 		retry := time.Now().Add(backoff(g.failures + 1))
 		r.Log.Warn("grant refresh failed", "provider_id", g.providerID, "credential_id", g.credentialID, "retry_at", retry, "reason", reason)
 		_, err := conn.Exec(ctx, `UPDATE olp.provider_grants SET refresh_at=$3,refresh_attempt_id=NULL,

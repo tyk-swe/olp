@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -356,6 +357,51 @@ func TestGrantRefreshHTTPFailureRedactsQueryCredentials(t *testing.T) {
 		if strings.Contains(diagnostic, secret) || strings.Contains(diagnostic, url.QueryEscape(secret)) || !strings.Contains(diagnostic, "[REDACTED]") {
 			t.Fatal("the refresh error or host log disclosed the query credential")
 		}
+	}
+}
+
+func TestGrantRefreshRetriesOnlyWhenNoRequestCouldHaveBeenSent(t *testing.T) {
+	for _, tier := range []string{"confined", "unconfined"} {
+		t.Run(tier, func(t *testing.T) {
+			var host *Host
+			var table *pluginTable
+			digest := fixtureDigest
+			if tier == "confined" {
+				host, table = newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+			} else {
+				u, file := unconfinedFixture(t, DefaultLimits, nil)
+				host = newUnconfinedHost(t, u, file)
+				table, digest = host.db.(*pluginTable), file.Digest
+			}
+			unavailable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			unavailable.Close()
+			lost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				conn.Close()
+			}))
+			t.Cleanup(lost.Close)
+			table.origins = []string{unavailable.URL, lost.URL}
+			for _, tc := range []struct {
+				name, target string
+				notSent      bool
+			}{
+				{"unapproved origin", "https://elsewhere.example/token", tier == "confined"},
+				{"connection refused", unavailable.URL, tier == "confined"},
+				{"response lost", lost.URL, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := host.RefreshGrant(t.Context(), digest, fixtureProvider,
+						abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "fetch:" + tc.target}, lost.Client(), nil)
+					if err == nil || errors.Is(err, connectors.ErrNotSent) != tc.notSent {
+						t.Fatalf("refresh failed with %v, want not sent %v", err, tc.notSent)
+					}
+				})
+			}
+		})
 	}
 }
 

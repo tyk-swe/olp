@@ -119,8 +119,9 @@ const (
 	CodeHTTPFailed = "http_failed"
 	// CodeInvalidGrant: the grant can no longer be refreshed, such as when
 	// the upstream revoked its refresh token or let it expire. OLP stops
-	// refreshing the grant. A refresh failure with any other code is
-	// transient, and OLP retries it.
+	// refreshing the grant. Other failures are retried only when OLP knows
+	// the refresh token was not spent; an ambiguous outcome stays fenced and
+	// lapses the grant after its attempt deadline.
 	CodeInvalidGrant = "invalid_grant"
 	// CodeNotSent: a plugin carrying a request did not send it upstream, such
 	// as when it could not connect, so OLP may try the request elsewhere.

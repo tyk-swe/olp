@@ -48,7 +48,8 @@ func at(t *time.Time, from time.Time) time.Duration {
 // A refresh renews the grant's own account: a refresh that observes another
 // principal or reports other grant facts, like one the upstream refuses with
 // invalid_grant, a plugin that refreshes no grants or one no longer installed
-// or approved, ends the grant's refresh. Every other failure is retried.
+// or approved, ends the grant's refresh. Other failures are retried only
+// when OLP knows the token was not spent.
 func TestRefreshFailuresArePermanentOnlyWhenTheGrantCanNoLongerRefresh(t *testing.T) {
 	g := &dueGrant{principal: "user@acme.example", facts: map[string]string{"account": "7"}}
 	for name, grant := range map[string]abi.Grant{
