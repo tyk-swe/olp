@@ -1,7 +1,7 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ensureSuccess, result } from '$lib/api/http';
-import type { Provider } from '$lib/features/providers/api';
+import { ensureOk, unwrap } from '$lib/api/http';
+import type { Provider } from '$lib/features/providers/api/providers';
 
 type Schemas = components['schemas'];
 
@@ -30,7 +30,7 @@ export async function startGrantEnrollment(
       body: slotId ? { slot_id: slotId } : undefined
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 /** Continues a grant enrollment with the pasted callback URL or code. */
@@ -50,7 +50,7 @@ export async function continueGrantEnrollment(
       body: { input }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 /** Asks where a grant enrollment by device authorization stands. Once its
@@ -69,7 +69,7 @@ export async function pollGrantEnrollment(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function cancelGrantEnrollment(
@@ -86,5 +86,5 @@ export async function cancelGrantEnrollment(
       }
     }
   );
-  ensureSuccess(response.error, response.response);
+  ensureOk(response);
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
 import {
   ApiProblem,
-  ensureSuccess,
+  ensureOk,
   fieldIssues,
   isEtagMismatch
 } from '$lib/api/http';
@@ -11,7 +11,7 @@ import {
   clearCsrfToken,
   getCsrfToken,
   setCsrfToken
-} from '$lib/features/access/session/api';
+} from '$lib/features/access/session/csrf';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 
@@ -182,7 +182,7 @@ describe('generated API error boundary', () => {
     expect(response.error).toEqual(problem);
     let caught: unknown;
     try {
-      ensureSuccess(response.error, response.response);
+      ensureOk(response);
     } catch (error) {
       caught = error;
     }
@@ -211,7 +211,7 @@ describe('generated API error boundary', () => {
     expect(response.error).toBe('<html>upstream unavailable</html>');
     let caught: unknown;
     try {
-      ensureSuccess(response.error, response.response);
+      ensureOk(response);
     } catch (error) {
       caught = error;
     }

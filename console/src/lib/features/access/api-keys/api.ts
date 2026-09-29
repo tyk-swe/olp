@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrap, unwrapPage } from '$lib/api/http';
 import { type CursorPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
@@ -27,7 +27,7 @@ export async function listApiKeyPage(
     params: { query: { limit: 50, cursor, created_by: createdBy } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function getApiKey(
@@ -38,7 +38,7 @@ export async function getApiKey(
     params: { path: { api_key_id: apiKeyId } },
     signal
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function createApiKey(
@@ -48,7 +48,7 @@ export async function createApiKey(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
@@ -61,7 +61,7 @@ export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function updateApiKey(
@@ -75,7 +75,7 @@ export async function updateApiKey(
     },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function revokeApiKey(key: ApiKey): Promise<void> {
@@ -88,5 +88,5 @@ export async function revokeApiKey(key: ApiKey): Promise<void> {
       }
     }
   );
-  result(response.data, response.error, response.response);
+  unwrap(response);
 }

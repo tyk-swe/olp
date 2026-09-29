@@ -1,3 +1,5 @@
+import { gatewayFetch } from '$lib/api/gateway';
+
 export const translationFormats = [
   'json',
   'text',
@@ -35,14 +37,11 @@ export async function translateAudio(
   if (prompt !== '') body.set('prompt', prompt);
   if (temperature !== '') body.set('temperature', temperature);
   body.set('response_format', format);
-  const response = await fetch('/v1/audio/translations', {
+  const response = await gatewayFetch('/v1/audio/translations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}` },
     body,
-    signal,
-    credentials: 'omit',
-    redirect: 'error',
-    cache: 'no-store'
+    signal
   });
   if (!response.ok)
     throw new Error(

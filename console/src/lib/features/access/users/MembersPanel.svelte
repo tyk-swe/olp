@@ -7,7 +7,7 @@
     listUserPage,
     updateUser,
     type User
-  } from '$lib/features/access/api';
+  } from '$lib/features/access/users/api';
   import type { CursorPage } from '$lib/api/http';
   import { errorMessage } from '$lib/api/http';
   import {

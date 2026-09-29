@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { result } from '$lib/api/http';
+import { unwrap } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
 export type UsagePoint = components['schemas']['UsagePointResponse'];
@@ -32,7 +32,7 @@ export async function usageSummary(
       params: { query: compactQuery(filters) }
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function usageSeries(
@@ -43,7 +43,7 @@ export async function usageSeries(
     '/api/v1/usage/time-series',
     { params: { query: compactQuery({ ...filters, granularity }) } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function usageBreakdown(
@@ -55,7 +55,7 @@ export async function usageBreakdown(
     '/api/v1/usage/breakdown',
     { params: { query: compactQuery({ ...filters, dimension, limit: 50 }) } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function usageCompleteness(
@@ -65,5 +65,5 @@ export async function usageCompleteness(
     '/api/v1/usage/completeness',
     { params: { query: compactQuery(filters) } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }

@@ -5,10 +5,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   createManagementToken,
   listManagementTokenPage,
-  listProjectPage,
   revokeManagementToken,
   type ManagementToken
-} from '$lib/features/access/api';
+} from '$lib/features/access/tokens/api';
+import { listProjectPage } from '$lib/features/access/projects/api';
 import ManagementTokensProbe from './test/ManagementTokensProbe.svelte';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
@@ -19,12 +19,15 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
     allows: () => role.current === 'owner'
   })
 }));
-vi.mock('$lib/features/access/api', async (original) => ({
-  ...(await original<typeof import('$lib/features/access/api')>()),
+vi.mock('$lib/features/access/tokens/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/tokens/api')>()),
   createManagementToken: vi.fn(),
   listManagementTokenPage: vi.fn(),
-  listProjectPage: vi.fn(),
   revokeManagementToken: vi.fn()
+}));
+vi.mock('$lib/features/access/projects/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/projects/api')>()),
+  listProjectPage: vi.fn()
 }));
 vi.mock('$lib/clipboard', () => ({ copyText: vi.fn(async () => true) }));
 

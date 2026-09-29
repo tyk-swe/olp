@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { UsageCompleteness } from '$lib/api/usage';
+import type { UsageCompleteness } from '$lib/features/usage/api/usage';
 import { presentUsageCompleteness } from '$lib/features/usage/completenessPresentation';
 
 const completeUsage: UsageCompleteness = {

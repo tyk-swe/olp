@@ -17,8 +17,8 @@
     listProviderRevisionPage,
     restoreProviderRevision,
     type ProviderRevisionDiff
-  } from '$lib/features/providers/revisions';
-  import { type Provider } from '$lib/features/providers/api';
+  } from '$lib/features/providers/api/revisions';
+  import { type Provider } from '$lib/features/providers/api/providers';
   import { formatDate, stateLabel } from '$lib/format';
   import type { RunProviderAction } from './providerEditor';
 

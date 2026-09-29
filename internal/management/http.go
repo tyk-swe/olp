@@ -3,6 +3,7 @@ package management
 import (
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/openapi"
 )
 
@@ -12,12 +13,10 @@ func Register(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(openapi.Document)
 	})
-	mux.HandleFunc("/api/v1/", NotFound)
+	mux.HandleFunc("/api/v1/", notFound)
 }
 
-func NotFound(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func notFound(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNotFound)
-	w.Write([]byte(`{"error":{"code":"not_found","message":"The requested management operation does not exist."}}`))
+	access.WriteProblem(w, access.Fail(404, "operation_not_found", "The requested management operation does not exist."))
 }

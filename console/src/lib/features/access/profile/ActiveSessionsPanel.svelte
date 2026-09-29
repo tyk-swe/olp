@@ -2,8 +2,11 @@
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '$lib/features/access/session/auth';
-  import { listSessionPage, revokeSession } from '$lib/features/access/api';
+  import { logout } from '$lib/features/access/session/api';
+  import {
+    listSessionPage,
+    revokeSession
+  } from '$lib/features/access/sessions/api';
   import { errorMessage } from '$lib/api/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import {

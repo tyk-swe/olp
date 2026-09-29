@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ApiProblem, ensureSuccess, pageResult, result } from '$lib/api/http';
+import { ApiProblem, ensureOk, unwrap, unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -24,7 +24,7 @@ export async function listMediaJobs(
   const { data, error, response } = await apiClient.GET('/api/v1/media-jobs', {
     params: { query: compactQuery(filters) }
   });
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }
 
 export async function getMediaJob(jobId: string): Promise<MediaJob> {
@@ -32,7 +32,7 @@ export async function getMediaJob(jobId: string): Promise<MediaJob> {
     '/api/v1/media-jobs/{job_id}',
     { params: { path: { job_id: jobId } } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function refreshMediaJob(jobId: string): Promise<MediaJob> {
@@ -40,7 +40,7 @@ export async function refreshMediaJob(jobId: string): Promise<MediaJob> {
     '/api/v1/media-jobs/{job_id}/refresh',
     { params: { path: { job_id: jobId } } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function deleteMediaJob(
@@ -56,7 +56,7 @@ export async function deleteMediaJob(
       }
     }
   );
-  ensureSuccess(error, response);
+  ensureOk({ error, response });
 }
 
 export type MediaContentVariant = 'video' | 'thumbnail' | 'spritesheet';
@@ -76,7 +76,7 @@ export async function downloadMediaJobContent(
     }
   );
   if (error || !(data instanceof Blob)) {
-    ensureSuccess(error ?? { message: 'invalid content' }, response);
+    ensureOk({ error: error ?? { message: 'invalid content' }, response });
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
       title: 'The media content response did not include a binary body',

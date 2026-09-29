@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { result } from '$lib/api/http';
+import { unwrap } from '$lib/api/http';
 
 export type ConfigurationDocument =
   components['schemas']['ConfigurationDocument'];
@@ -18,7 +18,7 @@ export async function exportConfiguration(
     '/api/v1/configuration/export',
     { signal }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function planConfiguration(
@@ -30,7 +30,7 @@ export async function planConfiguration(
     '/api/v1/configuration/plan',
     { body: { document, secret_bindings: secretBindings }, signal }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function applyConfiguration(
@@ -46,7 +46,7 @@ export async function applyConfiguration(
       signal
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export function missingSecretBindings(plan: ConfigurationPlan): string[] {

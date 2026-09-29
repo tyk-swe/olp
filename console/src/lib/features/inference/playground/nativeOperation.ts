@@ -1,3 +1,4 @@
+import { gatewayFetch } from '$lib/api/gateway';
 import {
   nativeObject,
   parseNativeJSON,
@@ -109,15 +110,12 @@ export async function runNativeOperation(
   });
   if (operation === 'embeddings')
     headers.set('X-OLP-Client-Contract', 'raw-vector-storage/1');
-  const response = await fetch(
+  const response = await gatewayFetch(
     `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
       headers,
       body,
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error',
       signal
     }
   );

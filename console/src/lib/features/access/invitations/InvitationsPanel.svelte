@@ -10,7 +10,7 @@
     revokeInvitation,
     type Invitation,
     type InvitationSecret
-  } from '$lib/features/access/api';
+  } from '$lib/features/access/invitations/api';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';
   import {

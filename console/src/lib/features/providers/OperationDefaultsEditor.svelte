@@ -5,7 +5,8 @@
     type NativePath
   } from '$lib/json/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
-  import { operationFields, type ProviderProfile } from './profiles';
+  import { operationFields } from './profiles';
+  import type { ProviderProfile } from './api/profiles';
   import NativeMapEditor from './NativeMapEditor.svelte';
   let {
     draft,

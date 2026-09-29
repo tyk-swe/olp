@@ -15,6 +15,7 @@
     SDK_OPTIONS,
     sdkLabel,
     sdkSnippet,
+    testSdkRequest,
     type ApiKeySdk
   } from '$lib/features/access/api-keys/sdkExamples';
 
@@ -91,66 +92,7 @@
     testState = 'running';
     testMessage = '';
     try {
-      let response: Response;
-      if (sdk === 'anthropic') {
-        response = await fetch(`${endpoint}/anthropic/v1/messages`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-api-key': secret.secret,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: routeSlug,
-            max_tokens: 16,
-            messages: [{ role: 'user', content: 'Connection test' }]
-          })
-        });
-      } else if (sdk === 'gemini') {
-        response = await fetch(
-          `${endpoint}/gemini/v1beta/models/${encodeURIComponent(routeSlug)}:generateContent`,
-          {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-goog-api-key': secret.secret
-            },
-            body: JSON.stringify({
-              contents: [
-                { role: 'user', parts: [{ text: 'Connection test' }] }
-              ],
-              generationConfig: { maxOutputTokens: 16 }
-            })
-          }
-        );
-      } else {
-        response = await fetch(`${endpoint}/v1/responses`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${secret.secret}`
-          },
-          body: JSON.stringify({
-            model: routeSlug,
-            input: 'Connection test',
-            max_output_tokens: 16
-          })
-        });
-      }
-      if (!response.ok) {
-        let detail = `Request failed (${response.status}).`;
-        try {
-          const problem = (await response.json()) as {
-            detail?: string;
-            error?: { message?: string };
-          };
-          detail = problem.detail ?? problem.error?.message ?? detail;
-        } catch {
-          // The status remains enough when an intermediary returns no JSON.
-        }
-        throw new Error(detail);
-      }
-      await response.body?.cancel();
+      await testSdkRequest(sdk, secret.secret, routeSlug);
       testState = 'passed';
       testMessage = `${sdkLabel(sdk)} request succeeded through route ${routeSlug}.`;
     } catch (error) {

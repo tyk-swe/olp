@@ -1,5 +1,5 @@
 import { instant } from '$lib/api/query';
-import type { UsageFilters } from '$lib/api/usage';
+import type { UsageFilters } from '$lib/features/usage/api/usage';
 import { dateTimeLocalValue } from '$lib/format';
 import { UUID } from '$lib/lists/filters';
 

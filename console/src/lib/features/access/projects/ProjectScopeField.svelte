@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listProjectMemberships } from '$lib/features/access/api';
+  import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 

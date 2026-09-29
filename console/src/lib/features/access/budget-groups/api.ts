@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrap, unwrapPage } from '$lib/api/http';
 import { type CursorPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
@@ -24,7 +24,7 @@ export async function listBudgetGroupPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function createBudgetGroup(
@@ -34,7 +34,7 @@ export async function createBudgetGroup(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function updateBudgetGroup(
@@ -51,5 +51,5 @@ export async function updateBudgetGroup(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }

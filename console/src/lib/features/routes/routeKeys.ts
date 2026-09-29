@@ -7,5 +7,7 @@ export const routeKeys = {
   draftPage: (cursor?: string) =>
     ['routes', 'lists', 'drafts', cursor ?? 'first'] as const,
   draft: (id: string) => ['routes', 'draft', id] as const,
-  revisions: (routeId: string) => ['routes', 'revisions', routeId] as const
+  revisions: (routeId: string) => ['routes', 'revisions', routeId] as const,
+  policy: <Scope extends string>(scope: Scope, id: string, etag: string) =>
+    ['routing-policy', scope, id, etag] as const
 };

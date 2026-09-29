@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
-import { clearCsrfToken } from '$lib/features/access/session/api';
+import { clearCsrfToken } from '$lib/features/access/session/csrf';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import {
   createPricingSource,
@@ -9,7 +9,7 @@ import {
   updatePricingSource,
   type PricingSource,
   type PricingSourceSnapshot
-} from '$lib/features/usage/pricingSources';
+} from '$lib/features/usage/api/pricingSources';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

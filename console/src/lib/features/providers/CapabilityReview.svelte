@@ -4,7 +4,7 @@
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/models';
+  } from '$lib/features/providers/api/models';
   import {
     capabilityLimitReached,
     MAX_REVIEWED_CAPABILITIES

@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrapPage } from '$lib/api/http';
 import { RUNTIME_GENERATION_PAGE_SIZE } from '$lib/api/pageSizes';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
@@ -18,5 +18,5 @@ export async function listRuntimeGenerations(
       }
     }
   );
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }

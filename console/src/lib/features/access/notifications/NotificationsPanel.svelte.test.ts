@@ -36,8 +36,8 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
 vi.mock('$lib/features/access/session/serviceCapabilities.svelte', () => ({
   useServiceCapabilities: () => ({ notificationsActive: true })
 }));
-vi.mock('$lib/features/access/api', async (original) => ({
-  ...(await original<typeof import('$lib/features/access/api')>()),
+vi.mock('$lib/features/access/projects/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/projects/api')>()),
   listProjectMemberships: vi.fn(async () => [])
 }));
 vi.mock('$lib/features/access/api-keys/api', async (original) => ({

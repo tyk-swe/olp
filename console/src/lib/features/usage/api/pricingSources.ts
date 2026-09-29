@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result, type CursorPage } from '$lib/api/http';
+import { type CursorPage, unwrap, unwrapPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
@@ -25,7 +25,7 @@ export async function listPricingSourcePage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function createPricingSource(input: {
@@ -37,7 +37,7 @@ export async function createPricingSource(input: {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function updatePricingSource(
@@ -54,7 +54,7 @@ export async function updatePricingSource(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function refreshPricingSource(
@@ -64,7 +64,7 @@ export async function refreshPricingSource(
     '/api/v1/pricing/sources/{pricing_source_id}/refresh',
     { params: { path: { pricing_source_id: source.id } } }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listPricingSourceSnapshots(
@@ -82,7 +82,7 @@ export async function listPricingSourceSnapshots(
         signal
       }
     );
-    return pageResult(result(response.data, response.error, response.response));
+    return unwrapPage(response);
   });
 }
 
@@ -100,5 +100,5 @@ export async function publishPricingSnapshot(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }

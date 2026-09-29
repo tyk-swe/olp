@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrap, unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -14,7 +14,7 @@ export async function listPricing(
     '/api/v1/pricing/revisions',
     { params: { query: compactQuery({ cursor, limit: 25 }) } }
   );
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }
 
 export async function createPricingRevision(
@@ -28,5 +28,5 @@ export async function createPricingRevision(
       body: { effective_at: effectiveAt, prices }
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }

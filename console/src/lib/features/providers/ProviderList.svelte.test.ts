@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listProviderPage } from './api';
+import { listProviderPage } from './api/providers';
 import { provider } from '$lib/forms/test/draftFixtures';
 import { SEARCH_DEBOUNCE_MS } from '$lib/lists/search.svelte';
 import ProviderListProbe from './test/ProviderListProbe.svelte';
@@ -9,8 +9,8 @@ import ProviderListProbe from './test/ProviderListProbe.svelte';
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('./api', async (original) => ({
-  ...(await original<typeof import('./api')>()),
+vi.mock('./api/providers', async (original) => ({
+  ...(await original<typeof import('./api/providers')>()),
   listProviderPage: vi.fn()
 }));
 

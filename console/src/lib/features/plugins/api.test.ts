@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { operationsFor } from '$lib/features/access/session/test/grants';
-import { clearCsrfToken } from '$lib/features/access/session/api';
+import { clearCsrfToken } from '$lib/features/access/session/csrf';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import { ApiProblem } from '$lib/api/http';
 import {

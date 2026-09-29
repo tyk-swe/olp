@@ -8,13 +8,14 @@ import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
 import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
 import { abortError, errorMessage } from '$lib/api/http';
 import {
+  inspectRouting,
   runPlayground,
   streamPlayground,
+  type InspectRoutingInput,
   type PlaygroundOperation,
   type PlaygroundRequest,
   type PlaygroundStreamDone
 } from './api';
-import { inspectRouting, type InspectRoutingInput } from './inspection';
 import { nativeDialects, nativeOperationRequest } from './nativeOperation';
 import { playgroundTemplates, templateFor } from './templates';
 import {

@@ -14,7 +14,7 @@
   } from '$lib/features/runtime/health/api';
   import { errorMessage } from '$lib/api/http';
   import { listRuntimeGenerations } from '$lib/features/runtime/api';
-  import { usageCompleteness } from '$lib/api/usage';
+  import { usageCompleteness } from '$lib/features/usage/api/usage';
   import { formatDate, formatTime } from '$lib/format';
   import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';

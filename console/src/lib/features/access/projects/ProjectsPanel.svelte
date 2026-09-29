@@ -5,14 +5,14 @@
     createProject,
     listProjectMemberPage,
     listProjectPage,
-    listUsers,
     putProjectMember,
     removeProjectMember,
     renameProject,
     type Project,
     type ProjectMember,
     type ProjectRole
-  } from '$lib/features/access/api';
+  } from '$lib/features/access/projects/api';
+  import { listUsers } from '$lib/features/access/users/api';
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { formatDate } from '$lib/format';
@@ -86,9 +86,7 @@
   async function refreshSelected() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: projectKeys.root }),
-      queryClient.invalidateQueries({
-        queryKey: [...projectKeys.root, 'members']
-      })
+      queryClient.invalidateQueries({ queryKey: projectKeys.membersRoot })
     ]);
   }
 

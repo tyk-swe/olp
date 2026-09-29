@@ -5,7 +5,7 @@
   import {
     acceptInvitation,
     authenticationCapabilities
-  } from '$lib/features/access/session/auth';
+  } from '$lib/features/access/session/api';
   import {
     ApiProblem,
     applyServerFieldErrors,

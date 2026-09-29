@@ -1,22 +1,19 @@
 import { ConfigurationDraft } from './configurationDraft.svelte';
 import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
-import type { Provider } from './api';
+import type { Provider } from './api/providers';
 import type {
   CreateProviderInput,
   ProviderAuthMode,
   ProviderKind,
   ProviderProbe,
   UpdateProviderInput
-} from '$lib/features/providers/api';
+} from '$lib/features/providers/api/providers';
 import type {
   ProviderKindCapability,
   ProviderPreset
-} from '$lib/features/providers/models';
-import {
-  declaresModels,
-  pluginOptionFields,
-  type ProviderProfile
-} from './profiles';
+} from '$lib/features/providers/api/models';
+import { declaresModels, pluginOptionFields } from './profiles';
+import type { ProviderProfile } from './api/profiles';
 import { stateLabel } from '$lib/format';
 
 export type ProviderEditValues = {

@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result, type CursorPage } from '$lib/api/http';
+import { type CursorPage, unwrap, unwrapPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
@@ -34,7 +34,7 @@ export async function listNotificationDestinationPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function createNotificationDestination(
@@ -44,7 +44,7 @@ export async function createNotificationDestination(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function updateNotificationDestination(
@@ -61,7 +61,7 @@ export async function updateNotificationDestination(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listNotificationRules(
@@ -80,7 +80,7 @@ export async function listNotificationRulePage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function createNotificationRule(
@@ -90,7 +90,7 @@ export async function createNotificationRule(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function updateNotificationRule(
@@ -107,7 +107,7 @@ export async function updateNotificationRule(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listNotificationDeliveries(
@@ -119,6 +119,6 @@ export async function listNotificationDeliveries(
       params: { query: { limit: 50, cursor, rule_id: ruleId } },
       signal
     });
-    return pageResult(result(response.data, response.error, response.response));
+    return unwrapPage(response);
   });
 }

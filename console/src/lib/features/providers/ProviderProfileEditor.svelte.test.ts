@@ -1,17 +1,17 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProviderKindCapability } from './models';
+import type { ProviderKindCapability } from './api/models';
 import { emptyProviderOptions, providerEditValues } from './providerEditor';
 import {
   getConfigurationSchemas,
   listProviderProfiles,
   type ProviderProfile
-} from './profiles';
+} from './api/profiles';
 import ProviderProfileEditorProbe from './test/ProviderProfileEditorProbe.svelte';
 
-vi.mock('./profiles', async (original) => ({
-  ...(await original<typeof import('./profiles')>()),
+vi.mock('./api/profiles', async (original) => ({
+  ...(await original<typeof import('./api/profiles')>()),
   listProviderProfiles: vi.fn(),
   getConfigurationSchemas: vi.fn()
 }));

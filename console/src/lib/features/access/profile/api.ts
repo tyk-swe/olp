@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ensureSuccess, result } from '$lib/api/http';
+import { ensureOk, unwrap } from '$lib/api/http';
 
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList =
@@ -14,7 +14,7 @@ export type RecentAuthenticationPurpose =
 
 export async function getProfile(): Promise<UserProfile> {
   const { data, error, response } = await apiClient.GET('/api/v1/profile');
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function updateProfile(
@@ -25,7 +25,7 @@ export async function updateProfile(
     params: { header: { 'If-Match': profile.etag } },
     body: input
   });
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function reauthenticateWithPassword(
@@ -43,7 +43,7 @@ export async function reauthenticateWithPassword(
       }
     }
   );
-  ensureSuccess(error, response);
+  ensureOk({ error, response });
 }
 
 export async function changePassword(
@@ -57,7 +57,7 @@ export async function changePassword(
       body: input
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function enrollPassword(
@@ -71,14 +71,14 @@ export async function enrollPassword(
       body: input
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function listOidcIdentities(): Promise<OidcIdentityList> {
   const { data, error, response } = await apiClient.GET(
     '/api/v1/oidc/identities'
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function beginOidcReauthentication(
@@ -89,7 +89,7 @@ export async function beginOidcReauthentication(
     '/api/v1/oidc/reauthenticate',
     { body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) } }
   );
-  return result(data, error, response).authorization_url;
+  return unwrap({ data, error, response }).authorization_url;
 }
 
 export async function unlinkOidcIdentity(identityId: string): Promise<void> {
@@ -97,5 +97,5 @@ export async function unlinkOidcIdentity(identityId: string): Promise<void> {
     '/api/v1/oidc/identities/{identity_id}',
     { params: { path: { identity_id: identityId } } }
   );
-  ensureSuccess(error, response);
+  ensureOk({ error, response });
 }

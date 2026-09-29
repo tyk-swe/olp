@@ -1,4 +1,4 @@
-import type { UsageCompleteness } from '$lib/api/usage';
+import type { UsageCompleteness } from '$lib/features/usage/api/usage';
 
 export type UsageCompletenessPresentation =
   | { kind: 'complete' }

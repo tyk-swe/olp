@@ -3,7 +3,7 @@ import {
   MANAGEMENT_REQUIREMENTS,
   type ManagementRoute
 } from '$lib/api/requirements';
-import { MANAGEMENT_TOKEN_SCOPES } from '$lib/features/access/api';
+import { MANAGEMENT_TOKEN_SCOPES } from '$lib/features/access/tokens/api';
 import {
   FIXED_ROLES,
   allows,

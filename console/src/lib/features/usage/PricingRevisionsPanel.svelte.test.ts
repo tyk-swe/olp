@@ -1,30 +1,31 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { authenticationCapabilities } from '$lib/features/access/session/auth';
+import { authenticationCapabilities } from '$lib/features/access/session/api';
+import { sessionKeys } from '$lib/features/access/session/sessionKeys';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
-import { listProviderKinds } from '$lib/features/providers/models';
-import { listProviderVendors } from '$lib/features/providers/api';
+import { listProviderKinds } from '$lib/features/providers/api/models';
+import { listProviderVendors } from '$lib/features/providers/api/providers';
 import {
   createPricingRevision,
   listPricing,
   type PricingRevision
-} from './pricing';
+} from './api/pricing';
 import PricingRevisionsProbe from './test/PricingRevisionsProbe.svelte';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: vi.fn()
 }));
-vi.mock('$lib/features/access/session/auth', () => ({
+vi.mock('$lib/features/access/session/api', () => ({
   authenticationCapabilities: vi.fn()
 }));
-vi.mock('$lib/features/providers/models', () => ({
+vi.mock('$lib/features/providers/api/models', () => ({
   listProviderKinds: vi.fn()
 }));
-vi.mock('$lib/features/providers/api', () => ({
+vi.mock('$lib/features/providers/api/providers', () => ({
   listProviderVendors: vi.fn()
 }));
-vi.mock('./pricing', () => ({
+vi.mock('./api/pricing', () => ({
   createPricingRevision: vi.fn(),
   listPricing: vi.fn()
 }));
@@ -75,7 +76,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(['service-capabilities'], capabilities);
+  client.setQueryData(sessionKeys.serviceCapabilities, capabilities);
   vi.mocked(listProviderKinds).mockResolvedValue([
     {
       kind: 'openai',
@@ -276,7 +277,7 @@ it('blocks pricing creation during another settings save', async () => {
 });
 
 it('gates queries on installation capabilities and preserves edits while hidden', async () => {
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     gateway_available: false,
     limits_enforced: false
@@ -286,7 +287,7 @@ it('gates queries on installation capabilities and preserves edits while hidden'
   expect(listProviderKinds).not.toHaveBeenCalled();
   expect(listProviderVendors).not.toHaveBeenCalled();
   expect(listPricing).not.toHaveBeenCalled();
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     limits_enforced: false
   });
@@ -295,13 +296,13 @@ it('gates queries on installation capabilities and preserves edits while hidden'
   expect(listPricing).not.toHaveBeenCalled();
   expect(createButton().disabled).toBe(true);
   expect(host.textContent).toContain('Pricing revisions become available');
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     gateway_available: false,
     limits_enforced: false
   });
   await vi.waitFor(() => expect(host.querySelector('form')).toBeNull());
-  client.setQueryData(['service-capabilities'], capabilities);
+  client.setQueryData(sessionKeys.serviceCapabilities, capabilities);
   await vi.waitFor(() => expect(host.textContent).toContain('Revision 2'));
   expect(field('price-model').value).toBe(' model-a ');
   expect(field('input-price').value).toBe(' 0.00012500 ');
@@ -309,14 +310,16 @@ it('gates queries on installation capabilities and preserves edits while hidden'
 });
 
 it('does not start pricing queries while installation capabilities are unavailable', async () => {
-  client.removeQueries({ queryKey: ['service-capabilities'] });
+  client.removeQueries({ queryKey: sessionKeys.serviceCapabilities });
   const pending = Promise.withResolvers<typeof capabilities>();
   vi.mocked(authenticationCapabilities).mockReturnValue(pending.promise);
   establish();
   expect(host.querySelector('form')).toBeNull();
   pending.reject(new Error('Capabilities unavailable'));
   await vi.waitFor(() =>
-    expect(client.getQueryState(['service-capabilities'])?.status).toBe('error')
+    expect(client.getQueryState(sessionKeys.serviceCapabilities)?.status).toBe(
+      'error'
+    )
   );
   expect(listProviderKinds).not.toHaveBeenCalled();
   expect(listProviderVendors).not.toHaveBeenCalled();

@@ -28,6 +28,7 @@
     errorMessage,
     isEtagMismatch
   } from '$lib/api/http';
+  import { sessionKeys } from '$lib/features/access/session/sessionKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
   const queryClient = useQueryClient();
@@ -123,7 +124,7 @@
       }
       if (setting.key === 'auth.local_login_enabled')
         await queryClient.invalidateQueries({
-          queryKey: ['service-capabilities']
+          queryKey: sessionKeys.serviceCapabilities
         });
       status = `${settingLabel(setting.key)} saved.`;
     } catch (cause) {

@@ -6,25 +6,27 @@ import {
   createProject,
   listProjectMemberPage,
   listProjectPage,
-  listUsers,
   putProjectMember,
   removeProjectMember,
   renameProject,
   type Project,
-  type ProjectMember,
-  type User
-} from '$lib/features/access/api';
+  type ProjectMember
+} from '$lib/features/access/projects/api';
+import { listUsers, type User } from '$lib/features/access/users/api';
 import ProjectsProbe from './test/ProjectsProbe.svelte';
 
-vi.mock('$lib/features/access/api', async (original) => ({
-  ...(await original<typeof import('$lib/features/access/api')>()),
+vi.mock('$lib/features/access/projects/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/projects/api')>()),
   createProject: vi.fn(),
   listProjectMemberPage: vi.fn(),
   listProjectPage: vi.fn(),
-  listUsers: vi.fn(),
   putProjectMember: vi.fn(),
   removeProjectMember: vi.fn(),
   renameProject: vi.fn()
+}));
+vi.mock('$lib/features/access/users/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/users/api')>()),
+  listUsers: vi.fn()
 }));
 
 const project: Project = {

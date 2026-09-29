@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ApiProblem, result } from '$lib/api/http';
+import { ApiProblem, unwrap } from '$lib/api/http';
 
 type Schemas = components['schemas'];
 
@@ -24,7 +24,7 @@ export async function getSetupStatus(
     '/api/v1/setup/status',
     { signal }
   );
-  const value = result(data, error, response);
+  const value = unwrap({ data, error, response });
   if (typeof value?.setup_required !== 'boolean') {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',
@@ -48,7 +48,7 @@ export async function createOwner(
     body: input,
     signal
   });
-  const value = result(data, error, response);
+  const value = unwrap({ data, error, response });
 
   if (
     typeof value?.csrf_token !== 'string' ||

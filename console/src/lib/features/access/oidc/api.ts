@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { result } from '$lib/api/http';
+import { unwrap } from '$lib/api/http';
 
 type Schemas = components['schemas'];
 
@@ -14,7 +14,7 @@ export async function getOidcConfiguration(
     signal
   });
   if (response.response.status === 404) return null;
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function putOidcConfiguration(
@@ -25,11 +25,10 @@ export async function putOidcConfiguration(
     params: { header: { 'If-Match': etag ?? null } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function beginOidcLink(): Promise<string> {
   const response = await apiClient.POST('/api/v1/oidc/link');
-  return result(response.data, response.error, response.response)
-    .authorization_url;
+  return unwrap(response).authorization_url;
 }

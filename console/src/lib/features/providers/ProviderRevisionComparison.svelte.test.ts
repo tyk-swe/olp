@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it } from 'vitest';
 import ProviderRevisionComparison from './ProviderRevisionComparison.svelte';
-import type { ProviderRevisionDiff } from './revisions';
+import type { ProviderRevisionDiff } from './api/revisions';
 
 const unchanged: ProviderRevisionDiff = {
   from_revision: 1,

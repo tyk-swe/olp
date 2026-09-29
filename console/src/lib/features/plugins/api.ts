@@ -2,10 +2,10 @@ import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import {
   ApiProblem,
-  ensureSuccess,
+  ensureOk,
   errorMessage,
   fieldIssues,
-  result
+  unwrap
 } from '$lib/api/http';
 
 export type Plugin = components['schemas']['Plugin'];
@@ -20,7 +20,7 @@ export async function listPlugins(signal?: AbortSignal): Promise<PluginList> {
   const { data, error, response } = await apiClient.GET('/api/v1/plugins', {
     signal
   });
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 /**
@@ -38,7 +38,7 @@ export async function installPlugin(
     headers: { 'Content-Type': 'application/wasm' }
   });
   return {
-    plugin: result(data, error, response),
+    plugin: unwrap({ data, error, response }),
     created: response.status === 201
   };
 }
@@ -55,7 +55,7 @@ export async function approvePlugin(plugin: Plugin): Promise<Plugin> {
       body: { origins: plugin.manifest.origins }
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function uninstallPlugin(plugin: Plugin): Promise<void> {
@@ -68,7 +68,7 @@ export async function uninstallPlugin(plugin: Plugin): Promise<void> {
       }
     }
   );
-  ensureSuccess(error, response);
+  ensureOk({ error, response });
 }
 
 /** The executables in the deployment's unconfined plugin directory. */
@@ -79,7 +79,7 @@ export async function listUnconfinedExecutables(
     '/api/v1/unconfined-plugins',
     { signal }
   );
-  return result(data, error, response).items;
+  return unwrap({ data, error, response }).items;
 }
 
 /** Runs an executable to read the manifest it declares, for review. */
@@ -90,7 +90,7 @@ export async function reviewUnconfinedExecutable(
     '/api/v1/unconfined-plugins/{executable}/review',
     { params: { path: { executable: name } } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 /**
@@ -107,7 +107,7 @@ export async function permitUnconfinedPlugin(
       body: { digest: review.digest, acknowledge_risk: true }
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 /** Whether a request needs the owner to reauthenticate first. */

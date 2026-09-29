@@ -1,26 +1,28 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { authenticationCapabilities } from '$lib/features/access/session/auth';
+import { authenticationCapabilities } from '$lib/features/access/session/api';
+import { sessionKeys } from '$lib/features/access/session/sessionKeys';
+import { routeKeys } from '$lib/features/routes/routeKeys';
 import {
   listSettings,
   updateSetting,
   type Setting
 } from '$lib/features/settings/api';
 import SettingsPageProbe from './test/SettingsPageProbe.svelte';
-import { listProviderKinds } from '$lib/features/providers/models';
-import { listProviderVendors } from '$lib/features/providers/api';
-import { listPricingSources } from '$lib/features/usage/pricingSources';
+import { listProviderKinds } from '$lib/features/providers/api/models';
+import { listProviderVendors } from '$lib/features/providers/api/providers';
+import { listPricingSources } from '$lib/features/usage/api/pricingSources';
 import {
   createPricingRevision,
   listPricing,
   type PricingRevision
-} from '$lib/features/usage/pricing';
+} from '$lib/features/usage/api/pricing';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('$lib/features/access/session/auth', () => ({
+vi.mock('$lib/features/access/session/api', () => ({
   authenticationCapabilities: vi.fn()
 }));
 vi.mock('$lib/features/settings/api', async (original) => ({
@@ -28,17 +30,19 @@ vi.mock('$lib/features/settings/api', async (original) => ({
   listSettings: vi.fn(),
   updateSetting: vi.fn()
 }));
-vi.mock('$lib/features/providers/models', () => ({
+vi.mock('$lib/features/providers/api/models', () => ({
   listProviderKinds: vi.fn()
 }));
-vi.mock('$lib/features/providers/api', () => ({
+vi.mock('$lib/features/providers/api/providers', () => ({
   listProviderVendors: vi.fn()
 }));
-vi.mock('$lib/features/usage/pricingSources', async (original) => ({
-  ...(await original<typeof import('$lib/features/usage/pricingSources')>()),
+vi.mock('$lib/features/usage/api/pricingSources', async (original) => ({
+  ...(await original<
+    typeof import('$lib/features/usage/api/pricingSources')
+  >()),
   listPricingSources: vi.fn()
 }));
-vi.mock('$lib/features/usage/pricing', () => ({
+vi.mock('$lib/features/usage/api/pricing', () => ({
   createPricingRevision: vi.fn(),
   listPricing: vi.fn()
 }));
@@ -76,7 +80,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(['service-capabilities'], capabilities);
+  client.setQueryData(sessionKeys.serviceCapabilities, capabilities);
   vi.mocked(listSettings).mockResolvedValue([auditSetting, requestSetting]);
 });
 
@@ -161,7 +165,7 @@ it.each([true, false])(
       key: 'auth.local_login_enabled',
       value: String(!enabled)
     };
-    client.setQueryData(['service-capabilities'], {
+    client.setQueryData(sessionKeys.serviceCapabilities, {
       ...capabilities,
       local_login_enabled: !enabled
     });
@@ -191,7 +195,7 @@ it.each([true, false])(
 
     await vi.waitFor(() => {
       expect(host.textContent).toContain('Local password sign-in saved.');
-      expect(client.getQueryData(['service-capabilities'])).toEqual({
+      expect(client.getQueryData(sessionKeys.serviceCapabilities)).toEqual({
         ...capabilities,
         local_login_enabled: enabled
       });
@@ -202,18 +206,17 @@ it.each([true, false])(
 );
 
 async function establishPricing() {
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     gateway_available: true,
     limits_enforced: true
   });
   client.setQueryData(
-    [
-      'routing-policy',
+    routeKeys.policy(
       'installation',
       '00000000-0000-0000-0000-000000000000',
       ''
-    ],
+    ),
     { policy: {}, etag: 'policy-v1' }
   );
   vi.mocked(listPricingSources).mockResolvedValue([]);
@@ -303,14 +306,14 @@ it('keeps pricing mounted and blocks setting saves throughout creation and capab
     expect(createPricingRevision).toHaveBeenCalledTimes(1)
   );
   expect(saveButton(auditSetting.key).disabled).toBe(true);
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     gateway_available: false,
     limits_enforced: false
   });
   await vi.waitFor(() => expect(host.querySelector('.price-form')).toBeNull());
   expect(saveButton(auditSetting.key).disabled).toBe(true);
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     ...capabilities,
     gateway_available: true,
     limits_enforced: true

@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
-  import { currentSession, logout } from '$lib/features/access/session/auth';
+  import { currentSession, logout } from '$lib/features/access/session/api';
   import { errorMessage } from '$lib/api/http';
   import { getSetupStatus } from '$lib/features/access/setup/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';

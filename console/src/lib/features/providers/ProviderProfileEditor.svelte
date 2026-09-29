@@ -1,9 +1,12 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { nativeEntries, nativeObject } from '$lib/json/nativeJson';
-  import type { Provider } from './api';
+  import type { Provider } from './api/providers';
   import type { ProviderEditValues, RunProviderAction } from './providerEditor';
-  import { getConfigurationSchemas, listProviderProfiles } from './profiles';
+  import {
+    getConfigurationSchemas,
+    listProviderProfiles
+  } from './api/profiles';
   import { providerKeys } from './providerKeys';
   import NativeValueField from './NativeValueField.svelte';
   import NativeMapEditor from './NativeMapEditor.svelte';
@@ -35,7 +38,7 @@
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   const schemas = createQuery(() => ({
-    queryKey: ['provider-configuration-schemas'],
+    queryKey: providerKeys.configurationSchemas(),
     queryFn: ({ signal }) => getConfigurationSchemas(signal),
     staleTime: Infinity
   }));

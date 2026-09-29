@@ -2,12 +2,12 @@
   import { userKeys } from '$lib/features/access/users/userKeys';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '$lib/features/access/session/auth';
+  import { logout } from '$lib/features/access/session/api';
   import {
     listSessionPage,
-    listUsers,
     revokeSession
-  } from '$lib/features/access/api';
+  } from '$lib/features/access/sessions/api';
+  import { listUsers } from '$lib/features/access/users/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { errorMessage } from '$lib/api/http';

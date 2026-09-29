@@ -11,18 +11,18 @@
   import { dateTimeLocalValue, formatDate } from '$lib/format';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { listProviderKinds } from '$lib/features/providers/models';
+  import { listProviderKinds } from '$lib/features/providers/api/models';
   import {
     listProviderVendors,
     type ProviderKind
-  } from '$lib/features/providers/api';
+  } from '$lib/features/providers/api/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { operationKinds } from './history/api';
   import {
     createPricingRevision,
     listPricing,
     type PriceDraft
-  } from './pricing';
+  } from './api/pricing';
   import { pricingKeys } from './pricingKeys';
   import { optionalDecimal } from './pricingValidation';
 
@@ -43,7 +43,7 @@
   let providerId = $state('');
   let vendorId = $state('');
   const providerVendors = createQuery(() => ({
-    queryKey: ['provider-vendors'],
+    queryKey: providerKeys.vendors(),
     enabled: services.gatewayAvailable,
     queryFn: () => listProviderVendors()
   }));

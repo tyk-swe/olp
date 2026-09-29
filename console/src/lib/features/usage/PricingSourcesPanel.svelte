@@ -12,9 +12,9 @@
     type PricingSource,
     type PricingSourceRefresh,
     type PricingSourceSnapshot
-  } from '$lib/features/usage/pricingSources';
+  } from '$lib/features/usage/api/pricingSources';
   import { pricingKeys } from '$lib/features/usage/pricingKeys';
-  import type { PriceDraft } from '$lib/features/usage/pricing';
+  import type { PriceDraft } from '$lib/features/usage/api/pricing';
   import { formatDate } from '$lib/format';
 
   const queryClient = useQueryClient();

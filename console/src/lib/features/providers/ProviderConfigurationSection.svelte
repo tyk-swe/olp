@@ -2,8 +2,8 @@
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import type { Provider } from '$lib/features/providers/api';
-  import type { ProviderKindCapability } from '$lib/features/providers/models';
+  import type { Provider } from '$lib/features/providers/api/providers';
+  import type { ProviderKindCapability } from '$lib/features/providers/api/models';
   import ProviderActivationControls from '$lib/features/providers/ProviderActivationControls.svelte';
   import type { RunProviderAction } from './providerEditor';
   import type { FieldIssue } from '$lib/api/http';

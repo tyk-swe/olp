@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import type { SessionUser } from '$lib/features/access/session/auth';
+  import type { SessionUser } from '$lib/features/access/session/api';
   import { can } from '$lib/features/access/session/authorization';
   import BrandMark from '$lib/components/BrandMark.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';

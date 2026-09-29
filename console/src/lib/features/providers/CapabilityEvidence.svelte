@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProviderModel } from './models';
+  import type { ProviderModel } from './api/models';
   import { formatDate } from '$lib/format';
 
   let { model }: { model: ProviderModel } = $props();

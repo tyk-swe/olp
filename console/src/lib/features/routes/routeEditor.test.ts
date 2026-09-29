@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderModelInventory } from '$lib/features/providers/models';
+import type { ProviderModelInventory } from '$lib/features/providers/api/models';
 import {
   buildContentPolicy,
   buildCreateRouteDraftInput,

@@ -4,10 +4,10 @@ import InvitationAcceptance from './InvitationAcceptance.svelte';
 import {
   acceptInvitation,
   authenticationCapabilities
-} from '$lib/features/access/session/auth';
+} from '$lib/features/access/session/api';
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), replaceState: vi.fn() }));
-vi.mock('$lib/features/access/session/auth', () => ({
+vi.mock('$lib/features/access/session/api', () => ({
   acceptInvitation: vi.fn(),
   authenticationCapabilities: vi.fn()
 }));

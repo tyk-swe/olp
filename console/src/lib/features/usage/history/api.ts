@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrap, unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -53,7 +53,7 @@ export async function listRequests(
   const { data, error, response } = await apiClient.GET('/api/v1/requests', {
     params: { query: compactQuery(filters) }
   });
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {
@@ -61,5 +61,5 @@ export async function getRequest(requestId: string): Promise<RequestDetail> {
     '/api/v1/requests/{request_id}',
     { params: { path: { request_id: requestId } } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }

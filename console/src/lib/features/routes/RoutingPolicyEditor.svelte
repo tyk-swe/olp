@@ -4,11 +4,16 @@
   import { parseJsonObject } from '$lib/forms/json';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { apiClient } from '$lib/api/client';
-  import { result, errorMessage } from '$lib/api/http';
-  import type { components } from '$lib/api/schema';
-  type Policy = components['schemas']['RoutingPolicy'];
-  type Scope = 'installation' | 'route-draft' | 'api-key';
+  import { errorMessage } from '$lib/api/http';
+  import {
+    getRoutingPolicy,
+    replaceRoutingPolicy,
+    type RoutingPolicy,
+    type RoutingPolicyScope
+  } from './api';
+  import { routeKeys } from './routeKeys';
+  type Policy = RoutingPolicy;
+  type Scope = RoutingPolicyScope;
   let {
     scope,
     id,
@@ -52,17 +57,10 @@
   );
   guardUnsavedChanges(() => dirty);
   const policy = createQuery(() => ({
-    queryKey: ['routing-policy', scope, id, resourceEtag],
+    queryKey: routeKeys.policy(scope, id, resourceEtag),
     queryFn: async ({ queryKey, signal }) => {
-      const [, keyScope, keyId] = queryKey as [unknown, Scope, string, unknown];
-      const response = await apiClient.GET(
-        '/api/v1/routing-policies/{scope}/{id}',
-        {
-          params: { path: { scope: keyScope, id: keyId } },
-          signal
-        }
-      );
-      return result(response.data, response.error, response.response);
+      const [, keyScope, keyId] = queryKey;
+      return getRoutingPolicy(keyScope, keyId, signal);
     }
   }));
   $effect(() => {
@@ -161,18 +159,12 @@
     try {
       const body: Policy = JSON.parse(text);
       const previousEtag = policy.data.etag;
-      const response = await apiClient.PUT(
-        '/api/v1/routing-policies/{scope}/{id}',
-        {
-          params: { path: { scope: actionScope, id: actionId } },
-          headers: {
-            'If-Match': previousEtag,
-            'Idempotency-Key': crypto.randomUUID()
-          },
-          body
-        }
+      const saved = await replaceRoutingPolicy(
+        actionScope,
+        actionId,
+        previousEtag,
+        body
       );
-      const saved = result(response.data, response.error, response.response);
       // The mutation may have committed on the server even when this editor
       // has moved on; never replay it, but also never apply its outcome to a
       // resource the action no longer owns.

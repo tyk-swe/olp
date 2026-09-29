@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { result } from '$lib/api/http';
+import { unwrap } from '$lib/api/http';
 
 export type Overview = components['schemas']['OverviewResponse'];
 
@@ -8,5 +8,5 @@ export type Overview = components['schemas']['OverviewResponse'];
 /// paginated scan of every collection it counts.
 export async function getOverview(signal?: AbortSignal): Promise<Overview> {
   const response = await apiClient.GET('/api/v1/overview', { signal });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }

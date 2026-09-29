@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { UsagePoint } from '$lib/api/usage';
+  import type { UsagePoint } from '$lib/features/usage/api/usage';
   import {
     formatCompact,
     formatCost,

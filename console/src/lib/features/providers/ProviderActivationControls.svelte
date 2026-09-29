@@ -11,7 +11,7 @@
     probeProvider,
     restoreProviderAsDraft,
     type Provider
-  } from '$lib/features/providers/api';
+  } from '$lib/features/providers/api/providers';
   import {
     activationReady,
     capabilitiesCertified,

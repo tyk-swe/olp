@@ -1,10 +1,11 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import type { Provider, ProviderProbe } from '$lib/features/providers/api';
-  import {
-    declaresModels,
-    listProviderProfiles
-  } from '$lib/features/providers/profiles';
+  import type {
+    Provider,
+    ProviderProbe
+  } from '$lib/features/providers/api/providers';
+  import { declaresModels } from '$lib/features/providers/profiles';
+  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
   import { probeSummary } from '$lib/features/providers/providerEditor';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 

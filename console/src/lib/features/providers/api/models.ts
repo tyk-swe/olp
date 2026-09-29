@@ -1,9 +1,12 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result, type CursorPage } from '$lib/api/http';
+import { type CursorPage, pageResult, unwrap, unwrapPage } from '$lib/api/http';
 import { PROVIDER_PAGE_SIZE } from '$lib/api/pageSizes';
 import { collectCursorPages } from '$lib/api/pagination';
-import type { Provider, ProviderKind } from '$lib/features/providers/api';
+import type {
+  Provider,
+  ProviderKind
+} from '$lib/features/providers/api/providers';
 
 type Schemas = components['schemas'];
 
@@ -38,14 +41,14 @@ export async function getProviderCapabilityOptions(
       signal
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listProviderKinds(
   signal?: AbortSignal
 ): Promise<ProviderKindCapability[]> {
   const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
-  return result(response.data, response.error, response.response).items;
+  return unwrap(response).items;
 }
 
 export async function listProviderModelPage(
@@ -63,7 +66,7 @@ export async function listProviderModelPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
+  const page = unwrap(response);
   return { ...pageResult(page), provider: page.provider };
 }
 
@@ -80,7 +83,7 @@ export async function listProviderModelInventoryPage(
     },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function listProviderModelInventory(
@@ -105,7 +108,7 @@ export async function discoverProviderModels(
       body: { models: [] }
     }
   );
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 export async function declareProviderModels(
@@ -129,7 +132,7 @@ export async function declareProviderModels(
       }
     }
   );
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 export async function setProviderModel(
@@ -148,7 +151,7 @@ export async function setProviderModel(
       body: { enabled, capabilities }
     }
   );
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 export async function certifyProviderModel(
@@ -166,5 +169,5 @@ export async function certifyProviderModel(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }

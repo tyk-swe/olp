@@ -4,12 +4,11 @@
   import type { FieldIssue } from '$lib/api/http';
   import { shortDigest } from '$lib/features/plugins/api';
   import NativeValueField from './NativeValueField.svelte';
+  import { pluginOptionFields, pluginProfileGroups } from './profiles';
   import {
     listProviderProfiles,
-    pluginOptionFields,
-    pluginProfileGroups,
     type ProviderProfilePlugin
-  } from './profiles';
+  } from './api/profiles';
   import { providerKeys } from './providerKeys';
   import {
     selectPluginProfile,

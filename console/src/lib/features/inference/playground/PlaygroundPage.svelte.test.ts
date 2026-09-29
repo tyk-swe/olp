@@ -9,12 +9,12 @@ import {
   type RoutingDecision
 } from '$lib/features/routes/api';
 import {
+  inspectRouting,
   runPlayground,
   streamPlayground,
   type PlaygroundResponse,
   type PlaygroundStreamHandlers
 } from './api';
-import { inspectRouting } from './inspection';
 import { stringifyNativeJSON } from '$lib/json/nativeJson';
 import PlaygroundProbe from './test/PlaygroundProbe.svelte';
 
@@ -29,10 +29,10 @@ vi.mock('$lib/features/access/api-keys/api', async (original) => ({
 }));
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
+  inspectRouting: vi.fn(),
   runPlayground: vi.fn(),
   streamPlayground: vi.fn()
 }));
-vi.mock('./inspection', () => ({ inspectRouting: vi.fn() }));
 
 const SERVER_DELAY = 40;
 

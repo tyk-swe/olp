@@ -32,7 +32,7 @@ import {
   type RouteDraft,
   type RouteSimulation
 } from '$lib/features/routes/api';
-import { listProviderModelInventory } from '$lib/features/providers/models';
+import { listProviderModelInventory } from '$lib/features/providers/api/models';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
   buildCreateRouteDraftInput,

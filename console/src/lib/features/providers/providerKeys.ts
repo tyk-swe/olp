@@ -32,5 +32,13 @@ export const providerKeys = {
   enabledModels: () => ['providers', 'models', 'catalog', 'enabled'] as const,
   modelsOf: (id: string) => ['providers', 'models', 'of', id] as const,
   models: (id: string, cursor?: string) =>
-    ['providers', 'models', 'of', id, cursor ?? 'first'] as const
+    ['providers', 'models', 'of', id, cursor ?? 'first'] as const,
+  vendors: () => ['provider-vendors'] as const,
+  configurationSchemas: () => ['provider-configuration-schemas'] as const,
+  slots: (id: string, etag: string) => ['provider-slots', id, etag] as const,
+  bulkModels: (id: string, etag: string) =>
+    ['bulk-provider-models', id, etag] as const,
+  networkCredentials: (id: string) =>
+    ['providers', 'network-credentials', id] as const,
+  bulkRoutePreview: () => ['provider-bulk-route-preview'] as const
 };

@@ -5,6 +5,7 @@ import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
 import { ApiProblem } from '$lib/api/http';
 import { apiClient } from '$lib/api/client';
 import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+import { sessionKeys } from '$lib/features/access/session/sessionKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { routeKeys } from '$lib/features/routes/routeKeys';
 import {
@@ -12,11 +13,11 @@ import {
   getProvider,
   createProvider,
   probeProvider
-} from '$lib/features/providers/api';
+} from '$lib/features/providers/api/providers';
 import {
   listProviderModelPage,
   listProviderModelInventory
-} from '$lib/features/providers/models';
+} from '$lib/features/providers/api/models';
 import {
   getRouteDraft,
   replaceRouteDraft,
@@ -33,15 +34,15 @@ vi.mock('$app/state', () => ({
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('$lib/features/providers/api', async (original) => ({
-  ...(await original<typeof import('$lib/features/providers/api')>()),
+vi.mock('$lib/features/providers/api/providers', async (original) => ({
+  ...(await original<typeof import('$lib/features/providers/api/providers')>()),
   getProvider: vi.fn(),
   createProvider: vi.fn(),
   probeProvider: vi.fn(),
   updateProvider: vi.fn()
 }));
-vi.mock('$lib/features/providers/models', async (original) => ({
-  ...(await original<typeof import('$lib/features/providers/models')>()),
+vi.mock('$lib/features/providers/api/models', async (original) => ({
+  ...(await original<typeof import('$lib/features/providers/api/models')>()),
   listProviderModelPage: vi.fn(),
   listProviderModelInventory: vi.fn()
 }));
@@ -63,7 +64,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     local_login_enabled: true,
     oidc_login_enabled: false
   });
@@ -237,7 +238,7 @@ it('preserves resolved connection options when returning to a saved wizard draft
       ]
     }
   ]);
-  client.setQueryData(['provider-vendors'], []);
+  client.setQueryData(providerKeys.vendors(), []);
   vi.mocked(getProvider).mockResolvedValue(source);
   vi.mocked(createProvider).mockResolvedValue(saved.id);
   vi.mocked(updateProvider).mockImplementation(async () => {
@@ -499,7 +500,7 @@ it('does not submit an invalid route draft', () => {
 });
 
 it('preserves dirty route fields and advances their ETag after a policy save', async () => {
-  const policyKey = ['routing-policy', 'route-draft', draft.id, draft.etag];
+  const policyKey = routeKeys.policy('route-draft', draft.id, draft.etag);
   client.setQueryData(policyKey, { policy: {}, etag: draft.etag });
   const updated = { ...draft, etag: 'policy-saved' };
   const put = vi.spyOn(apiClient, 'PUT').mockResolvedValue({
@@ -535,7 +536,7 @@ it('preserves dirty route fields and advances their ETag after a policy save', a
 });
 
 it('blocks route publication and navigation until policy edits finish saving', async () => {
-  client.setQueryData(['routing-policy', 'route-draft', draft.id, draft.etag], {
+  client.setQueryData(routeKeys.policy('route-draft', draft.id, draft.etag), {
     policy: {},
     etag: draft.etag
   });
@@ -579,13 +580,10 @@ it('blocks route publication and navigation until policy edits finish saving', a
 it.each(['constraints', 'defaults'] as const)(
   'blocks saving and publishing malformed nested policy %s until corrected',
   async (key) => {
-    client.setQueryData(
-      ['routing-policy', 'route-draft', draft.id, draft.etag],
-      {
-        policy: {},
-        etag: draft.etag
-      }
-    );
+    client.setQueryData(routeKeys.policy('route-draft', draft.id, draft.etag), {
+      policy: {},
+      etag: draft.etag
+    });
     const other = key === 'constraints' ? 'defaults' : 'constraints';
     const corrected = { require_zero_data_retention: true };
     const policy = { [key]: corrected, [other]: { require_parameters: true } };
@@ -650,7 +648,7 @@ it.each(['constraints', 'defaults'] as const)(
 it('reloads malformed nested policy input even when the saved JSON is unchanged', async () => {
   const saved = { policy: {}, etag: draft.etag };
   client.setQueryData(
-    ['routing-policy', 'route-draft', draft.id, draft.etag],
+    routeKeys.policy('route-draft', draft.id, draft.etag),
     saved
   );
   vi.spyOn(apiClient, 'GET').mockResolvedValue({
@@ -764,7 +762,7 @@ it('shows before and after policies when only the routing policy changed', async
 });
 
 it('uses the credential editor snapshot ETag after a background refetch', async () => {
-  const poolKey = ['provider-slots', provider.id, provider.etag];
+  const poolKey = providerKeys.slots(provider.id, provider.etag);
   const slot = {
     id: 'slot-a',
     name: 'Original slot',
@@ -807,7 +805,7 @@ it('uses the credential editor snapshot ETag after a background refetch', async 
 });
 
 it('locks credential fields until a pending save completes', async () => {
-  client.setQueryData(['provider-slots', provider.id, provider.etag], {
+  client.setQueryData(providerKeys.slots(provider.id, provider.etag), {
     items: [
       {
         id: 'slot-a',
@@ -943,7 +941,7 @@ it.each(['original-key', 'changed-key'])(
       nextCursor: null
     });
     client.setQueryData(routeKeys.all(), []);
-    const policyKey = ['routing-policy', 'api-key', key.id, key.etag];
+    const policyKey = routeKeys.policy('api-key', key.id, key.etag);
     client.setQueryData(policyKey, { policy: {}, etag: key.etag });
     vi.spyOn(apiClient, 'GET').mockResolvedValue({
       data: { policy: {}, etag: 'saved-policy' },

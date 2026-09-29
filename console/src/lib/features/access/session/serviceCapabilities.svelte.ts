@@ -1,9 +1,10 @@
 import { createQuery } from '@tanstack/svelte-query';
-import { authenticationCapabilities } from './auth';
+import { authenticationCapabilities } from './api';
+import { sessionKeys } from './sessionKeys';
 
 export function useServiceCapabilities() {
   const capabilities = createQuery(() => ({
-    queryKey: ['service-capabilities'],
+    queryKey: sessionKeys.serviceCapabilities,
     queryFn: ({ signal }) => authenticationCapabilities(signal),
     staleTime: 60_000
   }));

@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listAudit } from '$lib/features/access/audit/api';
+import { listApiKeyPage } from '$lib/features/access/api-keys/api';
+import { getOidcConfiguration } from '$lib/features/access/oidc/api';
+import { listUserPage, listUsers } from '$lib/features/access/users/api';
+import {
+  listProviderPage,
+  listProviders
+} from '$lib/features/providers/api/providers';
+import { listRouteDraftPage } from '$lib/features/routes/api';
+import { collectCursorPages } from '$lib/api/pagination';
 import {
   listProviderHealth,
   listRequestMetadataGatewayEpochs
 } from '$lib/features/runtime/health/api';
 import { ApiProblem } from '$lib/api/http';
 import { listMediaJobs } from '$lib/features/media/api';
-import { listPricing } from '$lib/features/usage/pricing';
+import { listPricing } from '$lib/features/usage/api/pricing';
 import { listRequests } from '$lib/features/usage/history/api';
 import { listRuntimeGenerations } from '$lib/features/runtime/api';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
@@ -256,5 +265,103 @@ describe('resource API errors', () => {
       title: 'Request failed (503)',
       status: 503
     });
+  });
+});
+
+describe('management selector pagination', () => {
+  it('collects every cursor page for route, provider, and checklist selectors', async () => {
+    const seen: Array<string | undefined> = [];
+    const items = await collectCursorPages(async (cursor?: string) => {
+      seen.push(cursor);
+      if (!cursor) return { items: ['provider-1'], nextCursor: 'page-2' };
+      return { items: ['provider-2'], nextCursor: null };
+    });
+
+    expect(items).toEqual(['provider-1', 'provider-2']);
+    expect(seen).toEqual([undefined, 'page-2']);
+  });
+
+  it('fails closed if the API repeats a cursor', async () => {
+    await expect(
+      collectCursorPages(async () => ({ items: [], nextCursor: 'repeat' }))
+    ).rejects.toBeInstanceOf(ApiProblem);
+  });
+});
+
+describe('management resources', () => {
+  it('forwards abort signals to resource reads', async () => {
+    const controller = new AbortController();
+    const requests = captureRequests((request) => {
+      const body =
+        new URL(request.url).pathname === '/api/v1/users'
+          ? { items: [], next_cursor: null }
+          : { items: [], next_cursor: null };
+      return jsonResponse(body);
+    });
+
+    await listProviderPage(undefined, controller.signal);
+    await listRouteDraftPage(undefined, controller.signal);
+    await listApiKeyPage(undefined, controller.signal);
+    await listUserPage(undefined, controller.signal);
+    await getOidcConfiguration(controller.signal);
+
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      '/api/v1/providers',
+      '/api/v1/route-drafts',
+      '/api/v1/api-keys',
+      '/api/v1/users',
+      '/api/v1/oidc/configuration'
+    ]);
+    expect(requests.every((request) => !request.signal.aborted)).toBe(true);
+
+    controller.abort();
+
+    expect(requests.every((request) => request.signal.aborted)).toBe(true);
+  });
+
+  it('forwards abort signals across every cursor page', async () => {
+    const controller = new AbortController();
+    const requests = captureRequests((_request, index) =>
+      jsonResponse(
+        index === 0
+          ? { items: ['provider-1'], next_cursor: 'page-2' }
+          : { items: ['provider-2'], next_cursor: null }
+      )
+    );
+
+    await expect(listProviders(controller.signal)).resolves.toEqual([
+      'provider-1',
+      'provider-2'
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(new URL(requests[0]!.url).searchParams.get('cursor')).toBeNull();
+    expect(new URL(requests[1]!.url).searchParams.get('cursor')).toBe('page-2');
+
+    controller.abort();
+
+    expect(requests.every((request) => request.signal.aborted)).toBe(true);
+  });
+
+  it('collects every user page for full-roster selectors', async () => {
+    const controller = new AbortController();
+    const requests = captureRequests((_request, index) =>
+      jsonResponse(
+        index === 0
+          ? { items: [{ id: 'user-1' }], next_cursor: 'page-2' }
+          : { items: [{ id: 'user-2' }], next_cursor: null }
+      )
+    );
+
+    await expect(listUsers(controller.signal)).resolves.toEqual([
+      { id: 'user-1' },
+      { id: 'user-2' }
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(new URL(requests[0]!.url).searchParams.get('cursor')).toBeNull();
+    expect(new URL(requests[1]!.url).searchParams.get('cursor')).toBe('page-2');
+
+    controller.abort();
+
+    expect(requests.every((request) => request.signal.aborted)).toBe(true);
   });
 });

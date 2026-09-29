@@ -43,37 +43,35 @@ type Management struct {
 // Register mounts the whole management API: the published contract, every
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
-	control, policy, limiter, rt, gw, mediaJobs, cache, log := m.Access, m.Egress, m.Limiter, m.Runtime, m.Gateway, m.Media, m.Health, m.Log
-	pluginRuntime, pluginHost, unconfined := m.PluginRuntime, m.PluginHost, m.Unconfined
 	management.Register(mux)
-	control.Egress = policy
-	control.Register(mux)
-	catalogue := providers.New(control, policy, pluginHost)
-	catalogue.Unconfined = unconfined
-	catalogue.Log = log
-	catalogue.Plugins = pluginHost
-	if limiter != nil {
-		catalogue.Quotas = limiter
+	m.Access.Egress = m.Egress
+	m.Access.Register(mux)
+	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
+	catalogue.Unconfined = m.Unconfined
+	catalogue.Log = m.Log
+	catalogue.Plugins = m.PluginHost
+	if m.Limiter != nil {
+		catalogue.Quotas = m.Limiter
 	}
 	catalogue.Register(mux)
-	routeServer := routes.New(control)
-	routeServer.Inputs = rt.RoutingInputs
-	routeServer.UnconfinedPlugins = unconfined != nil
+	routeServer := routes.New(m.Access)
+	routeServer.Inputs = m.Runtime.RoutingInputs
+	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Register(mux)
-	(&gateway.Playground{Access: control, Gateway: gw}).Register(mux)
-	(&media.Management{Access: control, Pool: control.Pool, Jobs: mediaJobs, Log: log}).Register(mux)
-	(&resources.Management{Access: control, Pool: control.Pool}).Register(mux)
-	(&management.Overview{Access: control}).Register(mux)
-	(&observability.Management{Access: control, Cache: cache, Pool: control.Pool}).Register(mux)
-	(&plugins.Management{Access: control, Runtime: pluginRuntime, Host: pluginHost, Unconfined: unconfined}).Register(mux)
+	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
+	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)
+	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
+	(&management.Overview{Access: m.Access}).Register(mux)
+	(&observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}).Register(mux)
+	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
-	(&usage.Server{Access: control, VendorKind: providers.VendorKind, Egress: policy}).Register(mux)
+	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress}).Register(mux)
 	(&configuration.Server{
-		Access:                 control,
-		Egress:                 policy,
-		Unconfined:             unconfined,
+		Access:                 m.Access,
+		Egress:                 m.Egress,
+		Unconfined:             m.Unconfined,
 		VendorKind:             providers.VendorKind,
 		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {

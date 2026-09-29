@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { pageResult, unwrap, unwrapPage } from '$lib/api/http';
 import {
   GATEWAY_EPOCH_PAGE_SIZE,
   PROVIDER_HEALTH_PAGE_SIZE
@@ -26,7 +26,7 @@ export async function listRequestMetadataGatewayEpochs(
     '/api/v1/request-metadata/gateway-epochs',
     { params: { query: { state, cursor, limit: GATEWAY_EPOCH_PAGE_SIZE } } }
   );
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }
 
 export async function acknowledgeRequestMetadataGatewayEpoch(
@@ -36,12 +36,12 @@ export async function acknowledgeRequestMetadataGatewayEpoch(
     '/api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge',
     { params: { path: { process_epoch: processEpoch } } }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function getReadiness(): Promise<Readiness> {
   const { data, error, response } = await apiClient.GET('/api/v1/health/ready');
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }
 
 export async function listProviderHealth(windowMinutes = 15): Promise<{
@@ -59,7 +59,7 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
         }
       }
     });
-    const page = result(response.data, response.error, response.response);
+    const page = unwrap(response);
     responseWindow = page.window_minutes;
     return pageResult(page);
   });

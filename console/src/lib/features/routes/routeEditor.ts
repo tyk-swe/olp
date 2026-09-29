@@ -3,7 +3,7 @@ import type {
   CreateRouteDraftInput,
   ReplaceRouteDraftInput
 } from '$lib/features/routes/api';
-import type { ProviderModelInventory } from '$lib/features/providers/models';
+import type { ProviderModelInventory } from '$lib/features/providers/api/models';
 
 export type EditableTarget = {
   providerModelId: string;

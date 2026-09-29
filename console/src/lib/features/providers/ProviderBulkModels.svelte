@@ -4,14 +4,16 @@
   import { collectCursorPages } from '$lib/api/pagination';
   import { errorMessage } from '$lib/api/http';
   import { certificationPrerequisiteReady } from './providerEditor';
-  import { getProvider, probeProvider, type Provider } from './api';
+  import { providerKeys } from './providerKeys';
+  import { getProvider, probeProvider, type Provider } from './api/providers';
   import {
     listProviderModelPage,
     setProviderModel,
     certifyProviderModel,
     getProviderCapabilityOptions
-  } from './models';
-  import { dialectSurface, listProviderProfiles } from './profiles';
+  } from './api/models';
+  import { dialectSurface } from './profiles';
+  import { listProviderProfiles } from './api/profiles';
   let {
     provider,
     canManage,
@@ -36,7 +38,7 @@
     failures.flatMap((failure) => (failure.id ? [failure.id] : []))
   );
   const models = createQuery(() => ({
-    queryKey: ['bulk-provider-models', provider.id, provider.etag],
+    queryKey: providerKeys.bulkModels(provider.id, provider.etag),
     queryFn: () =>
       collectCursorPages((cursor) => listProviderModelPage(provider.id, cursor))
   }));

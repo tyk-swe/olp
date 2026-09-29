@@ -6,7 +6,7 @@
     type NativePath
   } from '$lib/json/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
-  import type { FieldSchema } from './profiles';
+  import type { FieldSchema } from './api/profiles';
   import NativeValueField from './NativeValueField.svelte';
   let {
     draft,

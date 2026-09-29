@@ -8,7 +8,7 @@ import { routeKeys } from '$lib/features/routes/routeKeys';
 import {
   listProviderModelInventory,
   type ProviderModelInventory
-} from '$lib/features/providers/models';
+} from '$lib/features/providers/api/models';
 import {
   activateRoute,
   createRouteDraft,
@@ -47,8 +47,8 @@ vi.mock('$app/state', () => ({
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('$lib/features/providers/models', async (original) => ({
-  ...(await original<typeof import('$lib/features/providers/models')>()),
+vi.mock('$lib/features/providers/api/models', async (original) => ({
+  ...(await original<typeof import('$lib/features/providers/api/models')>()),
   listProviderModelInventory: vi.fn()
 }));
 vi.mock('$lib/features/routes/api', async (original) => ({
@@ -115,12 +115,8 @@ const etagMismatch = () =>
   });
 
 const okResponse = () => new Response(null, { status: 200 });
-const policyKey = (scope: string, id: string) => [
-  'routing-policy',
-  scope,
-  id,
-  ''
-];
+const policyKey = (scope: string, id: string) =>
+  routeKeys.policy(scope, id, '');
 
 let host: HTMLElement;
 let client: QueryClient;

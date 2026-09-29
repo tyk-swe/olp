@@ -60,6 +60,39 @@ export default [
     }
   },
   {
+    // Feature api modules (and shared transport) own every apiClient call;
+    // browser code reaches the inference gateway only through gatewayFetch.
+    files: ['src/**/*.{ts,svelte}'],
+    ignores: [
+      'src/lib/api/**',
+      'src/lib/features/**/api.ts',
+      'src/lib/features/**/api/*.ts',
+      'src/**/*.test.ts',
+      'src/**/test/**'
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '$lib/api/client',
+              message:
+                'Call the management API from the feature api module, not a component.'
+            }
+          ]
+        }
+      ],
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message: 'Use a feature api module or $lib/api/gateway gatewayFetch.'
+        }
+      ]
+    }
+  },
+  {
     files: ['tests/journeys/**/*.ts'],
     rules: {
       'no-restricted-imports': [

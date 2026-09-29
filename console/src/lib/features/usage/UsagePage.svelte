@@ -10,7 +10,7 @@
     usageCompleteness,
     usageSeries,
     usageSummary
-  } from '$lib/api/usage';
+  } from '$lib/features/usage/api/usage';
   import { getApiKey } from '$lib/features/access/api-keys/api';
   import {
     budgetStateNote,

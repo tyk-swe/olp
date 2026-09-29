@@ -20,12 +20,15 @@
     isEtagMismatch,
     type FieldIssue
   } from '$lib/api/http';
-  import { updateProvider, type Provider } from '$lib/features/providers/api';
+  import {
+    updateProvider,
+    type Provider
+  } from '$lib/features/providers/api/providers';
   import {
     listProviderModelPage,
     listProviderKinds,
     type ProviderModelPage
-  } from '$lib/features/providers/models';
+  } from '$lib/features/providers/api/models';
   import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {

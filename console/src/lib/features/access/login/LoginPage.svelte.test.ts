@@ -1,13 +1,13 @@
 import { mount, unmount, flushSync } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import LoginPage from './LoginPage.svelte';
-import { authenticationCapabilities } from '$lib/features/access/session/auth';
+import { authenticationCapabilities } from '$lib/features/access/session/api';
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/state', () => ({
   page: { url: new URL('https://console.test/login') }
 }));
-vi.mock('$lib/features/access/session/auth', () => ({
+vi.mock('$lib/features/access/session/api', () => ({
   authenticationCapabilities: vi.fn(),
   beginOidcLogin: vi.fn(),
   login: vi.fn()

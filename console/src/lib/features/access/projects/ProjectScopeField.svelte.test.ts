@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { listProjectMemberships } from '$lib/features/access/api';
+import { listProjectMemberships } from '$lib/features/access/projects/api';
 import ProjectScopeProbe from './test/ProjectScopeProbe.svelte';
 
 const role = vi.hoisted(() => ({ user: { access_scope: 'global' } }));
@@ -9,7 +9,7 @@ const role = vi.hoisted(() => ({ user: { access_scope: 'global' } }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => role
 }));
-vi.mock('$lib/features/access/api', () => ({
+vi.mock('$lib/features/access/projects/api', () => ({
   listProjectMemberships: vi.fn()
 }));
 

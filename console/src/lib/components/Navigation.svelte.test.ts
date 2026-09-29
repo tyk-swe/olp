@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import NavigationProbe from '$lib/components/test/NavigationProbe.svelte';
+import { sessionKeys } from '$lib/features/access/session/sessionKeys';
 import { operationsFor } from '$lib/features/access/session/test/grants';
 
 let host: HTMLElement;
@@ -14,7 +15,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(['service-capabilities'], {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
     local_login_enabled: true,
     oidc_login_enabled: false,
     gateway_available: true

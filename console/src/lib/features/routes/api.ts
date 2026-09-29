@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ensureSuccess, pageResult, result } from '$lib/api/http';
+import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
 import { ROUTE_PAGE_SIZE, ROUTE_REVISION_PAGE_SIZE } from '$lib/api/pageSizes';
 import { collectCursorPages } from '$lib/api/pagination';
 import { type CursorPage } from '$lib/api/http';
@@ -27,7 +27,7 @@ export async function listRouteDraftPage(
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function listRoutes(signal?: AbortSignal): Promise<ActiveRoute[]> {
@@ -42,7 +42,7 @@ export async function listRoutePage(
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function getRouteDraft(
@@ -53,7 +53,7 @@ export async function getRouteDraft(
     params: { path: { draft_id: id } },
     signal
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function createRouteDraft(
@@ -63,7 +63,7 @@ export async function createRouteDraft(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function replaceRouteDraft(
@@ -75,7 +75,7 @@ export async function replaceRouteDraft(
     params: { path: { draft_id: id }, header: { 'If-Match': etag } },
     body: input
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function deleteRouteDraft(
@@ -85,7 +85,7 @@ export async function deleteRouteDraft(
   const response = await apiClient.DELETE('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } }
   });
-  ensureSuccess(response.error, response.response);
+  ensureOk(response);
 }
 
 export async function simulateRoute(
@@ -99,11 +99,45 @@ export async function simulateRoute(
       body: input
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export type RoutingDecision = Schemas['RoutingDecision'];
 export type RoutingPreferences = Schemas['RoutingPreferences'];
+export type RoutingPolicy = Schemas['RoutingPolicy'];
+export type RoutingPolicyResource = Schemas['PolicyResponse'];
+export type RoutingPolicyScope = 'installation' | 'route-draft' | 'api-key';
+
+export async function getRoutingPolicy(
+  scope: RoutingPolicyScope,
+  id: string,
+  signal?: AbortSignal
+): Promise<RoutingPolicyResource> {
+  return unwrap(
+    await apiClient.GET('/api/v1/routing-policies/{scope}/{id}', {
+      params: { path: { scope, id } },
+      signal
+    })
+  );
+}
+
+export async function replaceRoutingPolicy(
+  scope: RoutingPolicyScope,
+  id: string,
+  etag: string,
+  body: RoutingPolicy
+): Promise<RoutingPolicyResource> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/routing-policies/{scope}/{id}', {
+      params: { path: { scope, id } },
+      headers: {
+        'If-Match': etag,
+        'Idempotency-Key': crypto.randomUUID()
+      },
+      body
+    })
+  );
+}
 
 export type RoutingSimulationInput = Pick<
   Schemas['PlaygroundRequest'],
@@ -157,7 +191,7 @@ export async function simulateRouting(
     },
     signal
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function validateRoute(
@@ -172,7 +206,7 @@ export async function validateRoute(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function activateRoute(
@@ -190,7 +224,7 @@ export async function activateRoute(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function retireRoute(
@@ -206,7 +240,7 @@ export async function retireRoute(
       }
     }
   });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listRouteRevisions(
@@ -230,7 +264,7 @@ async function listRouteRevisionPage(
     },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function diffRouteRevisions(
@@ -246,7 +280,7 @@ export async function diffRouteRevisions(
       signal
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function restoreRouteRevision(
@@ -262,5 +296,5 @@ export async function restoreRouteRevision(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }

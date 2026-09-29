@@ -1,12 +1,12 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { result } from '$lib/api/http';
+import { unwrap } from '$lib/api/http';
 
 export type Setting = components['schemas']['SettingResponse'];
 
 export async function listSettings(): Promise<Setting[]> {
   const { data, error, response } = await apiClient.GET('/api/v1/settings');
-  return result(data, error, response).items;
+  return unwrap({ data, error, response }).items;
 }
 
 export async function updateSetting(
@@ -23,5 +23,5 @@ export async function updateSetting(
       body: { value }
     }
   );
-  return result(data, error, response);
+  return unwrap({ data, error, response });
 }

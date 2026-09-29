@@ -7,7 +7,7 @@
     beginOidcLogin,
     login,
     type AuthenticationCapabilities
-  } from '$lib/features/access/session/auth';
+  } from '$lib/features/access/session/api';
   import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
   import { errorMessage } from '$lib/api/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';

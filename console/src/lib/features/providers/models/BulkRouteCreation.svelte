@@ -10,7 +10,7 @@
     fidelityOptions,
     type FidelityMode
   } from '$lib/features/routes/routeFidelity';
-  import type { ProviderModelInventory } from '../models';
+  import type { ProviderModelInventory } from '../api/models';
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
   let {
     models,

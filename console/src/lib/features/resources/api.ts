@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -23,5 +23,5 @@ export async function listProviderResources(
     '/api/v1/provider-resources',
     { params: { query: compactQuery(filters) } }
   );
-  return pageResult(result(data, error, response));
+  return unwrapPage({ data, error, response });
 }

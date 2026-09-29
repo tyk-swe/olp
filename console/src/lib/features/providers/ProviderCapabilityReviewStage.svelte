@@ -3,8 +3,8 @@
     CapabilityCertification,
     CapabilityDeclaration,
     ProviderModel
-  } from '$lib/features/providers/models';
-  import type { Provider } from '$lib/features/providers/api';
+  } from '$lib/features/providers/api/models';
+  import type { Provider } from '$lib/features/providers/api/providers';
   import {
     cursorPaginationProps,
     type CursorHistory

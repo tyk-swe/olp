@@ -5,8 +5,9 @@ import { serializeIfMatch } from '$lib/api/http';
 import { createAuthMiddleware } from '$lib/features/access/session/authMiddleware';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
-/** Generated-schema client for feature slices that need operation-level types. */
-const generatedClient = createClient<paths>({
+/** Typed management API client generated from the OpenAPI contract. Feature
+ * api modules resolve its calls with unwrap, unwrapPage or ensureOk. */
+export const apiClient = createClient<paths>({
   // openapi-fetch constructs Request objects before invoking fetch. An
   // explicit same-origin base keeps those requests valid in browsers, tests,
   // and static-console integration without introducing a configurable API
@@ -44,9 +45,8 @@ type TextOperation = (
   error?: unknown;
   response: Response;
 }>;
-export const apiClient = generatedClient;
 for (const method of methods) {
-  const operation = generatedClient[method] as TextOperation;
+  const operation = apiClient[method] as TextOperation;
   Object.defineProperty(apiClient, method, {
     configurable: true,
     writable: true,

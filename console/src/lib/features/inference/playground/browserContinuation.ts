@@ -1,3 +1,4 @@
+import { gatewayFetch } from '$lib/api/gateway';
 import {
   nativeObject,
   parseNativeJSON,
@@ -413,13 +414,10 @@ export async function streamTurn(
   if (new TextEncoder().encode(body).byteLength > maxEventBytes)
     throw new Error('The native request exceeds the public body limit.');
   const response = await checked(
-    await fetch('/v1/chat/completions', {
+    await gatewayFetch('/v1/chat/completions', {
       method: 'POST',
       headers: headers(key, submission),
       body,
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error',
       signal
     })
   );
@@ -500,13 +498,10 @@ export async function unaryTurn(
   if (new TextEncoder().encode(body).byteLength > maxEventBytes)
     throw new Error('The next native request exceeds the public body limit.');
   const response = await checked(
-    await fetch('/v1/chat/completions', {
+    await gatewayFetch('/v1/chat/completions', {
       method: 'POST',
       headers: headers(key, submission, parentHandle),
       body,
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error',
       signal
     })
   );
@@ -529,14 +524,11 @@ export async function recoverTurn(
   signal?: AbortSignal
 ): Promise<ReadyTurn> {
   const response = await checked(
-    await fetch(
+    await gatewayFetch(
       `/v1/continuation-submissions/${encodeURIComponent(submission)}`,
       {
         method: 'GET',
         headers: headers(key, submission),
-        cache: 'no-store',
-        credentials: 'omit',
-        redirect: 'error',
         signal
       }
     )

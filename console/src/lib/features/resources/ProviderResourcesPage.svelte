@@ -5,6 +5,7 @@
     listProviderResources,
     type ProviderResourceFilters
   } from '$lib/features/resources/api';
+  import { resourceKeys } from '$lib/features/resources/resourceKeys';
   import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
@@ -28,7 +29,7 @@
   let paging = $state(emptyCursorHistory());
 
   const resources = createQuery(() => ({
-    queryKey: ['provider-resources', applied, paging.cursor] as const,
+    queryKey: resourceKeys.page(applied, paging.cursor),
     queryFn: () => listProviderResources({ ...applied, cursor: paging.cursor }),
     placeholderData: (previous) => previous
   }));

@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { Provider } from './api';
+  import type { Provider } from './api/providers';
+  import { providerKeys } from './providerKeys';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
   import type { RunProviderAction } from './providerEditor';
   import {
     createNetworkCredential,
     listNetworkCredentials,
     revokeNetworkCredential
-  } from './profiles';
+  } from './api/profiles';
   import { formatDate } from '$lib/format';
   import { parseNativeJSON, nativeObject } from '$lib/json/nativeJson';
   let {
@@ -33,7 +34,7 @@
   } = $props();
   let secret = $state('');
   const credentials = createQuery(() => ({
-    queryKey: ['providers', 'network-credentials', provider.id],
+    queryKey: providerKeys.networkCredentials(provider.id),
     queryFn: ({ signal }) => listNetworkCredentials(provider.id, signal)
   }));
   const selected = $derived(

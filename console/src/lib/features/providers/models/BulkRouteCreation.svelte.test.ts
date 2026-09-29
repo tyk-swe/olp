@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
-import type { ProviderModelInventory } from '../models';
+import type { ProviderModelInventory } from '../api/models';
 import BulkRouteCreation from './BulkRouteCreation.svelte';
 
 const model: ProviderModelInventory = {

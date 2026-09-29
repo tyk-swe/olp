@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProviderRevisionDiff } from '$lib/features/providers/revisions';
+  import type { ProviderRevisionDiff } from '$lib/features/providers/api/revisions';
   let { revisionDiff }: { revisionDiff: ProviderRevisionDiff | null } =
     $props();
 </script>

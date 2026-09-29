@@ -1,13 +1,14 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { listRoutes } from '$lib/features/routes/api';
+  import { providerKeys } from './providerKeys';
   import {
     getProvider,
     activateProvider,
     disableProvider,
     restoreProviderAsDraft,
     type ProviderSummary
-  } from './api';
+  } from './api/providers';
   import { errorMessage } from '$lib/api/http';
   let {
     selected,
@@ -18,7 +19,7 @@
   let busy = $state(false);
   let outcomes = $state<string[]>([]);
   const routes = createQuery(() => ({
-    queryKey: ['provider-bulk-route-preview'],
+    queryKey: providerKeys.bulkRoutePreview(),
     enabled: Boolean(preview),
     queryFn: ({ signal }) => listRoutes(signal)
   }));

@@ -1,9 +1,9 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result, type CursorPage } from '$lib/api/http';
+import { type CursorPage, unwrap, unwrapPage } from '$lib/api/http';
 import { PROVIDER_REVISION_PAGE_SIZE } from '$lib/api/pageSizes';
-import type { Provider } from '$lib/features/providers/api';
-import type { ProviderModel } from '$lib/features/providers/models';
+import type { Provider } from '$lib/features/providers/api/providers';
+import type { ProviderModel } from '$lib/features/providers/api/models';
 
 type Schemas = components['schemas'];
 
@@ -31,7 +31,7 @@ export async function listProviderRevisionPage(
       signal
     }
   );
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function getProviderRevision(
@@ -48,7 +48,7 @@ export async function getProviderRevision(
       signal
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listProviderRevisionModelPage(
@@ -67,7 +67,7 @@ export async function listProviderRevisionModelPage(
       signal
     }
   );
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function diffProviderRevisions(
@@ -83,7 +83,7 @@ export async function diffProviderRevisions(
       signal
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function restoreProviderRevision(
@@ -102,9 +102,5 @@ export async function restoreProviderRevision(
       }
     }
   );
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as ProviderRevisionRestore;
+  return unwrap(response);
 }

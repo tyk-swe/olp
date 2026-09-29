@@ -1,5 +1,5 @@
-import type { ProviderKindCapability } from '../models';
-import type { ProviderProfile } from '../profiles';
+import type { ProviderKindCapability } from '../api/models';
+import type { ProviderProfile } from '../api/profiles';
 
 /** The provider kind an installed plugin's profiles are offered under. */
 export const pluginSpec: ProviderKindCapability = {

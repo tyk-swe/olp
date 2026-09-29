@@ -13,12 +13,12 @@
     resetCursor
   } from '$lib/lists/pagination';
   import { debouncedSearch } from '$lib/lists/search.svelte';
-  import { getProvider } from '$lib/features/providers/api';
+  import { getProvider } from '$lib/features/providers/api/providers';
   import {
     listProviderModelInventoryPage,
     setProviderModel,
     type ProviderModelInventory
-  } from '$lib/features/providers/models';
+  } from '$lib/features/providers/api/models';
   import { errorMessage } from '$lib/api/http';
   import { formatInteger, stateLabel } from '$lib/format';
   import { metadataFacts } from '$lib/features/providers/models/modelMetadata';

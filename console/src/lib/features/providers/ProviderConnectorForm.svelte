@@ -7,10 +7,10 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
   import type { FieldIssue } from '$lib/api/http';
-  import { listProviderVendors } from '$lib/features/providers/api';
-  import { listProviderProfiles } from '$lib/features/providers/profiles';
+  import { listProviderVendors } from '$lib/features/providers/api/providers';
+  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
   import { providerKeys } from '$lib/features/providers/providerKeys';
-  import type { ProviderKindCapability } from '$lib/features/providers/models';
+  import type { ProviderKindCapability } from '$lib/features/providers/api/models';
   import {
     emptyProviderOptions,
     requiresCredential,
@@ -46,7 +46,7 @@
   } = $props();
 
   const vendors = createQuery(() => ({
-    queryKey: ['provider-vendors'],
+    queryKey: providerKeys.vendors(),
     queryFn: ({ signal }) => listProviderVendors(signal)
   }));
   const vendorId = $derived(draft.presetId || draft.options?.vendor_id || '');

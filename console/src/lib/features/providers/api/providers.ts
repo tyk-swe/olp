@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ApiProblem, pageResult, result } from '$lib/api/http';
+import { ApiProblem, unwrap, unwrapPage } from '$lib/api/http';
 import { PROVIDER_PAGE_SIZE } from '$lib/api/pageSizes';
 import { collectCursorPages } from '$lib/api/pagination';
 import { type CursorPage } from '$lib/api/http';
@@ -22,7 +22,7 @@ export async function listProviderVendors(
   signal?: AbortSignal
 ): Promise<ProviderVendor[]> {
   const response = await apiClient.GET('/api/v1/provider-vendors', { signal });
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 export async function listProviders(
@@ -42,7 +42,7 @@ export async function listProviderPage(
     },
     signal
   });
-  return pageResult(result(response.data, response.error, response.response));
+  return unwrapPage(response);
 }
 
 export async function getProvider(
@@ -53,7 +53,7 @@ export async function getProvider(
     params: { path: { provider_id: id } },
     signal
   });
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 export async function createProvider(
@@ -63,7 +63,7 @@ export async function createProvider(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response).id;
+  return unwrap(response).id;
 }
 
 export async function updateProvider(
@@ -75,7 +75,7 @@ export async function updateProvider(
     params: { path: { provider_id: id }, header: { 'If-Match': etag } },
     body: input
   });
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 export async function probeProvider(
@@ -90,7 +90,7 @@ export async function probeProvider(
       }
     }
   );
-  return result(response.data, response.error, response.response);
+  return unwrap(response);
 }
 
 /** Manual inventory fallback for compatible endpoints without a model-list API. */
@@ -108,8 +108,7 @@ export async function activateProvider(provider: Provider): Promise<number> {
       }
     }
   );
-  return result(response.data, response.error, response.response)
-    .runtime_generation.sequence;
+  return unwrap(response).runtime_generation.sequence;
 }
 
 /**
@@ -133,10 +132,7 @@ export async function disableProvider(
       }
     }
   );
-  return (
-    result(response.data, response.error, response.response).runtime_generation
-      ?.sequence ?? null
-  );
+  return unwrap(response).runtime_generation?.sequence ?? null;
 }
 
 /** Moves a disabled provider back to an editable draft. */
@@ -155,7 +151,7 @@ export async function restoreProviderAsDraft(
       }
     }
   );
-  return result(response.data, response.error, response.response) as Provider;
+  return unwrap(response);
 }
 
 /**

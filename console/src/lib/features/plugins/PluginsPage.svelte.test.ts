@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApiProblem } from '$lib/api/http';
+import { providerKeys } from '$lib/features/providers/providerKeys';
 import {
   approvePlugin,
   installPlugin,
@@ -122,7 +123,7 @@ function button(name: string): HTMLButtonElement {
 // Caches a fresh, inactive catalogue, as the provider wizard leaves it.
 async function seedCatalogue() {
   const catalogue = {
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
     staleTime: Infinity
   };

@@ -7,7 +7,7 @@ import {
   listRequestMetadataGatewayEpochs
 } from '$lib/features/runtime/health/api';
 import { listRuntimeGenerations } from '$lib/features/runtime/api';
-import { usageCompleteness } from '$lib/api/usage';
+import { usageCompleteness } from '$lib/features/usage/api/usage';
 import HealthPageProbe from './test/HealthPageProbe.svelte';
 
 const role = vi.hoisted(() => ({ globalScope: true }));
@@ -26,7 +26,7 @@ vi.mock('$lib/features/runtime/health/api', () => ({
 vi.mock('$lib/features/runtime/api', () => ({
   listRuntimeGenerations: vi.fn()
 }));
-vi.mock('$lib/api/usage', () => ({
+vi.mock('$lib/features/usage/api/usage', () => ({
   usageCompleteness: vi.fn()
 }));
 

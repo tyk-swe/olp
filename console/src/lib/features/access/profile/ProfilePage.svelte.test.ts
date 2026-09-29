@@ -7,7 +7,7 @@ import {
   updateProfile,
   type UserProfile
 } from '$lib/features/access/profile/api';
-import { listSessionPage } from '$lib/features/access/api';
+import { listSessionPage } from '$lib/features/access/sessions/api';
 import { userKeys } from '$lib/features/access/users/userKeys';
 import ProfilePageProbe from './test/ProfilePageProbe.svelte';
 
@@ -25,8 +25,8 @@ vi.mock('$lib/features/access/profile/api', async (original) => ({
   updateProfile: vi.fn(),
   beginOidcReauthentication: vi.fn()
 }));
-vi.mock('$lib/features/access/api', async (original) => ({
-  ...(await original<typeof import('$lib/features/access/api')>()),
+vi.mock('$lib/features/access/sessions/api', async (original) => ({
+  ...(await original<typeof import('$lib/features/access/sessions/api')>()),
   listSessionPage: vi.fn()
 }));
 

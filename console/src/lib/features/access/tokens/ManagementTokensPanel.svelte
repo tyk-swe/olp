@@ -7,11 +7,11 @@
     createManagementToken,
     listManagementTokenPage,
     revokeManagementToken,
-    listProjectPage,
     type ManagementToken,
     type ManagementTokenScope,
     type ManagementTokenSecret
-  } from '$lib/features/access/api';
+  } from '$lib/features/access/tokens/api';
+  import { listProjectPage } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';

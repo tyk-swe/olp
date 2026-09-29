@@ -1,10 +1,14 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { apiClient } from '$lib/api/client';
-  import { result, errorMessage, unanswered } from '$lib/api/http';
-  import type { components } from '$lib/api/schema';
-  import type { Provider } from './api';
+  import { errorMessage, unanswered } from '$lib/api/http';
+  import type { Provider } from './api/providers';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
+  import {
+    listCredentialSlots,
+    putCredentialSlot,
+    validateCredentialSlot,
+    type CredentialSlot as Slot
+  } from './api/credentials';
   import {
     cancelGrantEnrollment,
     continueGrantEnrollment,
@@ -13,10 +17,9 @@
     type GrantEnrollment,
     type GrantEnrollmentCompletion,
     type GrantEnrollmentStatus
-  } from './grants';
+  } from './api/grants';
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from './providerKeys';
-  type Slot = components['schemas']['CredentialSlot'];
   let {
     provider,
     canManage,
@@ -46,14 +49,8 @@
   let routes = $state('');
   let keys = $state('');
   const pool = createQuery(() => ({
-    queryKey: ['provider-slots', provider.id, provider.etag],
-    queryFn: async () => {
-      const response = await apiClient.GET(
-        '/api/v1/providers/{provider_id}/credential-slots',
-        { params: { path: { provider_id: provider.id } } }
-      );
-      return result(response.data, response.error, response.response);
-    }
+    queryKey: providerKeys.slots(provider.id, provider.etag),
+    queryFn: ({ signal }) => listCredentialSlots(provider.id, signal)
   }));
   function edit(slot?: Slot) {
     editingEtag = pool.data?.etag ?? '';
@@ -85,30 +82,19 @@
     error = '';
     notice = '';
     try {
-      const response = await apiClient.PUT(
-        '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
-        {
-          params: { path: { provider_id: provider.id, slot_id: editing.id! } },
-          headers: {
-            'If-Match': editingEtag,
-            'Idempotency-Key': crypto.randomUUID()
-          },
-          body: {
-            slot: {
-              ...editing,
-              // A write that names no credential version keeps the slot's.
-              // Naming it would bind it again, which OLP refuses once it is
-              // revoked or its grant lapsed.
-              credential_version_id: null,
-              allowed_models: parseManualModelNames(models),
-              allowed_routes: parseManualModelNames(routes),
-              allowed_api_keys: parseManualModelNames(keys)
-            },
-            credential: secret || null
-          }
-        }
-      );
-      result(response.data, response.error, response.response);
+      await putCredentialSlot(provider.id, editingEtag, {
+        slot: {
+          ...editing,
+          // A write that names no credential version keeps the slot's.
+          // Naming it would bind it again, which OLP refuses once it is
+          // revoked or its grant lapsed.
+          credential_version_id: null,
+          allowed_models: parseManualModelNames(models),
+          allowed_routes: parseManualModelNames(routes),
+          allowed_api_keys: parseManualModelNames(keys)
+        },
+        credential: secret || null
+      });
       secret = '';
       editing = null;
       notice =
@@ -231,14 +217,7 @@
     error = '';
     notice = '';
     try {
-      const response = await apiClient.POST(
-        '/api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate',
-        {
-          params: { path: { provider_id: provider.id, slot_id: slot.id! } },
-          headers: { 'If-Match': pool.data.etag }
-        }
-      );
-      result(response.data, response.error, response.response);
+      await validateCredentialSlot(provider.id, slot.id!, pool.data.etag);
       notice = `${slot.name}: model access validated.`;
       await pool.refetch();
     } catch (e) {

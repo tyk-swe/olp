@@ -80,6 +80,8 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
 
 export type CursorPage<T> = { items: T[]; nextCursor: string | null };
 
+type Fetched<T> = { data?: T; error?: unknown; response: Response };
+
 /** Unwraps a management list envelope into the console's cursor page. */
 export function pageResult<T>(page: {
   items: T[];
@@ -88,22 +90,31 @@ export function pageResult<T>(page: {
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
-export function ensureSuccess(error: unknown, response: Response): void {
-  if (!response.ok) throw apiProblem(error, response);
-}
-
-export function result<T>(
-  data: T | null | undefined,
-  error: unknown,
-  response: Response
-): NonNullable<T> {
-  if (!response.ok) throw apiProblem(error, response);
-  if (data !== undefined && data !== null) return data;
+/** Resolves an apiClient call to its body, throwing its problem on failure. */
+export function unwrap<T>(fetched: Fetched<T>): NonNullable<T> {
+  if (!fetched.response.ok) throw apiProblem(fetched.error, fetched.response);
+  if (fetched.data !== undefined && fetched.data !== null)
+    return fetched.data as NonNullable<T>;
   throw new ApiProblem({
     type: 'urn:olp:problem:invalid-api-response',
     title: 'The API response did not include the expected JSON body',
     status: 502
   });
+}
+
+/** Resolves an apiClient list call to the console's cursor page. */
+export function unwrapPage<T>(
+  fetched: Fetched<{ items: T[]; next_cursor?: string | null }>
+): CursorPage<T> {
+  return pageResult(unwrap(fetched));
+}
+
+/** Throws the call's problem when its response was not successful. */
+export function ensureOk(fetched: {
+  error?: unknown;
+  response: Response;
+}): void {
+  if (!fetched.response.ok) throw apiProblem(fetched.error, fetched.response);
 }
 
 export function fieldIssues(error: unknown): FieldIssue[] {

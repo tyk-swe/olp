@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { ApiProblem } from '$lib/api/http';
-import { clearCsrfToken } from '$lib/features/access/session/api';
+import { clearCsrfToken } from '$lib/features/access/session/csrf';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 import {
   disableProvider,
   isProviderInUse,
   restoreProviderAsDraft,
   type Provider
-} from '$lib/features/providers/api';
+} from '$lib/features/providers/api/providers';
 
 const providerId = '01980000-0000-7000-8000-000000000101';
 const providerEtag = '01980000-0000-7000-8000-000000000109';

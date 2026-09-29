@@ -3,7 +3,7 @@ import {
   clearCsrfToken,
   getCsrfToken,
   setCsrfToken
-} from '$lib/features/access/session/api';
+} from '$lib/features/access/session/csrf';
 import { QueryPartition } from '$lib/features/access/session/queryPartition';
 import {
   isAuthenticationEndpoint,

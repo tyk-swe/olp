@@ -4,36 +4,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
 import { ApiProblem } from '$lib/api/http';
 import { providerKeys } from './providerKeys';
-import type { Provider } from './api';
+import type { Provider } from './api/providers';
 import {
   listProviderCredentials,
   type ProviderCredential
-} from './credentials';
+} from './api/credentials';
 import {
   continueGrantEnrollment,
   pollGrantEnrollment,
   startGrantEnrollment,
   type GrantEnrollment
-} from './grants';
-import { listProviderModelPage } from './models';
+} from './api/grants';
+import { listProviderModelPage } from './api/models';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
 import { pluginSpec } from './test/pluginFixtures';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('./grants', () => ({
+vi.mock('./api/grants', () => ({
   startGrantEnrollment: vi.fn(),
   continueGrantEnrollment: vi.fn(),
   pollGrantEnrollment: vi.fn(),
   cancelGrantEnrollment: vi.fn()
 }));
-vi.mock('./credentials', async (original) => ({
-  ...(await original<typeof import('./credentials')>()),
+vi.mock('./api/credentials', async (original) => ({
+  ...(await original<typeof import('./api/credentials')>()),
   listProviderCredentials: vi.fn()
 }));
-vi.mock('./models', async (original) => ({
-  ...(await original<typeof import('./models')>()),
+vi.mock('./api/models', async (original) => ({
+  ...(await original<typeof import('./api/models')>()),
   listProviderModelPage: vi.fn()
 }));
 
@@ -194,7 +194,7 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
   client.setQueryData(providerKeys.kinds(), [pluginSpec]);
-  client.setQueryData(['provider-profiles'], []);
+  client.setQueryData(providerKeys.profiles(), []);
   vi.mocked(listProviderModelPage).mockResolvedValue({
     provider,
     items: [],

@@ -4,14 +4,14 @@
   import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
-  import { type Provider } from '$lib/features/providers/api';
+  import { type Provider } from '$lib/features/providers/api/providers';
   import {
     listProviderCredentials,
     revokeProviderCredential,
     rotateProviderCredential,
     type ProviderCredential
-  } from '$lib/features/providers/credentials';
-  import { type ProviderKindCapability } from '$lib/features/providers/models';
+  } from '$lib/features/providers/api/credentials';
+  import { type ProviderKindCapability } from '$lib/features/providers/api/models';
   import { formatDate } from '$lib/format';
   import {
     DISABLED_EDIT_NOTE,

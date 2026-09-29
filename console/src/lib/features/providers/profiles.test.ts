@@ -3,9 +3,9 @@ import {
   declaresModels,
   dialectSurface,
   pluginOptionFields,
-  pluginProfileGroups,
-  type ProviderProfile
+  pluginProfileGroups
 } from './profiles';
+import type { ProviderProfile } from './api/profiles';
 
 function profile(overrides: Partial<ProviderProfile>): ProviderProfile {
   return {

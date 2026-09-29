@@ -10,7 +10,7 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { listProviderPage } from '$lib/features/providers/api';
+  import { listProviderPage } from '$lib/features/providers/api/providers';
   import { cursorPaginationProps, resetCursor } from '$lib/lists/pagination';
   import { debouncedSearch } from '$lib/lists/search.svelte';
   import type { ProviderListState } from './providerPagination';

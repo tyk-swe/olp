@@ -4,14 +4,14 @@ import {
   currentSession,
   login,
   logout
-} from '$lib/features/access/session/auth';
+} from '$lib/features/access/session/api';
 import { type FixedRole } from '$lib/features/access/session/authorization';
 import { ApiProblem } from '$lib/api/http';
 import {
   clearCsrfToken,
   getCsrfToken,
   setCsrfToken
-} from '$lib/features/access/session/api';
+} from '$lib/features/access/session/csrf';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 
 function sessionResponse(role: string, csrfToken = `csrf-${role}`) {
@@ -172,7 +172,7 @@ describe('bounded authentication reads', () => {
     'times out a pending %s read and recovers on explicit retry',
     async (kind) => {
       vi.useFakeTimers();
-      const { authenticationCapabilities } = await import('./auth');
+      const { authenticationCapabilities } = await import('./api');
       const { AUTHENTICATION_DEADLINE_MS } = await import('./requestDeadline');
       let signal: AbortSignal | undefined;
       vi.stubGlobal(

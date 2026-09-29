@@ -19,7 +19,7 @@ import {
   updateProvider,
   type Provider,
   type ProviderProbe
-} from '$lib/features/providers/api';
+} from '$lib/features/providers/api/providers';
 import {
   certifyProviderModel,
   declareProviderModels,
@@ -30,13 +30,13 @@ import {
   setProviderModel,
   type CapabilityDeclaration,
   type CapabilityCertification
-} from '$lib/features/providers/models';
+} from '$lib/features/providers/api/models';
 import {
-  isLiveGrant,
   listProviderCredentials,
-  rotateProviderCredential
-} from '$lib/features/providers/credentials';
-import type { ProviderProfile } from '$lib/features/providers/profiles';
+  rotateProviderCredential,
+  type ProviderCredential
+} from '$lib/features/providers/api/credentials';
+import type { ProviderProfile } from '$lib/features/providers/api/profiles';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
@@ -44,7 +44,7 @@ import {
   startGrantEnrollment,
   type GrantEnrollment,
   type GrantEnrollmentStatus
-} from '$lib/features/providers/grants';
+} from '$lib/features/providers/api/grants';
 import {
   authOptionsFor,
   buildCreateProviderInput,
@@ -58,6 +58,24 @@ import {
   type ProviderDraft
 } from '$lib/features/providers/providerEditor';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
+
+/** Reports whether the credential version with the id is a live grant
+ * enrolled through the plugin build with the digest, which a provider pinning
+ * that build authenticates with: its grant hasn't lapsed and the version isn't
+ * revoked. */
+function isLiveGrant(
+  credentials: ProviderCredential[] | undefined,
+  id: string | null | undefined,
+  pluginDigest: string | undefined
+): boolean {
+  const credential = credentials?.find((candidate) => candidate.id === id);
+  return Boolean(
+    credential?.grant &&
+    !credential.revoked_at &&
+    !credential.grant.lapsed_at &&
+    credential.grant.plugin_digest === pluginDigest
+  );
+}
 
 export class ProviderWizardState {
   stepLabels = ['Connection', 'Models and capabilities', 'Activation'] as const;

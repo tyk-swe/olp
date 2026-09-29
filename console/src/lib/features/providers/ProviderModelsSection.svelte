@@ -18,12 +18,13 @@
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/models';
-  import { probeProvider, type Provider } from '$lib/features/providers/api';
+  } from '$lib/features/providers/api/models';
   import {
-    declaresModels,
-    listProviderProfiles
-  } from '$lib/features/providers/profiles';
+    probeProvider,
+    type Provider
+  } from '$lib/features/providers/api/providers';
+  import { declaresModels } from '$lib/features/providers/profiles';
+  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
   import {
     cursorPaginationProps,
     resetCursor,
@@ -38,7 +39,7 @@
     providerDisabled
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
-  import type { ProviderModelPage } from './models';
+  import type { ProviderModelPage } from './api/models';
 
   let {
     current,

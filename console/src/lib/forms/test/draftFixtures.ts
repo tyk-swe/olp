@@ -1,5 +1,5 @@
-import type { Provider } from '$lib/features/providers/api';
-import type { ProviderKindCapability } from '$lib/features/providers/models';
+import type { Provider } from '$lib/features/providers/api/providers';
+import type { ProviderKindCapability } from '$lib/features/providers/api/models';
 import type { RouteDraft } from '$lib/features/routes/api';
 
 export const provider: Provider = {

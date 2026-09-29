@@ -9,22 +9,25 @@ import {
   probeProvider,
   type Provider,
   type ProviderProbe
-} from './api';
-import { listProviderModelPage, type ProviderKindCapability } from './models';
-import type { ProviderProfile } from './profiles';
+} from './api/providers';
+import {
+  listProviderModelPage,
+  type ProviderKindCapability
+} from './api/models';
+import type { ProviderProfile } from './api/profiles';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
 import { referenceProfile } from './test/pluginFixtures';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('./api', async (original) => ({
-  ...(await original<typeof import('./api')>()),
+vi.mock('./api/providers', async (original) => ({
+  ...(await original<typeof import('./api/providers')>()),
   createProvider: vi.fn(),
   probeProvider: vi.fn()
 }));
-vi.mock('./models', async (original) => ({
-  ...(await original<typeof import('./models')>()),
+vi.mock('./api/models', async (original) => ({
+  ...(await original<typeof import('./api/models')>()),
   listProviderModelPage: vi.fn()
 }));
 
@@ -150,13 +153,14 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
   client.setQueryData(providerKeys.kinds(), [openAiSpec, pluginSpec]);
-  client.setQueryData(['provider-vendors'], []);
-  client.setQueryData(['provider-configuration-schemas'], {});
+  client.setQueryData(providerKeys.vendors(), []);
+  client.setQueryData(providerKeys.configurationSchemas(), {});
   client.setQueryData(projectKeys.memberships, []);
-  client.setQueryData(
-    ['provider-profiles'],
-    [openAiChat, referenceChat, workspaceChat]
-  );
+  client.setQueryData(providerKeys.profiles(), [
+    openAiChat,
+    referenceChat,
+    workspaceChat
+  ]);
 });
 
 afterEach(async () => {
@@ -285,10 +289,10 @@ describe('provider wizard with a plugin profile', () => {
   });
 
   it('discovers the models of a profile that declares discovery, without a probe model', async () => {
-    client.setQueryData(
-      ['provider-profiles'],
-      [openAiChat, { ...referenceChat, model_discovery: true }]
-    );
+    client.setQueryData(providerKeys.profiles(), [
+      openAiChat,
+      { ...referenceChat, model_discovery: true }
+    ]);
     mockCreatedProvider(3);
     render();
     await settle();
@@ -313,7 +317,7 @@ describe('provider wizard with a plugin profile', () => {
   });
 
   it('points to the Plugins page when no approved plugin offers a profile', async () => {
-    client.setQueryData(['provider-profiles'], [openAiChat]);
+    client.setQueryData(providerKeys.profiles(), [openAiChat]);
     render();
     await settle();
     choosePluginKind();
@@ -475,10 +479,10 @@ describe('provider detail', () => {
   });
 
   it('runs upstream discovery for a plugin profile that declares it', async () => {
-    client.setQueryData(
-      ['provider-profiles'],
-      [openAiChat, { ...referenceChat, model_discovery: true }]
-    );
+    client.setQueryData(providerKeys.profiles(), [
+      openAiChat,
+      { ...referenceChat, model_discovery: true }
+    ]);
     client.setQueryData(providerKeys.models(pluginProvider.id), modelPage);
     vi.mocked(listProviderModelPage).mockResolvedValue(modelPage);
     render(pluginProvider.id);

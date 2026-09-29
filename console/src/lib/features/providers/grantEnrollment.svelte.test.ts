@@ -11,7 +11,7 @@ import {
   updateProvider,
   type Provider,
   type ProviderProbe
-} from './api';
+} from './api/providers';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
@@ -19,13 +19,16 @@ import {
   startGrantEnrollment,
   type GrantEnrollment,
   type GrantEnrollmentCompletion
-} from './grants';
+} from './api/grants';
 import {
   listProviderCredentials,
   type ProviderCredential
-} from './credentials';
-import { listProviderModelPage, type ProviderKindCapability } from './models';
-import type { ProviderProfile } from './profiles';
+} from './api/credentials';
+import {
+  listProviderModelPage,
+  type ProviderKindCapability
+} from './api/models';
+import type { ProviderProfile } from './api/profiles';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
 import { pluginSpec, referenceProfile } from './test/pluginFixtures';
 
@@ -33,24 +36,24 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
 vi.mock('$lib/clipboard', () => ({ copyText: vi.fn() }));
-vi.mock('./api', async (original) => ({
-  ...(await original<typeof import('./api')>()),
+vi.mock('./api/providers', async (original) => ({
+  ...(await original<typeof import('./api/providers')>()),
   createProvider: vi.fn(),
   updateProvider: vi.fn(),
   probeProvider: vi.fn()
 }));
-vi.mock('./grants', () => ({
+vi.mock('./api/grants', () => ({
   startGrantEnrollment: vi.fn(),
   continueGrantEnrollment: vi.fn(),
   pollGrantEnrollment: vi.fn(),
   cancelGrantEnrollment: vi.fn()
 }));
-vi.mock('./credentials', async (original) => ({
-  ...(await original<typeof import('./credentials')>()),
+vi.mock('./api/credentials', async (original) => ({
+  ...(await original<typeof import('./api/credentials')>()),
   listProviderCredentials: vi.fn()
 }));
-vi.mock('./models', async (original) => ({
-  ...(await original<typeof import('./models')>()),
+vi.mock('./api/models', async (original) => ({
+  ...(await original<typeof import('./api/models')>()),
   listProviderModelPage: vi.fn()
 }));
 
@@ -162,10 +165,10 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
   client.setQueryData(providerKeys.kinds(), [probeSpec]);
-  client.setQueryData(['provider-vendors'], []);
-  client.setQueryData(['provider-configuration-schemas'], {});
+  client.setQueryData(providerKeys.vendors(), []);
+  client.setQueryData(providerKeys.configurationSchemas(), {});
   client.setQueryData(projectKeys.memberships, []);
-  client.setQueryData(['provider-profiles'], [referenceGrantChat]);
+  client.setQueryData(providerKeys.profiles(), [referenceGrantChat]);
   provider = saved;
   vi.mocked(createProvider).mockResolvedValue(saved.id);
   vi.mocked(updateProvider).mockImplementation(async () => provider);
@@ -420,17 +423,14 @@ describe('saving the Connection stage of a draft that holds a credential', () =>
 
   it('signs in upstream again once the draft moves to another build of the plugin', async () => {
     const nextDigest = 'f'.repeat(64);
-    client.setQueryData(
-      ['provider-profiles'],
-      [
-        referenceGrantChat,
-        {
-          ...referenceGrantChat,
-          revision: nextDigest,
-          plugin: { digest: nextDigest, name: 'reference', version: '0.2.0' }
-        }
-      ]
-    );
+    client.setQueryData(providerKeys.profiles(), [
+      referenceGrantChat,
+      {
+        ...referenceGrantChat,
+        revision: nextDigest,
+        plugin: { digest: nextDigest, name: 'reference', version: '0.2.0' }
+      }
+    ]);
     await enrollThenReturn();
     set(
       '#provider-plugin-profile',
@@ -468,10 +468,10 @@ describe('saving the Connection stage of a draft that holds a credential', () =>
       label: 'Reference Chat Completions',
       authentication: ['static_credential']
     };
-    client.setQueryData(
-      ['provider-profiles'],
-      [referenceChat, referenceGrantChat]
-    );
+    client.setQueryData(providerKeys.profiles(), [
+      referenceChat,
+      referenceGrantChat
+    ]);
     provider = {
       ...enrolled,
       configuration: {
