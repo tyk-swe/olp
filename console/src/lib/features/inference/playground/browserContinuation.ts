@@ -11,8 +11,13 @@ import {
 export const continuationVersion = 'chat-anthropic-tools-v1';
 const maxEventBytes = 1 << 20;
 const maxStreamBytes = 8 << 20;
+const utf8 = new TextEncoder();
 const maxObservations = 4096;
 const handlePattern = /^continuation_[0-9a-f]{32}$/;
+
+function utf8Length(text: string): number {
+  return utf8.encode(text).length;
+}
 
 export type ToolCall = {
   id: string;
@@ -230,7 +235,7 @@ type Chunk = {
 };
 
 function parseChunk(source: string): Chunk {
-  if (source.length > maxEventBytes)
+  if (utf8Length(source) > maxEventBytes)
     throw new Error('A continuation event exceeds the client limit.');
   const chunk = record(decodeDelivery(source));
   if (record(chunk.olp).version !== continuationVersion)
@@ -250,7 +255,9 @@ function assemble(frames: Chunk[]): {
 } {
   const observations: Observation[] = [];
   const calls = new Map<number, ToolCall>();
+  const argumentBytes = new Map<number, number>();
   let text = '';
+  let textBytes = 0;
   let handle = '';
   let finish = '';
   let terminal = false;
@@ -276,7 +283,8 @@ function assemble(frames: Chunk[]): {
     const delta = selected.delta === undefined ? {} : record(selected.delta);
     if (typeof delta.content === 'string') {
       text += delta.content;
-      if (text.length > maxStreamBytes)
+      textBytes += utf8Length(delta.content);
+      if (textBytes > maxStreamBytes)
         throw new Error('Continuation text exceeds the client limit.');
     }
     if (Array.isArray(delta.tool_calls)) {
@@ -300,10 +308,16 @@ function assemble(frames: Chunk[]): {
         if (call.function !== undefined) {
           const fn = record(call.function);
           if (typeof fn.name === 'string') current.function.name += fn.name;
-          if (typeof fn.arguments === 'string')
+          if (typeof fn.arguments === 'string') {
             current.function.arguments += fn.arguments;
+            argumentBytes.set(
+              index as number,
+              (argumentBytes.get(index as number) ?? 0) +
+                utf8Length(fn.arguments)
+            );
+          }
         }
-        if (current.function.arguments.length > maxEventBytes)
+        if ((argumentBytes.get(index as number) ?? 0) > maxEventBytes)
           throw new Error('Tool arguments exceed the client limit.');
         calls.set(index as number, current);
       }
@@ -354,15 +368,26 @@ async function frames(response: Response): Promise<Chunk[]> {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const result: Chunk[] = [];
-  let buffer = '';
   let total = 0;
+  let eventBytes = 0;
   let doneMarker = false;
-  const consume = (block: string) => {
-    const data = block
-      .split('\n')
+  let awaitingLF = false;
+  let heldDispatch = false;
+  let lineParts: Uint8Array[] = [];
+  let lineLength = 0;
+  let lines: string[] = [];
+  const oversized = () => {
+    if (eventBytes > maxEventBytes)
+      throw new Error('A continuation event exceeds the client limit.');
+  };
+  const dispatch = () => {
+    oversized();
+    const data = lines
       .filter((line) => line.startsWith('data:'))
       .map((line) => line.slice(5).trimStart())
       .join('\n');
+    lines = [];
+    eventBytes = 0;
     if (!data) return;
     if (data === '[DONE]') {
       doneMarker = true;
@@ -371,31 +396,85 @@ async function frames(response: Response): Promise<Chunk[]> {
     if (doneMarker) throw new Error('A continuation event followed [DONE].');
     result.push(parseChunk(data));
   };
+  const endLine = (carriage: boolean) => {
+    const bytes = new Uint8Array(lineLength);
+    let offset = 0;
+    for (const part of lineParts) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+    lineParts = [];
+    lineLength = 0;
+    oversized();
+    if (bytes.length === 0) {
+      if (carriage) heldDispatch = true;
+      else dispatch();
+      return;
+    }
+    lines.push(decoder.decode(bytes));
+  };
+  const feed = (chunk: Uint8Array) => {
+    total += chunk.length;
+    if (total > maxStreamBytes)
+      throw new Error('Continuation stream exceeds the client limit.');
+    let start = 0;
+    for (let i = 0; i < chunk.length; i++) {
+      const byte = chunk[i]!;
+      if (awaitingLF) {
+        awaitingLF = false;
+        if (byte === 0x0a) {
+          eventBytes += 1;
+          start = i + 1;
+          if (heldDispatch) {
+            heldDispatch = false;
+            dispatch();
+          }
+          continue;
+        }
+        if (heldDispatch) {
+          heldDispatch = false;
+          dispatch();
+        }
+      }
+      if (byte === 0x0d || byte === 0x0a) {
+        if (i > start) {
+          lineParts.push(chunk.subarray(start, i));
+          lineLength += i - start;
+        }
+        eventBytes += i - start + 1;
+        start = i + 1;
+        if (byte === 0x0d) awaitingLF = true;
+        endLine(byte === 0x0d);
+      }
+    }
+    if (start < chunk.length) {
+      lineParts.push(chunk.subarray(start));
+      lineLength += chunk.length - start;
+      eventBytes += chunk.length - start;
+    }
+    oversized();
+  };
   try {
     for (;;) {
       const item = await reader.read();
-      const chunk = item.done
-        ? decoder.decode()
-        : decoder.decode(item.value, { stream: true });
-      total += chunk.length;
-      if (total > maxStreamBytes)
-        throw new Error('Continuation stream exceeds the client limit.');
-      buffer += chunk.replaceAll('\r\n', '\n');
-      let boundary = buffer.indexOf('\n\n');
-      while (boundary >= 0) {
-        consume(buffer.slice(0, boundary));
-        buffer = buffer.slice(boundary + 2);
-        boundary = buffer.indexOf('\n\n');
-      }
-      if (buffer.length > maxEventBytes)
-        throw new Error('A continuation event exceeds the client limit.');
+      if (item.value !== undefined && item.value.length > 0) feed(item.value);
       if (item.done) break;
     }
-    if (buffer.trim())
+    if (heldDispatch) dispatch();
+    const trailing = new Uint8Array(lineLength);
+    let offset = 0;
+    for (const part of lineParts) {
+      trailing.set(part, offset);
+      offset += part.length;
+    }
+    if ([...lines, decoder.decode(trailing)].join('\n').trim())
       throw new Error('The continuation stream ended mid-event.');
     if (!doneMarker)
       throw new Error('The continuation stream has no terminal marker.');
     return result;
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -411,7 +490,7 @@ export async function streamTurn(
 ): Promise<ReadyTurn> {
   const wire = replaceNative(request, ['stream'], true);
   const body = stringifyNativeJSON(wire);
-  if (new TextEncoder().encode(body).byteLength > maxEventBytes)
+  if (utf8Length(body) > maxEventBytes)
     throw new Error('The native request exceeds the public body limit.');
   const response = await checked(
     await gatewayFetch('/v1/chat/completions', {
@@ -495,7 +574,7 @@ export async function unaryTurn(
   signal?: AbortSignal
 ): Promise<ReadyTurn> {
   const body = stringifyNativeJSON(request);
-  if (new TextEncoder().encode(body).byteLength > maxEventBytes)
+  if (utf8Length(body) > maxEventBytes)
     throw new Error('The next native request exceeds the public body limit.');
   const response = await checked(
     await gatewayFetch('/v1/chat/completions', {
@@ -506,7 +585,7 @@ export async function unaryTurn(
     })
   );
   const source = await response.text();
-  if (source.length > maxStreamBytes)
+  if (utf8Length(source) > maxStreamBytes)
     throw new Error('The continuation result exceeds the client limit.');
   return completedUnary(
     decodeDelivery(source),
@@ -534,7 +613,7 @@ export async function recoverTurn(
     )
   );
   const source = await response.text();
-  if (source.length > maxStreamBytes)
+  if (utf8Length(source) > maxStreamBytes)
     throw new Error('Recovery result exceeds the client limit.');
   const recovery = record(decodeDelivery(source));
   const nativeRecovery = parseNativeJSON(source);

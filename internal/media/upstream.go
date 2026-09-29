@@ -548,16 +548,21 @@ func interrupted(ctx context.Context, err error) error {
 }
 
 func retryAfterHeader(header string, now time.Time) time.Duration {
-	if header == "" {
+	value := strings.TrimSpace(header)
+	if value == "" {
 		return 0
 	}
-	if seconds, err := strconv.ParseFloat(strings.TrimSpace(header), 64); err == nil && seconds > 0 {
-		return time.Duration(seconds * float64(time.Second))
-	}
-	if at, err := http.ParseTime(header); err == nil {
-		if d := at.Sub(now); d > 0 {
-			return d
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		for _, c := range value {
+			if c < '0' || c > '9' {
+				return 0
+			}
 		}
+		const maxSeconds = uint64((1<<63 - 1) / time.Second)
+		return time.Duration(min(seconds, maxSeconds)) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return max(at.Sub(now), 0)
 	}
 	return 0
 }
