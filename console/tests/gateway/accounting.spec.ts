@@ -608,6 +608,32 @@ test('usage time filters keep impossible dates visible and send exact bounds', a
   );
   expect(usageRequests).toEqual([]);
 
+  const correctedStart = await page.getByLabel('From').inputValue();
+  const correctedUtc = await page.evaluate(
+    (value) => new Date(value).toISOString(),
+    correctedStart
+  );
+  await page
+    .getByRole('textbox', { name: 'Route', exact: true })
+    .fill('unmatched-usage-route');
+  const appliedSummary = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/v1/usage/summary'
+  );
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  const appliedResponse = await appliedSummary;
+  expect(appliedResponse.ok()).toBe(true);
+  const appliedUrl = new URL(appliedResponse.url());
+  expect(appliedUrl.searchParams.get('start')).toBe(correctedUtc);
+  expect(appliedUrl.searchParams.get('route')).toBe('unmatched-usage-route');
+  const appliedPage = new URL(page.url());
+  expect(appliedPage.searchParams.get('start')).toBe(correctedUtc);
+  expect(appliedPage.searchParams.get('route')).toBe('unmatched-usage-route');
+  expect(decodeURIComponent(page.url())).not.toContain('2026-02-30');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Refresh', exact: true })
+  ).toBeEnabled();
+
   const start = '2026-03-01T12:00:00.000000001Z';
   const end = '2026-03-01T12:00:00.000000002Z';
   const summaryResponse = page.waitForResponse(

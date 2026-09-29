@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { dateTimeLocalValue } from '$lib/format';
 import {
   applyUsageDraft,
   defaultUsageState,
@@ -147,6 +148,69 @@ describe('usage report URL state', () => {
     expect(usageProblem(state)).toBe('Enter valid start and end times.');
     expect(usageSearch(state)).toContain(`start=${encodeURIComponent(start)}`);
   });
+
+  it.each([
+    {
+      bound: 'start',
+      invalid: '2026-02-30T12:00:00Z',
+      other: '2026-03-10T12:00:00Z'
+    },
+    {
+      bound: 'start',
+      invalid: '2027-02-29T12:00:00Z',
+      other: '2027-03-10T12:00:00Z'
+    },
+    {
+      bound: 'start',
+      invalid: '2026-03-01T24:00:00Z',
+      other: '2026-03-10T12:00:00Z'
+    },
+    {
+      bound: 'end',
+      invalid: '2026-02-30T12:00:00Z',
+      other: '2026-02-01T12:00:00Z'
+    },
+    {
+      bound: 'end',
+      invalid: '2027-02-29T12:00:00Z',
+      other: '2027-02-01T12:00:00Z'
+    },
+    {
+      bound: 'end',
+      invalid: '2026-03-01T24:00:00Z',
+      other: '2026-02-01T12:00:00Z'
+    }
+  ] as const)(
+    'normalizes the corrected visible $bound $invalid when its draft is applied',
+    ({ bound, invalid, other }) => {
+      const otherBound = bound === 'start' ? 'end' : 'start';
+      const canonical = new Date(other).toISOString();
+      const state = readUsageState(
+        new URLSearchParams({ [bound]: invalid, [otherBound]: other }),
+        defaults
+      );
+      expect(state.filters[bound]).toBe(invalid);
+      expect(state.filters[otherBound]).toBe(canonical);
+      expect(usageProblem(state)).toBe('Enter valid start and end times.');
+      const corrected = new Date(invalid).toISOString();
+      const draft = usageDraft(state);
+      expect(draft[bound]).toBe(dateTimeLocalValue(corrected));
+
+      const applied = applyUsageDraft(draft, state);
+      expect(applied.filters[bound]).toBe(corrected);
+      expect(applied.filters[otherBound]).toBe(canonical);
+      expect(usageProblem(applied)).toBeNull();
+
+      const changed = applyUsageDraft(
+        { ...draft, route: 'changed-route' },
+        state
+      );
+      expect(changed.filters[bound]).toBe(corrected);
+      expect(changed.filters[otherBound]).toBe(canonical);
+      expect(changed.filters.route).toBe('changed-route');
+      expect(usageProblem(changed)).toBeNull();
+    }
+  );
 
   it('keeps impossible local calendar dates invalid in drafts', () => {
     for (const start of ['2026-02-30T12:00', '2027-02-29T12:00']) {

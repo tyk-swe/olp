@@ -132,6 +132,7 @@ export function applyUsageDraft(
   const state = readUsageState(new URLSearchParams(draft), applied);
   for (const field of ['start', 'end'] as const) {
     state.filters[field] =
+      timeValid(applied.filters[field], true) &&
       draft[field] === dateTimeLocalValue(applied.filters[field])
         ? applied.filters[field]
         : (usageInstant(draft[field], false) ?? draft[field]);
