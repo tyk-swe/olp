@@ -107,7 +107,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 		failure := &attemptFailure{status: response.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := state.rejected(response.StatusCode, failure.upstream)
 		if class == classRateLimit {
-			failure.retryAfter = retryAfter(response.Header.Get("Retry-After"), s.now())
+			failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), s.now())
 		}
 		return fail(class, failure)
 	}

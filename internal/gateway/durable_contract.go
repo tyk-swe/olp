@@ -216,16 +216,6 @@ func strictBatchInputMatches(result oif.Document, effective []byte) bool {
 	return true
 }
 
-func strictState(doc oif.Document, fallback string) string {
-	status, ok := doc.Root().Lookup("status")
-	if ok {
-		if value, valid := status.Text(); valid && value != "" && len(value) <= 64 {
-			return value
-		}
-	}
-	return fallback
-}
-
 func (s *Server) durableExpiry(provider *time.Time) *time.Time {
 	expires := s.now().Add(resources.DurableLifetime - time.Second)
 	if provider != nil && provider.Before(expires) {
@@ -264,11 +254,4 @@ func durableProjection(result []byte, localID string, files map[string]string) (
 		return nil, err
 	}
 	return out.Bytes(), nil
-}
-
-func strictIdentityProjection(result []byte, upstreamID, localID string) ([]byte, error) {
-	if _, _, err := strictResult(result, upstreamID); err != nil {
-		return nil, err
-	}
-	return durableProjection(result, localID, nil)
 }

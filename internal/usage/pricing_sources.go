@@ -104,10 +104,6 @@ func loadSource(ctx context.Context, q access.Queryer, id string) (Source, error
 	return scanSource(q.QueryRow(ctx, sourceColumns+" WHERE id=$1", id))
 }
 
-func loadSnapshot(ctx context.Context, q access.Queryer, id string) (SourceSnapshot, error) {
-	return scanSnapshot(q.QueryRow(ctx, snapshotColumns+" WHERE id=$1", id))
-}
-
 type sourceInput struct {
 	Name    string `json:"name"`
 	URL     string `json:"url"`

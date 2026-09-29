@@ -51,7 +51,8 @@ OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 # within the original service.
 restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
-export OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
+OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
+export OLP_TEST_RESTORE_VALKEY_URL
 go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration ./internal/database ./internal/gateway ./internal/providers ./internal/media
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
@@ -60,7 +61,7 @@ OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.
-go build -tags=oidctest -ldflags "-X github.com/tyk-swe/olp/internal/process.Version=$(node -p 'require("./package.json").version')" -o .local/bin/olp-identity-test ./cmd/olp
+make build-go GO_BUILD_OUTPUT=.local/bin/olp-identity-test GO_BUILD_TAGS=oidctest
 for database in olp_packaged olp_vite; do
   "${compose[@]}" exec -T postgres createdb -U olp "$database"
 done
@@ -70,6 +71,7 @@ pnpm --dir console exec playwright test --config playwright.config.ts
 export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
 export OLP_LOCAL_DIR="$scratch"
 for origin in true false; do
-  export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+  OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+  export OLP_TEST_RUN_TOKEN
   OLP_CONSOLE_E2E_PACKAGED="$origin" ./scripts/browser-integration.sh
 done

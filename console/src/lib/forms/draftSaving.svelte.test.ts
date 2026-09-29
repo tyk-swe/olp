@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
 import { ApiProblem } from '$lib/api/http';
 import { apiClient } from '$lib/api/client';
-import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
 import { sessionKeys } from '$lib/features/access/session/sessionKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { routeKeys } from '$lib/features/routes/routeKeys';
@@ -936,7 +936,7 @@ it.each(['original-key', 'changed-key'])(
         unpriced_attempts: 0
       }
     };
-    client.setQueryData(apiKeyQueries.page(), {
+    client.setQueryData(apiKeyKeys.page(), {
       items: [key],
       nextCursor: null
     });

@@ -342,9 +342,7 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	}
 	return eventstream.NewDecoder().Decode(bytes.NewReader(frame), nil)
 }
-func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamBedrockEvents(r, limit, route, emit, nil, false)
-}
+
 func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, native bool) (*openai.Completion, error) {
 	c := &openai.Completion{ProviderModel: route}
 	started, stopped := false, false

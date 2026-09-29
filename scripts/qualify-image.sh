@@ -30,6 +30,7 @@ export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
 export OLP_VALKEY_URL="redis://:olp-local@$valkey/0"
 export OLP_LOCAL_DIR="$scratch"
 source scripts/secrets.sh "$scratch/secrets"
-export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+export OLP_TEST_RUN_TOKEN
 export OLP_CONSOLE_E2E_PACKAGED=true OLP_CONSOLE_E2E_CANDIDATE=true
 ./scripts/browser-integration.sh

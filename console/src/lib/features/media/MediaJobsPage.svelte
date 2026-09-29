@@ -19,6 +19,7 @@
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { formatDate, stateLabel } from '$lib/format';
+  import { downloadBlob } from '$lib/download';
   import MediaTimeline from './MediaTimeline.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
@@ -105,21 +106,15 @@
     if (actionBusy) return;
     actionBusy = 'download';
     actionError = null;
-    let url: string | null = null;
     try {
       const { blob, filename } = await downloadMediaJobContent(
         jobId,
         downloadVariant
       );
-      url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      anchor.click();
+      downloadBlob(blob, filename);
     } catch (error) {
       actionError = errorMessage(error, 'The content could not be downloaded.');
     } finally {
-      if (url) URL.revokeObjectURL(url);
       actionBusy = null;
     }
   }

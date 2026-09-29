@@ -59,6 +59,7 @@ afterEach(async () => {
   if (component) await unmount(component);
   component = undefined;
   host.remove();
+  vi.unstubAllGlobals();
 });
 
 function render() {
@@ -86,7 +87,24 @@ function click(text: string) {
   button!.click();
 }
 
-it('exports the configuration artifact', async () => {
+it('exports and downloads the configuration artifact', async () => {
+  const createObjectURL = vi
+    .fn<typeof URL.createObjectURL>()
+    .mockReturnValue('blob:configuration');
+  const revokeObjectURL = vi.fn<typeof URL.revokeObjectURL>();
+  vi.stubGlobal(
+    'URL',
+    class extends URL {
+      static createObjectURL = createObjectURL;
+      static revokeObjectURL = revokeObjectURL;
+    }
+  );
+  const download = vi
+    .spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.href).toBe('blob:configuration');
+      expect(this.download).toBe('openllmproxy-configuration.json');
+    });
   vi.mocked(exportConfiguration).mockResolvedValue({
     digest: 'digest-1',
     document
@@ -97,6 +115,20 @@ it('exports the configuration artifact', async () => {
   expect(exportConfiguration).toHaveBeenCalled();
   expect(host.textContent).toContain('digest-1');
   expect(host.textContent).toContain('Download JSON');
+  click('Download JSON');
+  expect(download).toHaveBeenCalledOnce();
+  expect(createObjectURL).toHaveBeenCalledOnce();
+  const blob = createObjectURL.mock.calls[0]![0];
+  expect(blob).toBeInstanceOf(Blob);
+  expect((blob as Blob).type).toBe('application/json');
+  const downloaded = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob as Blob);
+  });
+  expect(downloaded).toBe(JSON.stringify(document, null, 2));
+  expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:configuration');
 });
 
 it('plans a pasted artifact and renders actions', async () => {

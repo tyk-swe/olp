@@ -26,8 +26,9 @@ create_disposable_database "$restore_db"
 # counters or stream, even though the restored installation identity is stable.
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 \
   valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
-export OLP_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
-for attempt in {1..30}; do
+OLP_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
+export OLP_VALKEY_URL
+for _ in {1..30}; do
   if docker exec "$restore_valkey" valkey-cli -a olp-local ping 2>/dev/null | grep -qx PONG; then break; fi
   sleep 1
 done

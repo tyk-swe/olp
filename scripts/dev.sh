@@ -3,8 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml up -d --wait
 make setup
-mkdir -p .local/bin
-CGO_ENABLED=1 go build -ldflags "-X github.com/tyk-swe/olp/internal/process.Version=$(node -p 'require("./package.json").version')" -o .local/bin/olp ./cmd/olp
+make build-go
 export OLP_DATABASE_URL="postgres://olp:olp-local@127.0.0.1:${OLP_POSTGRES_PORT:-54321}/olp?sslmode=disable"
 export OLP_VALKEY_URL="redis://:olp-local@127.0.0.1:${OLP_VALKEY_PORT:-63791}/0"
 export OLP_LISTEN_ADDR=127.0.0.1:8082

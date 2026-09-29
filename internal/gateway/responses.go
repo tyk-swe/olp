@@ -494,10 +494,6 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func responsesRouteEligible(p *runtime.Provider, model string) bool {
-	return stateQualified(p, model, "generation", "unary")
-}
-
 var errResponseMapping = errors.New("stored response mapping failed")
 
 func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact *AttemptFact, frame []byte) ([]byte, error) {

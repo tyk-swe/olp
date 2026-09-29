@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
   import { overviewKeys } from '$lib/features/overview/overviewKeys';
 
   import { goto } from '$app/navigation';
@@ -26,6 +26,7 @@
     budgetStateLabel
   } from '$lib/features/access/api-keys/budgetPresentation';
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
+  import { isApiKeyExpired, isApiKeyUsable } from './apiKeyLifecycle';
 
   let {
     listState = $bindable(),
@@ -61,7 +62,7 @@
     }
   });
   const keys = createQuery(() => ({
-    queryKey: apiKeyQueries.page(cursor, createdBy),
+    queryKey: apiKeyKeys.page(cursor, createdBy),
     queryFn: ({ signal }) => listApiKeyPage(cursor, signal, createdBy)
   }));
 
@@ -103,7 +104,7 @@
     mutationError = '';
     try {
       onSecret(await rotateApiKey(key), key.allowed_routes[0]);
-      await queryClient.invalidateQueries({ queryKey: apiKeyQueries.root });
+      await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {
@@ -117,7 +118,7 @@
     mutationError = '';
     try {
       await revokeApiKey(key);
-      await queryClient.invalidateQueries({ queryKey: apiKeyQueries.root });
+      await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
       await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
       mutationError = errorMessage(error);
@@ -240,6 +241,8 @@
       <tbody>
         {#each keys.data?.items ?? [] as key (key.id)}
           {@const budget = budgetState(key.budget)}
+          {@const expired = isApiKeyExpired(key)}
+          {@const usable = isApiKeyUsable(key)}
           <tr>
             <td
               ><strong>{key.name}</strong><br /><code>{key.lookup_id}</code><br
@@ -248,15 +251,12 @@
             <td
               ><span
                 class:danger={Boolean(key.revoked_at)}
-                class:warning={Boolean(
-                  key.expires_at && new Date(key.expires_at) < new Date()
-                )}
-                class:success={!key.revoked_at &&
-                  (!key.expires_at || new Date(key.expires_at) >= new Date())}
+                class:warning={expired}
+                class:success={usable}
                 class="badge"
                 >{key.revoked_at
                   ? 'revoked'
-                  : key.expires_at && new Date(key.expires_at) < new Date()
+                  : expired
                     ? 'expired'
                     : 'active'}</span
               ><br /><small
@@ -331,12 +331,8 @@
                   type="button"
                   onclick={() => onEdit(key)}
                   disabled={Boolean(busy)}
-                  >{canManage &&
-                  !key.revoked_at &&
-                  (!key.expires_at || new Date(key.expires_at) >= new Date())
-                    ? 'Edit'
-                    : 'View'}</button
-                >{#if canManage && !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
+                  >{canManage && usable ? 'Edit' : 'View'}</button
+                >{#if canManage && !key.revoked_at}{#if usable}<button
                       class="button button-secondary"
                       type="button"
                       onclick={() => rotate(key)}

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -74,20 +73,6 @@ func TestRoutingOverrideIsExactlyOneObject(t *testing.T) {
 		r.Header.Set(routingHeader, raw)
 		if got, err := attemptBudget(r, route); err != nil || got != want {
 			t.Errorf("%s: %d, %v", raw, got, err)
-		}
-	}
-}
-
-func TestRetryAfterCannotOverflow(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, value := range []string{"9223372036854775807", "18446744073709551616"} {
-		if got := retryAfter(value, now); got <= time.Minute {
-			t.Errorf("%s overflowed: %v", value, got)
-		}
-	}
-	for value, want := range map[string]time.Duration{"2": 2 * time.Second, "120": 2 * time.Minute, "-1": 0, "nonsense": 0, "18446744073709551616junk": 0, now.Add(5 * time.Second).Format(http.TimeFormat): 5 * time.Second} {
-		if got := retryAfter(value, now); got != want {
-			t.Errorf("%s: %v, want %v", value, got, want)
 		}
 	}
 }

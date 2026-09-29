@@ -6,7 +6,7 @@
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
   import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
   import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
   import {
@@ -44,7 +44,7 @@
     queryFn: ({ signal }) => listNotificationDeliveries(undefined, signal)
   }));
   const apiKeys = createQuery(() => ({
-    queryKey: apiKeyQueries.list(),
+    queryKey: apiKeyKeys.list(),
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
   const groups = createQuery(() => ({

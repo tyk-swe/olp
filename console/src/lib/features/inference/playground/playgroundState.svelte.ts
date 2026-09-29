@@ -4,7 +4,7 @@ import { routeKeys } from '$lib/features/routes/routeKeys';
 import { listRoutes, simulateRouting } from '$lib/features/routes/api';
 import { hasOutputRules } from '$lib/features/routes/routeEditor';
 import { listApiKeys } from '$lib/features/access/api-keys/api';
-import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
 import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
 import { abortError, errorMessage } from '$lib/api/http';
 import {
@@ -66,7 +66,7 @@ export class PlaygroundState {
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   apiKeys = createQuery(() => ({
-    queryKey: apiKeyQueries.list(),
+    queryKey: apiKeyKeys.list(),
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
   mutation = createMutation(() => ({ mutationFn: runPlayground }));

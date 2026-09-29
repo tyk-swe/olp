@@ -100,11 +100,6 @@ func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
 	return p.Connector().SupportsRetainedResponses()
 }
 
-func officialOpenAIEndpoint(endpoint string) bool {
-	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
-	return endpoint == "" || endpoint == "https://api.openai.com/v1"
-}
-
 func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
 	return cfg.ResourceURL(model, path, query)
 }
@@ -272,7 +267,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
-		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
+		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
 	}
 	return nil, finish(f.class, f)
 }
@@ -919,7 +914,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
 	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
-		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
+		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
 	}
 	return nil, finish(f.class, f)
 }

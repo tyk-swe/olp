@@ -11,7 +11,6 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -656,7 +655,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
 		class := st.rejected(resp.StatusCode, f.upstream)
 		if class == classRateLimit {
-			f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
+			f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
 		}
 		return fail(class, f)
 	}
@@ -935,27 +934,6 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.read += int64(n)
 	return n, err
-}
-
-// retryAfter parses a Retry-After header as seconds or an HTTP date.
-func retryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
-		for _, c := range value {
-			if c < '0' || c > '9' {
-				return 0
-			}
-		}
-		const maxSeconds = uint64((1<<63 - 1) / time.Second)
-		return time.Duration(min(seconds, maxSeconds)) * time.Second
-	}
-	if at, err := http.ParseTime(value); err == nil {
-		return max(at.Sub(now), 0)
-	}
-	return 0
 }
 
 // finish emits the terminal envelope exactly once.

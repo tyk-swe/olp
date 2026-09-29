@@ -2,7 +2,7 @@
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
   import { overviewKeys } from '$lib/features/overview/overviewKeys';
 
   import { goto } from '$app/navigation';
@@ -24,6 +24,7 @@
   import ApiKeySecretDialog from '$lib/features/access/api-keys/ApiKeySecretDialog.svelte';
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
   import type { ApiKeyPolicyInput } from '$lib/features/access/api-keys/apiKeyPolicy';
+  import { isApiKeyUsable } from './apiKeyLifecycle';
 
   let {
     isNew = false,
@@ -47,10 +48,7 @@
   let preferredRoute = $state<string | undefined>();
   const isForm = $derived(isNew || editing !== null);
   const canChangeForm = $derived(
-    canManage &&
-      (!editing ||
-        (!editing.revoked_at &&
-          (!editing.expires_at || new Date(editing.expires_at) >= new Date())))
+    canManage && (!editing || isApiKeyUsable(editing))
   );
 
   onDestroy(() => {
@@ -88,7 +86,7 @@
         preferredRoute = route;
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: apiKeyQueries.root }),
+        queryClient.invalidateQueries({ queryKey: apiKeyKeys.root }),
         queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
       return true;

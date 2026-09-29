@@ -233,7 +233,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(bedrockErrorBody(raw)), dispatched: true}
 	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
 	if f.class == classRateLimit {
-		f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
+		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
 	}
 	return nil, finish(f.class, f)
 }

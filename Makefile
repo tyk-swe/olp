@@ -8,8 +8,10 @@ GO_TEST_PACKAGES ?= ./...
 GO_TEST_ARGS ?=
 GO_TEST_TIMEOUT ?= 5m
 CONSOLE_TEST_ARGS ?=
+GO_BUILD_OUTPUT ?= .local/bin/olp
+GO_BUILD_TAGS ?=
 
-.PHONY: help setup dev check test test-go test-console test-scripts test-race integration api build fmt
+.PHONY: help setup dev check test test-go test-console test-scripts test-race integration api build build-go fmt
 
 help: ## Show development commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -50,9 +52,12 @@ integration: ## Run isolated service, race, process, SDK, and browser checks
 	./scripts/integration.sh
 
 build: api ## Build the native Go binary and static console
-	mkdir -p .local/bin
-	CGO_ENABLED=1 go build -mod=readonly -trimpath -ldflags='$(LDFLAGS)' -o .local/bin/olp ./cmd/olp
+	$(MAKE) build-go
 	pnpm --dir console build
+
+build-go: ## Build the native Go binary from generated contracts
+	mkdir -p -- "$$(dirname -- "$(GO_BUILD_OUTPUT)")"
+	CGO_ENABLED=1 go build -mod=readonly -trimpath $(if $(strip $(GO_BUILD_TAGS)),-tags="$(GO_BUILD_TAGS)") -ldflags='$(LDFLAGS)' -o "$(GO_BUILD_OUTPUT)" ./cmd/olp
 
 fmt: ## Format Go and console source
 	gofmt -w cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture

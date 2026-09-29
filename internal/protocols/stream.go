@@ -96,9 +96,6 @@ func streamError(err error) error {
 
 type contentBlock struct{ kind, args string }
 
-func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamAnthropicEvents(r, limit, route, emit, nil)
-}
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	started, finished, done := false, false, false
@@ -283,9 +280,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 	}
 	return c, nil
 }
-func streamGemini(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
-	return streamGeminiEvents(r, limit, route, emit, nil)
-}
+
 func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	finished := map[int64]bool{}

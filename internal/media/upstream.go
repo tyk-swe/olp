@@ -214,7 +214,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
 		failure.Class, failure.Ambiguous = outcome.Class, call.Ambiguous && outcome.Acceptance.Unresolved()
 		if failure.Class == ClassRateLimit {
-			failure.RetryAfter = retryAfterHeader(resp.Header.Get("Retry-After"), t.now())
+			failure.RetryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), t.now())
 		}
 		return nil, failure
 	}
@@ -545,24 +545,4 @@ func interrupted(ctx context.Context, err error) error {
 		return context.DeadlineExceeded
 	}
 	return nil
-}
-
-func retryAfterHeader(header string, now time.Time) time.Duration {
-	value := strings.TrimSpace(header)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
-		for _, c := range value {
-			if c < '0' || c > '9' {
-				return 0
-			}
-		}
-		const maxSeconds = uint64((1<<63 - 1) / time.Second)
-		return time.Duration(min(seconds, maxSeconds)) * time.Second
-	}
-	if at, err := http.ParseTime(value); err == nil {
-		return max(at.Sub(now), 0)
-	}
-	return 0
 }
