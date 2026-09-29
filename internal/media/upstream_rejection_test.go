@@ -9,6 +9,27 @@ import (
 	"time"
 )
 
+func TestTransportSaturatesHugeRetryAfter(t *testing.T) {
+	transport, server := testTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "18446744073709551616")
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"error":{"message":"slow down"}}`)
+	}))
+	call := &UpstreamCall{Method: "POST", Path: "images/generations", JSON: []byte(`{}`), Kind: ResponseImages, Ambiguous: true}
+	_, failure := transport.Do(context.Background(), testTarget(server.URL+"/v1"), call, nil)
+	if failure == nil || failure.Class != ClassRateLimit || failure.Status != http.StatusTooManyRequests {
+		t.Fatalf("rate limit rejection: %+v", failure)
+	}
+	if !failure.Dispatched || failure.Ambiguous {
+		t.Fatalf("rate-limit dispatch state: %+v", failure)
+	}
+	saturated := time.Duration(uint64((1<<63-1)/time.Second)) * time.Second
+	if failure.RetryAfter != saturated {
+		t.Fatalf("Retry-After: %v, want saturated %v", failure.RetryAfter, saturated)
+	}
+}
+
 func TestMultipartEarlyRejectionPreservesProviderStatus(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {

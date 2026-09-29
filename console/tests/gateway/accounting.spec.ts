@@ -583,3 +583,72 @@ test('retained media records expose metadata, filters, and accessible details', 
     'retained-video-failure'
   );
 });
+
+test('usage time filters keep impossible dates visible and send exact bounds', async ({
+  page
+}) => {
+  await signIn(page);
+  const usageRequests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/v1/usage/'))
+      usageRequests.push(request.url());
+  });
+
+  await page.goto(
+    '/usage?start=2026-02-30T12%3A00%3A00Z&end=2026-03-10T12%3A00%3A00Z'
+  );
+  await expect(page.getByRole('alert')).toContainText(
+    'Enter valid start and end times.'
+  );
+  await expect(
+    page.getByRole('button', { name: 'Refresh', exact: true })
+  ).toBeDisabled();
+  expect(new URL(page.url()).searchParams.get('start')).toBe(
+    '2026-02-30T12:00:00Z'
+  );
+  expect(usageRequests).toEqual([]);
+
+  const correctedStart = await page.getByLabel('From').inputValue();
+  const correctedUtc = await page.evaluate(
+    (value) => new Date(value).toISOString(),
+    correctedStart
+  );
+  await page
+    .getByRole('textbox', { name: 'Route', exact: true })
+    .fill('unmatched-usage-route');
+  const appliedSummary = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/v1/usage/summary'
+  );
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  const appliedResponse = await appliedSummary;
+  expect(appliedResponse.ok()).toBe(true);
+  const appliedUrl = new URL(appliedResponse.url());
+  expect(appliedUrl.searchParams.get('start')).toBe(correctedUtc);
+  expect(appliedUrl.searchParams.get('route')).toBe('unmatched-usage-route');
+  const appliedPage = new URL(page.url());
+  expect(appliedPage.searchParams.get('start')).toBe(correctedUtc);
+  expect(appliedPage.searchParams.get('route')).toBe('unmatched-usage-route');
+  expect(decodeURIComponent(page.url())).not.toContain('2026-02-30');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Refresh', exact: true })
+  ).toBeEnabled();
+
+  const start = '2026-03-01T12:00:00.000000001Z';
+  const end = '2026-03-01T12:00:00.000000002Z';
+  const summaryResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/v1/usage/summary'
+  );
+  await page.goto(
+    `/usage?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+  );
+  const summary = await summaryResponse;
+  expect(summary.ok()).toBe(true);
+  const summaryUrl = new URL(summary.url());
+  expect(summaryUrl.searchParams.get('start')).toBe(start);
+  expect(summaryUrl.searchParams.get('end')).toBe(end);
+  const applied = new URL(page.url());
+  expect(applied.searchParams.get('start')).toBe(start);
+  expect(applied.searchParams.get('end')).toBe(end);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});

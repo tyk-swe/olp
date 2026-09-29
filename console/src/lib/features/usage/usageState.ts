@@ -1,7 +1,7 @@
 import { instant } from '$lib/api/query';
 import type { UsageFilters } from '$lib/features/usage/api/usage';
 import { dateTimeLocalValue } from '$lib/format';
-import { UUID } from '$lib/lists/filters';
+import { timeOrder, timeValid, UUID } from '$lib/lists/filters';
 
 const dimensions = [
   'route',
@@ -41,8 +41,13 @@ export function defaultUsageState(now = new Date()): UsageState {
   };
 }
 
-function urlInstant(value: string): string | undefined {
-  return /T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? instant(value) : undefined;
+function usageInstant(value: string, fromUrl: boolean): string | undefined {
+  if (!timeValid(value, fromUrl)) return undefined;
+  const normalized = instant(value);
+  if (normalized === undefined) return undefined;
+  const fraction = /\.(\d{4,9})(?:Z|[+-]\d{2}:\d{2})?$/i.exec(value)?.[1];
+  if (fraction === undefined) return normalized;
+  return `${normalized.slice(0, 19)}.${fraction}Z`;
 }
 
 export function usageProblem(state: UsageState): string | null {
@@ -54,9 +59,9 @@ export function usageProblem(state: UsageState): string | null {
     attribution_key,
     attribution_value
   } = state.filters;
-  if (!urlInstant(start) || !urlInstant(end))
+  if (!timeValid(start, true) || !timeValid(end, true))
     return 'Enter valid start and end times.';
-  if (new Date(start) >= new Date(end)) return 'End must be after start.';
+  if (timeOrder(start) >= timeOrder(end)) return 'End must be after start.';
   if (provider_id && !UUID.test(provider_id))
     return 'Provider ID must be a UUID.';
   if (api_key_id && !UUID.test(api_key_id)) return 'API key ID must be a UUID.';
@@ -74,8 +79,8 @@ export function readUsageState(
   const start = search.get('start')?.trim() || defaults.filters.start;
   const end = search.get('end')?.trim() || defaults.filters.end;
   const filters: UsageFilters = {
-    start: urlInstant(start) ?? start,
-    end: urlInstant(end) ?? end
+    start: usageInstant(start, true) ?? start,
+    end: usageInstant(end, true) ?? end
   };
   for (const field of resources) {
     const value = search.get(field)?.trim();
@@ -127,9 +132,10 @@ export function applyUsageDraft(
   const state = readUsageState(new URLSearchParams(draft), applied);
   for (const field of ['start', 'end'] as const) {
     state.filters[field] =
+      timeValid(applied.filters[field], true) &&
       draft[field] === dateTimeLocalValue(applied.filters[field])
         ? applied.filters[field]
-        : (instant(draft[field]) ?? draft[field]);
+        : (usageInstant(draft[field], false) ?? draft[field]);
   }
   return state;
 }
