@@ -112,11 +112,7 @@ func TestOwnerPermitsAnUnconfinedPluginThatSignsRequests(t *testing.T) {
 	if certified < 3 || upstream.refused.Load() != 0 {
 		t.Fatalf("control sent %d signed requests, and %d the upstream refused", certified, upstream.refused.Load())
 	}
-	draft := fidelityDraft("reference-unconfined", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Reference unconfined", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-unconfined"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-unconfined", created["id"])), "Reference unconfined")
 	h.refresh()
 	chat := map[string]any{"model": "reference-unconfined", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	if status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, chat); status != 200 || !strings.Contains(fmt.Sprint(reply), "Hello from the signed upstream") {

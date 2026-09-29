@@ -6,6 +6,7 @@ export const providerKeys = {
     ['providers', 'summary', 'page', cursor ?? 'first'] as const,
   detail: (id: string) => ['providers', 'detail', id] as const,
   kinds: () => ['providers', 'kinds'] as const,
+  profiles: () => ['provider-profiles'] as const,
   capabilityOptions: (kind: string) =>
     ['providers', 'capability-options', kind] as const,
   credentials: (id: string) => ['providers', 'credentials', id] as const,

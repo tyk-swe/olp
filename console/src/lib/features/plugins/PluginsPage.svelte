@@ -11,10 +11,12 @@
     installPlugin,
     listPlugins,
     pluginProblem,
+    pluginTitle,
     shortDigest,
     uninstallPlugin,
     type Plugin
   } from '$lib/features/plugins/api';
+  import { providerKeys } from '$lib/features/providers/providerKeys';
 
   const access = useRole();
   const canManage = $derived(access.can('plugins.manage'));
@@ -32,10 +34,6 @@
   // The digest whose declared origins the owner is reviewing for approval.
   let reviewing = $state('');
 
-  function title(plugin: Plugin) {
-    return `${plugin.manifest.name} ${plugin.manifest.version}`;
-  }
-
   function status(plugin: Plugin) {
     if (plugin.executable) return 'Permitted';
     return plugin.approved_at ? 'Approved' : 'Pending approval';
@@ -44,7 +42,7 @@
   async function refreshPlugins() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: pluginKeys.root }),
-      queryClient.invalidateQueries({ queryKey: ['provider-profiles'] })
+      queryClient.invalidateQueries({ queryKey: providerKeys.profiles() })
     ]);
   }
 
@@ -59,7 +57,7 @@
     } catch (cause) {
       error = isEtagMismatch(cause)
         ? 'This plugin changed meanwhile. Review it as it is now, then try again.'
-        : (pluginProblem(cause) ?? errorMessage(cause));
+        : pluginProblem(cause);
     } finally {
       await refreshPlugins();
       busy = '';
@@ -79,8 +77,8 @@
       form.reset();
       module = null;
       notice = created
-        ? `Installed ${title(plugin)}. Review its origins and approve it before it can be used.`
-        : `${title(plugin)} is already installed; nothing changed.`;
+        ? `Installed ${pluginTitle(plugin)}. Review its origins and approve it before it can be used.`
+        : `${pluginTitle(plugin)} is already installed; nothing changed.`;
     });
   }
 
@@ -88,7 +86,7 @@
     await run(`approve-${plugin.digest}`, async () => {
       await approvePlugin(plugin);
       reviewing = '';
-      notice = `Approved ${title(plugin)}. It may now reach its declared origins.`;
+      notice = `Approved ${pluginTitle(plugin)}. It may now reach its declared origins.`;
     });
   }
 
@@ -96,11 +94,11 @@
     const consequence = plugin.executable
       ? 'and withdraw its permission? Its executable stays in the image.'
       : 'and delete its module?';
-    if (!confirm(`Uninstall ${title(plugin)} ${consequence}`)) return;
+    if (!confirm(`Uninstall ${pluginTitle(plugin)} ${consequence}`)) return;
     await run(`uninstall-${plugin.digest}`, async () => {
       await uninstallPlugin(plugin);
       if (reviewing === plugin.digest) reviewing = '';
-      notice = `Uninstalled ${title(plugin)}.`;
+      notice = `Uninstalled ${pluginTitle(plugin)}.`;
     });
   }
 </script>
@@ -182,7 +180,7 @@
       <article class="card plugin" aria-labelledby={headingId}>
         <header>
           <div>
-            <h2 id={headingId}>{title(plugin)}</h2>
+            <h2 id={headingId}>{pluginTitle(plugin)}</h2>
             {#if plugin.manifest.description}<p>
                 {plugin.manifest.description}
               </p>{/if}
@@ -292,7 +290,7 @@
             <section class="approval" aria-labelledby={`${headingId}-approval`}>
               <h3 id={`${headingId}-approval`}>Approve these origins?</h3>
               <p>
-                Once approved, {title(plugin)} may reach exactly
+                Once approved, {pluginTitle(plugin)} may reach exactly
                 {plugin.manifest.origins.length === 1
                   ? 'this origin'
                   : `these ${plugin.manifest.origins.length} origins`}. Its

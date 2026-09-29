@@ -10,6 +10,7 @@
     pluginProfileGroups,
     type ProviderProfilePlugin
   } from './profiles';
+  import { providerKeys } from './providerKeys';
   import {
     selectPluginProfile,
     type ProviderEditValues
@@ -31,20 +32,14 @@
   } = $props();
 
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   const groups = $derived(pluginProfileGroups(profiles.data ?? []));
   const pinned = $derived(
     values.profileId ? `${values.profileId}@${values.profileRevision}` : ''
   );
-  const selected = $derived(
-    profiles.data?.find(
-      (profile) =>
-        profile.kind === 'plugin' &&
-        `${profile.id}@${profile.revision}` === pinned
-    )
-  );
+  const selected = $derived(pluginProfile(pinned));
 
   const options = $derived(pluginOptionFields(selected));
 
@@ -55,6 +50,14 @@
         (issue) =>
           issue.field === `configuration.options.plugin_options.${name}`
       )?.message ?? ''
+    );
+  }
+
+  /** The catalogue's plugin profile pinned as `id@revision`. */
+  function pluginProfile(pin: string) {
+    return profiles.data?.find(
+      (profile) =>
+        profile.kind === 'plugin' && `${profile.id}@${profile.revision}` === pin
     );
   }
 
@@ -70,14 +73,7 @@
   }
 
   function choose(value: string) {
-    selectPluginProfile(
-      values,
-      profiles.data?.find(
-        (profile) =>
-          profile.kind === 'plugin' &&
-          `${profile.id}@${profile.revision}` === value
-      )
-    );
+    selectPluginProfile(values, pluginProfile(value));
     onChange?.();
   }
 </script>

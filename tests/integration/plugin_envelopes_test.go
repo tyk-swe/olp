@@ -117,7 +117,7 @@ func TestPluginProfileWithAnEnvelopeServesTransformedRoutes(t *testing.T) {
 	if envelope := declared["envelope"].(map[string]any); envelope["request"] != "request" || envelope["response"] != "response" || len(declared["rewrites"].([]any)) != 3 {
 		t.Fatalf("the owner reviews %v", declared)
 	}
-	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
+	approvePlugin(t, h, owner, installed)
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
 		if p := profile.(map[string]any); p["id"] == "reference-gemini" && p["strict"] != false || p["id"] == "reference-chat" && p["strict"] != true {
 			t.Fatalf("catalogued %v", p)
@@ -130,18 +130,14 @@ func TestPluginProfileWithAnEnvelopeServesTransformedRoutes(t *testing.T) {
 	// Certification probes unary and streaming chat through the envelope.
 	certifyPluginProvider(t, h, owner, "/api/v1/providers/"+created["id"].(string))
 
-	draft := fidelityDraft("enveloped-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	strict := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	strict := h.want(owner, "POST", "/api/v1/route-drafts", strictDraft(fidelityDraft("enveloped-strict", created["id"])), idem(uuid.NewString()), 201)
 	for _, action := range []string{"validate", "activate"} {
 		problem := h.want(owner, "POST", "/api/v1/route-drafts/"+strict["id"].(string)+"/"+action, nil, withMatch(strict, idem(uuid.NewString())), 422)
 		if problemCode(t, problem) != "target_capability" || !strings.Contains(problem["detail"].(string), "Declare the route transformed to use this profile") {
 			t.Fatalf("strict %s of an enveloped profile: %v", action, problem)
 		}
 	}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", transformed(fidelityDraft("enveloped", created["id"])), idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Enveloped", "scopes": []string{"inference"}, "allowed_routes": []string{"enveloped"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, transformed(fidelityDraft("enveloped", created["id"])), "Enveloped")
 	h.refresh()
 
 	before := len(upstream.received())

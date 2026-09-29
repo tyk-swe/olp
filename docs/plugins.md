@@ -75,9 +75,9 @@ never widens; a new digest of the same plugin needs its own approval.
 
 The profiles of approved plugins appear in `GET /api/v1/provider-profiles` under
 the `plugin` provider kind. A plugin profile's `revision` is the digest of the
-plugin module that supplies it, and its `plugin` names that plugin and version.
-In the console's provider wizard, choose **Provider plugin**, then the profile
-and plugin build.
+plugin module, or of an unconfined plugin's executable, that supplies it, and
+its `plugin` names that plugin and version. In the console's provider wizard,
+choose **Provider plugin**, then the profile and plugin build.
 
 A provider of the `plugin` kind pins the digest as its profile revision and
 authenticates as its profile declares: with a static credential, or with a
@@ -211,10 +211,11 @@ carry them. They are not secret.
 ### Signing hooks
 
 A profile may declare a signing hook for an upstream whose keys must become
-signatures or timestamped tokens. The hook is the only plugin code that runs
-per request: once per upstream request, never per stream event, after hosting
-has placed the request and its body is final. It receives the finished request,
-the static credential or the grant's access token and the provider's
+signatures or timestamped tokens. Unless an unconfined plugin
+[carries the traffic](#carrying-traffic), the hook is the only plugin code that
+runs per request: once per upstream request, never per stream event, after
+hosting has placed the request and its body is final. It receives the finished
+request, the static credential or the grant's access token and the provider's
 [options](#options), and returns headers to add, which OLP redacts like the
 credential. Gateways run it for traffic, and control for probes and
 certification. A signing profile need not place the credential at all.
@@ -348,13 +349,14 @@ cannot shorten that deadline.
 
 A grant that no configuration uses any more, such as a credential version that
 re-enrolling its slot replaced, or one enrolled for a draft that moved to
-another plugin build, is retired when it next comes due instead of refreshed:
-OLP discards its refresh token and the grant lapses, so a restored revision
-that selects the version again serves it only after a new grant enrollment.
-Nothing served the grant, so no notification is sent; audit records
-`provider.grant.retire` with the credential version as resource and the worker
-as actor. Revoking a credential version ends its grant at once: OLP deletes
-the refresh token, and nothing refreshes the grant again.
+another plugin build, is retired instead of refreshed on a worker's next pass,
+whether or not a refresh is due, unless one is in flight: OLP discards its
+refresh token and the grant lapses, so a restored revision that selects the
+version again serves it only after a new grant enrollment. Nothing served the
+grant, so no notification is sent; audit records `provider.grant.retire` with
+the credential version as resource and the worker as actor. Revoking a
+credential version ends its grant at once: OLP deletes the refresh token, and
+nothing refreshes the grant again.
 
 A refresh advances the grant beneath the same credential version: the new
 access token replaces the old one, and the grant's generation advances. The

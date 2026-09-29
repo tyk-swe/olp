@@ -39,16 +39,16 @@ import (
 func grantRefresher(t *testing.T, h *accessHarness) *grants.Refresher {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	runtime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { runtime.Close(context.Background()) })
+	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	var unconfined *plugins.Unconfined
 	if h.UnconfinedDir != "" {
 		unconfined = plugins.NewUnconfined(h.UnconfinedDir, plugins.DefaultLimits, log)
 	}
-	host := plugins.NewHost(runtime, unconfined, h.Pool)
+	host := plugins.NewHost(pluginRuntime, unconfined, h.Pool)
 	t.Cleanup(func() { host.Close(context.Background()) })
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	return &grants.Refresher{Pool: h.Pool, Keys: h.Server.Keys, Installation: h.Server.Installation, Plugins: host, Egress: &policy, Log: log}
@@ -69,11 +69,7 @@ func servingGrant(t *testing.T, h *accessHarness, owner *browser, path string) (
 	t.Helper()
 	credentialID := enrollGrant(t, h, owner, path)
 	certifyPluginProvider(t, h, owner, path)
-	draft := fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Account", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-account"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-account", strings.TrimPrefix(path, "/api/v1/providers/"))), "Account")
 	h.refresh()
 	return credentialID, key
 }
@@ -133,7 +129,7 @@ func TestWorkersRefreshGrantsAheadOfExpiryAndGatewaysServeTheNewAccessToken(t *t
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	enrolled := authority.Issued()
 
@@ -198,7 +194,7 @@ func TestPinnedReleaseServesCurrentGrantAfterCredentialReplacement(t *testing.T)
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	credentialID, _ := servingGrant(t, h, owner, path)
 	pinned := h.Runtime.Release()
@@ -509,7 +505,7 @@ func TestARefreshedGrantServesAtItsBaseURL(t *testing.T) {
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	authority.SignInAs(testutil.OAuthIdentity{Subject: "operator@reference.example", Account: "acct-eu", APIBase: upstream.URL + "/regions/eu/v1"})
 	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 
@@ -540,7 +536,7 @@ func TestRacingWorkersSpendEachRefreshTokenOnce(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	second := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Second reference account", "model": vendorModel, "configuration": map[string]any{
 		"kind": "plugin", "auth_mode": "grant", "profile_id": "reference-grant-chat", "profile_revision": digest,
 	}}, idem(uuid.NewString()), 201)
@@ -582,7 +578,7 @@ func TestAnUpstreamCredentialFailureRefreshesTheGrantEarly(t *testing.T) {
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	if status := chat(t, h, key); status != 200 {
 		t.Fatalf("serving the grant: %d", status)
@@ -635,7 +631,7 @@ func TestAnAmbiguousStreamCredentialFailureRefreshesAGrantWithoutExpiry(t *testi
 		healthy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(upstream.Server.Close)
-	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, upstream, "0.1.0")
 	credentialID, key := servingGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	if grant := readGrant(t, h, credentialID); grant.expires != nil || grant.refresh != nil {
 		t.Fatalf("the grant already has an expiry or scheduled refresh: %+v", grant)
@@ -789,7 +785,7 @@ func TestGrantRefreshTakesTheProviderNetworkPathAndRetriesWithBackoff(t *testing
 		io.Copy(client, target)
 	}))
 	t.Cleanup(proxy.Close)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, map[string]any{"network": map[string]any{"proxy_url": proxy.URL}}))
 	refresher := grantRefresher(t, h)
 
@@ -826,7 +822,7 @@ func TestPermanentRefreshFailureLapsesTheGrant(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	refresher := grantRefresher(t, h)
 
@@ -857,7 +853,7 @@ func TestRevokingACredentialVersionEndsItsGrant(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	credentialID := enrollGrant(t, h, owner, path)
 
@@ -886,7 +882,7 @@ func TestARefreshIsKeptWhenItsPassIsInterrupted(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	credentialID := enrollGrant(t, h, owner, grantProvider(t, h, owner, digest, nil))
 	refresher := grantRefresher(t, h)
 

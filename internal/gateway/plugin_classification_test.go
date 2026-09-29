@@ -7,10 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -20,29 +16,7 @@ import (
 // classification.
 func (h *harness) declarePlugin(classification ...abi.FailureRule) {
 	h.t.Helper()
-	manifest := abi.Manifest{Name: "acme", Version: "1.0.0", Profiles: []abi.Profile{{
-		ID: "acme-chat", Label: "Acme Chat", Dialect: "openai-chat",
-		Hosting: abi.Hosting{Address: h.upstream.URL + "/a/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}, Classification: classification},
-	}}}
-	digest := strings.Repeat("cd", 32)
-	plugin, err := connectors.NewPluginProfile(digest, manifest, "acme-chat")
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	secrets := map[string][]byte{}
-	for id, provider := range h.rt.release.Snapshot.Providers {
-		for _, slot := range provider.Slots {
-			secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
-		}
-		if provider.Slots[0].ID == h.slotA {
-			provider.Kind, provider.AuthMode, provider.Plugin = connectors.KindPlugin, connectors.AuthStaticCredential, plugin
-			provider.ProfileID, provider.ProfileRevision, provider.Endpoint = "acme-chat", digest, plugin.Address(nil)
-			h.rt.release.Snapshot.Providers[id] = provider
-		}
-	}
-	if h.rt.release, err = runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets); err != nil {
-		h.t.Fatal(err)
-	}
+	h.servePluginProfile(abi.Hosting{Address: h.upstream.URL + "/a/v1", Headers: map[string]string{"Authorization": "Bearer {credential}"}, Classification: classification})
 }
 
 // A 400 carrying the quota code a plugin profile declares rate limited cools

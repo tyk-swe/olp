@@ -8,7 +8,6 @@ import (
 	"errors"
 	"maps"
 	"net/textproto"
-	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -47,7 +46,7 @@ type Options struct {
 
 // Configuration is the stored connection configuration; it is the contract's
 // ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
-// as the profile revision; pin resolves that plugin profile.
+// as the profile revision; Pin resolves that plugin profile.
 type Configuration struct {
 	ProviderID      string   `json:"-"`
 	ProfileID       string   `json:"profile_id,omitempty"`
@@ -108,7 +107,7 @@ func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *p
 	if c.Kind != KindPlugin {
 		return nil
 	}
-	if c.ProfileID == "" || !pluginDigest.MatchString(c.ProfileRevision) {
+	if c.ProfileID == "" || !plugins.ValidDigest(c.ProfileRevision) {
 		return access.Invalid("configuration.profile_revision", "Choose a plugin profile: its ID, and the plugin's digest as the profile revision.")
 	}
 	plugin, err := plugins.Profile(ctx, q, unconfined, c.ProfileRevision, c.ProfileID)
@@ -149,8 +148,6 @@ func (c *Configuration) pinned(installed []byte) error {
 // pluginColumn selects the plugin that the provider p pins, as a
 // connectors.InstalledPlugin, or NULL.
 const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
-
-var pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // VendorMissing reports whether the configuration omits its vendor id.
 func (c *Configuration) VendorMissing() bool {

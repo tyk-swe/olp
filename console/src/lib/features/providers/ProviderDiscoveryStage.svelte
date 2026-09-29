@@ -6,6 +6,7 @@
     listProviderProfiles
   } from '$lib/features/providers/profiles';
   import { probeSummary } from '$lib/features/providers/providerEditor';
+  import { providerKeys } from '$lib/features/providers/providerKeys';
 
   let {
     provider,
@@ -25,7 +26,7 @@
 
   const disabled = $derived(Boolean(busy));
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   // A plugin profile without model discovery has no upstream model list: the

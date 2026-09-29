@@ -22,7 +22,7 @@ import (
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
-// Secret is the value the log and panic behaviours leak.
+// secret is the value the log and panic behaviours leak.
 const secret = "sk-fixture-secret"
 
 var behaviour string
@@ -68,13 +68,13 @@ var calls atomic.Int64
 // Sign signs as the credential's prefix up to a colon says: "loop" never
 // returns, "allocate" exhausts memory, "exit" stops the plugin, "fail" reports
 // a failure holding the credential, "large-failure:N" logs N records and
-// reports oversized failure diagnostics, "log" logs the credential, "stderr" writes
-// the credential to standard error just after it answers, "wait" returns once
-// its call is cancelled, "header:Name" returns that header, "credential-header"
-// returns a reserved header containing the credential in its name,
-// and "option:name" returns X-Fixture-Option, the provider's profile and value
-// of that option. Anything else returns X-Fixture-Signature and
-// X-Fixture-Calls, this instance's count of signed requests.
+// reports oversized failure diagnostics, "log" logs the credential, "stderr"
+// writes the credential to standard error just after it answers, "wait"
+// returns once its call is cancelled, "credential-header" returns a reserved
+// header containing the credential in its name, and "option:name" returns
+// X-Fixture-Option, the provider's profile and value of that option. Anything
+// else returns X-Fixture-Signature and X-Fixture-Calls, this instance's count
+// of signed requests.
 func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResult, error) {
 	called := calls.Add(1)
 	behaviour, rest, _ := strings.Cut(r.Credential, ":")
@@ -107,8 +107,6 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 	case "wait":
 		<-ctx.Done()
 		return plugin.SignResult{}, &plugin.Error{Code: "fixture_cancelled", Message: "the call was cancelled"}
-	case "header":
-		return plugin.SignResult{Headers: map[string]string{rest: "fixture"}}, nil
 	case "credential-header":
 		return plugin.SignResult{Headers: map[string]string{"X-OLP-" + r.Credential: "fixture"}}, nil
 	case "option":

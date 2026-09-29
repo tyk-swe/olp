@@ -61,8 +61,8 @@ type Server struct {
 }
 
 // New prepares the provider surface with a bounded upstream client and at
-// most four concurrent probes, whose plugin profiles' signing hooks signer
-// runs.
+// most four concurrent probes. signer runs the signing hooks of plugin
+// profiles.
 func New(a *access.Server, policy *egress.Policy, signer connectors.Signer) *Server {
 	auth := connectors.NewAuth(policy)
 	auth.Signer = signer

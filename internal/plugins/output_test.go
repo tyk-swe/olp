@@ -17,6 +17,7 @@ type logLine struct {
 	Level   string            `json:"level"`
 	Message string            `json:"msg"`
 	Attrs   map[string]string `json:"plugin_attrs"`
+	Error   string            `json:"error"`
 }
 
 func logLines(t *testing.T, logged *bytes.Buffer) []logLine {
@@ -30,6 +31,23 @@ func logLines(t *testing.T, logged *bytes.Buffer) []logLine {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// budgetSpent adds up what the records in logged cost their call's budget and
+// counts the warnings that output was dropped.
+func budgetSpent(t *testing.T, logged *bytes.Buffer) (spent, warnings int) {
+	t.Helper()
+	for _, line := range logLines(t, logged) {
+		if line.Level == "WARN" {
+			warnings++
+			continue
+		}
+		spent += recordCost + len(line.Message)
+		for key, value := range line.Attrs {
+			spent += len(key) + len(value)
+		}
+	}
+	return spent, warnings
 }
 
 func TestOutputRedactsSecretsAsWrittenAndAsJSON(t *testing.T) {
@@ -148,14 +166,7 @@ func TestOutputBudgetHoldsForConcurrentRecords(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	spent, warnings := 0, 0
-	for _, line := range logLines(t, &logged) {
-		if line.Level == "WARN" {
-			warnings++
-			continue
-		}
-		spent += recordCost + len(line.Message)
-	}
+	spent, warnings := budgetSpent(t, &logged)
 	if spent > maxCallLog || warnings != 1 {
 		t.Fatalf("concurrent records spent %d bytes of a %d byte budget, with %d warnings", spent, maxCallLog, warnings)
 	}

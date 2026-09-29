@@ -263,8 +263,9 @@ type GrantAuthentication struct {
 
 // Hosting is a profile's hosting adaptation: where and how the dialect's
 // requests reach the upstream, how the upstream lists its models and how its
-// failures are classified. It is a declaration OLP runs itself, so no plugin
-// code runs per request.
+// failures are classified. It is a declaration OLP runs itself; the only
+// plugin code that runs per request is a signing hook or, in an unconfined
+// plugin that carries the traffic, its carrier.
 //
 // The address and the header and query parameter values are templates.
 // Placeholders stand for a provider's values: {credential} for its static

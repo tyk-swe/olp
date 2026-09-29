@@ -44,15 +44,8 @@ func unconfinedFixture(t *testing.T, limits Limits, log *slog.Logger) (*Unconfin
 // file in the unconfined tier u.
 func newUnconfinedHost(t *testing.T, u *Unconfined, file ExecutableFile) *Host {
 	t.Helper()
-	r, err := NewRuntime(t.Context(), Interpreted, DefaultLimits, u.log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := NewHost(r, u, &pluginTable{executable: file.Name})
-	t.Cleanup(func() {
-		host.Close(context.Background())
-		r.Close(context.Background())
-	})
+	host := NewHost(newTestRuntime(t, DefaultLimits, u.log), u, &pluginTable{executable: file.Name})
+	t.Cleanup(func() { host.Close(context.Background()) })
 	return host
 }
 
@@ -101,29 +94,19 @@ func digestOf(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func isCode(err error, code string) bool {
-	refusal, ok := errors.AsType[*Error](err)
-	return ok && refusal.Code == code
-}
-
 // An executable that doesn't speak the ABI over stdio, or speaks another
 // version of it, is refused when the owner reviews it.
 func TestUnconfinedTierRefusesExecutablesThatDontSpeakItsABI(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	for name, script := range map[string]string{
-		"otherabi": `echo '{"abi_version":2}'; cat >/dev/null`,
-		"silent":   `exit 0`,
-		"chatty":   `echo 'hello'; cat >/dev/null`,
+	u := NewUnconfined(t.TempDir(), DefaultLimits, slog.New(slog.DiscardHandler))
+	for name, tc := range map[string]struct{ body, code string }{
+		"otherabi": {`echo '{"abi_version":2}'; cat >/dev/null`, CodeABIUnsupported},
+		"silent":   {`exit 0`, CodeExecutableInvalid},
+		"chatty":   {`echo 'hello'; cat >/dev/null`, CodeExecutableInvalid},
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	u := NewUnconfined(dir, DefaultLimits, slog.New(slog.DiscardHandler))
-	for name, code := range map[string]string{"otherabi": CodeABIUnsupported, "silent": CodeExecutableInvalid, "chatty": CodeExecutableInvalid} {
-		if _, _, err := u.Inspect(t.Context(), name); !isCode(err, code) {
-			t.Errorf("%s: want %s, got %v", name, code, err)
+		script(t, u, name, tc.body)
+		if _, _, err := u.Inspect(t.Context(), name); !isCode(err, tc.code) {
+			t.Errorf("%s: want %s, got %v", name, tc.code, err)
 		}
 	}
 }
@@ -251,14 +234,9 @@ func TestUnconfinedPluginRunsOnlyAsPermitted(t *testing.T) {
 	if _, err := sign(t, host, strings.Repeat("0", 64), "sk-fixture"); !isCode(err, CodeExecutableChanged) {
 		t.Fatalf("a changed executable ran: %v", err)
 	}
-	r, err := NewRuntime(t.Context(), Interpreted, DefaultLimits, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close(context.Background())
-	disabled := NewHost(r, nil, &pluginTable{executable: file.Name})
+	disabled := NewHost(newTestRuntime(t, DefaultLimits, nil), nil, &pluginTable{executable: file.Name})
 	defer disabled.Close(context.Background())
-	if _, err = sign(t, disabled, file.Digest, "sk-fixture"); !isCode(err, CodeUnconfinedDisabled) {
+	if _, err := sign(t, disabled, file.Digest, "sk-fixture"); !isCode(err, CodeUnconfinedDisabled) {
 		t.Fatalf("an unconfined plugin ran without the tier: %v", err)
 	}
 }
@@ -485,17 +463,7 @@ func TestUnconfinedProcessLogsShareOneBudget(t *testing.T) {
 				}
 			}
 			wg.Wait()
-			spent, warnings := 0, 0
-			for _, line := range logLines(t, &logged) {
-				if line.Level == "WARN" {
-					warnings++
-					continue
-				}
-				spent += recordCost + len(line.Message)
-				for key, value := range line.Attrs {
-					spent += len(key) + len(value)
-				}
-			}
+			spent, warnings := budgetSpent(t, &logged)
 			if spent == 0 || spent > maxCallLog || warnings != 1 {
 				t.Fatalf("process logs spent %d bytes of a %d byte budget, with %d warnings", spent, maxCallLog, warnings)
 			}
@@ -514,8 +482,7 @@ func TestUnconfinedProcessLogRedactionTracksItsCalls(t *testing.T) {
 	write("before any call")
 	p.calls[1] = &pending{secrets: []string{"first-secret"}}
 	write("active first-secret")
-	p.end(p.calls[1])
-	delete(p.calls, 1)
+	p.forget(1)
 	p.calls[2] = &pending{secrets: []string{"second-secret"}}
 	callOutput(p.grants(0)).record(abi.LogRecord{Message: "ended first-secret; active second-secret"})
 	p.ended["first-secret"] = time.Now().Add(-time.Second)

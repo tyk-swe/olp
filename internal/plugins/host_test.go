@@ -82,16 +82,8 @@ func (s scanner) Scan(dest ...any) error { return s(dest...) }
 
 func newTestHost(t testing.TB, engine Engine, limits Limits, log *slog.Logger, module []byte) (*Host, *pluginTable) {
 	t.Helper()
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	r, err := NewRuntime(t.Context(), engine, limits, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { r.Close(context.Background()) })
 	table := &pluginTable{module: module}
-	return NewHost(r, nil, table), table
+	return NewHost(startRuntime(t, engine, limits, log), nil, table), table
 }
 
 const fixtureDigest = "fixture"
@@ -203,12 +195,9 @@ func TestSigningFailuresLeaveNothingBehind(t *testing.T) {
 		limits           Limits
 		fresh            bool
 	}{
-		// Time enough to instantiate the module afresh under the race
-		// detector; generous time elsewhere, so the memory limit is what
-		// stops the call.
-		"time":     {"loop", CodeTimedOut, Limits{Memory: 32 << 20, Time: 5 * time.Second, Stack: DefaultLimits.Stack, Instances: 1}, true},
-		"memory":   {"allocate", CodeFailed, Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, true},
-		"reported": {"fail:" + fixtureSecret, "fixture_failed", Limits{Memory: 16 << 20, Time: time.Minute, Stack: DefaultLimits.Stack, Instances: 1}, false},
+		"time":     {"loop", CodeTimedOut, timeLimits, true},
+		"memory":   {"allocate", CodeFailed, memoryLimits, true},
+		"reported": {"fail:" + fixtureSecret, "fixture_failed", memoryLimits, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -264,14 +253,7 @@ func TestPluginFailureDiagnosticsShareTheCallLogBudget(t *testing.T) {
 						t.Fatal("a failure diagnostic disclosed its credential")
 					}
 					spent, warnings, failures := 0, 0, 0
-					for _, raw := range bytes.Split(bytes.TrimSpace(output), []byte("\n")) {
-						var line struct {
-							logLine
-							Error string `json:"error"`
-						}
-						if err := json.Unmarshal(raw, &line); err != nil {
-							t.Fatal(err)
-						}
+					for _, line := range logLines(t, bytes.NewBuffer(output)) {
 						if strings.Contains(line.Message, "exceeded its budget") {
 							warnings++
 							continue
@@ -318,11 +300,11 @@ func TestGrantRefreshReachesOnlyTheApprovedOrigins(t *testing.T) {
 		t.Fatalf("refreshed %+v: %v", grant, err)
 	}
 	_, err = host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "fetch:https://elsewhere.example/token"}, authority.Client(), nil)
-	if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != abi.CodeOriginNotApproved {
+	if !reported(err, abi.CodeOriginNotApproved) {
 		t.Fatalf("refreshing at an origin nobody approved: %v", err)
 	}
 	_, err = host.RefreshGrant(t.Context(), fixtureDigest, fixtureProvider, abi.GrantRefresh{Profile: "fixture-chat", RefreshToken: "spent"}, authority.Client(), nil)
-	if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != abi.CodeInvalidGrant {
+	if !reported(err, abi.CodeInvalidGrant) {
 		t.Fatalf("refreshing with a spent refresh token: %v", err)
 	}
 }
@@ -440,7 +422,7 @@ func TestHostEvictsTheLeastRecentlyUsedIdleCode(t *testing.T) {
 	}
 	host.hosted["0"].calls = 1
 	host.hosted["loading"] = &hosted{}
-	evicted := host.evict()
+	evicted := host.evictExcess()
 	if len(evicted) != 1 || evicted[0].(*Module).Digest != "1" || len(host.hosted) != maxHosted || host.hosted["0"] == nil {
 		t.Fatalf("evicted %v, kept %d", evicted, len(host.hosted))
 	}

@@ -177,14 +177,26 @@ func installReferencePlugin(t *testing.T, h *accessHarness, owner *browser, upst
 	return installPlugin(t, h, owner, testutil.BuildPlugin(t, "./sdk/plugin/reference", append([]string{"-X=main.upstream=" + upstream.URL + "/v1", "-X=main.version=" + version}, ldflags...)...))
 }
 
+// installGrantPlugin installs the reference plugin built against a grant
+// upstream and the authority whose access tokens the upstream accepts.
+func installGrantPlugin(t *testing.T, h *accessHarness, owner *browser, upstream *pluginUpstream, version string) string {
+	t.Helper()
+	return installReferencePlugin(t, h, owner, upstream, version, "-X=main.authority="+upstream.authority.URL)
+}
+
 // installPlugin installs a plugin module, approves its origins, and returns
 // its digest.
 func installPlugin(t *testing.T, h *accessHarness, owner *browser, module []byte) string {
 	t.Helper()
 	installed := h.want(owner, "POST", "/api/v1/plugins", module, wasm, 201)
-	origins := installed["manifest"].(map[string]any)["origins"]
-	h.want(owner, "POST", "/api/v1/plugins/"+digestOf(module)+"/approve", map[string]any{"origins": origins}, etagHeader(installed), 200)
+	approvePlugin(t, h, owner, installed)
 	return digestOf(module)
+}
+
+// approvePlugin approves exactly the origins an installed plugin declares.
+func approvePlugin(t *testing.T, h *accessHarness, owner *browser, installed map[string]any) {
+	t.Helper()
+	h.want(owner, "POST", "/api/v1/plugins/"+installed["digest"].(string)+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
 }
 
 // certifyPluginProvider certifies a plugin provider's model vendorModel for
@@ -208,6 +220,16 @@ func certifyPluginProvider(t *testing.T, h *accessHarness, owner *browser, path 
 	}
 	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
+}
+
+// publishRoute creates and activates a route draft, and returns the secret of
+// an inference key that may call only that route. Gateways serve it after
+// their next refresh.
+func publishRoute(t *testing.T, h *accessHarness, owner *browser, draft map[string]any, keyName string) string {
+	t.Helper()
+	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
+	return h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": keyName, "scopes": []string{"inference"}, "allowed_routes": []string{draft["slug"].(string)}}, idem(uuid.NewString()), 201)["secret"].(string)
 }
 
 // An operator creates a provider from an installed plugin's profile and a
@@ -240,7 +262,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 			t.Fatalf("the catalogue offers an unapproved plugin's profile: %v", profile)
 		}
 	}
-	h.want(owner, "POST", "/api/v1/plugins/"+digest+"/approve", map[string]any{"origins": installed["manifest"].(map[string]any)["origins"]}, etagHeader(installed), 200)
+	approvePlugin(t, h, owner, installed)
 	var catalogued map[string]any
 	for _, profile := range h.want(owner, "GET", "/api/v1/provider-profiles", nil, nil, 200)["items"].([]any) {
 		if profile.(map[string]any)["kind"] == "plugin" && profile.(map[string]any)["id"] == "reference-chat" {
@@ -266,11 +288,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("reference-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Reference", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-strict"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-strict", created["id"])), "Reference")
 	h.refresh()
 
 	before := len(upstream.received())
@@ -294,7 +312,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 	}
 
 	// The published snapshot carries the pinned digest and the profile's
-	// hosting adaptation, so gateways need nothing else.
+	// hosting adaptation, so a gateway serves the provider from its release.
 	var snapshot []byte
 	if err := h.Pool.QueryRow(t.Context(), "SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&snapshot); err != nil {
 		t.Fatal(err)
@@ -413,11 +431,7 @@ func TestPluginProfileDiscoversModelsAndClassifiesFailuresAsDeclared(t *testing.
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("reference-quota", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Reference", "scopes": []string{"inference"}, "allowed_routes": []string{"reference-quota"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("reference-quota", created["id"])), "Reference")
 	h.refresh()
 	chat := func(prompt string) (int, any) {
 		status, reply, _ := h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": "reference-quota", "messages": []any{map[string]any{"role": "user", "content": prompt}}})
@@ -447,10 +461,7 @@ func TestSwitchingPluginDigestsIsANewProviderRevision(t *testing.T) {
 	path := "/api/v1/providers/" + created["id"].(string)
 	certifyPluginProvider(t, h, owner, path)
 
-	detail := h.want(owner, "GET", path, nil, nil, 200)
-	moved := detail["configuration"].(map[string]any)
-	moved["profile_revision"] = second
-	detail = h.want(owner, "PATCH", path, map[string]any{"name": "Reference", "configuration": moved}, etagHeader(detail), 200)
+	detail := moveToBuild(t, h, owner, path, second)
 	if detail["configuration"].(map[string]any)["profile_revision"] != second {
 		t.Fatalf("the draft pins %v", detail["configuration"])
 	}

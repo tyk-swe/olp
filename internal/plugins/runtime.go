@@ -387,7 +387,7 @@ func (m *Module) run(ctx context.Context, call Call, use func(context.Context, a
 	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", m.runtime.limits.Time))
+		return refuseTimedOut(m.runtime.limits.Time)
 	case errors.Is(err, errStackExhausted):
 		return refuse(CodeFailed, fmt.Sprintf("The plugin exhausted its %d KiB stack limit.", m.runtime.limits.Stack>>10))
 	}
@@ -503,9 +503,15 @@ func capability(ctx context.Context, request abi.Request) abi.Response {
 	case abi.CapabilityHTTP:
 		response.Result, response.Error = serveHTTP(ctx, request.Params)
 	default:
-		response.Error = &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + request.Method + "."}
+		response.Error = noCapability(request.Method)
 	}
 	return response
+}
+
+// noCapability is the failure of a request for a capability the call is not
+// granted, which reads the same for one OLP does not have.
+func noCapability(name string) *abi.Error {
+	return &abi.Error{Code: abi.CodeUnknownMethod, Message: "OLP grants this call no capability named " + name + "."}
 }
 
 // lend writes a message into a buffer the plugin allocates for it.

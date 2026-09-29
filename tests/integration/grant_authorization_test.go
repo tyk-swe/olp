@@ -46,7 +46,7 @@ func TestGrantEnrollmentRechecksProjectReachAfterUpstreamSteps(t *testing.T) {
 				handler.ServeHTTP(w, r)
 			}))
 			t.Cleanup(authority.Close)
-			digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+			digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 			profileID := "reference-device-chat"
 			if step == "continue" {
 				profileID = "reference-grant-chat"
@@ -96,7 +96,7 @@ func TestGrantEnrollmentByManagementTokenKeepsItsActorAndOwnership(t *testing.T)
 	h := newAccessHarness(t)
 	owner := h.owner()
 	authority := testutil.NewOAuthServer(t)
-	digest := installReferencePlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0", "-X=main.authority="+authority.URL)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
 	path := grantProvider(t, h, owner, digest, nil)
 	created, token := createToken(h, owner, "grant operator", []string{"configure"})
 	tokenID := created["id"].(string)

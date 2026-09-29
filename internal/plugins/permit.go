@@ -36,7 +36,7 @@ func (s *Management) executables(r *http.Request, _ access.Principal) (access.Re
 	}
 	items := make([]contract.UnconfinedExecutable, 0, len(files))
 	for _, file := range files {
-		permitted, err := permitted(r.Context(), s.Access.Pool, file.Digest)
+		permitted, err := isPermitted(r.Context(), s.Access.Pool, file.Digest)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -55,7 +55,7 @@ func (s *Management) review(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, problem(err)
 	}
-	permitted, err := permitted(r.Context(), s.Access.Pool, file.Digest)
+	permitted, err := isPermitted(r.Context(), s.Access.Pool, file.Digest)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -79,7 +79,7 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if !digestPattern.MatchString(input.Digest) {
+	if !ValidDigest(input.Digest) {
 		return access.Reply{}, access.Invalid("digest", "Name the executable by the lowercase hexadecimal SHA-256 digest you reviewed.")
 	}
 	if !input.AcknowledgeRisk {
@@ -132,8 +132,8 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, 
 	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: plugin, ETag: plugin.Etag.String(), Location: "/api/v1/plugins/" + file.Digest})
 }
 
-// permitted reports whether an owner permitted the executable with digest.
-func permitted(ctx context.Context, q access.Queryer, digest string) (bool, error) {
+// isPermitted reports whether an owner permitted the executable with digest.
+func isPermitted(ctx context.Context, q access.Queryer, digest string) (bool, error) {
 	var exists bool
 	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.plugins WHERE digest=$1 AND executable IS NOT NULL)", digest).Scan(&exists)
 	return exists, err

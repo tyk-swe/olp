@@ -1,5 +1,13 @@
 package plugins
 
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+)
+
 // Codes of the errors OLP reports about a plugin module or a plugin call.
 const (
 	// CodeModuleInvalid: the module is not WebAssembly, is not a provider
@@ -50,4 +58,31 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
+// isCode reports whether err is an *Error with code.
+func isCode(err error, code string) bool {
+	refusal, ok := errors.AsType[*Error](err)
+	return ok && refusal.Code == code
+}
+
 func refuse(code, message string) *Error { return &Error{Code: code, Message: message} }
+
+// refuseStopped refuses a call because the plugin's process stopped, for
+// reason.
+func refuseStopped(reason string) *Error {
+	return refuse(CodeFailed, "The plugin stopped: "+reason+".")
+}
+
+// refuseStartTimeout refuses a call because the plugin's process did not
+// start within limit.
+func refuseStartTimeout(limit time.Duration) *Error {
+	return refuse(CodeTimedOut, fmt.Sprintf("The plugin did not start within its %s time limit.", limit))
+}
+
+// refuseTimedOut refuses a call because it ran past limit.
+func refuseTimedOut(limit time.Duration) *Error {
+	return refuse(CodeTimedOut, fmt.Sprintf("The plugin exceeded its %s time limit.", limit))
+}
+
+// notSent marks err as the failure of a request that never reached the
+// upstream.
+func notSent(err error) error { return fmt.Errorf("%w: %w", connectors.ErrNotSent, err) }

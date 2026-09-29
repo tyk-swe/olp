@@ -82,7 +82,7 @@
   // 409 on a disabled provider, so they stay locked until it is a draft again.
   const editingLocked = $derived(providerDisabled(current));
   const profiles = createQuery(() => ({
-    queryKey: ['provider-profiles'],
+    queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal)
   }));
   // A plugin profile without model discovery has no upstream model list; the

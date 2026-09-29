@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
-// recordingCarrier answers every carried request with its status, recording
+// recordingCarrier answers every carried request with a 418 response, recording
 // what it was asked to carry.
 type recordingCarrier struct {
 	digest   string

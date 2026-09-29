@@ -25,6 +25,9 @@ const SessionTTL = 10 * time.Minute
 // maxSession bounds the state a plugin carries between enrollment steps.
 const maxSession = 16 << 10
 
+// maxAddress bounds the URLs a plugin may send the operator to.
+const maxAddress = 8 << 10
+
 // An Enrollment is a grant enrollment in progress: an operator's sign-in to an
 // upstream account, through the plugin profile a provider pins, for one of the
 // provider's credential slots. It is persisted with its session state
@@ -83,7 +86,7 @@ func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[st
 // origins, where OLP may send the operator.
 func approved(manifest abi.Manifest, address string) bool {
 	target, err := url.Parse(address)
-	return len(address) <= 8<<10 && err == nil && (target.Scheme == "https" || target.Scheme == "http") && slices.Contains(manifest.Origins, connectors.Origin(target))
+	return len(address) <= maxAddress && err == nil && (target.Scheme == "https" || target.Scheme == "http") && slices.Contains(manifest.Origins, connectors.Origin(target))
 }
 
 // Save persists a started enrollment, its session state encrypted until the

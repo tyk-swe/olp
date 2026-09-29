@@ -46,7 +46,7 @@ func newCarryingHarness(t *testing.T, carrier connectors.Carrier) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.pinPlugin(plugin)
+	h.pinPlugin(plugin, nil)
 	return h
 }
 

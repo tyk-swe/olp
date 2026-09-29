@@ -58,7 +58,7 @@ func (u *Unconfined) Executables() ([]ExecutableFile, error) {
 	files := []ExecutableFile{}
 	for _, entry := range entries {
 		file, err := u.executable(entry.Name())
-		if refusal, ok := errors.AsType[*Error](err); ok && refusal.Code == CodeExecutableUnknown {
+		if isCode(err, CodeExecutableUnknown) {
 			continue
 		}
 		if err != nil {

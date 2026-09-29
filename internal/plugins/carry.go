@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -29,7 +28,7 @@ import (
 func (h *Host) Carry(ctx context.Context, digest string, provider abi.Provider, req *http.Request, secrets []string) (*http.Response, error) {
 	request, err := carriedRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		return nil, notSent(err)
 	}
 	entry := h.use(digest)
 	call, cancel := context.WithCancel(ctx)
@@ -77,19 +76,19 @@ func (h *Host) carry(ctx context.Context, entry *hosted, call Call) (abi.HTTPRes
 	var head abi.HTTPResponse
 	loaded, err := entry.wait(ctx)
 	if err != nil {
-		return head, nil, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		return head, nil, notSent(err)
 	}
 	executable, ok := loaded.(*Executable)
 	if !ok {
-		return head, nil, fmt.Errorf("%w: %w", connectors.ErrNotSent, refuse(CodeFailed, "A confined plugin carries no traffic."))
+		return head, nil, notSent(refuse(CodeFailed, "A confined plugin carries no traffic."))
 	}
 	result, err := executable.stream(ctx, call)
 	if err != nil {
-		return head, nil, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		return head, nil, notSent(err)
 	}
 	part, err := result.next()
 	if reported, ok := errors.AsType[*abi.Error](err); ok && reported.Code == abi.CodeNotSent {
-		return head, nil, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		return head, nil, notSent(err)
 	}
 	switch {
 	case errors.Is(err, io.EOF):

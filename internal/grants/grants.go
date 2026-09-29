@@ -7,8 +7,8 @@
 // and holds the grant beneath it. The version's secret, under the
 // provider_credential purpose, is a connectors.GrantCredential: the current
 // access token and the facts, which is all the credential source serves
-// gateways. The refresh token is kept apart under secrets.ProviderGrantRefresh, which gateway
-// code never reads.
+// gateways. The refresh token is kept apart under secrets.ProviderGrantRefresh,
+// which gateway code never reads.
 package grants
 
 import (

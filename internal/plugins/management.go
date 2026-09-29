@@ -32,6 +32,10 @@ const maxInstalled = 64
 
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// ValidDigest reports whether digest is the lowercase hexadecimal SHA-256
+// digest that identifies a plugin.
+func ValidDigest(digest string) bool { return digestPattern.MatchString(digest) }
+
 // Management serves provider plugin administration on the management API.
 // Only an owner with a user session installs, approves, permits and
 // uninstalls plugins; any role that may read management state lists them.
@@ -223,8 +227,7 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	etag := plugin.Etag.String()
-	if err = access.Match(r, etag); err != nil {
+	if err = access.Match(r, plugin.Etag.String()); err != nil {
 		return access.Reply{}, err
 	}
 	// Provider writes hold the same installation lock, so no revision can pin
@@ -342,7 +345,7 @@ func problem(err error) error {
 
 func digestParam(r *http.Request) (string, error) {
 	digest := r.PathValue("plugin_digest")
-	if !digestPattern.MatchString(digest) {
+	if !ValidDigest(digest) {
 		return "", access.Fail(http.StatusBadRequest, "invalid_identifier", "Identify the plugin by the lowercase hexadecimal SHA-256 digest of its module.")
 	}
 	return digest, nil

@@ -142,7 +142,7 @@ func TestCarryReportsWhetherARequestWasSent(t *testing.T) {
 		t.Fatalf("a request the plugin did not send failed with %v, reaching the upstream %d times", err, reached.Load())
 	}
 	_, err := carry(t.Context(), host, digest, upstream.URL, "carrier:fail")
-	if reported, ok := errors.AsType[*abi.Error](err); !ok || reported.Code != "carrier_failed" || errors.Is(err, connectors.ErrNotSent) || reached.Load() != 1 {
+	if !reported(err, "carrier_failed") || errors.Is(err, connectors.ErrNotSent) || reached.Load() != 1 {
 		t.Fatalf("a request the plugin failed after sending failed with %v", err)
 	}
 	if _, err = carry(t.Context(), host, strings.Repeat("0", 64), upstream.URL, "hi"); !errors.Is(err, connectors.ErrNotSent) || !isCode(err, CodeExecutableChanged) {
@@ -211,27 +211,22 @@ func TestCarryCancellationReachesTheUpstream(t *testing.T) {
 // may be stuck, so OLP stops it, failing the calls in flight on it.
 func TestAPluginThatIgnoresACancelledCarryIsStopped(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	// It answers its first call's head, then reads its calls and answers none.
-	script := "#!/bin/sh\necho '{\"abi_version\":1}'\nread call\necho '{\"id\":1,\"part\":{\"status\":200}}'\ncat >/dev/null\n"
-	if err := os.WriteFile(filepath.Join(dir, "stuck"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	limits := DefaultLimits
 	limits.Time = time.Second
-	u := NewUnconfined(dir, limits, slog.New(slog.DiscardHandler))
-	files, err := u.Executables()
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := newUnconfinedHost(t, u, files[0])
-	resp, err := carry(t.Context(), host, files[0].Digest, "https://api.example.com", "stuck")
+	u := NewUnconfined(t.TempDir(), limits, slog.New(slog.DiscardHandler))
+	// It answers its first call's head, then reads its calls and answers none.
+	file := script(t, u, "stuck", `echo '{"abi_version":1}'
+read call
+echo '{"id":1,"part":{"status":200}}'
+cat >/dev/null`)
+	host := newUnconfinedHost(t, u, file)
+	resp, err := carry(t.Context(), host, file.Digest, "https://api.example.com", "stuck")
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("carried %v: %v", resp, err)
 	}
 	inFlight := make(chan error, 1)
 	go func() {
-		_, err := carry(t.Context(), host, files[0].Digest, "https://api.example.com", "in flight")
+		_, err := carry(t.Context(), host, file.Digest, "https://api.example.com", "in flight")
 		inFlight <- err
 	}()
 	resp.Body.Close()

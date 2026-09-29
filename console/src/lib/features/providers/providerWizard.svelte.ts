@@ -206,9 +206,9 @@ export class ProviderWizardState {
       // afterwards and must not be demanded again on a re-save.
       credentialAlreadyStored: Boolean(existing),
       // The connection form loads the profile catalogue.
-      profiles: this.queryClient.getQueryData<ProviderProfile[]>([
-        'provider-profiles'
-      ])
+      profiles: this.queryClient.getQueryData<ProviderProfile[]>(
+        providerKeys.profiles()
+      )
     });
     if (issue) {
       this.errorMessage = issue;

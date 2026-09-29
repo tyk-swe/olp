@@ -203,11 +203,11 @@ var registered Plugin
 // abi.CodeUnknownMethod.
 var methods = map[string]func(ctx context.Context, params json.RawMessage) (any, error){
 	abi.MethodManifest:      manifest,
-	abi.MethodSign:          sign,
-	abi.MethodGrantStart:    enrollment(abi.MethodGrantStart, GrantEnroller.StartGrant),
-	abi.MethodGrantExchange: enrollment(abi.MethodGrantExchange, GrantEnroller.ExchangeGrant),
-	abi.MethodGrantPoll:     enrollment(abi.MethodGrantPoll, GrantPoller.PollGrant),
-	abi.MethodGrantRefresh:  refreshGrant,
+	abi.MethodSign:          optional(abi.MethodSign, "A sign request carries the request to sign.", Signer.Sign),
+	abi.MethodGrantStart:    optional(abi.MethodGrantStart, invalidParams, GrantEnroller.StartGrant),
+	abi.MethodGrantExchange: optional(abi.MethodGrantExchange, invalidParams, GrantEnroller.ExchangeGrant),
+	abi.MethodGrantPoll:     optional(abi.MethodGrantPoll, invalidParams, GrantPoller.PollGrant),
+	abi.MethodGrantRefresh:  optional(abi.MethodGrantRefresh, "A grant_refresh call carries the grant to refresh.", GrantRefresher.RefreshGrant),
 	abi.MethodCarry:         carry,
 }
 
@@ -282,19 +282,6 @@ func manifest(context.Context, json.RawMessage) (any, error) {
 	return m, nil
 }
 
-// sign answers the sign call with the plugin's Signer.
-func sign(ctx context.Context, params json.RawMessage) (any, error) {
-	signer, ok := registered.(Signer)
-	if !ok {
-		return nil, unknownMethod(abi.MethodSign)
-	}
-	var request SignRequest
-	if err := json.Unmarshal(params, &request); err != nil {
-		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A sign request carries the request to sign."}
-	}
-	return signer.Sign(ctx, request)
-}
-
 // carryChunk bounds the body bytes one part of a carried response holds, so
 // that each part, in base64 within a frame, stays well within 1 MiB.
 const carryChunk = 64 << 10
@@ -314,13 +301,14 @@ func carry(ctx context.Context, params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	head := HTTPResponse{Status: response.Status, Header: response.Header}
 	if response.Body == nil {
-		return nil, sendPart(ctx, HTTPResponse{Status: response.Status, Header: response.Header})
+		return nil, sendPart(ctx, head)
 	}
 	defer response.Body.Close()
 	// A body that ignores the call's context still stops when OLP cancels.
 	defer context.AfterFunc(ctx, func() { response.Body.Close() })()
-	if err = sendPart(ctx, HTTPResponse{Status: response.Status, Header: response.Header}); err != nil {
+	if err = sendPart(ctx, head); err != nil {
 		return nil, err
 	}
 	chunk := make([]byte, carryChunk)
@@ -340,34 +328,23 @@ func carry(ctx context.Context, params json.RawMessage) (any, error) {
 	}
 }
 
-// enrollment serves a grant enrollment step with the plugin's implementation
-// of the step's interface E, GrantEnroller or GrantPoller.
-func enrollment[E, P, R any](method string, step func(E, context.Context, P) (R, error)) func(context.Context, json.RawMessage) (any, error) {
+// invalidParams is what a method reports for parameters that do not match it.
+const invalidParams = "The parameters do not match the method."
+
+// optional serves a method with the plugin's implementation of the interface I
+// that declares it, which takes the parameters as a P.
+func optional[I, P, R any](method, invalid string, call func(I, context.Context, P) (R, error)) func(context.Context, json.RawMessage) (any, error) {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		enroller, ok := registered.(E)
+		implementation, ok := registered.(I)
 		if !ok {
 			return nil, unknownMethod(method)
 		}
 		var p P
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The parameters do not match the method."}
+			return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: invalid}
 		}
-		return step(enroller, ctx, p)
+		return call(implementation, ctx, p)
 	}
-}
-
-// refreshGrant answers the grant_refresh call with the plugin's
-// GrantRefresher.
-func refreshGrant(ctx context.Context, params json.RawMessage) (any, error) {
-	refresher, ok := registered.(GrantRefresher)
-	if !ok {
-		return nil, unknownMethod(abi.MethodGrantRefresh)
-	}
-	var refresh GrantRefresh
-	if err := json.Unmarshal(params, &refresh); err != nil {
-		return nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "A grant_refresh call carries the grant to refresh."}
-	}
-	return refresher.RefreshGrant(ctx, refresh)
 }
 
 func unknownMethod(method string) *abi.Error {

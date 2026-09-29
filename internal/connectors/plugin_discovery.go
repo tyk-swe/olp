@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -24,7 +22,8 @@ func validateDiscovery(declared abi.Hosting) error {
 	if len(discovery.Path) > 512 || !listingPath.MatchString(discovery.Path) || slices.ContainsFunc(strings.Split(discovery.Path, "/"), func(segment string) bool { return segment == "." || segment == ".." }) {
 		return &ProfileError{Field: "hosting.discovery.path", Message: "Declare the listing's path under the address, such as /models: segments of letters, digits and URL punctuation, without dot segments, query or fragment."}
 	}
-	fields := []struct{ field, name string }{{"hosting.discovery.models", discovery.Models}, {"hosting.discovery.id", discovery.ID}}
+	type listingField struct{ field, name string }
+	fields := []listingField{{"hosting.discovery.models", discovery.Models}, {"hosting.discovery.id", discovery.ID}}
 	if pagination := discovery.Pagination; pagination != nil {
 		field := "hosting.discovery.pagination.parameter"
 		_, placed := declared.Query[pagination.Parameter]
@@ -34,13 +33,13 @@ func validateDiscovery(declared abi.Hosting) error {
 		case placed:
 			return &ProfileError{Field: field, Message: "The hosting adaptation already places this query parameter."}
 		}
-		fields = append(fields, struct{ field, name string }{"hosting.discovery.pagination.cursor", pagination.Cursor})
+		fields = append(fields, listingField{"hosting.discovery.pagination.cursor", pagination.Cursor})
 		if pagination.More != "" {
-			fields = append(fields, struct{ field, name string }{"hosting.discovery.pagination.more", pagination.More})
+			fields = append(fields, listingField{"hosting.discovery.pagination.more", pagination.More})
 		}
 	}
 	for _, f := range fields {
-		if f.name == "" || utf8.RuneCountInString(f.name) > 128 || !utf8.ValidString(f.name) || strings.ContainsFunc(f.name, unicode.IsControl) {
+		if !PlainText(f.name, 1, 128) {
 			return &ProfileError{Field: f.field, Message: "Name a top-level field of the listing with 1–128 characters, without control characters."}
 		}
 	}

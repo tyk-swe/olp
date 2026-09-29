@@ -21,10 +21,10 @@ credentials; enabled named pools require it. `worker` publishes no public
 listener and runs only the accounting, media reconciliation, and
 [recovery plane](operations.md#replicated-worker-health), which `all` also runs;
 an installation that serves traffic with `gateway` and `control` needs at least
-one `worker` replica for accounting, budget reconciliation, retention, and media
-job polling to happen at all. Gateway readiness on the private
-`GET /health/ready` listener fails while the key-authority snapshot is missing
-or stale.
+one `worker` replica for accounting, budget reconciliation, retention, media job
+polling, and plugin grant refresh to happen at all. Gateway readiness on the
+private `GET /health/ready` listener fails while the key-authority snapshot is
+missing or stale.
 
 ## Configuration
 

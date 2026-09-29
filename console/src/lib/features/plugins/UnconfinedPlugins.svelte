@@ -18,6 +18,7 @@
     needsReauthentication,
     permitUnconfinedPlugin,
     pluginProblem,
+    pluginTitle,
     reviewUnconfinedExecutable,
     shortDigest,
     type UnconfinedExecutableReview
@@ -44,9 +45,6 @@
   }));
 
   let review = $state<UnconfinedExecutableReview | null>(null);
-  const reviewed = $derived(
-    review ? `${review.manifest.name} ${review.manifest.version}` : ''
-  );
   let acknowledged = $state(false);
   let busy = $state('');
   let error = $state('');
@@ -82,7 +80,7 @@
     try {
       review = await reviewUnconfinedExecutable(name);
     } catch (cause) {
-      error = pluginProblem(cause) ?? errorMessage(cause);
+      error = pluginProblem(cause);
     } finally {
       busy = '';
     }
@@ -156,15 +154,14 @@
       review = null;
       acknowledged = false;
       await Promise.all([executables.refetch(), onPermitted()]);
-      notice = `Permitted ${plugin.manifest.name} ${plugin.manifest.version}. Providers may now use its profiles.`;
+      notice = `Permitted ${pluginTitle(plugin)}. Providers may now use its profiles.`;
     } catch (cause) {
       if (needsReauthentication(cause)) {
         verified = false;
-        busy = '';
         await reauthenticate();
         return;
       }
-      error = pluginProblem(cause) ?? errorMessage(cause);
+      error = pluginProblem(cause);
     } finally {
       busy = '';
     }
@@ -259,7 +256,7 @@
     {/if}
     {#if review}
       <section class="review" aria-labelledby="unconfined-review-heading">
-        <h3 id="unconfined-review-heading">Review {reviewed}</h3>
+        <h3 id="unconfined-review-heading">Review {pluginTitle(review)}</h3>
         {#if review.manifest.description}<p>
             {review.manifest.description}
           </p>{/if}

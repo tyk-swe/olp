@@ -124,9 +124,7 @@ func TestUnconfinedPluginCarriesATargetsTraffic(t *testing.T) {
 	draft := transformed(fidelityDraft("carried", carried["id"]))
 	draft["max_attempts"] = 2
 	draft["targets"] = append(draft["targets"].([]any), map[string]any{"provider_id": backup["id"], "provider_model": vendorModel, "priority": 1, "weight": 1, "timeout_ms": 5000})
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Carried", "scopes": []string{"inference"}, "allowed_routes": []string{"carried"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, draft, "Carried")
 	h.refresh()
 	chat := func(prompt string, stream bool) map[string]any {
 		return map[string]any{"model": "carried", "stream": stream, "messages": []any{map[string]any{"role": "user", "content": prompt}}}

@@ -57,8 +57,8 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 
 // StrictRefusal reports an obligation a strict route's target cannot meet as a
 // 422, or returns nil when err is not such an obligation. A refusal that exists
-// only because the target has no provider profile or needs translation tells
-// the author to declare the route transformed.
+// only because the target has no provider profile, its profile is not strict or
+// it needs translation tells the author to declare the route transformed.
 func StrictRefusal(err error) error {
 	var incompatible incompatibilityError
 	if !errors.As(err, &incompatible) {
@@ -87,7 +87,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	}
 	for rows.Next() {
 		var revision ProviderRevision
-		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.Plugin); err != nil {
+		if err = rows.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.InstalledPlugin); err != nil {
 			rows.Close()
 			return nil, err
 		}

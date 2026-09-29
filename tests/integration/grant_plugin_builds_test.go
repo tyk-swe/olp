@@ -11,8 +11,9 @@ import (
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
-// subscribeToLapses subscribes a webhook destination to grant lapses and
-// returns the number of deliveries enqueued so far.
+// subscribeToLapses subscribes a webhook destination to grant lapses, allowing
+// the loopback webhook through the server's egress policy, and returns a
+// function that counts the deliveries enqueued so far.
 func subscribeToLapses(t *testing.T, h *accessHarness, owner *browser) func() int {
 	t.Helper()
 	h.Server.Egress = alertPolicy()
@@ -57,8 +58,8 @@ func TestAGrantServesOnlyThePluginBuildThatEnrolledIt(t *testing.T) {
 	deliveries := subscribeToLapses(t, h, owner)
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	enrolling := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
-	upgrade := installReferencePlugin(t, h, owner, upstream, "0.2.0", "-X=main.authority="+authority.URL)
+	enrolling := installGrantPlugin(t, h, owner, upstream, "0.1.0")
+	upgrade := installGrantPlugin(t, h, owner, upstream, "0.2.0")
 	path := grantProvider(t, h, owner, enrolling, nil)
 	enrolled := enrollGrant(t, h, owner, path)
 	certifyPluginProvider(t, h, owner, path)
@@ -138,8 +139,8 @@ func TestUninstallingAPluginRetiresTheGrantsItEnrolled(t *testing.T) {
 	deliveries := subscribeToLapses(t, h, owner)
 	authority := testutil.NewOAuthServer(t)
 	upstream := newGrantUpstream(t, authority)
-	enrolling := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+authority.URL)
-	upgrade := installReferencePlugin(t, h, owner, upstream, "0.2.0", "-X=main.authority="+authority.URL)
+	enrolling := installGrantPlugin(t, h, owner, upstream, "0.1.0")
+	upgrade := installGrantPlugin(t, h, owner, upstream, "0.2.0")
 	path := grantProvider(t, h, owner, enrolling, nil)
 	enrolled := enrollGrant(t, h, owner, path)
 	moveToBuild(t, h, owner, path, upgrade)

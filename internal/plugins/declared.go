@@ -28,8 +28,10 @@ const (
 	// type section allocates for them.
 	maxTypes = 1 << 16
 	// maxVectorEntries bounds other decoded vectors, including nested
-	// element and name vectors. Their combined count is bounded as well.
+	// element and name vectors.
 	maxVectorEntries = 1 << 16
+	// maxModuleEntries bounds the entries of all of a module's decoded
+	// vectors together, whichever limit bounds each.
 	maxModuleEntries = 1 << 20
 	// frameOverhead is what a frame holds beyond its function's values, such
 	// as its return address, in stack values.
@@ -65,6 +67,10 @@ const (
 	sectionDataCount = 12
 )
 
+// wasmHeader is the magic number and version every WebAssembly module begins
+// with.
+const wasmHeader = "\x00asm\x01\x00\x00\x00"
+
 // declare bounds every allocation-driving declaration, including nested
 // vectors and strings, before wazero decodes it. Semantic validation and
 // instruction validation remain wazero's responsibility.
@@ -74,7 +80,7 @@ func declare(module []byte) (declarations, error) {
 	}
 	budget := uint64(maxModuleEntries)
 	r := reader{data: module, budget: &budget}
-	if header := r.bytes(8); r.err != nil || string(header) != "\x00asm\x01\x00\x00\x00" {
+	if header := r.bytes(8); r.err != nil || string(header) != wasmHeader {
 		return declarations{}, errNotModule
 	}
 	var d declarations
@@ -210,8 +216,8 @@ func (r *reader) u32() uint32 {
 	return 0
 }
 
-// vector bounds a decoded vector before either preflight or wazero allocates
-// it. Every entry needs at least one byte, even before semantic validation.
+// vector bounds a decoded vector before either OLP or wazero allocates it.
+// Every entry needs at least one byte, even before semantic validation.
 func (r *reader) vector(limit uint32) uint32 {
 	n := r.u32()
 	if r.err != nil || n > limit || uint64(n) > uint64(r.len()) || uint64(n) > *r.budget {

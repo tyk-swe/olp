@@ -60,11 +60,7 @@ func TestPluginOptionsPlaceTheUpstreamAddress(t *testing.T) {
 	}
 	certifyPluginProvider(t, h, owner, path)
 
-	draft := fidelityDraft("workspace-strict", created["id"])
-	draft["fidelity"] = map[string]any{"mode": "strict"}
-	route := h.want(owner, "POST", "/api/v1/route-drafts", draft, idem(uuid.NewString()), 201)
-	h.want(owner, "POST", "/api/v1/route-drafts/"+route["id"].(string)+"/activate", nil, withMatch(route, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workspace", "scopes": []string{"inference"}, "allowed_routes": []string{"workspace-strict"}}, idem(uuid.NewString()), 201)["secret"].(string)
+	key := publishRoute(t, h, owner, strictDraft(fidelityDraft("workspace-strict", created["id"])), "Workspace")
 	serve := func(workspace string) {
 		t.Helper()
 		h.refresh()

@@ -68,11 +68,11 @@ var errRefreshNotClaimed = errors.New("the grant no longer accepts a refresh att
 // their plugins, as a worker task that every worker replica runs. A grant's
 // refresh holds a Postgres advisory lock and commits an attempt before
 // dispatch, so even losing that session cannot authorize another use of the
-// same rotating token. The new access token rewrites
-// the secret of the grant's credential version and advances the grant's
-// generation, which gateways poll; the refresh token stays under
-// secrets.ProviderGrantRefresh. A refresh that fails permanently lapses the grant, and a
-// grant that no configuration uses any more is retired rather than refreshed.
+// same rotating token. The new access token rewrites the secret of the grant's
+// credential version and advances the grant's generation, which gateways poll;
+// the refresh token stays under secrets.ProviderGrantRefresh. A refresh that
+// fails permanently lapses the grant, and a grant that no configuration uses
+// any more is retired rather than refreshed.
 type Refresher struct {
 	Pool         *pgxpool.Pool
 	Keys         *secrets.KeyRing
@@ -153,8 +153,7 @@ func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 func (r *Refresher) due(ctx context.Context) ([]string, error) {
 	rows, err := r.Pool.Query(ctx, `SELECT g.credential_id::text FROM olp.provider_grants g
 		JOIN olp.provider_credentials c ON c.id=g.credential_id
-		WHERE g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
-			AND (g.refresh_at<=now() OR g.refresh_attempt_id IS NULL AND `+using+` IS NULL)
+		WHERE `+dueCondition+`
 		ORDER BY g.refresh_at LIMIT $1`, refreshesPerPass)
 	if err != nil {
 		return nil, err
@@ -189,6 +188,13 @@ const using = `coalesce(
 	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
 		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)))`
 
+// dueCondition is what makes a grant g, over its credential version c, due: it
+// holds a refresh token, its credential version is not revoked, and it is
+// either due a refresh or unused by any configuration (using) and not
+// mid-attempt.
+const dueCondition = `g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
+	AND (g.refresh_at<=now() OR g.refresh_attempt_id IS NULL AND ` + using + ` IS NULL)`
+
 // dueGrant is what refreshing a grant needs: its credential version's
 // provider, plugin, principal and facts, its refresh token's secret, and the
 // configuration it refreshes on behalf of.
@@ -220,8 +226,7 @@ func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentia
 	var configuration *refreshConfiguration
 	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,g.refresh_attempt_id::text,`+using+`
 		FROM olp.provider_grants g JOIN olp.provider_credentials c ON c.id=g.credential_id
-		WHERE g.credential_id=$1 AND g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
-			AND (g.refresh_at<=now() OR g.refresh_attempt_id IS NULL AND `+using+` IS NULL)`, credentialID).
+		WHERE g.credential_id=$1 AND `+dueCondition, credentialID).
 		Scan(&g.providerID, &g.digest, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &g.refreshAttemptID, &configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

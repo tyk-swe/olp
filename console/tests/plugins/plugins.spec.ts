@@ -1,27 +1,14 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '../playwright';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
+import { buildReferencePlugin } from './referencePlugin';
 
 let module = '';
 
 // The journey installs the reference plugin, built from the SDK exactly as a
 // plugin author would build it.
 test.beforeAll(() => {
-  module = join(mkdtempSync(join(tmpdir(), 'olp-plugin-')), 'reference.wasm');
-  execFileSync(
-    'go',
-    ['build', '-buildmode=c-shared', '-o', module, './sdk/plugin/reference'],
-    {
-      cwd: fileURLToPath(new URL('../../..', import.meta.url)),
-      env: { ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', CGO_ENABLED: '0' },
-      stdio: 'inherit'
-    }
-  );
+  ({ module } = buildReferencePlugin());
 });
 
 test('an owner installs, approves and uninstalls a provider plugin', async ({

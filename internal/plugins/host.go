@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptrace"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -34,10 +32,10 @@ const usableRecheck = 30 * time.Second
 // grant's refresh runs in a worker ahead of its access token's expiry. A
 // confined plugin's module is loaded from the database when it is prepared or
 // on its first call, and kept compiled, with its pool of instances, for the
-// calls after it, so no request compiles anything; an unconfined plugin's process likewise keeps
-// running between calls. A Host keeps the code of the plugins it called most
-// recently, and runs only plugins that Usable admits. It is safe for
-// concurrent use.
+// calls after it, so no request compiles anything; an unconfined plugin's
+// process likewise keeps running between calls. A Host keeps the code of the
+// plugins it called most recently, and runs only plugins that Usable admits.
+// It is safe for concurrent use.
 type Host struct {
 	runtime    *Runtime
 	unconfined *Unconfined
@@ -102,7 +100,7 @@ func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Pro
 	var grant abi.Grant
 	installed, err := usable(ctx, h.db, h.unconfined, digest, false)
 	if err != nil {
-		return grant, fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		return grant, notSent(err)
 	}
 	var connected atomic.Bool
 	// Once a connection is available, even a failed write may have sent part
@@ -110,12 +108,9 @@ func (h *Host) RefreshGrant(ctx context.Context, digest string, provider abi.Pro
 	// including a failed follow-up after the token endpoint succeeded.
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	err = h.Call(ctx, digest, Call{Method: abi.MethodGrantRefresh, Params: refresh, Provider: &provider, Secrets: secrets, HTTP: &HTTP{Origins: installed.Manifest.Origins, Client: client}}, &grant)
-	refusedBeforeStart := false
-	if refusal, ok := errors.AsType[*Error](err); ok {
-		refusedBeforeStart = refusal.Code == CodeExecutableChanged || refusal.Code == CodeExecutableInvalid
-	}
+	refusedBeforeStart := isCode(err, CodeExecutableChanged) || isCode(err, CodeExecutableInvalid)
 	if err != nil && (installed.Executable == "" && !connected.Load() || refusedBeforeStart) {
-		err = fmt.Errorf("%w: %w", connectors.ErrNotSent, err)
+		err = notSent(err)
 	}
 	return grant, err
 }
@@ -164,9 +159,9 @@ func (h *Host) Call(ctx context.Context, digest string, call Call, result any) e
 	call.out = call.output(h.runtime.log, digest)
 	entry := h.use(digest)
 	defer h.done(entry)
-	code, err := entry.wait(ctx)
+	loaded, err := entry.wait(ctx)
 	if err == nil {
-		err = code.Call(ctx, call, result)
+		err = loaded.Call(ctx, call, result)
 	}
 	h.failed(ctx, call.out, call.Method, err)
 	return err
@@ -199,14 +194,7 @@ func (h *Host) Evict(digest string) {
 	if entry == nil {
 		return
 	}
-	select {
-	case <-entry.loaded:
-		if entry.code != nil {
-			entry.code.Close(context.Background())
-		}
-	default:
-		// Still loading: its load closes the code it produced.
-	}
+	entry.closeLoaded(context.Background())
 }
 
 // Close releases the code of every plugin the Host holds, stopping unconfined
@@ -217,14 +205,7 @@ func (h *Host) Close(ctx context.Context) {
 	h.hosted = map[string]*hosted{}
 	h.mu.Unlock()
 	for _, entry := range entries {
-		select {
-		case <-entry.loaded:
-			if entry.code != nil {
-				entry.code.Close(ctx)
-			}
-		default:
-			// Still loading, so nothing runs it yet.
-		}
+		entry.closeLoaded(ctx)
 	}
 }
 
@@ -235,6 +216,18 @@ func (entry *hosted) wait(ctx context.Context) (code, error) {
 		return entry.code, entry.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+// closeLoaded closes the entry's code once it is loaded. An entry still loading
+// has left the Host's map, so its load closes the code it produced.
+func (entry *hosted) closeLoaded(ctx context.Context) {
+	select {
+	case <-entry.loaded:
+		if entry.code != nil {
+			entry.code.Close(ctx)
+		}
+	default:
 	}
 }
 
@@ -265,7 +258,7 @@ func (h *Host) done(entry *hosted) {
 	entry.calls--
 	var evicted []code
 	if entry.calls == 0 {
-		evicted = h.evict()
+		evicted = h.evictExcess()
 	}
 	h.mu.Unlock()
 	for _, c := range evicted {
@@ -304,7 +297,7 @@ func (h *Host) load(digest string, entry *hosted) {
 	default:
 		entry.code = loaded
 		entry.verified = time.Now()
-		evicted = h.evict()
+		evicted = h.evictExcess()
 	}
 	// Publish completion before eviction can take ownership of the code.
 	close(entry.loaded)
@@ -325,24 +318,24 @@ func (h *Host) recheck(digest string, entry *hosted) {
 	h.mu.Lock()
 	entry.checking = false
 	_, refused := errors.AsType[*Error](err)
+	stopped := false
 	switch {
-	case err == nil || !refused:
+	case !refused:
 		entry.verified = time.Now()
 	case h.hosted[digest] == entry:
 		delete(h.hosted, digest)
-	default:
-		refused = false
+		stopped = true
 	}
 	h.mu.Unlock()
-	if refused {
+	if stopped {
 		h.runtime.log.Warn("cached plugin stopped: it is no longer usable", "plugin_digest", digest, "error", err)
 		entry.code.Close(ctx)
 	}
 }
 
-// evict forgets the least recently used code no call is using while the Host
-// holds more than maxHosted plugins, and returns it to close.
-func (h *Host) evict() []code {
+// evictExcess forgets the least recently used code no call is using while the
+// Host holds more than maxHosted plugins, and returns it to close.
+func (h *Host) evictExcess() []code {
 	var evicted []code
 	for len(h.hosted) > maxHosted {
 		var oldest *hosted

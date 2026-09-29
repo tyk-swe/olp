@@ -119,7 +119,7 @@ describe('plugin management api', () => {
     expect(requests[0]!.headers.get('if-match')).toBe(`"${plugin.etag}"`);
   });
 
-  it('surfaces a typed refusal with its manifest field', async () => {
+  it('surfaces a typed refusal by its problem type and detail', async () => {
     authLifecycle.establishSession(session);
     captureRequests(() =>
       jsonResponse(

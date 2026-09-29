@@ -26,6 +26,13 @@ printf 'subjectAltName=DNS:localhost,DNS:postgres,DNS:valkey,IP:127.0.0.1\nexten
 openssl x509 -req -in "$scratch/server.csr" -CA "$OLP_TEST_TLS_DIR/ca.crt" -CAkey "$OLP_TEST_TLS_DIR/ca.key" -CAcreateserial -out "$OLP_TEST_TLS_DIR/server.crt" -days 1 -extfile "$scratch/extensions" >/dev/null 2>&1
 # Disposable test key only; the Valkey image runs as its own unprivileged UID.
 chmod 644 "$OLP_TEST_TLS_DIR/server.key"
+# Registry pulls flake often enough to fail the suite before it starts; retry
+# them, including the standalone restore Valkey image reused below.
+for attempt in {1..3}; do
+  if "${compose[@]}" pull --quiet && docker pull --quiet valkey/valkey:9-alpine >/dev/null; then break; fi
+  if (( attempt == 3 )); then exit 1; fi
+  sleep $((attempt * 10))
+done
 "${compose[@]}" up -d --wait --wait-timeout 90
 postgres=$("${compose[@]}" port postgres 5432)
 valkey=$("${compose[@]}" port valkey 6379)

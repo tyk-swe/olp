@@ -109,9 +109,11 @@ configuration exports, and OLP does not redact them.
 A profile's `Hosting` declares where and how the dialect's requests reach the
 upstream, how the upstream lists its models and how its failures are
 classified. OLP runs it for every request of a provider using the profile; the
-only plugin code that runs per request is a [signing hook](#signing-hook).
-Providers using the profile authenticate with a static credential, or with a
-[grant](#grants), which the adaptation places or the signing hook signs with.
+only plugin code that runs per request is a [signing hook](#signing-hook) or,
+for an unconfined plugin that [carries the traffic](#carrying-traffic), its
+`Carry` method. Providers using the profile authenticate with a static
+credential, or with a [grant](#grants), which the adaptation places or the
+signing hook signs with.
 
 | Field | Rule |
 | --- | --- |
@@ -406,7 +408,7 @@ func (acme) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchange) (p
   `abi.CodeStateMismatch`, exchanges the code with `plugin.Fetch`, and returns
   the `Grant`: its `AccessToken` (at most 16 KiB, sendable in a header), any
   `RefreshToken`, `ExpiresIn` seconds, the observed `Principal` (the upstream
-  account, 1–256 characters) and a value for every declared fact.
+  account, 1–256 bytes) and a value for every declared fact.
 
 The principal is part of the provider's serving identity, so report a stable
 identifier of the account, the same at every sign-in: re-enrolling the same
@@ -440,8 +442,10 @@ Report a grant the upstream will no longer refresh, such as one whose refresh
 token was revoked or expired, as an `*plugin.Error` with code
 `abi.CodeInvalidGrant` (`invalid_grant`): OLP stops refreshing the grant, as it
 does when the refresh authorizes another principal or other facts. Any other
-failure is transient, and OLP retries it with backoff. OLP redacts the refresh
-token from what the refresh logs.
+failure is transient: OLP retries it with backoff when it knows the refresh
+token was not spent, and otherwise lapses the grant after its attempt deadline
+([grant refresh](plugins.md#grant-refresh)). OLP redacts the refresh token from
+what the refresh logs.
 
 The reference plugin's `reference-grant-chat` profile implements this flow
 against a fictional authority with the authorization code flow and PKCE, and
@@ -487,16 +491,16 @@ authority, and places and refreshes its grants as `reference-grant-chat` does.
 
 ### Fetch
 
-`plugin.Fetch` sends an HTTP request through OLP, the only way a plugin reaches
-the network. OLP grants it to grant enrollment steps and grant refresh, so pass
-it the call's context: `plugin.Fetch(ctx, request)`. OLP sends a request only
-to one of the plugin's approved origins, over the provider's network path and
-egress policy. It sets the framing headers itself; a plugin may not set `Host`,
-`Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect rather
-than following it, and any response the upstream sent, whatever its status.
-Request and response bodies are at most 512 KiB. A request OLP refuses or can't
-complete fails with an `*plugin.Error`: `origin_not_approved`, `http_failed` or
-`invalid_request`.
+`plugin.Fetch` sends an HTTP request through OLP, the only way a confined plugin
+reaches the network. OLP grants it to grant enrollment steps and grant refresh,
+so pass it the call's context: `plugin.Fetch(ctx, request)`. OLP sends a request
+only to one of the plugin's approved origins, over the provider's network path
+and egress policy. It sets the framing headers itself; a plugin may not set
+`Host`, `Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect
+rather than following it, and any response the upstream sent, whatever its
+status. Request and response bodies are at most 512 KiB. A request OLP refuses
+or can't complete fails with an `*plugin.Error`: `origin_not_approved`,
+`http_failed` or `invalid_request`.
 
 ## What a plugin can reach
 
@@ -516,8 +520,9 @@ avoid it.
 
 OLP keeps up to four instances of a module and serves each call on an idle one,
 so package-level state may survive from one call to the next. Never rely on it:
-OLP discards an instance whenever a call on it fails, and starts new ones as it
-needs them.
+OLP discards an instance whenever a call on it fails other than by an error the
+plugin reports, such as by exceeding a limit or trapping, and starts new ones as
+it needs them.
 
 ## Logging
 
@@ -550,8 +555,8 @@ either way: call `plugin.Serve` from `main`, which a WASI reactor never runs.
 func main() { plugin.Serve() }
 ```
 
-Build it as a static executable for the deployment's image, which has no C
-library of its own to link against:
+Build it as a static executable, which needs no library from the deployment's
+image:
 
 ```sh
 CGO_ENABLED=0 GOOS=linux go build -o acme .
@@ -695,8 +700,8 @@ A response carries either a result or an error:
 ```
 
 Error codes `invalid_request`, `unknown_method`, `internal`, `state_mismatch`,
-`origin_not_approved`, `http_failed` and `not_sent` are shared, as are RFC
-8628's `authorization_pending`, `slow_down`, `access_denied` and
+`origin_not_approved`, `http_failed`, `invalid_grant` and `not_sent` are shared,
+as are RFC 8628's `authorization_pending`, `slow_down`, `access_denied` and
 `expired_token` for `grant_poll`; a plugin may report codes of its own.
 
 ### Calls for a provider
