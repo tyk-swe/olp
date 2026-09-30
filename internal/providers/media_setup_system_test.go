@@ -24,7 +24,7 @@ import (
 
 // Exercise the public setup, declaration, certification, and publication APIs.
 // Only OpenAI's network transport is replaced; no provider or route is seeded.
-func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
+func TestIntegrationMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	adminURL := os.Getenv("OLP_TEST_DATABASE_ADMIN_URL")
 	if adminURL == "" {
 		t.Fatal("OLP_TEST_DATABASE_ADMIN_URL is required; run make integration")

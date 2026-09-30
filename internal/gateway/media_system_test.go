@@ -468,7 +468,7 @@ const videoCreateContentType = "multipart/form-data; boundary=video-boundary"
 // TestVideoJobLifecycleEndToEnd covers the media job journey end to end:
 // durable create, client-facing refresh, content download, two-phase delete,
 // idempotent re-delete, and session-authorized management views.
-func TestVideoJobLifecycleEndToEnd(t *testing.T) {
+func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	ctx := t.Context()
 
@@ -577,7 +577,7 @@ func TestVideoJobLifecycleEndToEnd(t *testing.T) {
 
 // TestMediaJobManagementSessionAuthorized checks the console's read surface:
 // session-only, metadata-only, etag-carrying, and lifecycle-aware.
-func TestMediaJobManagementSessionAuthorized(t *testing.T) {
+func TestIntegrationMediaJobManagementSessionAuthorized(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	ctx := t.Context()
 
@@ -680,7 +680,7 @@ func TestMediaJobManagementSessionAuthorized(t *testing.T) {
 // TestVideoDeleteAmbiguityRetainsIntent covers the injected-finalize-failure
 // path: the upstream delete lands, the tombstone write fails, the client sees
 // a retryable 503 and the row stays delete-pending for a second attempt.
-func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
+func TestIntegrationVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	ctx := t.Context()
 
@@ -744,7 +744,7 @@ func TestVideoDeleteAmbiguityRetainsIntent(t *testing.T) {
 // failure: the attach write fails after the provider accepted the job, so the
 // gateway persists cleanup intent, deletes the orphan upstream, and only then
 // answers 503.
-func TestVideoCreateAttachFailureCompensates(t *testing.T) {
+func TestIntegrationVideoCreateAttachFailureCompensates(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	ctx := t.Context()
 
@@ -819,7 +819,7 @@ func TestVideoCreateAttachFailureCompensates(t *testing.T) {
 
 // TestMediaReconciliationRefreshesAndExpires covers the worker-side state
 // machine: queued jobs refresh upstream, expired jobs are deleted.
-func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
+func TestIntegrationMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	ctx := t.Context()
 
@@ -917,7 +917,7 @@ func TestMediaReconciliationRefreshesAndExpires(t *testing.T) {
 // TestMediaJobCredentialRevocation covers the revocation guard: historical
 // credentials keep working while retained, and an explicit revocation always
 // wins — the job records a durable class instead of touching upstream.
-func TestMediaJobCredentialRevocation(t *testing.T) {
+func TestIntegrationMediaJobCredentialRevocation(t *testing.T) {
 	f := seedMediaFixture(t, "api_key", true)
 	ctx := t.Context()
 
@@ -1034,7 +1034,7 @@ func TestMediaJobCredentialRevocation(t *testing.T) {
 
 // TestVideoConcurrentCreates verifies reservation+attach stays correct under
 // parallel load and every create binds a distinct upstream identity.
-func TestVideoConcurrentCreates(t *testing.T) {
+func TestIntegrationVideoConcurrentCreates(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 
 	const workers = 8
@@ -1090,7 +1090,7 @@ func TestVideoConcurrentCreates(t *testing.T) {
 
 // TestVideoMultipartBounds exercises the upload boundary over live HTTP:
 // oversized bodies and excessive parts fail predictably and stage nothing.
-func TestVideoMultipartBounds(t *testing.T) {
+func TestIntegrationVideoMultipartBounds(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 
 	// A video upload past the file bound is refused before touching upstream.

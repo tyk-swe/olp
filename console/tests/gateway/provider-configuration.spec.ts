@@ -1,3 +1,4 @@
+import { manage } from '../helpers/management';
 import { expect, test, type Page } from '../playwright';
 import { signInGatewayOwner as signIn } from './signIn';
 
@@ -20,25 +21,11 @@ async function management(
   source?: string,
   match?: string
 ) {
-  return page.evaluate(
-    async ({ method, path, source, match }) => {
-      const session = await fetch('/api/v1/sessions/current').then((response) =>
-        response.json()
-      );
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': session.csrf_token
-      };
-      if (match) {
-        const current = await fetch(match).then((response) => response.json());
-        headers['If-Match'] = `"${current.etag}"`;
-      }
-      if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();
-      const response = await fetch(path, { method, headers, body: source });
-      return { status: response.status, source: await response.text() };
-    },
-    { method, path, source, match }
-  );
+  return manage(page, method, path, {
+    source,
+    match,
+    idempotency: method === 'POST' ? crypto.randomUUID() : undefined
+  });
 }
 function preservesCorpus(source: string) {
   const compact = source.replace(/\s/g, '');

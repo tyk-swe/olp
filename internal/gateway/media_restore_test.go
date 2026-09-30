@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
-func TestReplacementRestoreRetainsMediaJobsAndRotatedCredentials(t *testing.T) {
+func TestIntegrationReplacementRestoreRetainsMediaJobsAndRotatedCredentials(t *testing.T) {
 	for _, name := range []string{"OLP_TEST_RESTORE_VALKEY_URL", "OLP_TEST_BINARY"} {
 		if os.Getenv(name) == "" {
 			t.Fatalf("%s is required; run make integration", name)

@@ -22,10 +22,9 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           services: false
-      - run: make check
-      - run: ./scripts/check-contracts.sh
+      - run: make check GO_TEST_ARGS='-race -count=1'
+      - run: ./scripts/check-contracts.sh --already-generated
       - run: node scripts/check-release-version.mjs
-      - run: make test-race
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

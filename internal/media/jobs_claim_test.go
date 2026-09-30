@@ -397,7 +397,7 @@ func strPtr(value string) *string { return &value }
 
 // Worker A claims a job; ownership moves to B; A's lifecycle transition is
 // refused without changing B's row or lease.
-func TestStaleClaimCannotTransitionLifecycle(t *testing.T) {
+func TestIntegrationStaleClaimCannotTransitionLifecycle(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 	old := time.Now().Add(-10 * time.Minute)
@@ -431,7 +431,7 @@ func TestStaleClaimCannotTransitionLifecycle(t *testing.T) {
 
 // Worker A starts a poll; B reclaims and persists newer state; A's delayed
 // successful response cannot overwrite it.
-func TestStaleClaimCannotApplyPollResult(t *testing.T) {
+func TestIntegrationStaleClaimCannotApplyPollResult(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 	polled := time.Now().Add(-time.Minute)
@@ -488,7 +488,7 @@ func TestStaleClaimCannotApplyPollResult(t *testing.T) {
 
 // A delete confirmation arriving after ownership moved to B can neither
 // finalize the job nor release B's claim.
-func TestStaleClaimCannotFinalizeOrReleaseDelete(t *testing.T) {
+func TestIntegrationStaleClaimCannotFinalizeOrReleaseDelete(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 	job := f.insertJob(t, claimJobSeed{
@@ -541,7 +541,7 @@ func TestStaleClaimCannotFinalizeOrReleaseDelete(t *testing.T) {
 
 // Claim loss at completion is a benign handoff; genuine persistence failures
 // keep their existing reporting.
-func TestCompletionClassifiesClaimLossAsHandoff(t *testing.T) {
+func TestIntegrationCompletionClassifiesClaimLossAsHandoff(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 
@@ -601,7 +601,7 @@ func TestCompletionClassifiesClaimLossAsHandoff(t *testing.T) {
 
 // A poll arriving after the delete completed must not rotate the tombstone's
 // ETag or rewrite its metadata; content stays unavailable.
-func TestLatePollLeavesTombstoneUntouched(t *testing.T) {
+func TestIntegrationLatePollLeavesTombstoneUntouched(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 	progress := float32(100)
@@ -660,7 +660,7 @@ func TestLatePollLeavesTombstoneUntouched(t *testing.T) {
 // A current owner still drives the full lifecycle: poll refresh, expiry
 // delete, ambiguous-create marking, post-create cleanup, pending-delete
 // confirmation, and reclaim after an unfinished lease.
-func TestClaimedOwnerCompletesReconciliation(t *testing.T) {
+func TestIntegrationClaimedOwnerCompletesReconciliation(t *testing.T) {
 	f := seedClaimFixture(t)
 	ctx := t.Context()
 	stalePoll := time.Now().Add(-time.Minute)

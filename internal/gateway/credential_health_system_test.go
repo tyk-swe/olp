@@ -22,7 +22,7 @@ func (r *grantGenerationRuntime) GrantGeneration(string) int64 { return r.genera
 
 // One replica may still be recording a refusal of the old token after another
 // has polled its replacement. A shared cooldown must follow the refused token.
-func TestGrantCooldownsFollowGenerationsAcrossGateways(t *testing.T) {
+func TestIntegrationGrantCooldownsFollowGenerationsAcrossGateways(t *testing.T) {
 	limiter := mediaLimiter(t)
 	log := slog.New(slog.DiscardHandler)
 	provider, credential := uuid.NewString(), uuid.NewString()

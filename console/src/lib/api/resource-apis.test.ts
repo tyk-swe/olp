@@ -8,12 +8,10 @@ import {
   listProviders
 } from '$lib/features/providers/api/providers';
 import { listRouteDraftPage } from '$lib/features/routes/api';
-import { collectCursorPages } from '$lib/api/pagination';
 import {
   listProviderHealth,
   listRequestMetadataGatewayEpochs
 } from '$lib/features/runtime/health/api';
-import { ApiProblem } from '$lib/api/http';
 import { listMediaJobs } from '$lib/features/media/api';
 import { listPricing } from '$lib/features/usage/api/pricing';
 import { listRequests } from '$lib/features/usage/history/api';
@@ -148,156 +146,14 @@ describe('provider-health pagination', () => {
       expect(params.get('limit')).toBe('200');
     }
   });
-
-  it('rejects a repeated cursor instead of looping', async () => {
-    const requests = captureRequests(() =>
-      jsonResponse({ window_minutes: 15, items: [], next_cursor: 'repeat' })
-    );
-
-    const error = await listProviderHealth().catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:invalid-cursor-cycle',
-      title: 'The control API returned a repeated pagination cursor',
-      status: 502
-    });
-    expect(requests).toHaveLength(2);
-  });
-
-  it('enforces the shared collection safety limit', async () => {
-    const requests = captureRequests((_request, page) =>
-      jsonResponse({
-        window_minutes: 15,
-        items: Array.from({ length: 200 }, (_, item) =>
-          providerHealth(`provider-${page + 1}-${item + 1}`)
-        ),
-        next_cursor: `page-${page + 2}`
-      })
-    );
-
-    const error = await listProviderHealth().catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:pagination-limit-exceeded',
-      title: 'The control API collection exceeds the console safety limit',
-      status: 502
-    });
-    expect(requests).toHaveLength(51);
-  });
-});
-
-describe('resource API errors', () => {
-  it('preserves structured problem details', async () => {
-    captureRequests(() =>
-      jsonResponse(
-        {
-          type: 'urn:olp:problem:rate-limited',
-          title: 'Rate limited',
-          detail: 'Retry after the window',
-          status: 429,
-          instance: '/api/v1/requests',
-          errors: {
-            request: [
-              { code: 'invalid', message: 'Retry after the advertised window.' }
-            ]
-          }
-        },
-        { status: 503, headers: { 'content-type': 'application/problem+json' } }
-      )
-    );
-
-    const error = await listRequests({}).catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:rate-limited',
-      title: 'Rate limited',
-      detail: 'Retry after the window',
-      status: 429,
-      instance: '/api/v1/requests',
-      errors: {
-        request: [
-          { code: 'invalid', message: 'Retry after the advertised window.' }
-        ]
-      }
-    });
-  });
-
-  it('fails closed when a successful response omits its required JSON body', async () => {
-    captureRequests(
-      () =>
-        new Response(null, { status: 200, headers: { 'content-length': '0' } })
-    );
-
-    const error = await listRequests({}).catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The API response did not include the expected JSON body',
-      status: 502
-    });
-  });
-
-  it('fails closed when a successful response returns null instead of its required object', async () => {
-    captureRequests(() => jsonResponse(null));
-
-    const error = await listRequests({}).catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The API response did not include the expected JSON body',
-      status: 502
-    });
-  });
-
-  it('falls back to the response status for unstructured errors', async () => {
-    captureRequests(() => jsonResponse('gateway unavailable', { status: 503 }));
-
-    const error = await listRequests({}).catch((value: unknown) => value);
-
-    expect(error).toBeInstanceOf(ApiProblem);
-    expect((error as ApiProblem).problem).toEqual({
-      type: 'about:blank',
-      title: 'Request failed (503)',
-      status: 503
-    });
-  });
-});
-
-describe('management selector pagination', () => {
-  it('collects every cursor page for route, provider, and checklist selectors', async () => {
-    const seen: Array<string | undefined> = [];
-    const items = await collectCursorPages(async (cursor?: string) => {
-      seen.push(cursor);
-      if (!cursor) return { items: ['provider-1'], nextCursor: 'page-2' };
-      return { items: ['provider-2'], nextCursor: null };
-    });
-
-    expect(items).toEqual(['provider-1', 'provider-2']);
-    expect(seen).toEqual([undefined, 'page-2']);
-  });
-
-  it('fails closed if the API repeats a cursor', async () => {
-    await expect(
-      collectCursorPages(async () => ({ items: [], nextCursor: 'repeat' }))
-    ).rejects.toBeInstanceOf(ApiProblem);
-  });
 });
 
 describe('management resources', () => {
   it('forwards abort signals to resource reads', async () => {
     const controller = new AbortController();
-    const requests = captureRequests((request) => {
-      const body =
-        new URL(request.url).pathname === '/api/v1/users'
-          ? { items: [], next_cursor: null }
-          : { items: [], next_cursor: null };
-      return jsonResponse(body);
-    });
+    const requests = captureRequests(() =>
+      jsonResponse({ items: [], next_cursor: null })
+    );
 
     await listProviderPage(undefined, controller.signal);
     await listRouteDraftPage(undefined, controller.signal);

@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-func TestVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
+func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 	for _, scope := range []string{"key", "provider", "credential"} {
 		t.Run(scope, func(t *testing.T) {
 			limiter := mediaLimiter(t)
@@ -97,7 +97,7 @@ func TestVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 	}
 }
 
-func TestVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
+func TestIntegrationVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 	for _, scope := range []string{"key", "provider", "credential"} {
 		for _, operation := range []string{"list", "get", "content", "delete"} {
 			t.Run(scope+"/"+operation, func(t *testing.T) {
@@ -252,7 +252,7 @@ func mediaLimiter(t *testing.T) *limits.Limiter {
 	return limiter
 }
 
-func TestMediaKeySettlementChargesDispatchedRequests(t *testing.T) {
+func TestIntegrationMediaKeySettlementChargesDispatchedRequests(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		name := "unary"
 		if streaming {
@@ -308,7 +308,7 @@ func TestMediaKeySettlementChargesDispatchedRequests(t *testing.T) {
 	}
 }
 
-func TestMediaStreamHoldsTargetConcurrencyUntilCompletion(t *testing.T) {
+func TestIntegrationMediaStreamHoldsTargetConcurrencyUntilCompletion(t *testing.T) {
 	for _, scope := range []string{"provider", "credential"} {
 		t.Run(scope, func(t *testing.T) {
 			limiter := mediaLimiter(t)

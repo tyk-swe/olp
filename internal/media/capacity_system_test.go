@@ -22,7 +22,7 @@ func (generatedMedia) Read(p []byte) (int, error) { clear(p); return len(p), nil
 // Exercise full default-size uploads without constructing payload-sized test
 // buffers. Hold all artifacts concurrently, read slowly, then mass-disconnect
 // another upload wave and require every reservation and file to be released.
-func TestMediaCapacityWithSlowReadersAndMassDisconnects(t *testing.T) {
+func TestIntegrationMediaCapacityWithSlowReadersAndMassDisconnects(t *testing.T) {
 	const size int64 = 64 << 20
 	const concurrency = 8
 	spool := testSpool(t, DefaultCapacityBytes)
