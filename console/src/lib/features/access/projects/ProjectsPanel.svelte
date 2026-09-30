@@ -196,7 +196,9 @@
   </form>
   {#if createError}<p class="inline-problem" role="alert">{createError}</p>{/if}
 
-  {#if projects.isPending}<p role="status">Loading projects…</p>
+  {#if projects.isPending}<p class="inline-status" role="status">
+      Loading projects…
+    </p>
   {:else if projects.isError}<div class="inline-problem" role="alert">
       Projects are unavailable.
       <button
@@ -279,7 +281,9 @@
         </p>{/if}
       {#if memberNotice}<p class="notice" role="status">{memberNotice}</p>{/if}
 
-      {#if members.isPending}<p role="status">Loading members…</p>
+      {#if members.isPending}<p class="inline-status" role="status">
+          Loading members…
+        </p>
       {:else if members.isError}<div class="inline-problem" role="alert">
           Members are unavailable.
           <button

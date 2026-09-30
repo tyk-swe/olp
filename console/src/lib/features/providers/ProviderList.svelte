@@ -83,16 +83,21 @@
   </ReadOnlyNote>
 {/if}
 
-<label for="provider-search">Search connections</label><input
-  id="provider-search"
-  bind:value={listState.search}
-  oninput={() => {
-    if (listState.search === '') search.applyNow();
-    else search.schedule();
-  }}
-  placeholder="Name or vendor"
-  type="search"
-/>
+<div class="toolbar" role="search">
+  <label class="search"
+    ><span class="sr-only">Search connections</span><input
+      id="provider-search"
+      class="filter-control"
+      type="search"
+      bind:value={listState.search}
+      oninput={() => {
+        if (listState.search === '') search.applyNow();
+        else search.schedule();
+      }}
+      placeholder="Name or vendor"
+    /></label
+  >
+</div>
 {#if canManage}<ProviderBulkActions
     {selected}
     onChanged={async () => {
@@ -209,22 +214,19 @@
     border-bottom-color: var(--border-hairline);
     background: var(--surface-raised);
   }
-  #provider-search {
+  .search {
+    flex: 1 1 auto;
     max-width: 30rem;
-    display: block;
-    margin: 0.5rem 0 1rem;
   }
-  .updating {
-    margin: 0 0 0.5rem;
-    color: var(--foreground-muted);
-    font-size: var(--text-body-sm);
+  .search input {
+    width: 100%;
   }
   .connector-name {
     display: block;
     color: var(--foreground-muted);
   }
   .provider-table {
-    margin-top: 1.5rem;
+    margin-top: 0.75rem;
   }
   .updating + .provider-table {
     margin-top: 0;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { page } from '$app/state';
 </script>
 
@@ -16,7 +17,9 @@
         type="button"
         onclick={() => window.location.reload()}>Reload page</button
       >
-      <a class="button button-secondary" href="/">Return to overview</a>
+      <a class="button button-secondary" href={resolve('/')}
+        >Return to overview</a
+      >
     </div>
   </section>
 </main>

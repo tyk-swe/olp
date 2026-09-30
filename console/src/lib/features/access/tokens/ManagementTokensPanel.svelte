@@ -260,7 +260,8 @@
           />Selected projects</label
         >
         {#if !allProjects}
-          {#if projects.isPending}<span role="status">Loading projects…</span
+          {#if projects.isPending}<span class="inline-status" role="status"
+              >Loading projects…</span
             >{:else if projects.isError}<span
               class="inline-problem"
               role="alert"

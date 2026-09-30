@@ -142,7 +142,10 @@
         type="button"
         onclick={() => credentials.refetch()}>Retry</button
       >
-    </div>{:else if credentials.isPending}<p role="status">
+    </div>{:else if credentials.isPending}<p
+      class="inline-status"
+      role="status"
+    >
       Loading versions…
     </p>{:else}<ul class="credential-list">
       {#each credentials.data ?? [] as credential (credential.id)}{@const lapsed =

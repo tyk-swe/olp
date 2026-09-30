@@ -335,7 +335,9 @@
     </form>
   {/if}
 
-  {#if destinations.isPending}<span role="status">Loading destinations…</span>
+  {#if destinations.isPending}<span class="inline-status" role="status"
+      >Loading destinations…</span
+    >
   {:else if destinations.isError}<span class="inline-problem" role="alert"
       >Destinations are unavailable.
       <button
@@ -522,7 +524,9 @@
     </form>
   {/if}
 
-  {#if rules.isPending}<span role="status">Loading rules…</span>
+  {#if rules.isPending}<span class="inline-status" role="status"
+      >Loading rules…</span
+    >
   {:else if rules.isError}<span class="inline-problem" role="alert"
       >Rules are unavailable.
       <button class="text-button" type="button" onclick={() => rules.refetch()}
@@ -574,7 +578,9 @@
   {/if}
 
   <h3>Deliveries</h3>
-  {#if deliveries.isPending}<span role="status">Loading deliveries…</span>
+  {#if deliveries.isPending}<span class="inline-status" role="status"
+      >Loading deliveries…</span
+    >
   {:else if deliveries.isError}<span class="inline-problem" role="alert"
       >Deliveries are unavailable.
       <button

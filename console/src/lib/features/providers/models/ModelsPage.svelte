@@ -356,11 +356,6 @@
   .toolbar {
     gap: 1rem;
   }
-  .updating {
-    margin: 0 0 0.5rem;
-    color: var(--foreground-muted);
-    font-size: var(--text-body-sm);
-  }
   .search {
     flex: 1;
   }

@@ -47,7 +47,8 @@
 
 <div class="form-field project-scope">
   <label for={id}>Project</label>
-  {#if memberships.isPending}<span role="status">Loading projects…</span
+  {#if memberships.isPending}<span class="inline-status" role="status"
+      >Loading projects…</span
     >{:else if memberships.isError}<span class="field-error" role="alert"
       >Projects are unavailable.
       <button

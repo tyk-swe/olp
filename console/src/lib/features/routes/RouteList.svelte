@@ -280,11 +280,6 @@
   .compact {
     min-height: 6rem;
   }
-  .updating {
-    margin: 0 0 0.5rem;
-    color: var(--foreground-muted);
-    font-size: var(--text-body-sm);
-  }
   .route-section {
     margin-top: 1.5rem;
   }
