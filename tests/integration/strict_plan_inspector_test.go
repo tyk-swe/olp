@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -85,6 +86,7 @@ func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *test
 	before := calls.Load()
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-query-inspection")), 200)
 	request := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "private-query-input"}}}}}
+	var draftDecision map[string]any
 	for _, published := range []bool{false, true} {
 		input := map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary", "seed": "query", "dialect": "gemini-generate-content", "request": request, "query_settings": map[string]any{"$xgafv": "2"}}
 		var decision map[string]any
@@ -92,9 +94,13 @@ func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *test
 			delete(input, "request")
 			input["operation"] = map[string]any{"operation": "generation", "route": "query-inspection", "request": request}
 			decision = h.list(owner, "POST", "/api/v1/routing/simulate", input, nil, 200)[0].(map[string]any)
+			if !reflect.DeepEqual(draftDecision, decision) {
+				t.Fatalf("native query inspection differs: draft=%v published=%v", draftDecision, decision)
+			}
 		} else {
 			response := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", input, nil, 200)
 			decision = response["targets"].([]any)[0].(map[string]any)["decision"].(map[string]any)
+			draftDecision = decision
 		}
 		inspection := decision["interaction"].(map[string]any)
 		if decision["eligible"] != true || inspection["status"] != "admitted" || inspectorFields(t, decision)["/model"] != nil {

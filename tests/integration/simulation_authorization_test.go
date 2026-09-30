@@ -5,6 +5,7 @@ package integration_test
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -71,25 +72,37 @@ func TestRoutingSimulationMatchesInferenceKeyAuthorization(t *testing.T) {
 			calls := up.chats.Load()
 			eligible := tc.status == http.StatusOK
 			for _, mode := range []string{"unary", "streaming"} {
-				decisions := h.list(owner, "POST", "/api/v1/routing/simulate", map[string]any{
-					"operation": map[string]any{"operation": "generation", "request": map[string]any{"route": routeSlug}},
-					"surface":   "openai", "mode": mode, "api_key_id": key["id"],
-				}, nil, 200)
-				if len(decisions) != 1 {
-					t.Fatalf("missing decisions: %v", decisions)
-				}
-				decision := decisions[0].(map[string]any)
-				var attempt, reason any
-				if eligible {
-					attempt = float64(1)
-				} else {
-					reason = "api_key_not_authorized"
-					if tc.route == "other-route" {
-						reason = "route_not_allowed_for_key"
+				for _, native := range []bool{false, true} {
+					var request any
+					inspectionStatus := "not_inspected"
+					if native {
+						request = map[string]any{"model": routeSlug, "stream": mode == "streaming", "messages": []any{map[string]any{"role": "user", "content": "private-simulation-input"}}}
+						inspectionStatus = "not_evaluated"
+						if eligible {
+							inspectionStatus = "transformed"
+						}
 					}
-				}
-				if decision["eligible"] != eligible || decision["attempt"] != attempt || decision["reason"] != reason {
-					t.Fatalf("simulation disagrees with key authorization: %v", decision)
+					fields := map[string]any{"mode": mode, "api_key_id": key["id"]}
+					draftDecision := inspectorSimulation(t, h, owner, draft, false, request, fields)
+					decision := inspectorSimulation(t, h, owner, draft, true, request, fields)
+					if !reflect.DeepEqual(draftDecision, decision) {
+						t.Fatalf("%s native=%t: draft=%v published=%v", mode, native, draftDecision, decision)
+					}
+					var attempt, reason any
+					if eligible {
+						attempt = float64(1)
+					} else {
+						reason = "api_key_not_authorized"
+						if tc.route == "other-route" {
+							reason = "route_not_allowed_for_key"
+						}
+					}
+					if decision["eligible"] != eligible || decision["attempt"] != attempt || decision["reason"] != reason {
+						t.Fatalf("simulation disagrees with key authorization: %v", decision)
+					}
+					if decision["interaction"].(map[string]any)["status"] != inspectionStatus {
+						t.Fatalf("inspection did not respect key authorization: %v", decision)
+					}
 				}
 			}
 			if up.chats.Load() != calls {

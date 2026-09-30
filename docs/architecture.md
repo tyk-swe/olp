@@ -72,6 +72,18 @@ effects, and stream cancellation on unmount. The page owns presentation constant
 markup, and styles. Strict clients, native operations, audio translation, and
 realtime traces keep their own operation-specific behavior.
 
+Provider routing stays in `internal/runtime`: `PlanRequest` resolves policy
+and budget, evaluates candidates, orders them stably, and assembles decisions.
+Published eligibility and source constraints precede semantic preparation;
+effective request constraints follow successful preparation. The plan retains
+eligible target candidates, while preview attempt numbers and budget exhaustion
+apply to credential slots. Excluded credentials do not spend the budget.
+`internal/gateway` supplies common selection authority and measurements through
+its explicit runtime interface, with operation-specific preparation callbacks.
+`internal/routes` shares one inspection runner between draft and published
+simulations; their handlers own loading, authorization and response formats.
+Inspection never dispatches upstream or reserves provider state.
+
 Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`
 owns shared attempt progression, reservations, settlement, health and failover
 for canonical inference and ordinary media. `executor.go` and `media.go` retain

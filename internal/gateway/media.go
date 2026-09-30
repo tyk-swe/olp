@@ -265,58 +265,58 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	// encoded call for the metadata check so require_parameters cannot overlook
 	// a default or an explicit native null.
 	candidates := make(map[string][]string, len(route.Targets))
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
-		Accept: func(p runtime.Provider, t runtime.Target) error {
-			if !connectorsSupports(p, request.Op, x.mode) {
-				return errors.New("connector capability unavailable")
-			}
-			if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
-				return errors.New("video lifecycle capabilities unavailable")
-			}
-			encode := media.EncodeConfigured
-			if route.Fidelity.Strict() {
-				encode = media.EncodeStrictConfigured
-			}
-			call, effective, e := encode(request, p.Connector(), t.ProviderModel)
-			if e != nil {
-				semantic = errors.New(e.Message)
+	options := s.selectionOptions(x)
+	options.Parameters = mediaParameterNames(request)
+	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+		if !connectorsSupports(p, request.Op, x.mode) {
+			return errors.New("connector capability unavailable")
+		}
+		if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
+			return errors.New("video lifecycle capabilities unavailable")
+		}
+		encode := media.EncodeConfigured
+		if route.Fidelity.Strict() {
+			encode = media.EncodeStrictConfigured
+		}
+		call, effective, e := encode(request, p.Connector(), t.ProviderModel)
+		if e != nil {
+			semantic = errors.New(e.Message)
+			return semantic
+		}
+		if route.Fidelity.Strict() {
+			template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
+			if !ok {
+				semantic = errors.New("compiled strict media contract unavailable")
 				return semantic
 			}
-			if route.Fidelity.Strict() {
-				template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
-				if !ok {
-					semantic = errors.New("compiled strict media contract unavailable")
-					return semantic
-				}
-				if _, err := bindMediaContract(template, request, call, effective); err != nil {
-					semantic = err
-					return err
-				}
+			if _, err := bindMediaContract(template, request, call, effective); err != nil {
+				semantic = err
+				return err
 			}
-			if p.ProfileID != "" {
-				parameters, err := mediaOutboundParameterNames(call, effective)
-				if err != nil {
-					semantic = err
-					return err
-				}
-				candidates[t.ID] = parameters
+		}
+		if p.ProfileID != "" {
+			parameters, err := mediaOutboundParameterNames(call, effective)
+			if err != nil {
+				semantic = err
+				return err
 			}
-			return nil
-		},
-		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
-			if p.ProfileID == "" {
-				// Automatic providers keep their codec's null/default wire behavior;
-				// only explicit profiles define an exact effective native source.
-				return mediaParameterNames(request), nil
-			}
-			parameters, ok := candidates[t.ID]
-			if !ok {
-				return nil, nil
-			}
-			return parameters, nil
-		}})
+			candidates[t.ID] = parameters
+		}
+		return nil
+	}
+	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+		if p.ProfileID == "" {
+			// Automatic providers keep their codec's null/default wire behavior;
+			// only explicit profiles define an exact effective native source.
+			return mediaParameterNames(request), nil
+		}
+		parameters, ok := candidates[t.ID]
+		if !ok {
+			return nil, nil
+		}
+		return parameters, nil
+	}
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
 		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {

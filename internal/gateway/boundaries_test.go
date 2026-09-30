@@ -8,8 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func TestBodyLimitIncludesGzipWireBytes(t *testing.T) {
@@ -60,19 +58,18 @@ func TestBodyLimitIncludesGzipWireBytes(t *testing.T) {
 }
 
 func TestRoutingOverrideIsExactlyOneObject(t *testing.T) {
-	route := &runtime.Route{MaxAttempts: 3}
-	for _, raw := range []string{"", "null", "{}]", "{}}", "{} {}", "[]", `{"unexpected":true}`, `{"max_attempts":0}`, `{"max_attempts":4}`} {
+	for _, raw := range []string{"", "null", "{}]", "{}}", "{} {}", "[]", `{"unexpected":true}`, `{"max_attempts":0}`} {
 		r := httptest.NewRequest(http.MethodPost, "/", nil)
 		r.Header.Set(routingHeader, raw)
-		if _, err := attemptBudget(r, route); err == nil {
+		if _, err := routingPreferences(r); err == nil {
 			t.Errorf("accepted %s", raw)
 		}
 	}
-	for raw, want := range map[string]int{"{}  ": 3, `{"strategy":"weighted","max_attempts":2}`: 2} {
+	for _, raw := range []string{"{}  ", `{"strategy":"weighted","max_attempts":2}`} {
 		r := httptest.NewRequest(http.MethodPost, "/", nil)
 		r.Header.Set(routingHeader, raw)
-		if got, err := attemptBudget(r, route); err != nil || got != want {
-			t.Errorf("%s: %d, %v", raw, got, err)
+		if got, err := routingPreferences(r); err != nil || got == nil {
+			t.Errorf("%s: %v, %v", raw, got, err)
 		}
 	}
 }

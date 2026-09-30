@@ -131,21 +131,21 @@ func (s *Server) prepareUnary(x *execution) *Error {
 		}
 	}
 	var incompatible error
-	options := runtime.SelectionOptions{KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
-		Accept: func(p runtime.Provider, t runtime.Target) error {
-			_, err := x.unaryPlan(&p, t.ProviderModel)
-			if err != nil {
-				incompatible = err
-			}
-			return err
-		},
-		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
-			plan, err := x.unaryPlan(&p, t.ProviderModel)
-			if err != nil {
-				return nil, nil
-			}
-			return plan.Parameters(), nil
-		}}
+	options := s.selectionOptions(x)
+	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+		_, err := x.unaryPlan(&p, t.ProviderModel)
+		if err != nil {
+			incompatible = err
+		}
+		return err
+	}
+	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+		plan, err := x.unaryPlan(&p, t.ProviderModel)
+		if err != nil {
+			return nil, nil
+		}
+		return plan.Parameters(), nil
+	}
 	plan, err := runtime.PlanRequest(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {
 		return requestError(err)
