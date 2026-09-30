@@ -179,6 +179,7 @@
         <code>{endpoint}</code>
         <button
           type="button"
+          class:copied
           onclick={copyEndpoint}
           aria-label="Copy OpenAI-compatible base URL"
         >
@@ -347,6 +348,7 @@
   }
 
   .status-icon {
+    position: relative;
     display: grid;
     width: 2.25rem;
     height: 2.25rem;
@@ -355,14 +357,37 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
     background: transparent;
+    transition:
+      border-color var(--motion),
+      color var(--motion),
+      background-color var(--motion);
   }
 
   .status-icon.neutral {
     color: var(--foreground-muted);
   }
 
+  /* A ready subsystem lights its icon and carries a live ping in the corner. */
   .status-icon.ready {
-    color: var(--metric);
+    border-color: color-mix(in srgb, var(--signal) 45%, var(--border));
+    background: var(--accent-soft);
+    color: var(--signal);
+  }
+
+  .status-icon.ready::before,
+  .status-icon.ready::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+  }
+
+  .status-icon.ready::after {
+    animation: ping 2.4s var(--ease-out) infinite;
   }
 
   .status-card p {
@@ -441,17 +466,39 @@
     margin-top: 1rem;
   }
 
+  /* The endpoint reads as a terminal line: a signal prompt before the URL and
+     a blinking block caret after it. Both are generated content, hidden from
+     assistive technology, so the element's text is only the URL. */
   .endpoint-row code {
     min-width: 0;
     flex: 1;
     overflow-wrap: anywhere;
     padding: 0.75rem;
+    border: 1px solid var(--border-hairline);
     border-radius: var(--radius-control);
-    background: var(--code-bg);
+    background: var(--canvas);
     color: var(--code-foreground);
     font-family: var(--font-mono);
     font-size: var(--text-caption);
     white-space: normal;
+  }
+
+  .endpoint-row code::before {
+    content: '>';
+    content: '>' / '';
+    margin-right: 0.6em;
+    color: var(--signal);
+  }
+
+  .endpoint-row code::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.1em;
+    margin-left: 0.3em;
+    background: var(--signal);
+    vertical-align: text-bottom;
+    animation: caret 1.1s steps(1) infinite;
   }
 
   .recent-table {
@@ -469,12 +516,26 @@
     font-size: var(--text-body-sm);
     transition:
       border-color var(--motion),
+      background-color var(--motion),
       color var(--motion);
   }
 
   .endpoint-row button:hover {
-    border-color: var(--foreground-hover);
+    border-color: var(--signal);
     color: var(--foreground-hover);
+  }
+
+  .endpoint-row button.copied {
+    border-color: var(--signal);
+    background: var(--accent-soft);
+    color: var(--foreground-hover);
+    animation: copied 420ms var(--ease-out);
+  }
+
+  @keyframes copied {
+    30% {
+      box-shadow: 0 0 0 4px var(--signal-soft);
+    }
   }
 
   .endpoint-card > a,
@@ -505,6 +566,16 @@
     gap: 1rem;
   }
 
+  .privacy-mark,
+  .empty-state > span {
+    background: radial-gradient(
+        circle at 1px 1px,
+        color-mix(in srgb, var(--foreground) 12%, transparent) 1px,
+        transparent 0
+      )
+      0 0 / 5px 5px;
+  }
+
   .privacy-mark {
     display: grid;
     width: 2.25rem;
@@ -513,7 +584,7 @@
     place-items: center;
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
-    color: var(--foreground-muted);
+    color: var(--signal);
   }
 
   .activity {

@@ -10,6 +10,7 @@
   } from '$lib/features/access/session/authorization';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import type { IconName } from '$lib/components/icons';
+  import { slidingIndicator } from '$lib/components/indicator';
 
   type NavigationItem = {
     label: string;
@@ -205,7 +206,10 @@
 
 {#if variant === 'bar'}
   <nav class="bar" aria-label={label}>
-    <ul>
+    <ul
+      class="slide-indicator"
+      use:slidingIndicator={`${activeEntry?.href}|${entries.length}`}
+    >
       {#each entries as entry (entry.href)}
         {@const current = entry.href === activeEntry?.href}
         <li>
@@ -226,7 +230,7 @@
 {:else if variant === 'subnav'}
   {#if activeEntry && activeEntry.items.length > 1}
     <nav class="subnav" aria-label={activeEntry.label}>
-      <ul>
+      <ul class="slide-indicator" use:slidingIndicator={page.url.pathname}>
         {#each activeEntry.items as item (item.href)}
           <li>
             <a
@@ -284,7 +288,9 @@
       color var(--motion);
   }
 
-  /* Top bar and sub-row: text links with a hairline rule under the current one. */
+  /* Top bar and sub-row: text links over one signal indicator that slides to
+     the current page. Hovering the row steps the other links back and draws
+     a hairline under the hovered one. Every colour step stays above 4.5:1. */
   .bar,
   .subnav {
     min-width: 0;
@@ -298,18 +304,35 @@
 
   .bar a,
   .subnav a {
+    position: relative;
     display: inline-flex;
     min-height: 2.5rem;
     align-items: center;
     padding: 0 0.625rem;
     border-bottom: 2px solid transparent;
+    color: var(--foreground-subtle);
     font-size: 0.875rem;
     white-space: nowrap;
   }
 
   .bar a {
-    letter-spacing: 0.02em;
+    font-size: 0.8125rem;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .bar a::after,
+  .subnav a::after {
+    content: '';
+    position: absolute;
+    right: 0.625rem;
+    bottom: -2px;
+    left: 0.625rem;
+    height: 1px;
+    background: var(--border-strong);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 300ms var(--ease-out);
   }
 
   .subnav {
@@ -319,15 +342,31 @@
     border-top: 1px solid var(--border-hairline);
   }
 
+  .bar ul:hover a:not(:hover, .active),
+  .subnav ul:hover a:not(:hover, .active) {
+    color: var(--foreground-muted);
+  }
+
   .bar a:hover,
   .subnav a:hover {
-    color: var(--foreground);
+    color: var(--foreground-hover);
+  }
+
+  .bar a:not(.active):hover::after,
+  .subnav a:not(.active):hover::after {
+    transform: scaleX(1);
   }
 
   .bar a.active,
   .subnav a.active {
-    border-bottom-color: var(--foreground);
-    color: var(--foreground);
+    border-bottom-color: var(--signal);
+    color: var(--foreground-hover);
+  }
+
+  /* Once the shared indicator is placed, the per-link rule steps aside. */
+  .bar ul:global([data-indicator]) a.active,
+  .subnav ul:global([data-indicator]) a.active {
+    border-bottom-color: transparent;
   }
 
   /* Drawer list: grouped pages with icons under mono group labels. */
@@ -336,9 +375,24 @@
     flex-direction: column;
     gap: 1.25rem;
   }
+  /* The drawer's groups cascade in each time it opens: the dialog toggles
+     their display, which restarts the animation. */
   .nav-group {
     display: grid;
     gap: 0.25rem;
+    animation: rise 320ms var(--ease-out) 60ms backwards;
+  }
+  .nav-group:nth-child(2) {
+    animation-delay: 100ms;
+  }
+  .nav-group:nth-child(3) {
+    animation-delay: 140ms;
+  }
+  .nav-group:nth-child(4) {
+    animation-delay: 180ms;
+  }
+  .nav-group:nth-child(n + 5) {
+    animation-delay: 220ms;
   }
   .nav-label {
     margin: 0 0 0.25rem;
@@ -370,7 +424,11 @@
   }
   .list a.active {
     background: var(--surface-raised);
-    color: var(--foreground);
+    box-shadow: inset 2px 0 0 0 var(--signal);
+    color: var(--foreground-hover);
+  }
+  .list a.active :global(.icon) {
+    color: var(--signal);
   }
 
   @media (max-width: 62rem) {
@@ -391,6 +449,11 @@
     a:hover {
       outline: 1px solid LinkText;
       outline-offset: -1px;
+    }
+
+    .bar a::after,
+    .subnav a::after {
+      display: none;
     }
   }
 </style>

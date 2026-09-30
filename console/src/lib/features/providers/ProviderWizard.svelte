@@ -208,6 +208,7 @@
     list-style: none;
   }
   .steps li {
+    position: relative;
     display: flex;
     min-height: 2.75rem;
     align-items: center;
@@ -224,8 +225,9 @@
     min-width: 1.25rem;
     font-variant-numeric: tabular-nums;
   }
+  /* The current step pings and draws a signal rule along its baseline. */
   .steps li.current {
-    color: var(--foreground);
+    color: var(--foreground-hover);
   }
   .steps li.current::before {
     content: '';
@@ -234,9 +236,31 @@
     flex: none;
     border-radius: 50%;
     background: var(--signal);
+    box-shadow: 0 0 0 3px var(--signal-soft);
+  }
+  .steps li.current::after,
+  .steps li.complete::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    background: var(--signal);
+    transform-origin: left;
+    animation: step-rule 520ms var(--ease-out) backwards;
+  }
+  .steps li.complete::after {
+    background: color-mix(in srgb, var(--metric) 55%, transparent);
+    animation: none;
   }
   .steps li.complete {
     color: var(--metric);
+  }
+  @keyframes step-rule {
+    from {
+      transform: scaleX(0);
+    }
   }
   .stage {
     padding: 1.5rem;
@@ -258,6 +282,10 @@
   @media (forced-colors: active) {
     .steps li.current::before {
       border: 1px solid CanvasText;
+      background: CanvasText;
+    }
+    .steps li.current::after,
+    .steps li.complete::after {
       background: CanvasText;
     }
   }

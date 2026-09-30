@@ -5,70 +5,75 @@
   display: contents;
 }
 
-/* Factory palette. The console is dark-only: one canvas, one raised surface,
-   two hairline greys, bone text, and two functional accents (orange for live
-   status, green for positive metrics) plus a single restrained red for
-   failures. Components consume the semantic tokens below, never the raw
-   colours, so light cards can re-map them for their descendants. */
+/* Signal palette. The console is dark-only: a near-black canvas, cool
+   carbon surfaces, hairline greys and frost text, with electric blue as the
+   single brand accent (primary actions, focus, live status, indicators and
+   charts). Status colours are functional only: green for success, amber for
+   warnings, red for failures. Components consume the semantic tokens below,
+   never the raw colours, so paper cards can re-map them for their
+   descendants. Every text pair clears WCAG AA on every surface it sits on. */
 :root {
   color-scheme: dark;
-  --color-obsidian-canvas: #101010;
-  --color-carbon-lift: #161514;
-  --color-surface-card: #161514;
-  --color-surface-hover: #221f1d;
-  --color-surface-raised: #1e1c1a;
-  --color-hairline: #282624;
-  --color-ash-stroke: #3d3a39;
-  --color-graphite-mid: #4d4947;
-  --color-warm-granite: #8a8380;
-  --color-pale-stone: #b8b3b0;
-  --color-bone: #eeeeee;
-  --color-chalk: #fafafa;
-  --color-signal-orange: #ee6018;
-  --color-metric-green: #a0ca92;
-  --color-ember-red: #f07a6e;
+  --color-void: #050608;
+  --color-carbon: #0b0d12;
+  --color-carbon-subtle: #0e1117;
+  --color-carbon-raised: #12151c;
+  --color-carbon-hover: #171b24;
+  --color-hairline: #1c212b;
+  --color-stroke: #2a303c;
+  --color-graphite: #3a4251;
+  --color-steel: #8a93a3;
+  --color-mist: #b3bac7;
+  --color-frost: #e7eaf0;
+  --color-white: #f8f9fb;
+  --color-paper: #eceff4;
+  --color-paper-shade: #dde2ea;
+  --color-blue-300: #8fb3ff;
+  --color-blue-400: #5c8dff;
+  --color-blue-500: #2f64ee;
+  --color-blue-600: #2656d9;
+  --color-blue-700: #1f4fd1;
+  --color-green: #86d19b;
+  --color-amber: #f0b34a;
+  --color-red: #f07a6e;
+  --color-red-ink: #a3261f;
 
-  --canvas: var(--color-obsidian-canvas);
-  --surface: var(--color-surface-card);
-  --surface-subtle: #1c1a18;
-  --surface-hover: var(--color-surface-hover);
-  --surface-raised: var(--color-surface-raised);
-  --foreground: var(--color-bone);
-  --foreground-hover: var(--color-chalk);
-  --foreground-muted: var(--color-warm-granite);
-  --foreground-subtle: var(--color-pale-stone);
-  --border: var(--color-ash-stroke);
+  --canvas: var(--color-void);
+  --surface: var(--color-carbon);
+  --surface-subtle: var(--color-carbon-subtle);
+  --surface-hover: var(--color-carbon-hover);
+  --surface-raised: var(--color-carbon-raised);
+  --foreground: var(--color-frost);
+  --foreground-hover: var(--color-white);
+  --foreground-muted: var(--color-steel);
+  --foreground-subtle: var(--color-mist);
+  --border: var(--color-stroke);
   --border-hairline: var(--color-hairline);
-  --border-strong: var(--color-graphite-mid);
-  --accent: var(--color-bone);
-  --accent-strong: var(--color-chalk);
-  --accent-soft: var(--surface-subtle);
-  --signal: var(--color-signal-orange);
-  --metric: var(--color-metric-green);
-  --success: var(--color-metric-green);
-  --success-soft: color-mix(
-    in srgb,
-    var(--color-metric-green) 10%,
-    var(--color-obsidian-canvas)
-  );
-  --warning: var(--color-signal-orange);
-  --warning-soft: color-mix(
-    in srgb,
-    var(--color-signal-orange) 10%,
-    var(--color-obsidian-canvas)
-  );
-  --danger: var(--color-ember-red);
-  --danger-soft: color-mix(
-    in srgb,
-    var(--color-ember-red) 10%,
-    var(--color-obsidian-canvas)
-  );
-  --focus: var(--color-bone);
-  --code-bg: var(--color-carbon-lift);
-  --code-foreground: var(--color-bone);
-  --button-fill: var(--color-chalk);
-  --button-fill-hover: var(--color-bone);
-  --button-fill-text: var(--color-obsidian-canvas);
+  --border-strong: var(--color-graphite);
+  --accent: var(--color-blue-400);
+  --accent-strong: var(--color-blue-300);
+  --accent-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
+  --signal: var(--color-blue-400);
+  --signal-soft: color-mix(in srgb, var(--color-blue-400) 16%, transparent);
+  --metric: var(--color-green);
+  --caution: var(--color-amber);
+  --chart: var(--color-blue-400);
+  --success: var(--color-green);
+  --success-soft: color-mix(in srgb, var(--color-green) 10%, var(--color-void));
+  --warning: var(--color-amber);
+  --warning-soft: color-mix(in srgb, var(--color-amber) 10%, var(--color-void));
+  --danger: var(--color-red);
+  --danger-soft: color-mix(in srgb, var(--color-red) 10%, var(--color-void));
+  --focus: var(--color-blue-400);
+  --ring: color-mix(in srgb, var(--color-blue-400) 28%, transparent);
+  --code-bg: var(--color-carbon);
+  --code-foreground: var(--color-frost);
+  --button-fill: var(--color-blue-500);
+  --button-fill-hover: var(--color-blue-600);
+  --button-fill-text: #ffffff;
+  --backdrop: rgb(2 3 6 / 72%);
+  --shadow-overlay:
+    0 24px 64px -16px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 3%);
 
   --font-sans: 'Geist Variable', Geist, ui-sans-serif, system-ui, sans-serif;
   --font-mono:
@@ -83,8 +88,17 @@
   --radius-control: 3px;
   --radius-card: 10px;
   --radius-panel: 20px;
-  --motion: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --page-max: 75rem;
+
+  /* Motion: transform and opacity only, one expressive ease-out curve, and
+     short durations. `--motion` drives every hover/focus transition. The
+     reduced-motion rule below neutralises all of it. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-enter: 360ms;
+  --dur-slow: 640ms;
+  --motion: 180ms cubic-bezier(0.22, 1, 0.36, 1);
 
   font-family: var(--font-sans);
   font-synthesis: none;
@@ -137,6 +151,7 @@ html {
   background: var(--canvas);
   scroll-padding-top: 7.5rem;
   scrollbar-gutter: stable;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 body {
@@ -150,49 +165,57 @@ body {
   line-height: 1.43;
 }
 
-/* Light cards are the only bright objects on the canvas. Re-mapping the
+/* Paper cards are the only bright objects on the canvas. Re-mapping the
    semantic tokens here restyles every descendant (inputs, buttons, banners)
-   for the bone surface without per-component overrides. Orange and green stay
-   non-text inside: neither clears 4.5:1 on bone. */
+   for the paper surface without per-component overrides. Blue text uses the
+   deeper 700 step, and green and amber stay non-text inside: neither clears
+   4.5:1 on paper. */
 .card-light {
-  --canvas: var(--color-bone);
-  --surface: var(--color-bone);
-  --surface-subtle: #e2e0df;
-  --surface-hover: #e2e0df;
-  --surface-raised: var(--color-chalk);
-  --foreground: var(--color-obsidian-canvas);
-  --foreground-hover: var(--color-obsidian-canvas);
-  --foreground-muted: var(--color-graphite-mid);
-  --foreground-subtle: var(--color-graphite-mid);
-  --border: var(--color-pale-stone);
-  --border-hairline: #d6d3d1;
-  --border-strong: var(--color-warm-granite);
-  --accent: var(--color-obsidian-canvas);
-  --accent-strong: var(--color-obsidian-canvas);
-  --accent-soft: #e2e0df;
-  --success: var(--color-obsidian-canvas);
+  --canvas: var(--color-paper);
+  --surface: var(--color-paper);
+  --surface-subtle: var(--color-paper-shade);
+  --surface-hover: var(--color-paper-shade);
+  --surface-raised: var(--color-white);
+  --foreground: var(--color-void);
+  --foreground-hover: var(--color-void);
+  --foreground-muted: #4a5262;
+  --foreground-subtle: #3d4452;
+  --border: #bfc6d2;
+  --border-hairline: #d3d9e3;
+  --border-strong: #6b7485;
+  --accent: var(--color-blue-700);
+  --accent-strong: var(--color-blue-700);
+  --accent-soft: color-mix(in srgb, var(--color-blue-500) 10%, transparent);
+  --signal: var(--color-blue-700);
+  --signal-soft: color-mix(in srgb, var(--color-blue-500) 14%, transparent);
+  --success: var(--color-void);
   --success-soft: color-mix(
     in srgb,
-    var(--color-metric-green) 16%,
-    var(--color-bone)
+    var(--color-green) 18%,
+    var(--color-paper)
   );
-  --warning: var(--color-obsidian-canvas);
+  --warning: var(--color-void);
   --warning-soft: color-mix(
     in srgb,
-    var(--color-signal-orange) 12%,
-    var(--color-bone)
+    var(--color-amber) 16%,
+    var(--color-paper)
   );
-  --danger: #a3261f;
-  --danger-soft: color-mix(in srgb, #a3261f 10%, var(--color-bone));
-  --focus: var(--color-obsidian-canvas);
-  --code-bg: var(--color-obsidian-canvas);
-  --code-foreground: var(--color-bone);
-  --button-fill: var(--color-obsidian-canvas);
-  --button-fill-hover: var(--color-carbon-lift);
-  --button-fill-text: var(--color-bone);
+  --danger: var(--color-red-ink);
+  --danger-soft: color-mix(
+    in srgb,
+    var(--color-red-ink) 10%,
+    var(--color-paper)
+  );
+  --focus: var(--color-blue-700);
+  --ring: color-mix(in srgb, var(--color-blue-500) 22%, transparent);
+  --code-bg: var(--color-void);
+  --code-foreground: var(--color-frost);
+  --button-fill: var(--color-blue-500);
+  --button-fill-hover: var(--color-blue-700);
+  --button-fill-text: #ffffff;
   border-color: var(--border-hairline);
-  background: var(--color-bone);
-  color: var(--color-obsidian-canvas);
+  background: var(--color-paper);
+  color: var(--color-void);
 }
 
 .page-header {
@@ -216,15 +239,21 @@ body {
   margin: 1.5rem 0 0.75rem;
 }
 
+/* A faint inner top highlight gives dark cards an edge against the black
+   canvas without adding a gradient behind their text. */
 .card {
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-card);
   background: var(--surface);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 2.5%);
 }
 
-/* Declared after `.card` so the bone surface wins at equal specificity. */
+/* Declared after `.card` so the paper surface wins at equal specificity. */
 .card.card-light {
-  background: var(--color-bone);
+  background: var(--color-paper);
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 60%) inset,
+    0 24px 60px -28px rgb(47 100 238 / 35%);
 }
 
 .table-shell {
@@ -266,16 +295,50 @@ body {
   border-bottom: 0;
 }
 
+/* Rows settle in once when a result set renders; keyed rows that survive a
+   refetch keep their DOM node and do not replay. Only the first eight rows
+   are staggered so long pages finish together. */
 .data-table tbody tr {
+  animation: row-in 280ms var(--ease-out) backwards;
   transition:
     background-color var(--motion),
     color var(--motion);
+}
+
+.data-table tbody tr:nth-child(2) {
+  animation-delay: 25ms;
+}
+.data-table tbody tr:nth-child(3) {
+  animation-delay: 50ms;
+}
+.data-table tbody tr:nth-child(4) {
+  animation-delay: 75ms;
+}
+.data-table tbody tr:nth-child(5) {
+  animation-delay: 100ms;
+}
+.data-table tbody tr:nth-child(6) {
+  animation-delay: 125ms;
+}
+.data-table tbody tr:nth-child(7) {
+  animation-delay: 150ms;
+}
+.data-table tbody tr:nth-child(n + 8) {
+  animation-delay: 175ms;
+}
+
+.data-table tbody td:first-child {
+  transition: box-shadow var(--motion);
 }
 
 .data-table tbody tr:hover {
   background: var(--surface-hover);
   color: var(--foreground-hover);
   --foreground-muted: var(--foreground-subtle);
+}
+
+.data-table tbody tr:hover td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--signal);
 }
 
 /* Status tag: mono caption, hairline outline, a 6px dot carrying the tone. */
@@ -319,12 +382,12 @@ body {
   background: var(--metric);
 }
 .badge.warning {
-  border-color: color-mix(in srgb, var(--signal) 40%, var(--border));
-  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border-color: color-mix(in srgb, var(--caution) 40%, var(--border));
+  background: color-mix(in srgb, var(--caution) 12%, transparent);
   color: var(--warning);
 }
 .badge.warning::before {
-  background: var(--signal);
+  background: var(--caution);
 }
 .badge.danger {
   border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
@@ -335,21 +398,34 @@ body {
   background: var(--danger);
 }
 .badge.accent {
-  border-color: var(--foreground-muted);
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
-  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--signal) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 .badge.accent::before {
-  background: var(--foreground);
+  background: var(--signal);
 }
 
+/* Live status: a signal dot whose ring pings outward. The ring is a
+   pseudo-element so the dot itself never changes size or colour. */
 .status-dot {
+  position: relative;
   display: inline-block;
   width: 6px;
   height: 6px;
   flex: none;
   border-radius: 50%;
   background: var(--signal);
+}
+
+.status-dot:not(.metric, .idle, .danger)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--signal);
+  animation: ping 2.4s var(--ease-out) infinite;
+  pointer-events: none;
 }
 .status-dot.metric {
   background: var(--metric);
@@ -369,6 +445,29 @@ body {
   padding: 2rem;
   color: var(--foreground-muted);
   text-align: center;
+}
+
+/* A thin signal line sweeps across the top of a loading region. It is small
+   enough that contrast checks still read the text beneath it. */
+.loading-state {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-state::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--signal) 50%,
+    transparent
+  );
+  animation: scan 1.6s var(--ease-in-out) infinite;
 }
 
 .form-grid {
@@ -414,6 +513,20 @@ body {
   border-color: var(--border-strong);
 }
 
+/* Focused fields trade the outline for a signal border and a soft halo; the
+   border alone clears the 3:1 focus-indicator contrast on both surfaces. */
+.form-field
+  :is(
+    input:not([type='checkbox'], [type='radio']),
+    select,
+    textarea
+  ):focus-visible,
+.filter-control:focus-visible {
+  border-color: var(--focus);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
 .form-field input::placeholder,
 .form-field textarea::placeholder,
 .filter-control::placeholder {
@@ -426,7 +539,7 @@ body {
 }
 
 input {
-  accent-color: var(--foreground);
+  accent-color: var(--button-fill);
 }
 
 input[type='file'] {
@@ -452,11 +565,13 @@ input[type='file']::file-selector-button {
 }
 
 input[type='file']::file-selector-button:hover {
-  border-color: var(--foreground-hover);
+  border-color: var(--signal);
   color: var(--foreground-hover);
 }
 
-/* Metric tiles: no fill, hairline dividers, a mono label over a 36px value. */
+/* Metric tiles: no fill, hairline dividers, a mono label over a 36px value.
+   Values rise into place in sequence, and a signal rule draws across the top
+   of the tile under the pointer. */
 .metric-grid {
   display: grid;
   overflow: hidden;
@@ -469,10 +584,34 @@ input[type='file']::file-selector-button:hover {
 }
 
 .metric-card {
+  position: relative;
   padding: 1.25rem;
   border: 0;
   border-radius: 0;
   background: var(--surface);
+  box-shadow: none;
+  transition: background-color var(--motion);
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--signal);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 420ms var(--ease-out);
+}
+
+.metric-card:hover {
+  background: var(--surface-raised);
+}
+
+.metric-card:hover::before {
+  transform: scaleX(1);
 }
 .metric-card p {
   margin: 0;
@@ -491,6 +630,17 @@ input[type='file']::file-selector-button:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.031em;
   line-height: 1;
+  animation: value-in 560ms var(--ease-out) 80ms backwards;
+}
+
+.metric-card:nth-child(2) strong {
+  animation-delay: 130ms;
+}
+.metric-card:nth-child(3) strong {
+  animation-delay: 180ms;
+}
+.metric-card:nth-child(n + 4) strong {
+  animation-delay: 230ms;
 }
 
 .read-only-note {
@@ -546,12 +696,14 @@ input[type='file']::file-selector-button:hover {
   text-underline-offset: 4px;
   transition:
     color var(--motion),
-    text-decoration-color var(--motion);
+    text-decoration-color var(--motion),
+    text-underline-offset var(--motion);
 }
 
 .text-button:hover:not(:disabled) {
   color: var(--foreground-hover);
-  text-decoration-color: currentColor;
+  text-decoration-color: var(--signal);
+  text-underline-offset: 5px;
 }
 
 @media (max-width: 56rem) {
@@ -609,8 +761,8 @@ button:not(:disabled),
 }
 
 ::selection {
-  background: var(--foreground);
-  color: var(--canvas);
+  background: color-mix(in srgb, var(--color-blue-500) 55%, transparent);
+  color: var(--foreground-hover);
 }
 
 .sr-only {
@@ -633,8 +785,8 @@ button:not(:disabled),
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
   border-radius: var(--radius-control);
-  background: var(--color-chalk);
-  color: var(--color-obsidian-canvas);
+  background: var(--color-blue-500);
+  color: #ffffff;
   transform: translateY(-160%);
   transition: transform var(--motion);
 }
@@ -643,7 +795,15 @@ button:not(:disabled),
   transform: translateY(0);
 }
 
+/* Buttons carry the hatch: on hover a 45° line pattern fades in behind the
+   label and drifts, paused whenever the pointer is elsewhere. The pattern sits
+   at z-index -1 inside the button's own stacking context, so it paints over
+   the fill but under the text. */
 .button {
+  --hatch: color-mix(in srgb, var(--foreground) 14%, transparent);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: inline-flex;
   min-height: 2.5rem;
   align-items: center;
@@ -659,7 +819,37 @@ button:not(:disabled),
   transition:
     background-color var(--motion),
     border-color var(--motion),
-    color var(--motion);
+    color var(--motion),
+    box-shadow var(--motion),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.button::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 2px,
+    var(--hatch) 2px 3px,
+    transparent 3px 5px
+  );
+  background-size: 7.07px 7.07px;
+  opacity: 0;
+  animation: hatch-slide 2s linear infinite paused;
+  transition: opacity var(--dur-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.button:hover:not(:disabled, [aria-disabled='true'])::after {
+  opacity: 1;
+  animation-play-state: running;
+  transition-delay: 60ms;
+}
+
+.button:active:not(:disabled, [aria-disabled='true']) {
+  transform: translateY(1px);
 }
 
 .button:disabled {
@@ -668,27 +858,80 @@ button:not(:disabled),
 }
 
 .button-primary {
+  --hatch: rgb(255 255 255 / 20%);
   border-color: var(--button-fill);
   background: var(--button-fill);
   color: var(--button-fill-text);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 14%);
 }
 
 .button-primary:hover:not(:disabled) {
   border-color: var(--button-fill-hover);
   background: var(--button-fill-hover);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 14%),
+    0 10px 28px -14px var(--color-blue-500);
 }
 
 .button-secondary {
+  --hatch: color-mix(in srgb, var(--signal) 30%, transparent);
   border-color: var(--border);
   background: transparent;
   color: var(--foreground);
 }
 
 .button-secondary:hover:not(:disabled) {
-  border-color: var(--foreground-hover);
+  border-color: var(--signal);
   color: var(--foreground-hover);
 }
 
+/* Rows driven by the `slidingIndicator` action: one signal bar glides to the
+   active item. Until the action has measured the row, each item's own
+   underline stays the indicator. */
+.slide-indicator {
+  position: relative;
+}
+
+.slide-indicator::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 2px;
+  background: var(--signal);
+  box-shadow: 0 0 12px 0 var(--signal);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--indicator-x, 0)) scaleX(var(--indicator-w, 0));
+  transform-origin: left;
+}
+
+.slide-indicator[data-indicator]::after {
+  opacity: 1;
+}
+
+.slide-indicator[data-indicator='sliding']::after {
+  transition:
+    transform 440ms var(--ease-out),
+    opacity var(--motion);
+}
+
+.slide-indicator[data-indicator] .active {
+  border-bottom-color: transparent;
+}
+
+/* Arrow icons lean into their destination. */
+.icon-arrow {
+  transition: transform var(--motion);
+}
+
+:is(a, button, summary):hover > .icon-arrow {
+  transform: translateX(3px);
+}
+
+/* Eyebrows lead with a short signal rule: the one blue thread that runs
+   through every page heading. */
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--foreground-subtle);
@@ -700,16 +943,37 @@ button:not(:disabled),
   text-transform: uppercase;
 }
 
-/* An eyebrow for sections that report live state carries the signal dot. */
-.eyebrow-live::before {
+.eyebrow::before {
   content: '';
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 0.75rem;
+  height: 1px;
   margin-right: 0.5rem;
-  border-radius: 50%;
   background: var(--signal);
   vertical-align: middle;
+}
+
+/* An eyebrow for sections that report live state carries a pinging dot. */
+.eyebrow-live {
+  position: relative;
+  padding-left: 0.875rem;
+}
+
+.eyebrow-live::before,
+.eyebrow-live::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.eyebrow-live::after {
+  animation: ping 2.4s var(--ease-out) infinite;
 }
 
 .wordmark {
@@ -724,10 +988,11 @@ button:not(:disabled),
 .page-title {
   max-width: 48rem;
   margin: 0;
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
-  font-weight: 500;
-  letter-spacing: -0.031em;
-  line-height: 1.1;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 460;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+  text-wrap: balance;
 }
 
 .page-description {
@@ -764,13 +1029,124 @@ button:not(:disabled),
   margin: 0;
 }
 
+/* Page entrance: every top-level block of a page rises into place, 50ms
+   apart. Pages re-mount on navigation, so the sequence replays for free. */
+#main-content > * {
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+
+#main-content > :nth-child(2) {
+  animation-delay: 50ms;
+}
+#main-content > :nth-child(3) {
+  animation-delay: 100ms;
+}
+#main-content > :nth-child(4) {
+  animation-delay: 150ms;
+}
+#main-content > :nth-child(5) {
+  animation-delay: 200ms;
+}
+#main-content > :nth-child(n + 6) {
+  animation-delay: 250ms;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes value-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes hatch-slide {
+  to {
+    background-position: 28.28px -28.28px;
+  }
+}
+
+@keyframes ping {
+  0% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+}
+
+@keyframes scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  55%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes draw-x {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
   }
 }
@@ -795,7 +1171,10 @@ button:not(:disabled),
     --accent-strong: LinkText;
     --accent-soft: Canvas;
     --signal: CanvasText;
+    --signal-soft: Canvas;
     --metric: CanvasText;
+    --caution: CanvasText;
+    --chart: CanvasText;
     --success: CanvasText;
     --success-soft: Canvas;
     --warning: CanvasText;
@@ -803,11 +1182,34 @@ button:not(:disabled),
     --danger: CanvasText;
     --danger-soft: Canvas;
     --focus: Highlight;
+    --ring: transparent;
     --code-bg: Canvas;
     --code-foreground: CanvasText;
     --button-fill: ButtonFace;
     --button-fill-hover: ButtonFace;
     --button-fill-text: ButtonText;
+    --backdrop: Canvas;
+  }
+
+  .button::after,
+  .status-dot::after,
+  .eyebrow-live::after,
+  .slide-indicator::after {
+    display: none;
+  }
+
+  .slide-indicator[data-indicator] .active {
+    border-bottom-color: Highlight;
+  }
+
+  .form-field
+    :is(
+      input:not([type='checkbox'], [type='radio']),
+      select,
+      textarea
+    ):focus-visible,
+  .filter-control:focus-visible {
+    outline: 2px solid Highlight;
   }
 
   .card-light {
@@ -840,7 +1242,10 @@ button:not(:disabled),
 
   .status-dot,
   .eyebrow-live::before,
-  .badge::before {
+  .eyebrow::before,
+  .badge::before,
+  .metric-card::before,
+  .loading-state::before {
     border: 1px solid CanvasText;
     background: CanvasText;
   }

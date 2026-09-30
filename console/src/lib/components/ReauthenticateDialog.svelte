@@ -105,9 +105,13 @@
 
 <style>
   .reauth-dialog::backdrop {
-    background: rgb(0 0 0 / 75%);
+    background: var(--backdrop);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+  }
+
+  .reauth-dialog[open]::backdrop {
+    animation: fade 240ms var(--ease-out);
   }
 
   .reauth-dialog {
@@ -120,7 +124,11 @@
     border-radius: var(--radius-panel);
     background: var(--surface-raised);
     color: var(--foreground);
-    box-shadow: 0 16px 48px rgb(0 0 0 / 60%);
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .reauth-dialog[open] {
+    animation: pop-in 280ms var(--ease-out);
   }
 
   h2 {

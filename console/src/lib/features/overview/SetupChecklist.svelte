@@ -122,29 +122,40 @@
     background: var(--border-hairline);
   }
 
+  /* The bar is scaled rather than resized so each completed step glides
+     forward on the compositor, and it grows from zero when first shown. */
   .progress span {
     display: block;
     height: 100%;
-    background: var(--metric);
+    background: var(--button-fill);
+    transform-origin: left;
+    transition: transform var(--dur-slow) var(--ease-out);
+    animation: progress-in 900ms var(--ease-out) 200ms backwards;
   }
 
   .progress-0 {
-    width: 0;
+    transform: scaleX(0);
   }
   .progress-1 {
-    width: 20%;
+    transform: scaleX(0.2);
   }
   .progress-2 {
-    width: 40%;
+    transform: scaleX(0.4);
   }
   .progress-3 {
-    width: 60%;
+    transform: scaleX(0.6);
   }
   .progress-4 {
-    width: 80%;
+    transform: scaleX(0.8);
   }
   .progress-5 {
-    width: 100%;
+    transform: scaleX(1);
+  }
+
+  @keyframes progress-in {
+    from {
+      transform: scaleX(0);
+    }
   }
 
   .check-error {
@@ -194,14 +205,50 @@
   }
 
   li.complete .step-marker {
-    border-color: var(--metric);
-    background: var(--metric);
+    border-color: var(--button-fill);
+    background: var(--button-fill);
+    color: var(--button-fill-text);
+    animation: marker-pop 420ms var(--ease-out) backwards;
+  }
+
+  /* The next step to take carries a slow signal ring. */
+  li.current .step-marker {
+    position: relative;
+    border-color: var(--signal);
     color: var(--foreground);
   }
 
-  li.current .step-marker {
-    border-color: var(--foreground);
-    color: var(--foreground);
+  li.current .step-marker::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border: 1px solid var(--signal);
+    border-radius: inherit;
+    animation: marker-ring 2.4s var(--ease-out) infinite;
+  }
+
+  @keyframes marker-pop {
+    from {
+      transform: scale(0.6);
+    }
+  }
+
+  @keyframes marker-ring {
+    0% {
+      opacity: 0.8;
+      transform: scale(1);
+    }
+    70%,
+    100% {
+      opacity: 0;
+      transform: scale(1.5);
+    }
+  }
+
+  @media (forced-colors: active) {
+    li.current .step-marker::after {
+      display: none;
+    }
   }
 
   a {
@@ -220,6 +267,7 @@
 
   a:hover {
     text-decoration: underline;
+    text-decoration-color: var(--signal);
     text-underline-offset: 4px;
   }
 

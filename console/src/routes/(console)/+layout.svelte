@@ -16,6 +16,7 @@
   import { sessionKeys } from '$lib/features/access/session/sessionKeys';
   import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
   import AppShell from '$lib/components/AppShell.svelte';
+  import BrandMark from '$lib/components/BrandMark.svelte';
 
   let { children } = $props();
   const queryClient = useQueryClient();
@@ -122,14 +123,14 @@
 
 {#if authentication.phase === 'checking' || authentication.phase === 'transitioning'}
   <main class="session-gate" aria-busy="true">
-    <p role="status"><span aria-hidden="true"></span>Verifying your session…</p>
+    <p role="status"><BrandMark size={36} animated />Verifying your session…</p>
   </main>
 {:else if authentication.phase !== 'authenticated' || !authentication.user}
   <main class="session-gate" aria-busy={authentication.phase === 'anonymous'}>
     {#if authentication.phase === 'anonymous'}
       <!-- Anonymous here means the redirect to login is still being resolved. -->
       <p role="status">
-        <span aria-hidden="true"></span>Verifying your session…
+        <BrandMark size={36} animated />Verifying your session…
       </p>
     {:else if authentication.phase === 'unavailable'}
       <div class="problem-banner" role="alert">
@@ -187,27 +188,18 @@
   .session-gate > p {
     display: flex;
     min-height: 2.75rem;
+    flex-direction: column;
     align-items: center;
-    gap: 0.65rem;
+    gap: 1rem;
     color: var(--foreground-muted);
-  }
-
-  .session-gate > p span {
-    width: 0.9rem;
-    height: 0.9rem;
-    border: 2px solid var(--border);
-    border-top-color: var(--signal);
-    border-radius: 50%;
-    animation: session-spin 700ms linear infinite;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    letter-spacing: -0.24px;
+    text-transform: uppercase;
+    animation: fade var(--dur-enter) var(--ease-out) 120ms backwards;
   }
 
   .session-gate .problem-banner {
     width: min(100%, 42rem);
-  }
-
-  @keyframes session-spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

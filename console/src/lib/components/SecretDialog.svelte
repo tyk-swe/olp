@@ -63,9 +63,13 @@
   }
 
   .secret-dialog::backdrop {
-    background: rgb(0 0 0 / 75%);
+    background: var(--backdrop);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+  }
+
+  .secret-dialog[open]::backdrop {
+    animation: fade 240ms var(--ease-out);
   }
 
   .secret-dialog {
@@ -80,7 +84,11 @@
     border-radius: var(--radius-panel);
     background: var(--surface-raised);
     color: var(--foreground);
-    box-shadow: 0 16px 48px rgb(0 0 0 / 60%);
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .secret-dialog[open] {
+    animation: pop-in 280ms var(--ease-out);
   }
 
   .secret-dialog.wide {
@@ -118,11 +126,16 @@
     color: var(--foreground-muted);
     font-size: 1.4rem;
     line-height: 1;
+    transition:
+      background-color var(--motion),
+      color var(--motion),
+      transform var(--motion);
   }
 
   .dialog-close:hover {
     background: var(--surface-hover);
     color: var(--foreground);
+    transform: rotate(90deg);
   }
 
   @media (max-width: 38rem) {

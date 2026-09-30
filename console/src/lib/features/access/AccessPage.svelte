@@ -6,6 +6,7 @@
   import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
   import ManagementTokensPanel from '$lib/features/access/tokens/ManagementTokensPanel.svelte';
   import ProjectsPanel from '$lib/features/access/projects/ProjectsPanel.svelte';
+  import { slidingIndicator } from '$lib/components/indicator';
 
   type Tab =
     'members' | 'invitations' | 'sessions' | 'projects' | 'tokens' | 'oidc';
@@ -47,7 +48,11 @@
   {/if}
 </div>
 
-<nav class="tabs" aria-label="Access settings">
+<nav
+  class="tabs slide-indicator"
+  aria-label="Access settings"
+  use:slidingIndicator={tab}
+>
   {#each tabs as item (item.id)}
     <button
       class:active={tab === item.id}
@@ -101,7 +106,10 @@
     color: var(--foreground);
   }
   .tabs button.active {
-    border-color: var(--foreground);
-    color: var(--foreground);
+    border-color: var(--signal);
+    color: var(--foreground-hover);
+  }
+  .tabs:global([data-indicator]) button.active {
+    border-color: transparent;
   }
 </style>

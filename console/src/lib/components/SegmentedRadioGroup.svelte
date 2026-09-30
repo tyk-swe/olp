@@ -74,6 +74,7 @@
     transition:
       background-color var(--motion),
       border-color var(--motion),
+      box-shadow var(--motion),
       color var(--motion);
   }
   .segmented-item:hover span {
@@ -85,9 +86,10 @@
     outline-offset: 2px;
   }
   input:checked + span {
-    border-color: var(--foreground);
-    background: var(--surface-raised);
-    color: var(--foreground);
+    border-color: var(--signal);
+    background: var(--accent-soft);
+    box-shadow: inset 0 -2px 0 0 var(--signal);
+    color: var(--foreground-hover);
   }
   @media (max-width: 38rem) {
     .segmented-root {
