@@ -69,6 +69,9 @@ type Config struct {
 type Runtime interface {
 	Release() *runtime.Release
 	Authenticate(secret string) (access.Authority, error)
+	// RoutingInputs returns current price and performance measurements, or
+	// nil when no measurements are available.
+	RoutingInputs() *usage.RoutingInputs
 	runtime.Credentials
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64
@@ -332,9 +335,8 @@ func bodyReadError(err error) *Error {
 	return invalidRequest("invalid_request", "The request body could not be read.", nil)
 }
 
-// routingHeader carries per-request routing preferences. Only the weighted
-// strategy exists, and the attempt budget can only be lowered below the
-// route's published maximum.
+// routingHeader carries per-request preferences for weighted, price, latency,
+// or throughput routing. Preferences can only lower the published attempt budget.
 const routingHeader = "X-OLP-Routing"
 
 func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
@@ -352,17 +354,6 @@ func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
 	}
 	return p, nil
 }
-func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
-	p, err := routingPreferences(r)
-	if err != nil {
-		return 0, err
-	}
-	if p != nil && p.MaxAttempts != nil && *p.MaxAttempts > route.MaxAttempts {
-		return 0, invalidRequest("invalid_request", "max_attempts cannot increase the published route budget.", nil)
-	}
-	return p.Budget(route.MaxAttempts), nil
-}
-
 func requestError(err error) *Error {
 	if gatewayError, ok := errors.AsType[*Error](err); ok {
 		return gatewayError
@@ -665,53 +656,53 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
-	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: source.parameters, Inputs: s.routingInputs(), TokenDemand: source.demand, Now: s.now(), CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
-		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
-			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
-				return source.parameters, source.demand
-			}
-			prepared, err := x.preparedProvider(&p, t.ProviderModel)
-			if err != nil {
-				return nil, nil
-			}
-			return prepared.parameters, prepared.demand
-		},
-		Accept: func(p runtime.Provider, t runtime.Target) error {
-			cfg := p.Connector()
-			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != runtime.Eligible {
-				return errors.New("provider network credential unavailable")
-			}
-			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
-				return errors.New("connector capability unavailable")
-			}
-			if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
-				semantic = errors.New("provider-state capability unavailable")
+	options := s.selectionOptions(x)
+	options.Parameters, options.TokenDemand = source.parameters, source.demand
+	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
+			return source.parameters, source.demand
+		}
+		prepared, err := x.preparedProvider(&p, t.ProviderModel)
+		if err != nil {
+			return nil, nil
+		}
+		return prepared.parameters, prepared.demand
+	}
+	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+		cfg := p.Connector()
+		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != runtime.Eligible {
+			return errors.New("provider network credential unavailable")
+		}
+		if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
+			return errors.New("connector capability unavailable")
+		}
+		if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
+			semantic = errors.New("provider-state capability unavailable")
+			return semantic
+		}
+		if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
+			var metadata runtime.ModelMetadata
+			_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
+			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
+				semantic = errors.New("model does not declare structured-output support")
 				return semantic
 			}
-			if !x.strict() && protocols.StructuredOutputRequested(x.parsed) {
-				var metadata runtime.ModelMetadata
-				_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
-				if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
-					semantic = errors.New("model does not declare structured-output support")
-					return semantic
-				}
-			}
-			var e error
-			if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
-				var prepared preparedProvider
-				prepared, e = x.preparedProvider(&p, t.ProviderModel)
-				if e != nil {
-					policyDecisions = prepared.policyDecisions
-				}
-			} else {
-				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
-			}
+		}
+		var e error
+		if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
+			var prepared preparedProvider
+			prepared, e = x.preparedProvider(&p, t.ProviderModel)
 			if e != nil {
-				semantic = e
+				policyDecisions = prepared.policyDecisions
 			}
-			return e
-		}}
+		} else {
+			_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+		}
+		if e != nil {
+			semantic = e
+		}
+		return e
+	}
 	if !x.strict() && route.ContentPolicy == nil {
 		hasProfile := false
 		for _, target := range route.Targets {

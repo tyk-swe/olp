@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +57,87 @@ func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanningPreparesEligibleTargetsAndChecksEffectiveRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		setup      func(*Provider, *SelectionOptions)
+		acceptErr  error
+		parameters []string
+		demand     *TokenDemand
+		calls      []string
+		reason     string
+	}{
+		{name: "disabled provider", setup: func(p *Provider, _ *SelectionOptions) { p.Enabled = false }, reason: "provider_not_active"},
+		{name: "uncertified operation", setup: func(p *Provider, _ *SelectionOptions) { p.Capabilities = nil }, reason: "capability_not_certified"},
+		{name: "source capacity", setup: func(_ *Provider, o *SelectionOptions) { o.TokenDemand.EstimatedInputTokens = 101 }, reason: "context_length_exceeded"},
+		{name: "source parameters", setup: func(_ *Provider, o *SelectionOptions) { o.Parameters = []string{"top_p"} }, reason: "parameter_not_supported"},
+		{name: "revoked credential", setup: func(_ *Provider, o *SelectionOptions) {
+			o.CredentialEligibility = func(string) Eligibility { return Revoked }
+		}, reason: "credential_revoked"},
+		{name: "semantic refusal", acceptErr: errors.New("unsupported source"), calls: []string{"accept"}, reason: "unsupported_request_semantics"},
+		{name: "admitted", calls: []string{"accept", "effective"}},
+		{name: "effective parameters", parameters: []string{"top_p"}, calls: []string{"accept", "effective"}, reason: "parameter_not_supported"},
+		{name: "effective context", demand: &TokenDemand{EstimatedInputTokens: 96, MaxOutputTokens: ptr(int64(5))}, calls: []string{"accept", "effective"}, reason: "context_length_exceeded"},
+		{name: "effective output", demand: &TokenDemand{EstimatedInputTokens: 20, MaxOutputTokens: ptr(int64(11))}, calls: []string{"accept", "effective"}, reason: "max_output_tokens_exceeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, slug, ids := planningFixture()
+			route := snapshot.Routes[slug]
+			route.Targets = route.Targets[:1]
+			route.Policy = &Policy{Constraints: Preferences{RequireParameters: ptr(true)}}
+			snapshot.Routes[slug] = route
+			provider := snapshot.Providers[ids[0]]
+			provider.AuthMode = "api_key"
+			provider.Slots = []Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: ptr(uuid.NewString())}}
+			provider.Models = map[string]json.RawMessage{"wire-model": json.RawMessage(`{"context_length":100,"max_output_tokens":10,"supported_parameters":["temperature"]}`)}
+			parameters := tc.parameters
+			if parameters == nil {
+				parameters = []string{"temperature"}
+			}
+			demand := tc.demand
+			if demand == nil {
+				demand = &TokenDemand{EstimatedInputTokens: 20, MaxOutputTokens: ptr(int64(5))}
+			}
+			var calls []string
+			options := SelectionOptions{
+				Parameters: []string{"temperature"}, TokenDemand: &TokenDemand{EstimatedInputTokens: 10, MaxOutputTokens: ptr(int64(5))},
+				CheckSlots: true, CredentialEligibility: func(string) Eligibility { return Eligible },
+				Accept: func(Provider, Target) error {
+					calls = append(calls, "accept")
+					return tc.acceptErr
+				},
+				Effective: func(Provider, Target) ([]string, *TokenDemand) {
+					calls = append(calls, "effective")
+					return parameters, demand
+				},
+			}
+			if tc.setup != nil {
+				tc.setup(&provider, &options)
+			}
+			snapshot.Providers[provider.ID] = provider
+			plan, err := PlanRequest(&snapshot, slug, "generation", "openai", "unary", []byte("preparation"), options)
+			if err != nil || len(plan.Decisions) != 1 {
+				t.Fatalf("plan=%+v error=%v", plan, err)
+			}
+			if !slices.Equal(calls, tc.calls) {
+				t.Fatalf("preparation calls=%v, want %v", calls, tc.calls)
+			}
+			decision := plan.Decisions[0]
+			if tc.reason == "" {
+				if !decision.Eligible || decision.Reason != nil || len(plan.Attempts) != 1 {
+					t.Fatalf("eligible target refused: %+v", plan)
+				}
+			} else if decision.Eligible || decision.Reason == nil || *decision.Reason != tc.reason || len(plan.Attempts) != 0 {
+				t.Fatalf("decision=%+v, want reason %s", decision, tc.reason)
+			}
+			if slices.Contains(calls, "effective") && (decision.EstimatedInputTokens == nil || *decision.EstimatedInputTokens != demand.EstimatedInputTokens || decision.RequestedOutputTokens == nil || *decision.RequestedOutputTokens != *demand.MaxOutputTokens) {
+				t.Fatalf("effective demand missing from decision: %+v", decision)
+			}
+		})
+	}
+}
+
 func TestPricePriorityFallbackAndPerformanceShareOneOrdering(t *testing.T) {
 	s, slug, ids := planningFixture()
 	now := time.Now()

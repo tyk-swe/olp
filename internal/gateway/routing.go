@@ -1,10 +1,14 @@
 package gateway
 
-import "github.com/tyk-swe/olp/internal/usage"
+import "github.com/tyk-swe/olp/internal/runtime"
 
-func (s *Server) routingInputs() *usage.RoutingInputs {
-	if source, ok := s.Runtime.(interface{ RoutingInputs() *usage.RoutingInputs }); ok {
-		return source.RoutingInputs()
+// selectionOptions supplies the shared routing authority and measurements.
+// Each operation adds its own source demand and semantic preparation.
+func (s *Server) selectionOptions(x *execution) runtime.SelectionOptions {
+	return runtime.SelectionOptions{
+		KeyID: x.keyID, Preferences: x.preferences,
+		Inputs: s.Runtime.RoutingInputs(), Now: s.now(),
+		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
+		UnconfinedPlugins: s.cfg.UnconfinedPlugins,
 	}
-	return nil
 }

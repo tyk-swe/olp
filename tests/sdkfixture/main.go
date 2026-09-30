@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -50,6 +51,8 @@ type staticRuntime struct {
 }
 
 func (s *staticRuntime) Release() *runtime.Release { return s.release }
+
+func (s *staticRuntime) RoutingInputs() *usage.RoutingInputs { return nil }
 
 func (s *staticRuntime) Authenticate(secret string) (access.Authority, error) {
 	authority, ok := s.keys[secret]

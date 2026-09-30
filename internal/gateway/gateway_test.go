@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -43,6 +44,7 @@ const (
 type fakeRuntime struct {
 	mu      sync.Mutex
 	release *runtime.Release
+	inputs  *usage.RoutingInputs
 	keys    map[string]access.Authority
 	stale   bool
 	revoked map[string]bool
@@ -53,6 +55,12 @@ type fakeRuntime struct {
 }
 
 func (f *fakeRuntime) Release() *runtime.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
+
+func (f *fakeRuntime) RoutingInputs() *usage.RoutingInputs {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inputs
+}
 
 func (f *fakeRuntime) Authenticate(secret string) (access.Authority, error) {
 	f.mu.Lock()

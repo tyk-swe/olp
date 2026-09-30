@@ -83,6 +83,9 @@ type rankedCandidate struct {
 	preference int
 }
 
+// PlanRequest evaluates targets, orders eligible candidates, and explains the
+// credential attempts within the route's budget. Execution rechecks live
+// credential authority and transient availability before dispatch.
 func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []byte, options SelectionOptions) (Plan, error) {
 	plan := Plan{Attempts: []Attempt{}, Decisions: []Decision{}}
 	route, ok := s.Routes[slug]
@@ -101,13 +104,25 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		return plan, unsupportedBudget()
 	}
 	plan.Budget = policy.Preferences.Budget(route.MaxAttempts)
+	rows, e := evaluateCandidates(s, route, operation, surface, mode, affinity, policy, options)
+	if e != nil {
+		return plan, e
+	}
+	orderCandidates(rows, policy.Strategy, operation)
+	plan.addCandidates(rows, options.CheckSlots)
+	return plan, nil
+}
+
+// evaluateCandidates preserves admission order: published eligibility and
+// source constraints precede preparation, then effective request constraints.
+func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, options SelectionOptions) ([]rankedCandidate, error) {
 	now := options.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 	routeID, e := uuid.Parse(route.RoutingID)
 	if e != nil {
-		return plan, &SelectionError{Code: NoEligibleTargets}
+		return nil, &SelectionError{Code: NoEligibleTargets}
 	}
 	rows := make([]rankedCandidate, 0, len(route.Targets))
 	for _, target := range route.Targets {
@@ -210,6 +225,10 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		}
 		rows = append(rows, row)
 	}
+	return rows, nil
+}
+
+func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 	slices.SortStableFunc(rows, func(a, b rankedCandidate) int {
 		if a.decision.Eligible != b.decision.Eligible {
 			if a.decision.Eligible {
@@ -226,7 +245,7 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		if order := cmp.Compare(a.preference, b.preference); order != 0 {
 			return order
 		}
-		switch policy.Strategy {
+		switch strategy {
 		case "price":
 			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
 			if (ap == nil) != (bp == nil) {
@@ -240,7 +259,7 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			}
 		case "latency", "throughput":
 			ap, bp := a.decision.Performance, b.decision.Performance
-			if policy.Strategy == "throughput" {
+			if strategy == "throughput" {
 				if ap != nil && ap.Throughput == nil {
 					ap = nil
 				}
@@ -255,16 +274,21 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 				return 1
 			}
 			if ap != nil {
-				if policy.Strategy == "latency" && ap.LatencyMS != bp.LatencyMS {
+				if strategy == "latency" && ap.LatencyMS != bp.LatencyMS {
 					return cmp.Compare(ap.LatencyMS, bp.LatencyMS)
 				}
-				if policy.Strategy == "throughput" && *ap.Throughput != *bp.Throughput {
+				if strategy == "throughput" && *ap.Throughput != *bp.Throughput {
 					return cmp.Compare(*bp.Throughput, *ap.Throughput)
 				}
 			}
 		}
 		return cmp.Compare(b.attempt.Score, a.attempt.Score)
 	})
+}
+
+// addCandidates retains every eligible target for execution. Preview ordinals
+// account for credential slots; excluded credentials never spend the budget.
+func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 	ordinal := 0
 	for _, row := range rows {
 		if !row.decision.Eligible {
@@ -273,12 +297,12 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		}
 		plan.Attempts = append(plan.Attempts, row.attempt)
 		count := len(row.slots)
-		if !options.CheckSlots {
+		if !checkSlots {
 			count = 1
 		}
 		for i := 0; i < count; i++ {
 			decision := row.decision
-			if options.CheckSlots {
+			if checkSlots {
 				id := row.slots[i].ID
 				decision.CredentialSlotID = &id
 			}
@@ -300,8 +324,6 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			plan.Decisions = append(plan.Decisions, decision)
 		}
 	}
-
-	return plan, nil
 }
 
 // skippedSlot is a credential slot planning skips because its credential

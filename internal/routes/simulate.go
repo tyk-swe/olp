@@ -19,20 +19,22 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type simulateDraftRequest struct {
-	Operation            string            `json:"operation"`
-	Surface              string            `json:"surface"`
-	Mode                 string            `json:"mode"`
-	Seed                 string            `json:"seed"`
-	Preferences          *Preferences      `json:"preferences"`
-	EstimatedInputTokens *int64            `json:"estimated_input_tokens"`
-	MaxOutputTokens      *int64            `json:"max_output_tokens"`
-	Request              json.RawMessage   `json:"request"`
-	Dialect              string            `json:"dialect"`
-	ClientContract       string            `json:"client_contract"`
-	SemanticHeaders      map[string]string `json:"semantic_headers"`
-	QuerySettings        map[string]string `json:"query_settings"`
-	APIKeyID             *string           `json:"api_key_id"`
+// simulationInput is the draft request and the normalized input used by both
+// simulation endpoints after their own decoding and authorization.
+type simulationInput struct {
+	Operation            string               `json:"operation"`
+	Surface              string               `json:"surface"`
+	Mode                 string               `json:"mode"`
+	Seed                 string               `json:"seed"`
+	Preferences          *runtime.Preferences `json:"preferences"`
+	EstimatedInputTokens *int64               `json:"estimated_input_tokens"`
+	MaxOutputTokens      *int64               `json:"max_output_tokens"`
+	Request              json.RawMessage      `json:"request"`
+	Dialect              string               `json:"dialect"`
+	ClientContract       string               `json:"client_contract"`
+	SemanticHeaders      map[string]string    `json:"semantic_headers"`
+	QuerySettings        map[string]string    `json:"query_settings"`
+	APIKeyID             *string              `json:"api_key_id"`
 }
 
 func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
@@ -73,7 +75,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var input simulateDraftRequest
+	var input simulationInput
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
@@ -146,41 +148,12 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, d.Slug, route.Fidelity.Strict())
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if input.Operation == "generation" {
-		if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
-	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
-	}
-	if mediaRequest != nil {
-		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
-	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins, Accept: accept, Effective: effective}
-	if key.reason != "" {
-		options.Accept = nil
-		options.Effective = nil
-	}
-	if parsed != nil {
-		options.Parameters = protocols.ParameterNames(parsed)
-	}
-	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)
+	decisions, err := s.inspectSimulation(snapshot, d.Slug, input, key, inputs, demand, eligibility)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	targets := []map[string]any{}
-	applyInspectionKeyReason(plan.Decisions, key.reason)
-	for _, decision := range inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections) {
+	for _, decision := range decisions {
 		var name string
 		for _, t := range d.Targets {
 			if t.ID == decision.TargetID {
@@ -202,7 +175,7 @@ type simulationRequest struct {
 	Operation            map[string]json.RawMessage `json:"operation"`
 	Surface              string                     `json:"surface"`
 	Mode                 string                     `json:"mode"`
-	Preferences          *Preferences               `json:"preferences"`
+	Preferences          *runtime.Preferences       `json:"preferences"`
 	APIKeyID             *string                    `json:"api_key_id"`
 	ClientContract       string                     `json:"client_contract"`
 	Seed                 string                     `json:"seed"`
@@ -286,47 +259,67 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	if err != nil {
 		return access.Reply{}, err
 	}
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins}
-	options.TokenDemand, err = tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
+	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	inspection := simulationInput{
+		Operation: operation, Surface: input.Surface, Mode: input.Mode, Seed: input.Seed,
+		Preferences: input.Preferences, Request: input.Operation["request"],
+		Dialect: input.Dialect, ClientContract: input.ClientContract,
+		SemanticHeaders: input.SemanticHeaders, QuerySettings: input.QuerySettings,
+	}
+	decisions, err := s.inspectSimulation(snapshot, slug, inspection, key, inputs, demand, eligibility)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return access.OK(decisions), nil
+}
+
+// inspectSimulation shares semantic inspection and routing explanations across
+// draft and published routes. Callers own loading, validation and authorization;
+// inspection never reserves state or dispatches an upstream request.
+func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, input simulationInput, key inspectionKeyContext, inputs *usage.RoutingInputs, demand *runtime.TokenDemand, eligibility func(string) runtime.Eligibility) ([]inspectedDecision, error) {
+	route := snapshot.Routes[slug]
 	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
 	if err != nil {
-		return access.Reply{}, err
+		return nil, err
 	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Operation["request"], operation, input.Surface, input.Mode, input.Dialect, slug, route.Fidelity.Strict())
+	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, slug, route.Fidelity.Strict())
 	if err != nil {
-		return access.Reply{}, err
+		return nil, err
 	}
-	if operation == "generation" {
+	if input.Operation == "generation" {
 		if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
-			return access.Reply{}, err
+			return nil, err
 		}
 	}
-	if parsed != nil {
-		options.Parameters = protocols.ParameterNames(parsed)
-	}
-	accept, effective, inspections := inspectionAccept(route, parsed, context, options.TokenDemand)
+	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
 	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, options.TokenDemand)
+		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
 	}
 	if mediaRequest != nil {
-		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, options.TokenDemand)
+		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
 	}
-	options.Accept = accept
-	options.Effective = effective
+	options := runtime.SelectionOptions{
+		KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand,
+		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
+		Accept: accept, Effective: effective,
+	}
 	if key.reason != "" {
 		options.Accept = nil
 		options.Effective = nil
 	}
+	if parsed != nil {
+		options.Parameters = protocols.ParameterNames(parsed)
+	}
 
-	plan, err := runtime.PlanRequest(snapshot, slug, operation, input.Surface, input.Mode, []byte(input.Seed), options)
+	plan, err := runtime.PlanRequest(snapshot, slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)
 	if err != nil {
-		return access.Reply{}, err
+		return nil, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	return access.OK(inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections)), nil
+	return inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections), nil
 }
 
 // Register mounts the route surface.

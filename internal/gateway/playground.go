@@ -10,7 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"slices"
@@ -47,17 +46,17 @@ type playgroundFormat struct {
 }
 
 type playgroundRequest struct {
-	Model           string              `json:"model"`
-	Operation       string              `json:"operation"`
-	Input           string              `json:"input"`
-	Request         json.RawMessage     `json:"request"`
-	Stream          *bool               `json:"stream"`
-	Surface         *string             `json:"surface"`
-	Temperature     *float64            `json:"temperature"`
-	MaxOutputTokens *int64              `json:"max_output_tokens"`
-	Tools           []playgroundTool    `json:"tools"`
-	ResponseFormat  *playgroundFormat   `json:"response_format"`
-	Routing         *routes.Preferences `json:"routing"`
+	Model           string               `json:"model"`
+	Operation       string               `json:"operation"`
+	Input           string               `json:"input"`
+	Request         json.RawMessage      `json:"request"`
+	Stream          *bool                `json:"stream"`
+	Surface         *string              `json:"surface"`
+	Temperature     *float64             `json:"temperature"`
+	MaxOutputTokens *int64               `json:"max_output_tokens"`
+	Tools           []playgroundTool     `json:"tools"`
+	ResponseFormat  *playgroundFormat    `json:"response_format"`
+	Routing         *runtime.Preferences `json:"routing"`
 }
 
 // chatBody translates the playground request into a native chat request.
@@ -233,7 +232,7 @@ func (in *playgroundRequest) parse(operation, mode string) (*openai.Request, ope
 	return parsed, family, nil
 }
 
-func (p *Playground) execution(r *http.Request, principal access.Principal, parsed *openai.Request, family openai.Family, preferences *routes.Preferences) *execution {
+func (p *Playground) execution(r *http.Request, principal access.Principal, parsed *openai.Request, family openai.Family, preferences *runtime.Preferences) *execution {
 	s := p.Gateway
 	return &execution{
 		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},

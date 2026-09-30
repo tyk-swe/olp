@@ -120,15 +120,14 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
 	snapshot := x.request.release.Snapshot
-	plan, err := runtime.PlanRequest(snapshot, route.Slug, operation, surface, mode, x.affinity, runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(),
-		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility, UnconfinedPlugins: s.cfg.UnconfinedPlugins,
-		Accept: func(p runtime.Provider, t runtime.Target) error {
-			if !qualified(&p, t.ProviderModel) {
-				return errors.New("provider capability unavailable")
-			}
-			return nil
-		}})
+	options := s.selectionOptions(x)
+	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+		if !qualified(&p, t.ProviderModel) {
+			return errors.New("provider capability unavailable")
+		}
+		return nil
+	}
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, operation, surface, mode, x.affinity, options)
 	if err != nil {
 		return nil, requestError(err)
 	}
