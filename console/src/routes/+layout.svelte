@@ -11,7 +11,7 @@
       queries: {
         retry: retryQuery,
         retryDelay: 1_000,
-        staleTime: 5_000,
+        staleTime: 30_000,
         queryKeyHashFn: (queryKey) => authLifecycle.queryKeyHash(queryKey)
       }
     }

@@ -248,7 +248,9 @@
         onclick={() => pool.refetch()}>Retry</button
       >
     </p>{/if}
-  {#if pool.isPending}<p role="status">Loading credentials…</p>{/if}
+  {#if pool.isPending}<p class="inline-status" role="status">
+      Loading credentials…
+    </p>{/if}
   {#if pool.data?.connection_usage}<p>
       Connection usage this minute: {pool.data.connection_usage
         .requests_this_minute} requests · {pool.data.connection_usage

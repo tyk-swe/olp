@@ -172,7 +172,7 @@
     <p>The acceptance token is shown once. No email service is required.</p>
   </div>
   {#if capabilities.pending}
-    <p role="status">Checking invitation availability…</p>
+    <p class="inline-status" role="status">Checking invitation availability…</p>
   {:else if capabilities.error}
     <div role="alert">
       Invitation availability could not be checked.
@@ -183,7 +183,7 @@
       >
     </div>
   {:else if !capabilities.localLoginEnabled}
-    <p role="status">
+    <p class="inline-status" role="status">
       Password invitations require local sign-in. Configure an OIDC role mapping
       and ask the member to sign in with single sign-on.
     </p>

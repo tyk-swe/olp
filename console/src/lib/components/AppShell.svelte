@@ -211,7 +211,7 @@
         type="button"
         class="close-button"
         aria-label="Close navigation"
-        onclick={closeNavigation}>×</button
+        onclick={closeNavigation}><NavIcon name="close" /></button
       >
     </div>
     <Navigation
@@ -451,8 +451,6 @@
 
   .close-button {
     display: grid;
-    font-size: 1.6rem;
-    line-height: 1;
   }
 
   @media (max-width: 80rem) {

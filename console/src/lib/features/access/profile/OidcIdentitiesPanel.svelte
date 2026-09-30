@@ -39,7 +39,7 @@
     <h2 id="linked-identities-title">Linked OIDC identities</h2>
   </div>
   {#if pending}
-    <p role="status">Loading linked identities…</p>
+    <p class="inline-status" role="status">Loading linked identities…</p>
   {:else if failed}
     <p class="field-error" role="alert">
       Linked identities are unavailable.

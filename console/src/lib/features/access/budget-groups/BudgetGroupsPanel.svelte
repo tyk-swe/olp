@@ -155,7 +155,9 @@
     </form>
   {/if}
 
-  {#if groups.isPending}<span role="status">Loading budget groups…</span>
+  {#if groups.isPending}<span class="inline-status" role="status"
+      >Loading budget groups…</span
+    >
   {:else if groups.isError}<span class="inline-problem" role="alert"
       >Budget groups are unavailable.
       <button class="text-button" type="button" onclick={() => groups.refetch()}

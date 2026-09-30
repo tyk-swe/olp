@@ -3,16 +3,25 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
-  import { currentSession, logout } from '$lib/features/access/session/api';
+  import { useQueryClient } from '@tanstack/svelte-query';
+  import {
+    authenticationCapabilities,
+    currentSession,
+    logout,
+    type AuthenticationCapabilities
+  } from '$lib/features/access/session/api';
   import { errorMessage } from '$lib/api/http';
   import { getSetupStatus } from '$lib/features/access/setup/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import { sessionKeys } from '$lib/features/access/session/sessionKeys';
   import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
   import AppShell from '$lib/components/AppShell.svelte';
 
   let { children } = $props();
+  const queryClient = useQueryClient();
   authLifecycle.markProtectedBoundaryChecking();
   let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
+  let pendingCapabilities: AuthenticationCapabilities | null = null;
   let installationName = $state('');
   let signOutError = $state('');
   let signingOut = $state(false);
@@ -44,11 +53,34 @@
 
   onMount(() => {
     const unsubscribe = authLifecycle.subscribe((snapshot) => {
+      if (snapshot.phase === 'authenticated' && pendingCapabilities) {
+        if (
+          queryClient.getQueryData(sessionKeys.serviceCapabilities) ===
+          undefined
+        ) {
+          queryClient.setQueryData(
+            sessionKeys.serviceCapabilities,
+            pendingCapabilities
+          );
+        }
+        pendingCapabilities = null;
+      }
       authentication = snapshot;
     });
     const unregister = authLifecycle.registerBoundary({
       async loadSession(signal) {
-        const session = await currentSession(signal);
+        // Capabilities are installation-wide, so they can fly beside the
+        // session load; an already-authenticated passive revalidation must
+        // not fetch them again.
+        const capabilities =
+          authLifecycle.snapshot().phase === 'authenticated'
+            ? Promise.resolve(null)
+            : authenticationCapabilities(signal).catch(() => null);
+        const [session, fetched] = await Promise.all([
+          currentSession(signal),
+          capabilities
+        ]);
+        pendingCapabilities = fetched;
         installationName = session.installation_name;
         return session;
       },

@@ -12,7 +12,6 @@ export type IconName =
   | 'playground'
   | 'settings'
   | 'menu'
-  | 'sun'
-  | 'moon'
+  | 'close'
   | 'chevron'
   | 'arrow';

@@ -44,7 +44,7 @@
     </h2>
   </div>
   {#if identitiesPending}
-    <p role="status">Checking your sign-in methods…</p>
+    <p class="inline-status" role="status">Checking your sign-in methods…</p>
   {:else if identitiesError}
     <p class="field-error" role="alert">
       Your sign-in methods are unavailable.

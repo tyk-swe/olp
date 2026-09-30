@@ -147,7 +147,9 @@
       </p>
     </div>
   </div>
-  {#if revisions.isPending}<p role="status">Loading provider revisions…</p>
+  {#if revisions.isPending}<p class="inline-status" role="status">
+      Loading provider revisions…
+    </p>
   {:else if revisions.isError}<div class="inline-problem" role="alert">
       {providerDetailError(revisions.error)}
       <button
@@ -245,7 +247,9 @@
     onClose={() => (viewed = null)}
   >
     {#snippet children(close)}
-      {#if revisionDetail.isPending}<p role="status">Loading revision…</p>
+      {#if revisionDetail.isPending}<p class="inline-status" role="status">
+          Loading revision…
+        </p>
       {:else if revisionDetail.isError}<div class="inline-problem" role="alert">
           {providerDetailError(revisionDetail.error)}
           <button
@@ -329,7 +333,7 @@
       {/if}
 
       <h3 class="revision-models-heading">Models and capabilities</h3>
-      {#if revisionModels.isPending}<p role="status">
+      {#if revisionModels.isPending}<p class="inline-status" role="status">
           Loading revision models…
         </p>
       {:else if revisionModels.isError}<div class="inline-problem" role="alert">

@@ -73,7 +73,7 @@
         Review {selected.map((provider) => provider.name).join(', ')} before applying
         {preview}.
       </p>
-      {#if routes.isPending}<p role="status">
+      {#if routes.isPending}<p class="inline-status" role="status">
           Checking affected routes…
         </p>{:else if routes.isError}<p role="alert">
           Route preview unavailable. <button onclick={() => routes.refetch()}

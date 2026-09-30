@@ -429,6 +429,33 @@ input {
   accent-color: var(--foreground);
 }
 
+input[type='file'] {
+  max-width: 100%;
+  min-width: 0;
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
+}
+
+input[type='file']::file-selector-button {
+  min-height: 2.5rem;
+  margin-right: 0.75rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--motion),
+    color var(--motion);
+}
+
+input[type='file']::file-selector-button:hover {
+  border-color: var(--foreground-hover);
+  color: var(--foreground-hover);
+}
+
 /* Metric tiles: no fill, hairline dividers, a mono label over a 36px value. */
 .metric-grid {
   display: grid;
@@ -802,6 +829,10 @@ button:not(:disabled),
     border-color: ButtonText;
   }
 
+  input[type='file']::file-selector-button {
+    border-color: ButtonText;
+  }
+
   .button-primary {
     background: ButtonFace;
     color: ButtonText;
@@ -883,6 +914,17 @@ button:not(:disabled),
 
 .empty-state p {
   max-width: 34rem;
+}
+
+.inline-status {
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
+}
+
+.updating {
+  margin: 0 0 0.5rem;
+  color: var(--foreground-muted);
+  font-size: var(--text-body-sm);
 }
 
 .inline-problem .button,

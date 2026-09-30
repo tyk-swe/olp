@@ -271,7 +271,9 @@
           ? 'Leave every route unchecked to allow all current and future routes.'
           : 'Leave blank to allow all current and future routes.'}
       </p>
-      {#if services.pending}<span role="status">Loading routes…</span>
+      {#if services.pending}<span class="inline-status" role="status"
+          >Loading routes…</span
+        >
       {:else if !services.gatewayAvailable}
         <label for="allowed-routes">Route slugs (comma separated)</label>
         <input
@@ -293,7 +295,8 @@
         <span
           >Save planned route restrictions. Routing is not available yet.</span
         >
-      {:else if routes.isPending}<span role="status">Loading routes…</span
+      {:else if routes.isPending}<span class="inline-status" role="status"
+          >Loading routes…</span
         >{:else if routes.isError}<span class="inline-problem" role="alert"
           >Routes are unavailable, so route restrictions cannot be reviewed.
           <button
@@ -427,7 +430,8 @@
     <div class="form-grid budget-inputs">
       <div class="form-field">
         <label for="budget-group">Shared budget group (optional)</label
-        >{#if groups.isPending}<span role="status">Loading groups…</span
+        >{#if groups.isPending}<span class="inline-status" role="status"
+            >Loading groups…</span
           >{:else}<select
             id="budget-group"
             bind:value={form.budgetGroupId}

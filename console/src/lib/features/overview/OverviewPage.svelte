@@ -7,7 +7,7 @@
 </script>
 
 {#if services.pending}
-  <p role="status">Loading installation…</p>
+  <div class="loading-state" role="status">Loading installation…</div>
 {:else if services.error}
   <div class="inline-problem" role="alert">
     {errorMessage(services.error)}

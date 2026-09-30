@@ -161,7 +161,9 @@
           >{/if}
         <div id="route-status">
           {#if playground.routes.isPending}
-            <small role="status">Loading active routes…</small>
+            <small class="inline-status" role="status"
+              >Loading active routes…</small
+            >
           {:else if playground.routes.isError}
             <p class="field-error" role="alert">
               {errorMessage(
@@ -281,6 +283,7 @@
             >Output content policy requires unary responses — streaming is
             disabled.</small
           >{:else if playground.streamEnabled && playground.streamCheck === 'checking'}<small
+            class="inline-status"
             role="status">Checking streaming eligibility…</small
           >{:else if playground.streamEnabled && playground.streamCheckMessage}<small
             class="policy-note"
