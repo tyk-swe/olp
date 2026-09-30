@@ -55,37 +55,63 @@ describe('unwrap', () => {
     ).toEqual({ id: 'one' });
   });
 
-  it('throws the problem document of a failed response', () => {
+  it('preserves structured problem details and their declared status', () => {
+    const problem = {
+      type: 'urn:olp:problem:rate-limited',
+      title: 'Rate limited',
+      detail: 'Retry after the window',
+      status: 429,
+      instance: '/api/v1/requests',
+      errors: {
+        request: [
+          { code: 'invalid', message: 'Retry after the advertised window.' }
+        ]
+      }
+    };
     let caught: unknown;
     try {
-      unwrap({
-        error: { title: 'Not found', status: 404, detail: 'No such route.' },
-        response: new Response(null, { status: 404 })
-      });
+      unwrap({ error: problem, response: new Response(null, { status: 503 }) });
     } catch (error) {
       caught = error;
     }
     expect(caught).toBeInstanceOf(ApiProblem);
-    expect((caught as ApiProblem).problem).toMatchObject({
-      status: 404,
-      detail: 'No such route.'
-    });
+    expect((caught as ApiProblem).problem).toEqual(problem);
   });
 
-  it('fails closed when a successful response omits its body', () => {
-    let caught: unknown;
-    try {
-      unwrap({ response: new Response(null, { status: 200 }) });
-    } catch (error) {
-      caught = error;
+  it.each(['gateway unavailable', { status: '503', title: false }, null])(
+    'falls back to the response status for unstructured error %s',
+    (error) => {
+      expect(() =>
+        unwrap({ error, response: new Response(null, { status: 503 }) })
+      ).toThrow(
+        expect.objectContaining({
+          problem: expect.objectContaining({
+            type: 'about:blank',
+            title: 'Request failed (503)',
+            status: 503
+          })
+        })
+      );
     }
-    expect(caught).toBeInstanceOf(ApiProblem);
-    expect((caught as ApiProblem).problem).toEqual({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The API response did not include the expected JSON body',
-      status: 502
-    });
-  });
+  );
+
+  it.each([undefined, null])(
+    'fails closed when a successful response has body %s',
+    (data) => {
+      let caught: unknown;
+      try {
+        unwrap({ data, response: new Response(null, { status: 200 }) });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ApiProblem);
+      expect((caught as ApiProblem).problem).toEqual({
+        type: 'urn:olp:problem:invalid-api-response',
+        title: 'The API response did not include the expected JSON body',
+        status: 502
+      });
+    }
+  );
 });
 
 describe('unwrapPage', () => {

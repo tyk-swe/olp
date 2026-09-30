@@ -1,8 +1,9 @@
+import { provisionGenerationRoute } from '../helpers/management';
+import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import AxeBuilder from '@axe-core/playwright';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { readFileSync } from 'node:fs';
 import {
   expect,
   test,
@@ -16,14 +17,8 @@ import {
   refreshUntilRequestCount
 } from '../journeys/request-history';
 
-// The owner created by tests/access/control.spec.ts; a run that starts on an
-// empty installation performs the setup itself.
 test.describe.configure({ mode: 'serial' });
 
-const owner = {
-  email: 'owner@example.com',
-  password: 'a long browser test password'
-};
 const upstream = {
   origin: 'http://127.0.0.1:4187',
   endpoint: 'http://127.0.0.1:4187/v1',
@@ -48,114 +43,14 @@ async function resetUpstream(request: APIRequestContext): Promise<void> {
   ).toBe(204);
 }
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page).toHaveURL(/\/(setup|login)(\?.*)?$/);
-  if (/\/setup$/.test(page.url())) {
-    await page.getByLabel('Display name').fill('Owner');
-    await page.getByLabel('Work email').fill(owner.email);
-    await page.getByLabel('Password', { exact: true }).fill(owner.password);
-    await page.getByLabel('Confirm password').fill(owner.password);
-    await page
-      .getByLabel('Setup token')
-      .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
-    await page.getByRole('button', { name: 'Create owner account' }).click();
-  } else {
-    const deadline = Date.now() + 75_000;
-    while (true) {
-      await page.getByLabel('Email').fill(owner.email);
-      await page.getByLabel('Password').fill(owner.password);
-      const completed = page.waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v1/sessions'
-      );
-      await page.getByRole('button', { name: 'Sign in' }).click();
-      const response = await completed;
-      if (response.status() !== 429 || Date.now() >= deadline) {
-        expect(response.status()).toBe(201);
-        break;
-      }
-      const seconds = Number(response.headers()['retry-after'] ?? '1');
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
-      );
-    }
-  }
-  await expect(page).toHaveURL(/\/$/);
-}
-
-/// Brings one OpenAI-compatible provider and one active route online through
-/// the console, which is the ground truth the accounting assertions need.
 async function provisionRoute(page: Page): Promise<void> {
-  await page.goto('/providers/new');
-  await expect(
-    page.getByRole('heading', { name: 'Connect an upstream provider.' })
-  ).toBeVisible();
-  await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
-  await page.getByLabel('Provider name').fill(provider);
-  await page.getByLabel('Authentication').selectOption('api_key');
-  await page
-    .getByRole('textbox', { name: 'Endpoint', exact: true })
-    .fill(upstream.endpoint);
-  await page.getByLabel('Seed model (optional)').fill(upstream.model);
-  await page
-    .getByLabel('Credential', { exact: true })
-    .fill(upstream.credential);
-  await page.getByRole('button', { name: /Save and test connection/ }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Discover upstream models' })
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Discover upstream models' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Review model capabilities' })
-  ).toBeVisible();
-  await page.getByLabel('Operation 1').selectOption('generation');
-  await page.getByLabel('Client surface 1').selectOption('openai');
-  await page.getByLabel('Mode 1').selectOption('unary');
-  await page.getByLabel('Operation 2').selectOption('generation');
-  await page.getByLabel('Client surface 2').selectOption('openai');
-  await page.getByLabel('Mode 2').selectOption('streaming');
-  await page.getByRole('checkbox', { name: 'Eligible for routes' }).check();
-  await page.getByRole('button', { name: 'Save capability review' }).click();
-  await expect(
-    page.getByText('Capability review saved with declared provenance.')
-  ).toBeVisible();
-  await page
-    .getByRole('button', { name: 'Server-certify capabilities' })
-    .click();
-  await expect(
-    page.getByText(/reviewed tuples passed server certification/)
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Continue to activation' }).click();
-  await page.getByRole('button', { name: 'Test completed draft' }).click();
-  await expect(page.getByText(/Final draft test passed/)).toBeVisible();
-  await page.getByRole('button', { name: 'Activate provider' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Now build a stable route slug.' })
-  ).toBeVisible();
-
-  await page.getByRole('link', { name: 'Build default route' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Build a route draft.' })
-  ).toBeVisible();
-  await page.getByLabel('Public model slug').fill(route);
-  await page.getByRole('button', { name: 'Add target' }).click();
-  await expect(
-    page.getByLabel('Provider model').first().locator('option:checked')
-  ).toContainText(upstream.model);
-  // This provider has no profile, so the route is declared transformed.
-  await page.getByLabel('Fidelity mode').selectOption('transformed');
-  await page.getByRole('button', { name: 'Create draft' }).click();
-  await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
-  await page
-    .getByRole('button', { name: 'Validate draft', exact: true })
-    .click();
-  await expect(page.getByText('Validation passed.')).toBeVisible();
-  await page
-    .getByRole('button', { name: 'Activate route', exact: true })
-    .click();
-  await expect(page.getByText('Revision 1 active')).toBeVisible();
+  await provisionGenerationRoute(page, {
+    providerName: provider,
+    route,
+    endpoint: upstream.endpoint,
+    model: upstream.model,
+    credential: upstream.credential
+  });
 }
 
 /// Issues the accounting key with a daily cost budget and returns its secret.

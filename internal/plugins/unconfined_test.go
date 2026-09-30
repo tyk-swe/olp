@@ -440,7 +440,9 @@ func TestUnconfinedProcessLogsShareOneBudget(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			var logged bytes.Buffer
 			p := &process{log: slog.New(slog.NewJSONHandler(&logged, nil)), calls: map[uint64]*pending{}}
-			message := strings.Repeat("x", 100)
+			// Both record costs are divisible by three, so no concurrent order
+			// can exactly exhaust the power-of-two budget without a warning.
+			message := strings.Repeat("x", 101)
 			emit := func(i int) {
 				if source == "redaction updates" || source == "concurrent" {
 					p.mu.Lock()

@@ -1,12 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { manage } from '../helpers/management';
+import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type Page, type TestInfo } from '../playwright';
-
-// The owner created by tests/access/control.spec.ts; a run that starts on an
-// empty installation performs the setup itself.
-const owner = {
-  email: 'owner@example.com',
-  password: 'a long browser test password'
-};
 
 // PROVIDER_PAGE_SIZE is 50, so fifty-three drafts make Next meaningful and
 // leave one searchable outlier.
@@ -18,80 +12,27 @@ const LIST_DELAY_MS = 800;
 // Keystrokes arrive faster than the 250ms search debounce.
 const KEYSTROKE_MS = 60;
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page).toHaveURL(/\/(setup|login)(\?.*)?$/);
-  if (/\/setup$/.test(page.url())) {
-    await page.getByLabel('Display name').fill('Owner');
-    await page.getByLabel('Work email').fill(owner.email);
-    await page.getByLabel('Password', { exact: true }).fill(owner.password);
-    await page.getByLabel('Confirm password').fill(owner.password);
-    await page
-      .getByLabel('Setup token')
-      .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
-    await page.getByRole('button', { name: 'Create owner account' }).click();
-  } else {
-    const deadline = Date.now() + 75_000;
-    while (true) {
-      await page.getByLabel('Email').fill(owner.email);
-      await page.getByLabel('Password').fill(owner.password);
-      const completed = page.waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/v1/sessions'
-      );
-      await page.getByRole('button', { name: 'Sign in' }).click();
-      const response = await completed;
-      if (response.status() !== 429 || Date.now() >= deadline) {
-        expect(response.status()).toBe(201);
-        break;
-      }
-      const seconds = Number(response.headers()['retry-after'] ?? '1');
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
-      );
-    }
-  }
-  await expect(page).toHaveURL(/\/$/);
-}
-
 /// Creates draft providers through the signed-in page so the list has real
 /// rows; drafts never contact the upstream.
 async function provisionProviders(page: Page): Promise<void> {
-  const created = await page.evaluate(
-    async ({ count, searchable }) => {
-      const session = await fetch('/api/v1/sessions/current').then((r) =>
-        r.json()
-      );
-      const names = [searchable];
-      for (let index = 0; index < count; index += 1)
-        names.push(`Responsiveness filler ${String(index).padStart(2, '0')}`);
-      const results: number[] = [];
-      for (const name of names) {
-        const response = await fetch('/api/v1/providers', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': session.csrf_token,
-            'Idempotency-Key': crypto.randomUUID()
-          },
-          body: JSON.stringify({
-            name,
-            configuration: {
-              kind: 'openai_compatible',
-              auth_mode: 'api_key',
-              endpoint: 'http://127.0.0.1:4187/v1'
-            },
-            credential: 'responsiveness-secret'
-          })
-        });
-        results.push(response.status);
+  const names = [searchable];
+  for (let index = 0; index < providerCount; index += 1)
+    names.push(`Responsiveness filler ${String(index).padStart(2, '0')}`);
+  for (const name of names) {
+    const response = await manage(page, 'POST', '/api/v1/providers', {
+      idempotency: crypto.randomUUID(),
+      body: {
+        name,
+        configuration: {
+          kind: 'openai_compatible',
+          auth_mode: 'api_key',
+          endpoint: 'http://127.0.0.1:4187/v1'
+        },
+        credential: 'responsiveness-secret'
       }
-      return results;
-    },
-    { count: providerCount, searchable }
-  );
-  expect(created).toEqual(Array(providerCount + 1).fill(201));
+    });
+    expect(response.status).toBe(201);
+  }
 }
 
 type ListQuery = { search: string; cursor: string };

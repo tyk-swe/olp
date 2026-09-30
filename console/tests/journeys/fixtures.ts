@@ -1,3 +1,4 @@
+import { signInOwner } from '../helpers/owner';
 import { expect, type Page, type Locator } from '../playwright';
 
 export const owner = {
@@ -17,31 +18,10 @@ export const vertical = {
   reply: 'Hello from the vertical upstream'
 };
 
-export async function signInAsOwner(page: Page): Promise<void> {
-  await page.goto('/login');
-  const deadline = Date.now() + 75_000;
-  // The full journey can sign in more than five times in one minute. Honor
-  // the real authentication limiter without relaxing production settings.
-  while (true) {
-    await page.getByLabel('Email').fill(owner.email);
-    await page.getByLabel('Password').fill(owner.password);
-    const completed = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/v1/sessions'
-    );
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    const response = await completed;
-    if (response.status() !== 429 || Date.now() >= deadline) {
-      expect(response.status()).toBe(201);
-      break;
-    }
-    const seconds = Number(response.headers()['retry-after'] ?? '1');
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
-    );
-  }
-  await expect(page).toHaveURL(/\/$/);
+export function signInAsOwner(page: Page): Promise<void> {
+  return signInOwner(page, owner, {
+    bootstrapTokenFile: process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE
+  });
 }
 
 /// Reads the one-time secret out of the reveal dialog.

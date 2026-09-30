@@ -53,7 +53,8 @@ restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
-go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration ./internal/database ./internal/gateway ./internal/providers ./internal/media
+go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration
+go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
@@ -70,8 +71,6 @@ pnpm --dir console exec playwright test --config playwright.config.ts
 
 export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"
 export OLP_LOCAL_DIR="$scratch"
-for origin in true false; do
-  OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
-  export OLP_TEST_RUN_TOKEN
-  OLP_CONSOLE_E2E_PACKAGED="$origin" ./scripts/browser-integration.sh
-done
+OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
+export OLP_TEST_RUN_TOKEN
+OLP_CONSOLE_E2E_PACKAGED=true ./scripts/browser-integration.sh

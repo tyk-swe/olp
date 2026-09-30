@@ -146,13 +146,23 @@ func TestMalformedNativeRequestKeepsDialectTelemetry(t *testing.T) {
 
 func TestUnreadUnaryResponseReleasesAdmission(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 16 << 20, MaxEventBytes: 4096})
-	h.mock.set("a", completion(modelA, strings.Repeat("x", 8<<20)))
+	h := newSocketDeadlineHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+	h.mock.set("a", completion(modelA, strings.Repeat("x", 256<<10)))
 	finished := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.server.Config.Handler.ServeHTTP(w, r)
 		finished <- struct{}{}
 	}))
+	// A small send buffer stalls delivery without spending the failure guard
+	// serializing megabytes under the race detector.
+	server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			if err := conn.(*net.TCPConn).SetWriteBuffer(1024); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	server.Start()
 	defer server.Close()
 	conn, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
 	if err != nil {
@@ -172,7 +182,7 @@ func TestUnreadUnaryResponseReleasesAdmission(t *testing.T) {
 	// Keep the connection open without reading any of the large response.
 	select {
 	case <-finished:
-	case <-time.After(responseWriteTimeout + 8*time.Second):
+	case <-time.After(socketTestGuard):
 		t.Fatal("an unread unary response retained admission past the write deadline")
 	}
 	env := h.sink.last(t)

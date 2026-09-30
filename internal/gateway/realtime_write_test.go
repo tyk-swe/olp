@@ -32,18 +32,14 @@ func TestRealtimeBoundedWriterRenewsIndependentFrameDeadline(t *testing.T) {
 }
 
 func TestRealtimeBoundedWriterStopsSlowPeer(t *testing.T) {
-	for _, peer := range []string{"client", "provider"} {
-		t.Run(peer, func(t *testing.T) {
-			writer := newRealtimeBoundedWriter(t.Context(), realtimeWriteFixture{wait: true}, 20*time.Millisecond)
-			defer writer.close()
-			started := time.Now()
-			if err := writer.write(websocket.MessageText, []byte(`{"type":"stalled"}`)); !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("slow %s peer was not terminated at its frame deadline: %v", peer, err)
-			}
-			if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-				t.Fatalf("slow %s peer held the writer for %v", peer, elapsed)
-			}
-		})
+	writer := newRealtimeBoundedWriter(t.Context(), realtimeWriteFixture{wait: true}, 20*time.Millisecond)
+	defer writer.close()
+	started := time.Now()
+	if err := writer.write(websocket.MessageText, []byte(`{"type":"stalled"}`)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("slow peer was not terminated at its frame deadline: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("slow peer held the writer for %v", elapsed)
 	}
 }
 

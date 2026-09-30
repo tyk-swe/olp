@@ -85,7 +85,7 @@ func postMedia(t *testing.T, url string, body []byte, headers map[string]string)
 // TestMediaCooldownSharedAcrossGateways proves a cooldown one replica records
 // is enforced by an independently constructed gateway before dispatch: the
 // cooled slot is skipped at the shared gate rather than rediscovered upstream.
-func TestMediaCooldownSharedAcrossGateways(t *testing.T) {
+func TestIntegrationMediaCooldownSharedAcrossGateways(t *testing.T) {
 	limiter := mediaLimiter(t)
 	h := newMediaHarness(t)
 	h.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, h.gateway.log)
@@ -119,7 +119,7 @@ func TestMediaCooldownSharedAcrossGateways(t *testing.T) {
 // TestMediaConnectionQuotaRejectsOnceForSiblingCredentials proves a
 // connection-wide quota refusal stops the sibling credentials that share the
 // connection instead of reserving — and recording — through each of them.
-func TestMediaConnectionQuotaRejectsOnceForSiblingCredentials(t *testing.T) {
+func TestIntegrationMediaConnectionQuotaRejectsOnceForSiblingCredentials(t *testing.T) {
 	limiter := mediaLimiter(t)
 	h := newMediaHarness(t)
 	h.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, h.gateway.log)
@@ -169,7 +169,7 @@ func TestMediaConnectionQuotaRejectsOnceForSiblingCredentials(t *testing.T) {
 	}
 }
 
-func TestVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t *testing.T) {
+func TestIntegrationVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t *testing.T) {
 	f := seedMediaFixture(t, "api_key", true)
 	limiter := mediaLimiter(t)
 	f.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, f.log)
@@ -209,7 +209,7 @@ func TestVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t *testing.T
 // TestVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget proves widening
 // the route budget cannot turn one durable create into repeated upstream
 // work: an ambiguous failure retires the reservation without a second create.
-func TestVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget(t *testing.T) {
+func TestIntegrationVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	route := f.snapshot.Routes["video-default"]
 	route.MaxAttempts = 3
@@ -250,7 +250,7 @@ func TestVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget(t *testing.T) {
 // TestVideoCreateReleasesProbeWhenReservationFails proves a half-open probe
 // admitted for the durable create is returned when the local persistence step
 // fails before any upstream dispatch.
-func TestVideoCreateReleasesProbeWhenReservationFails(t *testing.T) {
+func TestIntegrationVideoCreateReleasesProbeWhenReservationFails(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	for i := 0; i < circuitFailures; i++ {
 		f.gateway.health.record(f.providerID, AttemptFact{Class: classConnect})
@@ -279,7 +279,7 @@ func TestVideoCreateReleasesProbeWhenReservationFails(t *testing.T) {
 // TestRetainedVideoOperationsStayPinnedToRecordedTarget proves request
 // routing preferences are never reinterpreted as permission to move a
 // historical job: the recorded provider target is used regardless.
-func TestRetainedVideoOperationsStayPinnedToRecordedTarget(t *testing.T) {
+func TestIntegrationRetainedVideoOperationsStayPinnedToRecordedTarget(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
 	resp := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
 	created := decodeJSON(t, resp)

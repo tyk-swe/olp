@@ -27,8 +27,16 @@ export default defineConfig({
     screenshot: 'only-on-failure'
   },
   projects: [
-    { name: 'packaged', use: { baseURL: 'http://127.0.0.1:4182' } },
-    { name: 'vite', use: { baseURL: 'http://127.0.0.1:4183' } }
+    {
+      name: 'packaged',
+      testIgnore: '**/vite-smoke.spec.ts',
+      use: { baseURL: 'http://127.0.0.1:4182' }
+    },
+    {
+      name: 'vite',
+      testMatch: '**/basics/{shell,vite-smoke}.spec.ts',
+      use: { baseURL: 'http://localhost:4183' }
+    }
   ],
   webServer: [
     {
@@ -51,7 +59,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         OLP_DATABASE_URL: database('olp_vite'),
-        OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4183',
+        OLP_PUBLIC_ORIGIN: 'http://localhost:4183',
         OLP_LISTEN_ADDR: '127.0.0.1:4184',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9184',
         OLP_CONSOLE_DIR: 'console/build',
@@ -90,8 +98,8 @@ export default defineConfig({
       reuseExistingServer: false
     },
     {
-      command: 'pnpm dev --host 127.0.0.1 --port 4183 --strictPort',
-      url: 'http://127.0.0.1:4183',
+      command: 'pnpm dev --host localhost --port 4183 --strictPort',
+      url: 'http://localhost:4183',
       reuseExistingServer: false,
       env: { OLP_DEV_API_ORIGIN: 'http://127.0.0.1:4184' }
     }

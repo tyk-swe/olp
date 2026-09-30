@@ -1,3 +1,4 @@
+import { manage } from '../helpers/management';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '../playwright';
@@ -31,26 +32,11 @@ async function management(
   body?: unknown,
   match?: string
 ): Promise<{ status: number; body: ManagementBody }> {
-  return page.evaluate(
-    async ({ method, path, body, match }) => {
-      const session = await fetch('/api/v1/sessions/current').then((response) =>
-        response.json()
-      );
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': session.csrf_token
-      };
-      if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();
-      if (match) headers['If-Match'] = `"${match}"`;
-      const response = await fetch(path, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-      return { status: response.status, body: await response.json() };
-    },
-    { method, path, body, match }
-  ) as Promise<{ status: number; body: ManagementBody }>;
+  return manage<ManagementBody>(page, method, path, {
+    body,
+    etag: match,
+    idempotency: method === 'POST' ? crypto.randomUUID() : undefined
+  });
 }
 
 function success(

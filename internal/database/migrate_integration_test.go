@@ -88,7 +88,7 @@ func ledger(t *testing.T, pool *pgxpool.Pool) []string {
 	return versions
 }
 
-func TestMigrationRefusesHistoryWithAHole(t *testing.T) {
+func TestIntegrationMigrationRefusesHistoryWithAHole(t *testing.T) {
 	pool := scratchPool(t)
 	history := laterHistory(t)
 	if err := migrate(t.Context(), pool, history); err != nil {
@@ -113,7 +113,7 @@ func TestMigrationRefusesHistoryWithAHole(t *testing.T) {
 	}
 }
 
-func TestMigrationAndStartupRefuseANewerSchema(t *testing.T) {
+func TestIntegrationMigrationAndStartupRefuseANewerSchema(t *testing.T) {
 	pool := scratchPool(t)
 	if err := migrate(t.Context(), pool, laterHistory(t)); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestMigrationAndStartupRefuseANewerSchema(t *testing.T) {
 	}
 }
 
-func TestStoredRouteFidelityStatesStrictOrTransformed(t *testing.T) {
+func TestIntegrationStoredRouteFidelityStatesStrictOrTransformed(t *testing.T) {
 	pool := scratchPool(t)
 	if err := Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestStoredRouteFidelityStatesStrictOrTransformed(t *testing.T) {
 // A credential version never changes once created, except to be revoked:
 // published revisions pin it, and grant enrollment records its plugin,
 // observed principal and grant facts on it.
-func TestCredentialVersionsChangeOnlyByRevocation(t *testing.T) {
+func TestIntegrationCredentialVersionsChangeOnlyByRevocation(t *testing.T) {
 	pool := scratchPool(t)
 	if err := Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)

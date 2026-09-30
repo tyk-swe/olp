@@ -18,7 +18,7 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 			t.Parallel()
 			finished := make(chan error, 1)
 			s := &Server{Origin: "https://console.test"}
-			server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
+			server := httptest.NewServer(s.serve(65536, 250*time.Millisecond, func(r *http.Request) (Reply, error) {
 				var body map[string]any
 				err := Decode(r, &body)
 				finished <- err
@@ -30,6 +30,9 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer conn.Close()
+			if err = conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
 			// Leave the body open, even when the first JSON document is complete.
 			if _, err = fmt.Fprintf(conn, "POST / HTTP/1.1\r\nHost: console.test\r\nOrigin: %s\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n%s", s.Origin, body); err != nil {
 				t.Fatal(err)
@@ -39,8 +42,8 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 				if err == nil {
 					t.Fatal("accepted an incomplete request body")
 				}
-			case <-time.After(18 * time.Second):
-				t.Fatal("body read remained blocked after the 15-second access timeout")
+			case <-time.After(5 * time.Second):
+				t.Fatal("body read remained blocked after the access timeout")
 			}
 			if err = conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 				t.Fatal(err)
@@ -170,7 +173,7 @@ func TestHandleStreamResponseController(t *testing.T) {
 
 func TestAccessBodyReadDeadlineAllowsKeepAlive(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.serve(65536, 15*time.Second, func(r *http.Request) (Reply, error) {
+	server := httptest.NewServer(s.serve(65536, 250*time.Millisecond, func(r *http.Request) (Reply, error) {
 		var body map[string]any
 		err := Decode(r, &body)
 		return OK(body), err
@@ -181,11 +184,14 @@ func TestAccessBodyReadDeadlineAllowsKeepAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if err = conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+	if err = conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(conn)
-	for range 2 {
+	for request := range 2 {
+		if request > 0 {
+			time.Sleep(350 * time.Millisecond)
+		}
 		if _, err = fmt.Fprintf(conn, "POST / HTTP/1.1\r\nHost: console.test\r\nOrigin: %s\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}", s.Origin); err != nil {
 			t.Fatal(err)
 		}

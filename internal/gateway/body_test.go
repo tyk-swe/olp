@@ -32,13 +32,13 @@ func TestIncompleteBodiesReleaseAdmission(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := newHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+			h := newSocketDeadlineHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 			conn, err := net.DialTimeout("tcp", h.server.Listener.Addr().String(), time.Second)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer conn.Close()
-			if err := conn.SetDeadline(time.Now().Add(requestBodyTimeout + 3*time.Second)); err != nil {
+			if err := conn.SetDeadline(time.Now().Add(socketTestGuard)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: gateway.test\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Encoding: %s\r\nContent-Length: %d\r\n\r\n%s", fullKey, tc.encoding, len(tc.body)+1000, tc.body); err != nil {
@@ -68,14 +68,14 @@ func TestIncompleteBodiesReleaseAdmission(t *testing.T) {
 
 func TestCompletedUploadDoesNotLimitInferenceOrKeepAlive(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, Config{})
+	h := newSocketDeadlineHarness(t, Config{})
 	route := h.rt.release.Snapshot.Routes[routeSlug]
-	route.OverallTimeout = (requestBodyTimeout + 5*time.Second).Milliseconds()
+	route.OverallTimeout = socketTestGuard.Milliseconds()
 	route.Targets[0].Timeout = route.OverallTimeout
 	h.rt.release.Snapshot.Routes[routeSlug] = route
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		select {
-		case <-time.After(requestBodyTimeout + 100*time.Millisecond):
+		case <-time.After(socketTestTimeout + 100*time.Millisecond):
 			completion(modelA, answerText)(w, r)
 		case <-r.Context().Done():
 		}
@@ -85,7 +85,7 @@ func TestCompletedUploadDoesNotLimitInferenceOrKeepAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(requestBodyTimeout + 5*time.Second)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(socketTestGuard)); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(conn)
