@@ -60,8 +60,7 @@ WHERE r.event=$1 AND r.enabled AND d.enabled`
 
 const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,r.event,v.attempts,v.last_attempt_at,
  r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
- v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,
- d.url
+ v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload
 FROM olp.notification_deliveries v
 JOIN olp.notification_rules r ON r.id=v.rule_id
 JOIN olp.notification_destinations d ON d.id=r.destination_id
@@ -104,7 +103,6 @@ type delivery struct {
 	limit         *string
 	currency      string
 	payload       []byte
-	url           string
 }
 
 func thresholdEvidence(accrued string, limit *string, threshold int) (decimal.Decimal, decimal.Decimal, bool) {
@@ -357,7 +355,7 @@ func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
 		var d delivery
 		if err = rows.Scan(&d.id, &d.ruleID, &d.event, &d.attempts, &d.lastAttemptAt,
 			&d.ruleName, &d.subjectKind, &d.subjectID, &d.windowKind, &d.windowID, &d.threshold,
-			&d.accrued, &d.limit, &d.currency, &d.payload, &d.url); err != nil {
+			&d.accrued, &d.limit, &d.currency, &d.payload); err != nil {
 			return nil, err
 		}
 		deliveries = append(deliveries, d)
@@ -400,26 +398,31 @@ func webhookBody(d delivery) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-// notificationSecret reads the signing secret the rule's destination holds
-// now, not when the delivery was read: rotating or clearing a secret deletes
-// the old one, and the share lock waits for a rotation in flight to commit.
-func (w *notificationWorker) notificationSecret(ctx context.Context, ruleID string) ([]byte, error) {
+// notificationDestination reads the URL and signing secret of the rule's
+// destination now, not when the delivery was read, both from one locked row:
+// rotating or clearing a secret deletes the old one, the share lock waits for
+// a rotation in flight to commit, and a rule moved to another destination
+// sends there, signed with that destination's secret. It reports
+// pgx.ErrNoRows when the rule or its destination is disabled.
+func (w *notificationWorker) notificationDestination(ctx context.Context, ruleID string) (string, []byte, error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	defer tx.Rollback(ctx)
+	var target string
 	var secretID *string
 	if err = tx.QueryRow(ctx,
-		`SELECT d.secret_id::text FROM olp.notification_rules r
+		`SELECT d.url,d.secret_id::text FROM olp.notification_rules r
 		 JOIN olp.notification_destinations d ON d.id=r.destination_id
-		 WHERE r.id=$1 FOR SHARE OF d`, ruleID).Scan(&secretID); err != nil {
-		return nil, err
+		 WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF d`, ruleID).Scan(&target, &secretID); err != nil {
+		return "", nil, err
 	}
 	if secretID == nil {
-		return nil, nil
+		return target, nil, nil
 	}
-	return w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
+	secret, err := w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
+	return target, secret, err
 }
 
 func deliveryErrorCode(err error) string {
@@ -465,18 +468,21 @@ func (w *notificationWorker) send(ctx context.Context, d delivery) string {
 	if w.policy == nil {
 		return "invalid_destination"
 	}
-	target, err := w.policy.ValidateEndpoint(d.url)
+	destination, secret, err := w.notificationDestination(ctx, d.ruleID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "invalid_destination"
+	}
+	if err != nil {
+		w.log.Warn("notification destination unavailable", "delivery", d.id, "error", err)
+		return "network"
+	}
+	target, err := w.policy.ValidateEndpoint(destination)
 	if err != nil {
 		return "invalid_destination"
 	}
 	body, err := webhookBody(d)
 	if err != nil {
 		return "invalid_destination"
-	}
-	secret, err := w.notificationSecret(ctx, d.ruleID)
-	if err != nil {
-		w.log.Warn("notification secret unavailable", "delivery", d.id, "error", err)
-		return "network"
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, webhookTimeout)
 	defer cancel()
