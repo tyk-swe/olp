@@ -191,7 +191,21 @@ export class ProviderWizardState {
     }
   };
   goBack = () => {
-    if (this.wizardStep > 1) this.wizardStep -= 1;
+    if (this.wizardStep <= 1) return;
+    this.wizardStep -= 1;
+    const provider = this.wizardProvider;
+    const spec = this.selectedSpec;
+    const previous = this.draft;
+    if (this.wizardStep !== 1 || !provider || !spec || !previous) return;
+    // Discovery records upstream model facts in the stored configuration;
+    // re-saving the pre-discovery document would erase them and reset
+    // certification evidence, so the connection form edits the stored one.
+    const draft = createProviderDraft(spec, provider.configuration);
+    draft.name = provider.name;
+    draft.projectId = previous.projectId;
+    draft.model = previous.model;
+    draft.credential = '';
+    this.draft = draft;
   };
   /** Return to a blank step 1 without leaving the route; the draft effect
    * recreates the connection form from the first provider kind. */

@@ -65,8 +65,12 @@
     if (!spec) return;
     setProviderDraftKind(draft, kind);
     draft.authMode = spec.default_auth_mode;
-    if (kind === 'openai_compatible') selectProviderPreset(draft, spec, id);
-    else {
+    // The generic OpenAI-compatible vendor is a catalogue entry, not a preset;
+    // it clears any previous preset's endpoint and keeps its vendor id.
+    const preset = spec.presets.some((preset) => preset.id === id);
+    if (kind === 'openai_compatible')
+      selectProviderPreset(draft, spec, preset ? id : '');
+    if (!preset) {
       draft.presetId = '';
       draft.options = { ...emptyProviderOptions(), vendor_id: id || null };
     }

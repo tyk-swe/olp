@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { dateTimeLocalValue } from '$lib/format';
 import {
   applyUsageDraft,
+  clearedUsageState,
   defaultUsageState,
   readUsageState,
   usageDraft,
@@ -310,5 +311,30 @@ describe('usage report URL state', () => {
     expect(updated.filters.start).toBe('2026-03-01T12:00:00.000000001Z');
     expect(updated.filters.end).toBe('2026-03-02T12:00:00.000000009Z');
     expect(updated.filters.route).toBe('exact-route');
+  });
+});
+
+describe('clearing the usage report', () => {
+  it('clears to a valid state when the breakdown is by attribution', () => {
+    const now = new Date('2026-07-12T12:00:35.123Z');
+    const state = clearedUsageState(
+      { dimension: 'attribution', granularity: 'day' },
+      now
+    );
+    expect(state.dimension).toBe('route');
+    expect(state.granularity).toBe('day');
+    expect(state.filters.attribution_key).toBeUndefined();
+    expect(usageProblem(state)).toBeNull();
+    expect(
+      usageProblem(
+        readUsageState(new URLSearchParams(usageSearch(state)), defaults)
+      )
+    ).toBeNull();
+  });
+
+  it('keeps a breakdown that needs no filter', () => {
+    expect(
+      clearedUsageState({ dimension: 'model', granularity: 'hour' }).dimension
+    ).toBe('model');
   });
 });

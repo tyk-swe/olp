@@ -41,6 +41,20 @@ export function defaultUsageState(now = new Date()): UsageState {
   };
 }
 
+/** The report Clear returns to: the default window and filters, keeping the
+ * chosen axes. Clearing drops the attribution key, which the attribution
+ * breakdown requires, so that breakdown falls back to routes. */
+export function clearedUsageState(
+  draft: Pick<UsageDraft, 'dimension' | 'granularity'>,
+  now = new Date()
+): UsageState {
+  return {
+    ...defaultUsageState(now),
+    dimension: draft.dimension === 'attribution' ? 'route' : draft.dimension,
+    granularity: draft.granularity
+  };
+}
+
 function usageInstant(value: string, fromUrl: boolean): string | undefined {
   if (!timeValid(value, fromUrl)) return undefined;
   const normalized = instant(value);

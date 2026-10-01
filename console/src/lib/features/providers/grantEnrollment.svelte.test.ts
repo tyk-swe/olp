@@ -25,6 +25,7 @@ import {
   type ProviderCredential
 } from './api/credentials';
 import {
+  declareProviderModels,
   listProviderModelPage,
   type ProviderKindCapability
 } from './api/models';
@@ -54,7 +55,8 @@ vi.mock('./api/credentials', async (original) => ({
 }));
 vi.mock('./api/models', async (original) => ({
   ...(await original<typeof import('./api/models')>()),
-  listProviderModelPage: vi.fn()
+  listProviderModelPage: vi.fn(),
+  declareProviderModels: vi.fn()
 }));
 
 const digest = 'e'.repeat(64);
@@ -667,5 +669,70 @@ describe('grant enrollment by device authorization', () => {
     expect(cancelGrantEnrollment).toHaveBeenCalledWith(deviceEnrollment);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(pollGrantEnrollment).not.toHaveBeenCalled();
+  });
+});
+
+describe('stepping back in the provider wizard', () => {
+  it('re-saves the stored configuration, keeping model facts recorded after creation', async () => {
+    const referenceChat: ProviderProfile = {
+      ...referenceGrantChat,
+      id: 'reference-chat',
+      authentication: ['static_credential']
+    };
+    client.setQueryData(providerKeys.profiles(), [referenceChat]);
+    provider = {
+      ...saved,
+      configuration: {
+        ...saved.configuration,
+        auth_mode: 'static_credential',
+        profile_id: referenceChat.id
+      }
+    };
+    // Upstream facts discovery recorded; only their survival matters here.
+    const models = {
+      'reference-model': { context_length: 32768 }
+    } as unknown as NonNullable<Provider['configuration']['options']>['models'];
+    vi.mocked(declareProviderModels).mockImplementation(async () => {
+      provider = {
+        ...provider,
+        etag: 'v2',
+        configuration: {
+          ...provider.configuration,
+          options: { ...provider.configuration.options!, models }
+        }
+      };
+      return provider as never;
+    });
+    await connectionStage('reference-chat');
+    set('#provider-secret', 'static-secret');
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain('Declare upstream models');
+    });
+    set('#manual-models-wizard', 'reference-model');
+    [...host.querySelectorAll('button')]
+      .find(
+        (button) => button.textContent?.trim() === 'Add identifiers for review'
+      )!
+      .click();
+    await vi.waitFor(() => expect(declareProviderModels).toHaveBeenCalled());
+    await settle();
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Back')!
+      .click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.querySelector('#provider-plugin-profile')).not.toBeNull();
+    });
+    submit(host.querySelector('form')!);
+    await vi.waitFor(() => expect(updateProvider).toHaveBeenCalled());
+    const [id, etag, input] = vi.mocked(updateProvider).mock.calls[0]!;
+    expect(id).toBe(saved.id);
+    expect(etag).toBe('v2');
+    // Numbers keep their exact JSON text, so compare the serialized document.
+    expect(JSON.stringify(input.configuration?.options?.models)).toBe(
+      JSON.stringify(models)
+    );
   });
 });

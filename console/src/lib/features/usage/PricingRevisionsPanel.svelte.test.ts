@@ -11,6 +11,7 @@ import {
   listPricing,
   type PricingRevision
 } from './api/pricing';
+import { pricingKeys } from './pricingKeys';
 import PricingRevisionsProbe from './test/PricingRevisionsProbe.svelte';
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
@@ -369,4 +370,37 @@ it('pages through revisions and returns to the refreshed first page after creati
   });
   expect(listPricing).toHaveBeenLastCalledWith(undefined);
   expect(pageButton('Previous').disabled).toBe(true);
+});
+
+it('shows the created revision on the first page after paging away', async () => {
+  let created = false;
+  vi.mocked(createPricingRevision).mockImplementation(async () => {
+    created = true;
+    return revision;
+  });
+  vi.mocked(listPricing).mockImplementation(async (cursor) => ({
+    items: [
+      {
+        ...revision,
+        id: cursor ? 'older' : 'latest',
+        revision: cursor ? 1 : created ? 3 : 2
+      }
+    ],
+    nextCursor: cursor ? null : 'older-page'
+  }));
+  establish();
+  await ready();
+  await vi.waitFor(() => expect(host.textContent).toContain('Revision 2'));
+  [...host.querySelectorAll<HTMLButtonElement>('nav button')]
+    .find((button) => button.textContent?.trim() === 'Next')!
+    .click();
+  await vi.waitFor(() => expect(host.textContent).toContain('Revision 1'));
+  submit();
+  await vi.waitFor(() => expect(host.textContent).toContain('Revision 3'));
+  // The older page was never overwritten with first-page data.
+  expect(
+    client.getQueryData<{ items: PricingRevision[] }>(
+      pricingKeys.page('older-page')
+    )?.items[0]?.revision
+  ).toBe(1);
 });
