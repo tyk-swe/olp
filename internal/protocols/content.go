@@ -78,6 +78,7 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 			})
 		})
 	case openai.FamilyGeminiEmbeddings:
+		w.field(fields, "title", w.text)
 		w.field(fields, "content", func(raw json.RawMessage) json.RawMessage {
 			return w.object(raw, w.geminiParts)
 		})
@@ -85,6 +86,7 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 		w.field(fields, "requests", func(raw json.RawMessage) json.RawMessage {
 			return w.list(raw, func(item *json.RawMessage) {
 				*item = w.object(*item, func(req map[string]json.RawMessage) {
+					w.field(req, "title", w.text)
 					w.field(req, "content", func(raw json.RawMessage) json.RawMessage {
 						return w.object(raw, w.geminiParts)
 					})
