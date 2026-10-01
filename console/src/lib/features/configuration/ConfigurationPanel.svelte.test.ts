@@ -319,3 +319,29 @@ it('reports an invalid artifact', async () => {
   pasteArtifact('{not json');
   expect(host.textContent).toContain('The artifact is not valid JSON.');
 });
+
+it('ignores a plan that answers an artifact replaced meanwhile', async () => {
+  const pending = Promise.withResolvers<ConfigurationPlan>();
+  vi.mocked(planConfiguration).mockReturnValueOnce(pending.promise);
+  render();
+  pasteArtifact(JSON.stringify(document));
+  click('Plan');
+  flushSync();
+  expect(
+    host.querySelector<HTMLTextAreaElement>('#promotion-artifact')!.readOnly
+  ).toBe(true);
+  pasteArtifact(JSON.stringify(pluginDocument));
+  pending.resolve(cleanPlan);
+  await settle();
+  expect(host.querySelector('[data-testid="promotion-plan"]')).toBeNull();
+  expect(
+    [...host.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Apply'
+    )
+  ).toBe(false);
+  vi.mocked(planConfiguration).mockResolvedValue(cleanPlan);
+  click('Plan');
+  await settle();
+  expect(planConfiguration).toHaveBeenLastCalledWith(pluginDocument, {});
+  expect(host.textContent).toContain('Apply');
+});

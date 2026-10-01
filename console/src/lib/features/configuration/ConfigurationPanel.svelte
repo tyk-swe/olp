@@ -85,12 +85,17 @@
 
   async function runPlan() {
     if (busy || !artifactDocument) return;
+    // A plan answers the document it reviewed; one that arrives after the
+    // artifact changed must not enable Apply for the new document.
+    const planned = artifactDocument;
     busy = true;
     error = '';
     applyResult = '';
     try {
-      plan = await planConfiguration(artifactDocument, bindings());
+      const result = await planConfiguration(planned, bindings());
+      if (artifactDocument === planned) plan = result;
     } catch (problem) {
+      if (artifactDocument !== planned) return;
       plan = null;
       error = errorMessage(problem);
     } finally {
@@ -100,17 +105,22 @@
 
   async function apply() {
     if (busy || !artifactDocument) return;
+    const applied = artifactDocument;
     busy = true;
     error = '';
     applyResult = '';
     try {
-      plan = await applyConfiguration(artifactDocument, bindings());
+      const result = await applyConfiguration(applied, bindings());
+      if (artifactDocument !== applied) return;
+      plan = result;
       applyResult = 'staged';
     } catch (problem) {
+      if (artifactDocument !== applied) return;
       if (problem instanceof ApiProblem && problem.problem.status === 409) {
-        plan = await planConfiguration(artifactDocument, bindings()).catch(
+        const replanned = await planConfiguration(applied, bindings()).catch(
           () => plan
         );
+        if (artifactDocument === applied) plan = replanned;
       }
       error = errorMessage(problem);
     } finally {
@@ -195,11 +205,13 @@
       rows="8"
       placeholder="Paste an exported artifact, or choose a file"
       bind:value={artifact}
+      readonly={busy}
       oninput={parseArtifact}></textarea>
     <input
       aria-label="Upload artifact"
       type="file"
       accept="application/json,.json"
+      disabled={busy}
       onchange={upload}
     />
     {#if artifactDocument}
