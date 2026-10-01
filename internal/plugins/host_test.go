@@ -38,6 +38,8 @@ type pluginTable struct {
 	executable string
 	origins    []string
 	reads      int
+	// modules counts the reads that asked for a confined plugin's module.
+	modules int
 }
 
 func (p *pluginTable) install(module []byte) {
@@ -52,16 +54,22 @@ func (p *pluginTable) read() int {
 	return p.reads
 }
 
-func (p *pluginTable) QueryRow(context.Context, string, ...any) pgx.Row {
+func (p *pluginTable) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.reads++
+	withModule := len(args) > 1 && args[1] == true
+	if withModule {
+		p.modules++
+	}
 	module, executable := p.module, p.executable
 	manifest, err := json.Marshal(abi.Manifest{Origins: p.origins})
 	return scanner(func(dest ...any) error {
 		switch {
 		case module != nil:
-			*dest[3].(*[]byte) = module
+			if withModule {
+				*dest[3].(*[]byte) = module
+			}
 		case executable != "":
 			*dest[2].(**string) = &executable
 		default:
@@ -146,6 +154,37 @@ func TestHostCompilesAPluginOnceAndReusesItsInstances(t *testing.T) {
 	}
 	if reads := table.read(); reads != 1 {
 		t.Fatalf("the host read the module %d times", reads)
+	}
+}
+
+// Rechecking a cached plugin's usability reads its admission, not its module.
+func TestHostRechecksUsabilityWithoutReadingTheModule(t *testing.T) {
+	t.Parallel()
+	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, fixture(t, "well-behaved"))
+	signedCalls(t, host)
+	host.mu.Lock()
+	entry := host.hosted[fixtureDigest]
+	stale := time.Now().Add(-usableRecheck)
+	entry.verified = stale
+	host.mu.Unlock()
+	signedCalls(t, host)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		host.mu.Lock()
+		done := !entry.checking && entry.verified.After(stale)
+		host.mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the recheck did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	table.mu.Lock()
+	defer table.mu.Unlock()
+	if table.reads != 2 || table.modules != 1 {
+		t.Fatalf("the host made %d reads, %d of them for the module", table.reads, table.modules)
 	}
 }
 

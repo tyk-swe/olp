@@ -313,7 +313,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		return err
 	}
 	if rt != nil {
-		rt.Start(ctx)
+		// Authority must stay fresh while accepted requests drain, so
+		// polling outlives the listeners and stops once handlers finish.
+		rt.Start(context.WithoutCancel(ctx))
 		defer rt.Stop()
 	}
 	// The observability collectors probe only what this process composes: an
@@ -415,6 +417,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	defer cancel()
 	drainListeners(shutdown, listeners, emitter)
 	cancelRequests()
+	if rt != nil {
+		rt.Stop()
+	}
 	// Stop intake and flush accepted events before stopping the workers. If
 	// HTTP draining was forced, the epoch stays open to report the uncertainty
 	// from handlers that could still finish after intake closes.

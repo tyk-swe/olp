@@ -310,11 +310,12 @@ func (h *Host) load(digest string, entry *hosted) {
 // recheck observes whether the plugin a cached entry serves remains usable,
 // evicting it and closing its code when a refusal — such as the plugin's
 // uninstall on another replica — says it does not. Any other failure is no
-// removal, and the entry stays until the check next comes due.
+// removal, and the entry stays until the check next comes due. It reads only
+// the plugin's admission, never its module.
 func (h *Host) recheck(digest string, entry *hosted) {
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
-	_, err := Usable(ctx, h.db, h.unconfined, digest)
+	_, err := usable(ctx, h.db, h.unconfined, digest, false)
 	h.mu.Lock()
 	entry.checking = false
 	_, refused := errors.AsType[*Error](err)
