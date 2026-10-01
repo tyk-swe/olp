@@ -113,6 +113,12 @@ outage degrades to `bypass`, never to an error.
 
 - `embedding_route` names an OLP embeddings route, whose calls are accounted
   attempts; `similarity_threshold` and `max_candidates` bound matching.
+- **Isolation.** An approximate lookup cannot rely on the exact cache key, so
+  every vector is indexed with its scope identifier, route revision, guardrail
+  policy revisions and namespace generation, and a query filters on all of
+  them before similarity is compared. A semantic hit therefore never crosses a
+  boundary that an exact entry could not, and a purge or a new revision
+  invalidates semantic entries too.
 - The vector index uses the Valkey Search module on the cache Valkey. Vectors
   are derived from content and cannot be sealed while indexed, so enabling a
   semantic cache requires an explicit acknowledgement, recorded in audit and
@@ -155,7 +161,7 @@ reports show cache read and write tokens by route.
 | --- | --- | --- | --- |
 | Cached responses | The cache Valkey, sealed | The entry TTL, at most the route's `ttl_seconds`, or until evicted or purged | New seal purpose `response_cache` |
 | Cache keys | The cache Valkey, as HMAC digests | With the entry | New digest purpose `cache_key` |
-| Semantic vectors | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
+| Semantic vectors, tagged with scope, revisions and namespace | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
 | Cache configuration | Route revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
 | Cache-hit attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
 
@@ -185,10 +191,11 @@ reports show cache read and write tokens by route.
 
 - [ ] **M8.1** Hits and misses are correct for unary and streamed responses on
       every surface, and replayed streams validate against the protocol corpus.
-- [ ] **M8.1** No entry is ever served across a key or project boundary in an
-      isolation test with `key` and `project` scopes.
-- [ ] **M8.1** A new route revision, or a new guardrail policy revision at any
-      attachment scope, misses every older entry.
+- [ ] **M8.1, M8.2** No entry, exact or semantic, is ever served across a key
+      or project boundary in an isolation test with `key` and `project` scopes,
+      including for a near-identical prompt from another key.
+- [ ] **M8.1, M8.2** A new route revision, or a new guardrail policy revision
+      at any attachment scope, misses every older entry, exact or semantic.
 - [ ] **M8.1** Inspecting the cache Valkey reveals no plaintext response for
       exact entries.
 - [ ] **M8.1** Losing the cache Valkey degrades to `bypass` without request

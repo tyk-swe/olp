@@ -2,7 +2,7 @@
 
 | Status | Depends on | Integrates with | Unlocks |
 | --- | --- | --- | --- |
-| Planned | [M1](m01-measured-advantage.md) | [M3](m03-routing-resilience.md) (shadow traffic), [M4](m04-tenancy-identity.md) (organization scope), [M5](m05-observability.md) (capture redaction, decision export), [M9](m09-api-surface.md) (batch files), [M10](m10-agent-gateway.md) (tool calls) | [M8](m08-caching.md), [M10](m10-agent-gateway.md) |
+| Planned | [M1](m01-measured-advantage.md) | [M3](m03-routing-resilience.md) (shadow traffic), [M4](m04-tenancy-identity.md) (organization scope), [M5](m05-observability.md) (capture redaction, decision export), [M9](m09-api-surface.md) (batch files) | [M8](m08-caching.md), [M10](m10-agent-gateway.md) |
 
 OLP's [content policy](../gateway.md#content-policy) is a deterministic RE2
 filter: block or redact rules on input and unary output, with metadata-only

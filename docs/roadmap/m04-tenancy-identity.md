@@ -2,7 +2,7 @@
 
 | Status | Depends on | Integrates with | Unlocks |
 | --- | --- | --- | --- |
-| Planned | None | [M3](m03-routing-resilience.md) (budget fallbacks), [M5](m05-observability.md) (budget and key events), [M7](m07-guardrails.md) (organization-scoped policies), [M10](m10-agent-gateway.md) (toolsets and agents in access groups), [M11](m11-operator-ecosystem.md) (rotation into secret stores) | [M5](m05-observability.md), [M6](m06-cost-management.md), [M10](m10-agent-gateway.md), [M11](m11-operator-ecosystem.md) |
+| Planned | None | [M3](m03-routing-resilience.md) (budget fallbacks), [M7](m07-guardrails.md) (organization-scoped policies) | [M5](m05-observability.md), [M6](m06-cost-management.md), [M10](m10-agent-gateway.md), [M11](m11-operator-ecosystem.md) |
 
 OLP's access model is strict and well tested: projects, four installation
 roles, digest-only API keys, scoped management tokens, OIDC and
@@ -71,8 +71,10 @@ reserves for Enterprise in the core product.
   every key that reaches a route in the group draws from one pool.
 - **Windows.** Budgets support `day`, `week` (ISO weeks starting Monday) and
   `month` windows in an installation time zone, `budgets.time_zone` (an IANA
-  name, default `UTC`). Windows remain calendar-aligned and are computed from
-  Valkey server time, as today.
+  name, default `UTC`). Calendar windows stay calendar-aligned and are computed
+  from Valkey server time, as today. Subject to decision 4, a budget may
+  instead use a fixed duration: a whole number of hours or days, counted from
+  the budget's creation, which is how LiteLLM's reset periods work.
 - **Templates.** A limit template is a named, project-scoped set of limits and
   budgets. Keys, end-user policies and budget groups reference a template, and
   editing it updates every member at the next authority refresh.
@@ -98,9 +100,9 @@ reserves for Enterprise in the core product.
   agents, so one group grants models, tools and agents together.
 - **Key lifecycle.** Rotation gains an overlap period during which the old
   secret stays valid. Keys may declare a rotation interval, and the worker
-  raises a `key.expiring` notification before expiry or a due rotation; the
-  event ships with whichever of this workstream and
-  [M5.4](m05-observability.md#m54-alert-channels-and-events) lands second. OLP
+  flags the key before expiry or a due rotation. The `key.expiring`
+  notification itself is delivered by
+  [M5.4](m05-observability.md#m54-alert-channels-and-events). OLP
   never generates a secret that nobody receives: rotation stays an explicit,
   idempotent API call until
   [M11.3](m11-operator-ecosystem.md#m113-kms-and-external-secret-stores) lets
@@ -175,7 +177,7 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
   security boundary without a server-side pin.
 - Caller-chosen upstream destinations. Callers may bring a credential, never a
   base URL.
-- Rolling budget windows of arbitrary length, unless decision 4 adds them.
+- Budget windows shorter than one hour. Rate limits cover short intervals.
 - Replacing installation roles. Organizations add a scope; they do not add
   roles.
 
@@ -215,9 +217,10 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
 3. Window migration: whether existing daily and monthly budgets adopt the
    installation time zone when it changes (recommended: changes apply from the
    next window boundary).
-4. Whether to add fixed-duration windows such as `30d`, which LiteLLM allows
-   beside calendar resets (recommended: no; calendar windows cover reporting
-   periods, and the parity row closes on day, week and month).
+4. Whether to add fixed-duration windows such as `30d`, which LiteLLM offers
+   (recommended: yes, in whole hours or days; calendar windows alone are not
+   equivalent, so declining this means splitting the parity row and marking
+   fixed durations `Excluded`).
 5. Whether to accept opaque OAuth 2.0 tokens through introspection (RFC 7662)
    beside JWTs (recommended: yes, as an issuer type with a bounded positive
    cache; otherwise the parity row becomes `Excluded`).
@@ -231,7 +234,8 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
       exhausted, including a per-route limit and an access-group budget, and
       reports show which level refused it.
 - [ ] **M4.2** Weekly windows and non-UTC time zones reset at the correct
-      boundary, including across daylight-saving transitions.
+      boundary, including across daylight-saving transitions, and a
+      fixed-duration window resets exactly one duration after it began.
 - [ ] **M4.2** Editing a template changes every member's limits within the
       authority freshness bound, a temporary increase ends at its expiry and is
       audited, and a pinned attribution label cannot be overridden by a caller.

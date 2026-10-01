@@ -45,8 +45,9 @@ Every workstream preserves these rules from [concepts](../concepts.md) and
 - A request can narrow published policy, never widen it.
 - A committed stream never restarts on another target, and an ambiguous
   resource creation never repeats.
-- A strict route keeps one serving identity per request and dispatches at most
-  once. An ambiguous result is never retried, on the same target or another.
+- A strict route keeps one serving identity per request and sends the request
+  to a provider at most once. Once a request has been sent, its result is
+  final: it is never retried, on the same target or another.
 - Every attempt, including fallback and shadow attempts, pins its revisions and
   produces its own record.
 - Simulation explains the same decision the gateway makes, without contacting a
@@ -109,8 +110,10 @@ A route revision gains an ordered `fallbacks` list:
   [M8.3](m08-caching.md#m83-provider-prompt-cache-automation) reuse it.
 - **Session affinity.** A route may set `affinity` to keep requests with the
   same session on the same target and slot while it stays eligible. The
-  session is hashed into the rendezvous seed and never stored, which raises
-  provider prompt-cache hit rates without any gateway state.
+  session is hashed into the rendezvous seed, which raises provider
+  prompt-cache hit rates without any gateway state. Affinity stores nothing of
+  its own: a session label is recorded as attribution, like any label, and a
+  dialect cache key is not recorded at all.
 
 ### M3.3 Priority admission and capacity reservation
 
@@ -235,9 +238,11 @@ whether to honor `Retry-After`. Retries consume the attempt budget and the
 overall deadline, never apply after commitment or to ambiguous creations, and
 are recorded as attempts.
 
-A same-target retry keeps the serving identity, so it is the retry available
-to strict routes, and only for failures that prove the provider did no work:
-connect errors and explicit rate-limit rejections.
+A same-target retry keeps the serving identity, so it is the only retry a
+strict route can make, and only when the failure proves the request was never
+sent, such as a connect error. A rate-limit rejection answers a request that
+was sent, so a strict route returns it to the caller; retrying it is behavior
+for transformed routes.
 
 ## Non-goals
 
@@ -258,7 +263,8 @@ connect errors and explicit rate-limit rejections.
 | Supply-side spend counters | PostgreSQL authority, Valkey snapshots | As key budget windows today | None |
 | Shared circuit and probe state | Valkey | The staleness bound | None |
 | Shadow, probe and classifier attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
-| Session keys | Request memory, hashed into the selection seed | Never stored | None |
+| Session labels | Request records, as attribution, as labels are today | Request retention | None |
+| Dialect cache keys used as sessions | Request memory, hashed into the selection seed | Never stored | None |
 
 ## Change map
 
@@ -279,9 +285,10 @@ connect errors and explicit rate-limit rejections.
 2. The staleness bound for shared circuit state (recommended: five seconds,
    matching key-authority polling).
 3. Whether shadow traffic may target another project's routes (recommended: no).
-4. Whether a strict route may fall back or fail over after a dispatch that
-   provably did no work (recommended: no; strict keeps one serving identity,
-   and operators who want cross-target resilience choose transformed routes).
+4. Whether a strict route may retry, fall back or fail over after a request
+   was sent and explicitly rejected, for example with a rate-limit error
+   (recommended: no; strict sends at most once and keeps one serving identity,
+   and operators who want that resilience choose transformed routes).
 5. Where the priority queue sits relative to the pre-authentication pool
    (recommended: after authentication, with the outer pool sized to the queue
    depth).
@@ -294,9 +301,9 @@ connect errors and explicit rate-limit rejections.
 - [ ] **M3.1, M3.2, M3.7** Route simulation explains fallbacks, selector
       matches, capacity ordering and affinity for a given request.
 - [ ] **M3.1, M3.9** Integration tests prove that fallbacks and retries never
-      follow a committed stream, that a strict route never leaves its serving
-      identity after a dispatch, and that a `budget` fallback never exceeds the
-      key's overall budget.
+      follow a committed stream, that a strict route never sends a request
+      twice or leaves its serving identity, and that a `budget` fallback never
+      exceeds the key's overall budget.
 - [ ] **M3.3** Requests cannot raise priority above the key's ceiling, the
       queue never exceeds its depth or its timeout, and capacity shares hold
       under concurrent load across two gateways.

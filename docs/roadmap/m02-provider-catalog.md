@@ -2,7 +2,7 @@
 
 | Status | Depends on | Integrates with | Unlocks |
 | --- | --- | --- | --- |
-| Planned | None | [M1](m01-measured-advantage.md) (calibration factors), [M5](m05-observability.md) (retirement events), [M6](m06-cost-management.md) (price components) | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
+| Planned | None | [M1](m01-measured-advantage.md) (calibration factors), [M5](m05-observability.md) (retirement events) | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
 
 LiteLLM's largest advantage is breadth: about 170 provider pages and a model
 cost map covering thousands of models. OLP reaches seven native connector kinds,
@@ -153,8 +153,10 @@ The catalog is advisory and never authoritative on its own:
   client credentials, signed-request schemes and token-exchange
   authentication.
 - A reviewed plugin index: a signed list of plugin digests, origins and
-  source repositories that the console can browse. Installation, origin
-  approval and permitting stay explicit owner actions.
+  source repositories. A management operation fetches it through egress policy
+  and verifies its signature, and the console browses that operation's result;
+  the browser never fetches the index itself. Installation, origin approval
+  and permitting stay explicit owner actions.
 
 ## Non-goals
 
@@ -173,7 +175,7 @@ The catalog is advisory and never authoritative on its own:
 | Reference catalog and its signature | Embedded in the binary; refreshed copies as pricing source snapshots in PostgreSQL | Per release; snapshots as today | None; public data, verified with a compiled-in public key |
 | Accepted catalog facts | Operator model facts in PostgreSQL, tagged `catalog@<digest>` | Until edited | None |
 | Catalog signing key | The release pipeline's secret store, never the repository or the binary | Rotated by the documented procedure | Not an OLP seal purpose |
-| Plugin index | Fetched by the console through egress policy; not persisted | None | None |
+| Plugin index | Fetched and verified by a management operation through egress policy; not persisted | None | None |
 
 ## Change map
 
@@ -184,7 +186,7 @@ The catalog is advisory and never authoritative on its own:
 | Certification eligibility | `internal/providers/kinds.go`, `internal/providers/operations.go`, `internal/connectors/capabilities.go` |
 | Media contracts and jobs | `internal/media/`, `internal/mediacontract/` |
 | Catalog | new `internal/catalog/`, `internal/usage/pricing_sources.go`, `internal/providers/connector.go` |
-| Plugin templates and index | `sdk/plugin/`, `console/src/lib/features/providers/` |
+| Plugin templates and index | `sdk/plugin/`, `internal/plugins/`, `console/src/lib/features/providers/` |
 
 ## Decisions to settle
 
@@ -215,8 +217,8 @@ The catalog is advisory and never authoritative on its own:
 - [ ] **M2.4** Discovery suggests catalog facts, and accepting them stores
       provenance-tagged operator facts.
 - [ ] **M2.5** A plugin built from each authoring template passes the SDK
-      conformance suite, and the console refuses a plugin index whose signature
-      does not verify.
+      conformance suite, and the index operation refuses an index whose
+      signature does not verify.
 - [ ] The [parity matrix](parity.md) provider and media rows are `Parity` or
       better, with the breadth rows closed under the
       [breadth rule](parity.md#how-to-read-the-matrix).

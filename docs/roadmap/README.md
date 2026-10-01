@@ -86,10 +86,12 @@ Milestones are numbered in recommended order. Two relations connect them:
 - **Depends on** is a hard dependency: the milestone builds on the other's
   shipped work and cannot start without it. The graph below shows only these,
   and milestones without a path between them may proceed in parallel.
-- **Integrates with** is a touchpoint between two milestones that neither waits
-  for. The part that needs both lands with whichever ships second, and each
-  specification says what happens until then. The
-  [integration table](#integration-points) lists every one.
+- **Integrates with** is a touchpoint between two milestones that have no
+  dependency path between them, so neither waits for the other. The part that
+  needs both lands with whichever ships second, and each specification says
+  what happens until then. The [integration table](#integration-points) lists
+  every one. Work that crosses a hard dependency is not an integration: the
+  dependent milestone owns it.
 
 | ID | Milestone | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- |
@@ -141,9 +143,6 @@ dependencies have shipped; it does not wait for the rest of the earlier wave.
 | Sessions | M3.2, M5.5, M8.3 | Each uses the M3.2 definition; the first to ship introduces it |
 | Circuit events | M3.5, M5.4 | Shared circuits without notifications |
 | Guardrails on shadow traffic | M3.6, M7.1 | Shadow targets honor content policy |
-| Budget and key events | M4.2, M4.3, M5.4 | The new levels and intervals raise no events |
-| Access groups for toolsets and agents | M4.3, M10.1 | Groups hold routes only |
-| Scheduled key rotation | M4.3, M11.3 | Rotation is an explicit call, with a reminder event |
 | Organization-scoped guardrail policies | M4.5, M7.1 | Policies attach to the other four scopes |
 | Capture redaction and decision export | M5.1, M5.2, M7.1 | Unredacted capture for owners only; the stream carries content-policy decisions |
 | Batch pricing | M6.1, M9.2 | `batch_multiplier` ships with the first of the two |
@@ -180,8 +179,8 @@ recomputed whenever a milestone closes:
 | Accounting completeness | Share of admitted requests with complete usage, and share of attempts that are unpriced. |
 | Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
 
-At the 0.1.0 baseline the matrix has 174 rows: 15 `Ahead`, 36 `Parity`, 30
-`Partial`, 84 `Gap` and 9 `Excluded`, a parity coverage of 51 of 165 (31%).
+At the 0.1.0 baseline the matrix has 175 rows: 16 `Ahead`, 36 `Parity`, 30
+`Partial`, 84 `Gap` and 9 `Excluded`, a parity coverage of 52 of 166 (31%).
 
 ## Definition of done
 

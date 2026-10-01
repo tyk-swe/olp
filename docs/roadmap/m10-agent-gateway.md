@@ -99,6 +99,11 @@ use MCP tools:
   `mcp_call` and `mcp_approval_request` output items that the OpenAI SDKs
   already understand. Approval-required tools pause the loop and return an
   approval request.
+- **Pending approvals.** A paused call must resume exactly as it was proposed.
+  The gateway keeps the tool, its arguments, the pinned revisions and the
+  remaining bounds in a sealed continuation, as it keeps stored-response
+  continuations today, for at most 24 hours. An approval is accepted only from
+  the key that received the request, and only for that call.
 - **Tool search.** When the permitted tools exceed a configured count, the
   gateway advertises a search tool and a call tool instead of every
   definition. Search ranks tools by keyword, or by similarity through an OLP
@@ -158,7 +163,8 @@ use MCP tools:
   calls to them; a sandbox is reached as an MCP server.
 - Running stdio servers in the confined tier.
 - Template logic. Prompts substitute variables and nothing else.
-- Storing tool arguments, tool results, rendered prompts or variable values.
+- Storing tool arguments, tool results, rendered prompts or variable values,
+  apart from the sealed arguments of a call awaiting approval.
 
 ## Data and secrets
 
@@ -170,7 +176,8 @@ use MCP tools:
 | Gateway assertion signing keys | PostgreSQL, sealed; public keys served | Until rotated | New seal purpose `mcp_assertion_key` |
 | Prompt templates and skill listings | Revisions in PostgreSQL; configuration export | Until deleted | None |
 | Tool-call, agent-message and prompt usage | Request and attempt records | Request retention | None; metadata only |
-| Tool arguments and results, rendered prompts | Request memory | Never stored | None |
+| Pending tool approvals, including the call's arguments | PostgreSQL, sealed | Until approved, denied or 24 hours | New seal purpose `tool_approval` |
+| Other tool arguments and results, rendered prompts | Request memory | Never stored | None |
 
 ## Change map
 
@@ -209,6 +216,9 @@ use MCP tools:
 - [ ] **M10.2** Gateway-executed tools complete multi-step tasks for OpenAI,
       Anthropic and Gemini targets, respect every bound, and appear as separate
       attempts.
+- [ ] **M10.2** An approved call runs with exactly the arguments that were
+      proposed; an approval from another key, for another call, or after
+      expiry is refused.
 - [ ] **M10.2** Above the tool-count threshold a model sees only the search and
       call tools and can still reach every permitted tool, and none it is not
       permitted.
