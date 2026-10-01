@@ -53,10 +53,26 @@ function optionalDecimal(value: string): string | null {
   return value.trim() || null;
 }
 
+/**
+ * True while the expiry field still shows the edited key's saved expiry. The
+ * field holds whole local minutes, so re-sending it would round the stored
+ * instant down; an unchanged expiry is left out of the update instead.
+ */
+export function expiryUnchanged(
+  state: ApiKeyFormState,
+  editing: ApiKey | null = null
+): boolean {
+  return Boolean(
+    editing?.expires_at &&
+    state.expiresAt === dateTimeLocalValue(editing.expires_at)
+  );
+}
+
 export function buildApiKeyPolicyInput(
-  state: ApiKeyFormState
+  state: ApiKeyFormState,
+  editing: ApiKey | null = null
 ): ApiKeyPolicyInput {
-  return {
+  const input: ApiKeyPolicyInput = {
     name: state.name.trim(),
     project_id: state.projectId || null,
     budget_group_id: state.budgetGroupId || null,
@@ -73,4 +89,6 @@ export function buildApiKeyPolicyInput(
     allow_provider_state: state.allowProviderState,
     allowed_attribution_keys: state.allowedAttributionKeys
   };
+  if (expiryUnchanged(state, editing)) delete input.expires_at;
+  return input;
 }

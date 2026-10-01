@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ApiKey } from '$lib/features/access/api-keys/api';
 import {
   buildApiKeyPolicyInput,
+  expiryUnchanged,
   createApiKeyFormState
 } from '$lib/features/access/api-keys/apiKeyPolicy';
 
@@ -79,6 +80,34 @@ describe('API key form state', () => {
       daily_cost_limit: '1.250000000001',
       monthly_cost_limit: '20.00'
     });
+  });
+
+  it('leaves an untouched expiry out instead of rounding it to the minute', () => {
+    const editing = { ...key, expires_at: '2027-01-01T12:30:45.123Z' };
+    const state = createApiKeyFormState(editing);
+    state.name = 'renamed';
+
+    const input = buildApiKeyPolicyInput(state, editing);
+    expect(input).not.toHaveProperty('expires_at');
+    expect(expiryUnchanged(state, editing)).toBe(true);
+  });
+
+  it('sends an edited expiry as the chosen instant', () => {
+    const editing = { ...key, expires_at: '2027-01-01T12:30:45.123Z' };
+    const state = createApiKeyFormState(editing);
+    state.expiresAt = '2027-02-01T09:15';
+
+    expect(buildApiKeyPolicyInput(state, editing).expires_at).toBe(
+      new Date('2027-02-01T09:15').toISOString()
+    );
+  });
+
+  it('clears an expiry the user removed', () => {
+    const editing = { ...key, expires_at: '2027-01-01T12:30:45.123Z' };
+    const state = createApiKeyFormState(editing);
+    state.expiresAt = '';
+
+    expect(buildApiKeyPolicyInput(state, editing).expires_at).toBeNull();
   });
 
   it('submits blank optional limits as explicit nulls', () => {

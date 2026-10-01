@@ -2,6 +2,7 @@ import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
+import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
 
@@ -20,6 +21,11 @@ export async function listProjectPage(
       signal
     })
   );
+}
+
+/** Every project, following cursors past the first page. */
+export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
+  return collectCursorPages((cursor) => listProjectPage(cursor, signal));
 }
 
 export async function listProjectMemberships(
@@ -66,6 +72,16 @@ export async function listProjectMemberPage(
       params: { path: { project_id: projectId }, query: { limit: 50, cursor } },
       signal
     })
+  );
+}
+
+/** Every member of a project, following cursors past the first page. */
+export async function listAllProjectMembers(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<ProjectMember[]> {
+  return collectCursorPages((cursor) =>
+    listProjectMemberPage(projectId, cursor, signal)
   );
 }
 

@@ -38,6 +38,9 @@
   let copyError = $state('');
   let testState = $state<'idle' | 'running' | 'passed' | 'failed'>('idle');
   let testMessage = $state('');
+  // Each connection test claims a run number; switching SDK or starting a new
+  // test makes an in-flight result stale so it cannot overwrite the new tab.
+  let testRun = 0;
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     enabled: services.gatewayAvailable,
@@ -67,6 +70,7 @@
 
   function selectSdk(option: ApiKeySdk) {
     sdk = option;
+    testRun += 1;
     testState = 'idle';
     testMessage = '';
   }
@@ -90,13 +94,18 @@
   }
 
   async function testGeneratedKey() {
+    const run = ++testRun;
+    const tested = sdk;
+    const route = routeSlug;
     testState = 'running';
     testMessage = '';
     try {
-      await testSdkRequest(sdk, secret.secret, routeSlug);
+      await testSdkRequest(tested, secret.secret, route);
+      if (run !== testRun) return;
       testState = 'passed';
-      testMessage = `${sdkLabel(sdk)} request succeeded through route ${routeSlug}.`;
+      testMessage = `${sdkLabel(tested)} request succeeded through route ${route}.`;
     } catch (error) {
+      if (run !== testRun) return;
       testState = 'failed';
       testMessage = errorMessage(error, 'The generated key test failed.');
     }

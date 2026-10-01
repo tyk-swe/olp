@@ -8,7 +8,7 @@ import {
   revokeManagementToken,
   type ManagementToken
 } from '$lib/features/access/tokens/api';
-import { listProjectPage } from '$lib/features/access/projects/api';
+import { listProjects } from '$lib/features/access/projects/api';
 import ManagementTokensProbe from './test/ManagementTokensProbe.svelte';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
@@ -27,7 +27,7 @@ vi.mock('$lib/features/access/tokens/api', async (original) => ({
 }));
 vi.mock('$lib/features/access/projects/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/projects/api')>()),
-  listProjectPage: vi.fn()
+  listProjects: vi.fn()
 }));
 vi.mock('$lib/clipboard', () => ({ copyText: vi.fn(async () => true) }));
 
@@ -86,10 +86,7 @@ beforeEach(() => {
     items: [token],
     nextCursor: null
   });
-  vi.mocked(listProjectPage).mockResolvedValue({
-    items: [],
-    nextCursor: null
-  });
+  vi.mocked(listProjects).mockResolvedValue([]);
 });
 
 afterEach(async () => {
@@ -195,10 +192,7 @@ it('submits selected project ids for a scoped token', async () => {
     created_at: token.created_at,
     updated_at: token.created_at
   };
-  vi.mocked(listProjectPage).mockResolvedValue({
-    items: [project],
-    nextCursor: null
-  });
+  vi.mocked(listProjects).mockResolvedValue([project]);
   vi.mocked(createManagementToken).mockResolvedValue({
     ...token,
     secret: 'olpm_lookup_secret'
@@ -261,4 +255,59 @@ it('surfaces list failures without token controls', async () => {
   await settle();
   const alert = host.querySelector('[role="alert"]');
   expect(alert?.textContent).toContain('management unavailable');
+});
+
+it('names scoped projects from every project page', async () => {
+  const later = {
+    id: '55555555-5555-5555-5555-555555555555',
+    name: 'Research',
+    etag: 'p2',
+    member_count: 1,
+    created_by: token.created_by,
+    created_by_email: 'owner@example.com',
+    created_at: token.created_at,
+    updated_at: token.created_at
+  };
+  vi.mocked(listProjects).mockResolvedValue([later]);
+  vi.mocked(listManagementTokenPage).mockResolvedValue({
+    items: [{ ...token, all_projects: false, project_ids: [later.id] }],
+    nextCursor: null
+  });
+  render();
+  await settle();
+  expect(listProjects).toHaveBeenCalled();
+  expect(host.textContent).toContain('Research');
+  expect(host.textContent).not.toContain(later.id);
+});
+
+it('keeps the longest expiry choice inside the server cap', async () => {
+  vi.mocked(createManagementToken).mockResolvedValue({
+    ...token,
+    secret: 'olpm_lookup_secret'
+  });
+  render();
+  await settle();
+  const expiry = host.querySelector<HTMLSelectElement>('select');
+  expect(expiry).toBeTruthy();
+  const longest = [...expiry!.options].at(-1)!;
+  expiry!.value = longest.value;
+  expiry!.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  const input = host.querySelector<HTMLInputElement>('input[type="text"]');
+  input!.value = 'long lived';
+  input!.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  const before = Date.now();
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  const expiresAt = vi.mocked(createManagementToken).mock.calls[0][2];
+  const day = 24 * 60 * 60 * 1000;
+  expect(new Date(expiresAt).getTime()).toBeLessThanOrEqual(
+    Date.now() + 365 * day
+  );
+  expect(new Date(expiresAt).getTime()).toBeGreaterThanOrEqual(
+    before + 365 * day
+  );
 });
