@@ -86,12 +86,21 @@ func bedrockUsageValue(t *testing.T, usage string) *openai.Usage {
 
 func TestBedrockCacheUsage(t *testing.T) {
 	u := bedrockUsageValue(t, `{"inputTokens":100,"outputTokens":2,"totalTokens":102,"cacheReadInputTokens":20,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":10},{"ttl":"1h","inputTokens":5}]}`)
-	if u.InputTokens != 100 || u.OutputTokens != 2 {
-		t.Fatalf("Bedrock totals must stay reported: %+v", u)
+	if u.InputTokens != 150 || u.OutputTokens != 2 || u.TotalTokens != 102 {
+		t.Fatalf("Bedrock input must include cache reads and writes: %+v", u)
 	}
 	if *u.CachedInputTokens != 20 || *u.CacheWriteInputTokens != 30 ||
 		*u.CacheWrite5MInputTokens != 10 || *u.CacheWrite1HInputTokens != 5 {
 		t.Fatalf("cache categories: %+v", u)
+	}
+	// AWS's prompt-caching example reports the cache write beside inputTokens.
+	u = bedrockUsageValue(t, `{"inputTokens":4,"outputTokens":1,"totalTokens":1153,"cacheReadInputTokens":0,"cacheWriteInputTokens":1148}`)
+	if u.InputTokens != 1152 || *u.CacheWriteInputTokens != 1148 || u.TotalTokens != 1153 {
+		t.Fatalf("cache write beyond uncached input: %+v", u)
+	}
+	u = bedrockUsageValue(t, `{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":1000}`)
+	if u.InputTokens != 1004 || *u.CachedInputTokens != 1000 || u.TotalTokens != 1005 {
+		t.Fatalf("derived total: %+v", u)
 	}
 }
 
@@ -100,7 +109,7 @@ func TestBedrockCacheUsageValidation(t *testing.T) {
 		{"unknown TTL", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"10m","inputTokens":5}]}`},
 		{"duplicate TTL", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":5},{"ttl":"5m","inputTokens":4}]}`},
 		{"detail beyond generic write", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":10,"cacheDetails":[{"ttl":"5m","inputTokens":8},{"ttl":"1h","inputTokens":5}]}`},
-		{"read plus write beyond input", `{"inputTokens":40,"outputTokens":2,"cacheReadInputTokens":20,"cacheWriteInputTokens":30}`},
+		{"input overflow", `{"inputTokens":9223372036854775800,"outputTokens":2,"cacheReadInputTokens":20}`},
 		{"negative write", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":-1}`},
 		{"noninteger read", `{"inputTokens":100,"outputTokens":2,"cacheReadInputTokens":1.5}`},
 		{"negative detail", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":-1}]}`},
@@ -138,7 +147,7 @@ func TestBedrockCacheUsageStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := c.Usage
-	if u == nil || u.InputTokens != 100 || *u.CachedInputTokens != 20 ||
+	if u == nil || u.InputTokens != 150 || *u.CachedInputTokens != 20 ||
 		*u.CacheWriteInputTokens != 30 || *u.CacheWrite5MInputTokens != 10 {
 		t.Fatalf("streamed cache usage: %+v", u)
 	}

@@ -2,8 +2,11 @@ package protocols
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"io"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -116,5 +119,145 @@ func TestBedrockImageFormatsAndRefusals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func encodeBedrockMessages(t *testing.T, family openai.Family, body string) []map[string]json.RawMessage {
+	t.Helper()
+	request, err := Parse(family, []byte(body), "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, err := Encode(request, "bedrock", "amazon-bedrock", "wire-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(wire.Messages); i++ {
+		if string(wire.Messages[i]["role"]) == string(wire.Messages[i-1]["role"]) {
+			t.Fatalf("adjacent %s messages: %s", wire.Messages[i]["role"], encoded)
+		}
+	}
+	return wire.Messages
+}
+
+func TestBedrockMergesAdjacentSameRoleMessages(t *testing.T) {
+	messages := encodeBedrockMessages(t, openai.FamilyChat, `{"model":"route","messages":[
+		{"role":"user","content":"hi"},
+		{"role":"assistant","content":null,"tool_calls":[
+			{"id":"a","type":"function","function":{"name":"f","arguments":"{}"}},
+			{"id":"b","type":"function","function":{"name":"f","arguments":"{}"}}]},
+		{"role":"tool","tool_call_id":"a","content":"x"},
+		{"role":"tool","tool_call_id":"b","content":"y"},
+		{"role":"user","content":"next"}]}`)
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d", len(messages))
+	}
+	var content []map[string]json.RawMessage
+	if err := json.Unmarshal(messages[2]["content"], &content); err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 3 || !bytes.Contains(content[0]["toolResult"], []byte(`"toolUseId":"a"`)) ||
+		!bytes.Contains(content[1]["toolResult"], []byte(`"toolUseId":"b"`)) || string(content[2]["text"]) != `"next"` {
+		t.Fatalf("last user turn = %s", messages[2]["content"])
+	}
+
+	messages = encodeBedrockMessages(t, openai.FamilyResponses, `{"model":"route","input":[
+		{"role":"user","content":"hi"},
+		{"type":"function_call","call_id":"a","name":"f","arguments":"{}"},
+		{"type":"function_call","call_id":"b","name":"f","arguments":"{}"},
+		{"type":"function_call_output","call_id":"a","output":"x"},
+		{"type":"function_call_output","call_id":"b","output":"y"}]}`)
+	if len(messages) != 3 || bytes.Count(messages[1]["content"], []byte(`"toolUse"`)) != 2 ||
+		bytes.Count(messages[2]["content"], []byte(`"toolResult"`)) != 2 {
+		t.Fatalf("responses turns = %v", messages)
+	}
+}
+
+func TestBedrockSkipsEmptyTextParts(t *testing.T) {
+	g := &Generation{Messages: []Message{
+		{Role: "system", Parts: []Part{{Text: ""}}},
+		{Role: "user", Parts: []Part{{Text: "hi"}}},
+		{Role: "assistant", Parts: []Part{{Text: ""}}, Calls: []openai.ToolCall{{ID: "call-1", Name: "lookup", Arguments: "{}"}}},
+		{Role: "tool", ToolID: "call-1", Parts: []Part{{Text: "ok"}}},
+	}}
+	for _, operation := range []string{"generation", "token_count"} {
+		body, err := encodeBedrock(g, "model", operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded := raw(body)
+		if bytes.Contains(encoded, []byte(`{"text":""}`)) || !bytes.Contains(encoded, []byte(`"toolUse"`)) || bytes.Contains(encoded, []byte(`"system"`)) {
+			t.Fatalf("%s: %s", operation, encoded)
+		}
+	}
+	empty := &Generation{Messages: []Message{{Role: "user", Parts: []Part{{Text: ""}}}}}
+	if _, err := encodeBedrock(empty, "model", "generation"); err == nil {
+		t.Fatal("accepted a message with no content")
+	}
+}
+
+func TestBedrockOmitsEmptyToolDescription(t *testing.T) {
+	g := &Generation{
+		Messages: []Message{{Role: "user", Parts: []Part{{Text: "hi"}}}},
+		Tools: []Tool{
+			{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "g", Description: "d", Schema: json.RawMessage(`{"type":"object"}`)},
+		},
+	}
+	body, err := encodeBedrock(g, "model", "generation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		ToolConfig struct {
+			Tools []struct {
+				ToolSpec map[string]json.RawMessage `json:"toolSpec"`
+			} `json:"tools"`
+		} `json:"toolConfig"`
+	}
+	if err := json.Unmarshal(raw(body), &wire); err != nil {
+		t.Fatal(err)
+	}
+	tools := wire.ToolConfig.Tools
+	if len(tools) != 2 {
+		t.Fatalf("tools = %s", raw(body))
+	}
+	if _, ok := tools[0].ToolSpec["description"]; ok {
+		t.Fatalf("empty description sent: %s", raw(body))
+	}
+	if string(tools[1].ToolSpec["description"]) != `"d"` {
+		t.Fatalf("description lost: %s", raw(body))
+	}
+}
+
+func TestReadBedrockEventTruncatedAfterPrelude(t *testing.T) {
+	encode := func(buffer *bytes.Buffer, event, payload string) {
+		t.Helper()
+		headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue(event)}}
+		if err := eventstream.NewEncoder().Encode(buffer, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var metadata bytes.Buffer
+	encode(&metadata, "metadata", `{"usage":{"inputTokens":1,"outputTokens":2}}`)
+	prelude := metadata.Bytes()[:12]
+	if _, err := ReadBedrockEvent(bytes.NewReader(prelude), 4096); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v", err)
+	}
+
+	var stream bytes.Buffer
+	encode(&stream, "messageStart", `{"role":"assistant"}`)
+	encode(&stream, "messageStop", `{"stopReason":"end_turn"}`)
+	stream.Write(prelude)
+	_, err := Stream(openai.FamilyBedrock, openai.FamilyChat, bytes.NewReader(stream.Bytes()), 4096, "route", true, func([]byte) error { return nil })
+	var protocolErr *openai.ProtocolError
+	if !errors.As(err, &protocolErr) || !protocolErr.Truncated {
+		t.Fatalf("stream err = %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -399,12 +400,14 @@ func bedrockStreamUsage(message *eventstream.Message) *openai.Usage {
 		if json.Unmarshal(message.Payload, &wire) != nil || wire.Usage == nil {
 			return nil
 		}
-		if wire.Usage.InputTokens < 0 || wire.Usage.OutputTokens < 0 ||
-			wire.Usage.CacheReadInputTokens < 0 || wire.Usage.CacheReadInputTokens > wire.Usage.InputTokens ||
-			wire.Usage.CacheWriteInputTokens < 0 || wire.Usage.CacheWriteInputTokens > wire.Usage.InputTokens {
+		in, read, write := wire.Usage.InputTokens, wire.Usage.CacheReadInputTokens, wire.Usage.CacheWriteInputTokens
+		if in < 0 || wire.Usage.OutputTokens < 0 || read < 0 || write < 0 ||
+			read > math.MaxInt64-in || write > math.MaxInt64-in-read {
 			return nil
 		}
-		usage := &openai.Usage{InputTokens: wire.Usage.InputTokens, OutputTokens: wire.Usage.OutputTokens}
+		// Converse reports cache reads and writes beside inputTokens; the
+		// canonical input total includes both.
+		usage := &openai.Usage{InputTokens: in + read + write, OutputTokens: wire.Usage.OutputTokens}
 		if wire.Usage.CacheReadInputTokens > 0 {
 			cached := wire.Usage.CacheReadInputTokens
 			usage.CachedInputTokens = &cached

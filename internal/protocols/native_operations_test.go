@@ -262,6 +262,30 @@ func TestRerankVendorEncode(t *testing.T) {
 	}
 }
 
+func TestRerankCohereReturnDocuments(t *testing.T) {
+	r := parseRerank(t, `{"model":"route","query":"q","documents":["a","b"],"top_n":2,"return_documents":true}`)
+	f, _ := encode(t, r, "openai_compatible", "cohere", "rerank-v3.5")
+	if _, ok := f["return_documents"]; ok {
+		t.Fatalf("cohere v2 received return_documents: %v", f)
+	}
+	c, err := DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"id":"r1","results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.1}],"meta":{"billed_units":{"search_units":1}}}`), "route", "", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Results []struct {
+			Document *string `json:"document"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(c.Body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 2 || out.Results[0].Document == nil || *out.Results[0].Document != "b" ||
+		out.Results[1].Document == nil || *out.Results[1].Document != "a" {
+		t.Fatalf("documents not restored: %s", c.Body)
+	}
+}
+
 func TestRerankDecode(t *testing.T) {
 	r := parseRerank(t, `{"model":"route","query":"q","documents":["a","b"],"return_documents":true}`)
 	c, err := DecodeRequest(openai.FamilyRerank, openai.FamilyRerank, []byte(`{"data":[{"index":1,"relevance_score":0.9,"document":"b"},{"index":0,"relevance_score":0.1}],"usage":{"total_tokens":11}}`), "route", "", r)

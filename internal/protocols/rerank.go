@@ -20,6 +20,9 @@ func encodeRerank(vendor string, f Object, model string) ([]byte, error) {
 		if present(f["truncation"]) {
 			return nil, requestError("truncation", "Cohere cannot represent truncation")
 		}
+		// Cohere v2 has no return_documents control and never echoes
+		// documents; decodeRerank restores them from the request.
+		delete(f, "return_documents")
 	default:
 		return nil, requestError("operation", "The selected provider does not support rerank")
 	}
@@ -31,6 +34,19 @@ func rerankDocuments(r *openai.Request) int {
 		return -1
 	}
 	return len(arr(r.Field("documents")))
+}
+
+// rerankDocumentTexts returns the request's documents, which the OpenAI rerank
+// parser guarantees are strings, so results can name documents upstream omits.
+func rerankDocumentTexts(r *openai.Request) []string {
+	if r == nil {
+		return nil
+	}
+	var texts []string
+	if json.Unmarshal(r.Field("documents"), &texts) != nil {
+		return nil
+	}
+	return texts
 }
 
 func rerankReturnDocuments(r *openai.Request) bool {
@@ -49,10 +65,11 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 	}
 	documents := rerankDocuments(request)
 	wantDocuments := rerankReturnDocuments(request)
+	texts := rerankDocumentTexts(request)
 	c := &openai.Completion{FinishReason: "stop"}
 	out := Object{"object": raw("list"), "model": raw(route)}
 	if present(f["results"]) {
-		results, err := rerankResults(arr(f["results"]), documents, wantDocuments)
+		results, err := rerankResults(arr(f["results"]), documents, texts, wantDocuments)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +95,7 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 			}
 		}
 	} else if present(f["data"]) {
-		results, err := rerankResults(arr(f["data"]), documents, wantDocuments)
+		results, err := rerankResults(arr(f["data"]), documents, texts, wantDocuments)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +119,7 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 	return c, nil
 }
 
-func rerankResults(items []json.RawMessage, documents int, wantDocuments bool) ([]Object, error) {
+func rerankResults(items []json.RawMessage, documents int, texts []string, wantDocuments bool) ([]Object, error) {
 	if len(items) == 0 {
 		return nil, protocolError("missing rerank results")
 	}
@@ -129,6 +146,8 @@ func rerankResults(items []json.RawMessage, documents int, wantDocuments bool) (
 				return nil, protocolError("invalid rerank document")
 			}
 			entry["document"] = raw(document)
+		} else if wantDocuments && index < int64(len(texts)) {
+			entry["document"] = raw(texts[index])
 		}
 		results = append(results, entry)
 	}
