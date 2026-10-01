@@ -73,6 +73,26 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 	}
 }
 
+// settlePinHold settles a pinned hold that never passed through the attempt
+// loop. When it carries the half-open probe, the attempt's outcome lands on
+// the circuit through record, or the probe is released when nothing reached
+// the upstream, so a pinned call never leaves the circuit wedged half-open.
+func (s *Server) settlePinHold(ctx context.Context, x *execution, hold *dispatchHold, actual *int64) {
+	if hold == nil {
+		return
+	}
+	hold.settle(ctx, x.dispatched, actual)
+	if !hold.probed {
+		return
+	}
+	hold.probed = false
+	if x.dispatched && len(x.facts) > 0 {
+		s.health.record(hold.provider, x.facts[len(x.facts)-1])
+		return
+	}
+	s.health.releaseProbe(hold.provider)
+}
+
 // cooling reports whether a candidate slot is parked: the shared credential
 // or slot cooldown when distributed coordination is configured, or this
 // replica's local cooldown when it is not.

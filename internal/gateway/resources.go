@@ -166,7 +166,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateSlot(ctx, &provider, slot, resourceEstimate, deadline)
+		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
@@ -312,13 +312,13 @@ func (s *Server) stateDeadline(ctx context.Context, route *runtime.Route) (conte
 
 func (s *Server) reserveState(ctx context.Context, x *execution, authority access.Authority, overall time.Duration) *Error {
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, resourceEstimate, overall)
+	x.lease, e = s.Admission.reserveKey(ctx, authority, max(resourceEstimate, x.estimate), overall)
 	return e
 }
 
 func (s *Server) resourceSettle(ctx context.Context, x *execution, p *pin) {
-	if p != nil && p.hold != nil {
-		p.hold.settle(ctx, x.dispatched, nil)
+	if p != nil {
+		s.settlePinHold(ctx, x, p.hold, nil)
 	}
 	settleKey(ctx, x.lease, x.dispatched, nil, s.log)
 }
@@ -433,13 +433,15 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 		}
 		obj[name] = raw
 	}
-	for _, name := range []string{"output_file_id", "error_file_id"} {
+	// Stored metadata is always the provider's own object, so every file
+	// reference in it is an upstream identifier, whatever its spelling.
+	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
 		raw, ok := obj[name]
 		if !ok {
 			continue
 		}
 		var upstreamID string
-		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" || strings.HasPrefix(upstreamID, "file_") {
+		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" {
 			continue
 		}
 		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID)
@@ -684,6 +686,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if x.strict() {
 		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
 		if !ok {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
 			return
 		}
@@ -691,6 +694,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		var validationErr error
 		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
 		if validationErr != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
 			return
 		}
@@ -709,7 +713,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file, fileFirst)
 	if failure != nil {
-		x.dispatched = true
+		x.dispatched = failure.dispatched
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -937,12 +941,19 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	if authority.Policy.AllowProviderState {
 		kinds = append(kinds, resources.KindStrictFile)
 	}
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
+	// One extra row reports whether another page follows; it is never
+	// authorized or projected.
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file list could not be read."), x.family)
 		return
 	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
 	items := make([]json.RawMessage, 0, len(rows))
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
@@ -957,8 +968,9 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, obj)
+		ids = append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, listBody(items))
+	s.writeStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
@@ -1206,13 +1218,21 @@ func listArgs(r *http.Request) (int, string, *Error) {
 	return limit, after, nil
 }
 
-func listBody(items []json.RawMessage) []byte {
+// listBody writes the OpenAI cursor page shape: SDK auto-pagination follows
+// has_more and resumes after the last item's id.
+func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 	data, _ := json.Marshal(items)
-	out, _ := json.Marshal(map[string]json.RawMessage{
+	more, _ := json.Marshal(hasMore)
+	body := map[string]json.RawMessage{
 		"object":   json.RawMessage(`"list"`),
 		"data":     data,
-		"has_more": json.RawMessage(`false`),
-	})
+		"has_more": more,
+	}
+	if len(ids) > 0 {
+		body["first_id"], _ = json.Marshal(ids[0])
+		body["last_id"], _ = json.Marshal(ids[len(ids)-1])
+	}
+	out, _ := json.Marshal(body)
 	return out
 }
 
@@ -1334,7 +1354,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, upstream, "application/json")
 	if failure != nil {
-		x.dispatched = true
+		x.dispatched = failure.dispatched
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -1463,12 +1483,19 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	if authority.Policy.AllowProviderState {
 		kinds = append(kinds, resources.KindStrictBatch)
 	}
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
+	// One extra row reports whether another page follows; it is never
+	// authorized or projected.
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch list could not be read."), x.family)
 		return
 	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
 	items := make([]json.RawMessage, 0, len(rows))
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
@@ -1483,8 +1510,9 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, obj)
+		ids = append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, listBody(items))
+	s.writeStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
