@@ -2,8 +2,8 @@
 {{- $root := . -}}
 {{- $gatewayService := include "olp.observabilityServiceFullname" (dict "root" . "component" "gateway") -}}
 {{- $controlService := include "olp.observabilityServiceFullname" (dict "root" . "component" "control") -}}
-{{- $gatewayMonitored := and .Values.gateway.enabled .Values.gateway.service.enabled -}}
-{{- $controlMonitored := and .Values.control.enabled .Values.control.service.enabled -}}
+{{- $gatewayMonitored := and .Values.gateway.enabled .Values.gateway.service.enabled (gt (int .Values.gateway.replicas) 0) -}}
+{{- $controlMonitored := and .Values.control.enabled .Values.control.service.enabled (gt (int .Values.control.replicas) 0) -}}
 {{- $observabilityServiceNames := list -}}
 {{- if $gatewayMonitored -}}
 {{- $observabilityServiceNames = append $observabilityServiceNames $gatewayService -}}
@@ -11,7 +11,7 @@
 {{- if $controlMonitored -}}
 {{- $observabilityServiceNames = append $observabilityServiceNames $controlService -}}
 {{- end -}}
-{{- if .Values.worker.enabled -}}
+{{- if and .Values.worker.enabled (gt (int .Values.worker.replicas) 0) -}}
 {{- $observabilityServiceNames = append $observabilityServiceNames (include "olp.observabilityServiceFullname" (dict "root" . "component" "worker")) -}}
 {{- end -}}
 {{- $observabilityServices := join "|" $observabilityServiceNames -}}
@@ -139,20 +139,6 @@ spec:
           annotations:
             summary: OpenLLMProxy asynchronous worker observability is unavailable
             description: A gateway or control target cannot read the durable worker summaries that feed asynchronous-plane alerts.
-        - alert: OLPRuntimeOutboxBacklogHigh
-          expr: max(olp_runtime_outbox_pending_rows{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) > {{ .Values.monitoring.rules.runtimeOutboxPendingThreshold }}
-          for: 10m
-          labels: { severity: warning }
-          annotations:
-            summary: OpenLLMProxy runtime outbox backlog is sustained
-            description: Unpublished runtime-generation hints have remained above the configured threshold.
-        - alert: OLPRuntimeOutboxTakeoverBlocked
-          expr: max(increase(olp_runtime_outbox_failed_takeovers_total{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}[5m])) > 0
-          for: 0m
-          labels: { severity: critical }
-          annotations:
-            summary: OpenLLMProxy runtime outbox takeover is blocked
-            description: A surviving worker could not acquire the advisory lock from an owner past its heartbeat window.
 {{ end }}
 {{ if $gatewayMonitored }}
         - alert: OLPDistributedLimiterUnavailable

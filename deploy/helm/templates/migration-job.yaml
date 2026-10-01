@@ -1,4 +1,7 @@
 {{- if .Values.migration.enabled }}
+{{- if and .Values.migration.databaseSecretName (ne .Values.migration.databaseSecretName .Values.config.databaseSecretName) (not .Values.migration.runtimeRole) }}
+{{- fail "migration.runtimeRole is required when the migration job uses a separate database Secret" }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -37,6 +40,10 @@ spec:
           env:
             - name: OLP_DATABASE_MAX_CONNECTIONS
               value: {{ .Values.config.databaseMaxConnections | quote }}
+            {{- with .Values.migration.runtimeRole }}
+            - name: OLP_RUNTIME_ROLE
+              value: {{ . | quote }}
+            {{- end }}
             - name: OLP_DATABASE_URL
               valueFrom:
                 secretKeyRef:
