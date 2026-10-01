@@ -204,6 +204,11 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 	}
 	i, hasIn := count(f[in])
 	o, hasOut := count(f[out])
+	if family == "gemini" && hasIn && !present(f[out]) {
+		// proto3 JSON omits zero counts: a reply with no visible output (for
+		// example, thinking exhausted maxOutputTokens) has no candidatesTokenCount.
+		hasOut = true
+	}
 	if !hasIn || !hasOut {
 		return nil, nil
 	}

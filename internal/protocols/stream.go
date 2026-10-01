@@ -335,7 +335,7 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 				c.FinishReason = "tool_calls"
 			}
 		}
-		if present(f["usageMetadata"]) {
+		if present(f["usageMetadata"]) && part.Usage != nil {
 			c.Usage = part.Usage
 		}
 		return emit(eventFrame("", f))

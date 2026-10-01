@@ -204,7 +204,26 @@ func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model str
 	return prepared.Document().Bytes(), family, nil
 }
 
+// generationOnlyDefaults are sampling and output-limit controls that count
+// endpoints (Anthropic count_tokens, OpenAI input_tokens, Gemini countTokens)
+// reject as unknown input.
+var generationOnlyDefaults = []string{"max_tokens", "max_completion_tokens", "max_output_tokens", "temperature", "top_p", "top_k", "seed", "stop", "stop_sequences", "n", "presence_penalty", "frequency_penalty", "logprobs", "top_logprobs", "logit_bias", "stream_options"}
+
+func countDefaults(defaults Object) Object {
+	if len(defaults) == 0 {
+		return defaults
+	}
+	out := maps.Clone(defaults)
+	for _, key := range generationOnlyDefaults {
+		delete(out, key)
+	}
+	return out
+}
+
 func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
+	if r.Family.Operation() == "token_count" {
+		defaults = countDefaults(defaults)
+	}
 	var f Object
 	if r.Family.Surface() != "openai" {
 		f = r.Document()

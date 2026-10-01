@@ -9,7 +9,7 @@ import (
 )
 
 func TestInlineMediaBoundsAcrossNativeFamilies(t *testing.T) {
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		family openai.Family
 		body   string
 	}{
@@ -20,8 +20,11 @@ func TestInlineMediaBoundsAcrossNativeFamilies(t *testing.T) {
 		{openai.FamilyResponses, `{"model":"test","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,%s"}]}]}`},
 		{openai.FamilyAnthropic, `{"model":"test","max_tokens":16,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"%s"}}]}]}`},
 		{openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"%s"}}]}]}`},
+		{openai.FamilyGeminiStream, `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"%s"}}]}]}`},
+		{openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"%s"}}]}]}}`},
+		{openai.FamilyAnthropic, `{"model":"test","max_tokens":16,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"%s"}}]}]}]}`},
 	} {
-		t.Run(string(tc.family), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/%d", tc.family, i), func(t *testing.T) {
 			for _, data := range []string{"YWI=", "YWJj", "invalid!"} {
 				r, err := Parse(tc.family, []byte(fmt.Sprintf(tc.body, data)), "test")
 				if err != nil {

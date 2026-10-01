@@ -103,6 +103,10 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 	if policyErr != nil {
 		return preparedProvider{}, policyErr
 	}
+	if compiled != nil && len(compiled.Input) > 0 && !protocols.InputInspectable(invocation.Wire) {
+		// Never dispatch a destination body the input rules cannot see.
+		return preparedProvider{}, policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` has an input content policy that cannot be enforced on the `"+string(invocation.Wire)+"` provider wire.")
+	}
 	if compiled != nil {
 		for _, rule := range compiled.Input {
 			matched, blocked := false, false

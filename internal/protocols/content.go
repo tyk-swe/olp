@@ -19,6 +19,23 @@ type inspector struct {
 
 const inspectMaxDepth = 64
 
+// InputInspectable reports whether InspectInputText walks the prompt text of a
+// family. Callers enforcing input content policy must not dispatch a body whose
+// family it cannot inspect.
+func InputInspectable(family openai.Family) bool {
+	switch family {
+	case openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens,
+		openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank,
+		openai.FamilyAnthropic, openai.FamilyAnthropicCount,
+		openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
+		openai.FamilyBedrock, "bedrock_count",
+		openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch,
+		openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings:
+		return true
+	}
+	return false
+}
+
 func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 	fields := r.Document()
 	w := &inspector{fn: fn}
@@ -50,6 +67,41 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 		} else {
 			w.geminiFields(fields)
 		}
+	case openai.FamilyBedrock:
+		w.bedrockFields(fields)
+	case "bedrock_count":
+		w.field(fields, "input", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, func(input map[string]json.RawMessage) {
+				w.field(input, "converse", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, w.bedrockFields)
+				})
+			})
+		})
+	case openai.FamilyGeminiEmbeddings:
+		w.field(fields, "content", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, w.geminiParts)
+		})
+	case openai.FamilyGeminiEmbeddingsBatch:
+		w.field(fields, "requests", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(req map[string]json.RawMessage) {
+					w.field(req, "content", func(raw json.RawMessage) json.RawMessage {
+						return w.object(raw, w.geminiParts)
+					})
+				})
+			})
+		})
+	case openai.FamilyVertexEmbeddings:
+		w.field(fields, "instances", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(instance map[string]json.RawMessage) {
+					w.field(instance, "title", w.text)
+					w.field(instance, "content", w.text)
+				})
+			})
+		})
+	case openai.FamilyBedrockEmbeddings:
+		w.field(fields, "inputText", w.text)
 	}
 	// Configured tool/schema text is part of the effective invocation too. Arrays
 	// remain ordered and atomic; the explicit mutation policy controls text values.
@@ -249,6 +301,42 @@ func (w *inspector) geminiFields(fields map[string]json.RawMessage) {
 	})
 	w.field(fields, "systemInstruction", func(raw json.RawMessage) json.RawMessage {
 		return w.object(raw, w.geminiParts)
+	})
+}
+
+// bedrockFields walks a Converse body: system and message text blocks, tool
+// results and tool-use input. toolConfig is covered by the generic walk.
+func (w *inspector) bedrockFields(fields map[string]json.RawMessage) {
+	w.field(fields, "system", w.textOrParts)
+	w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
+		return w.messageList(raw, inspectBedrockMessage)
+	})
+}
+
+func inspectBedrockMessage(m map[string]json.RawMessage, w *inspector) {
+	w.field(m, "content", func(raw json.RawMessage) json.RawMessage {
+		return w.list(raw, func(block *json.RawMessage) {
+			*block = w.object(*block, func(b map[string]json.RawMessage) {
+				w.field(b, "text", w.text)
+				w.field(b, "toolUse", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, func(use map[string]json.RawMessage) {
+						w.field(use, "input", w.stringValues)
+					})
+				})
+				w.field(b, "toolResult", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, func(result map[string]json.RawMessage) {
+						w.field(result, "content", func(raw json.RawMessage) json.RawMessage {
+							return w.list(raw, func(item *json.RawMessage) {
+								*item = w.object(*item, func(c map[string]json.RawMessage) {
+									w.field(c, "text", w.text)
+									w.field(c, "json", w.stringValues)
+								})
+							})
+						})
+					})
+				})
+			})
+		})
 	})
 }
 
