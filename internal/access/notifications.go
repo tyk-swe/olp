@@ -116,24 +116,36 @@ func (s *Server) storeNotificationSecret(r *http.Request, tx pgx.Tx, id string, 
 	if raw == nil {
 		return nil
 	}
-	if string(*raw) == "null" {
-		_, err := tx.Exec(r.Context(),
-			"UPDATE olp.notification_destinations SET secret_id=NULL WHERE id=$1", id)
+	var secretID *string
+	if string(*raw) != "null" {
+		var secret string
+		if err := json.Unmarshal(*raw, &secret); err != nil {
+			return Invalid("secret", "Use a signing secret string or null.")
+		}
+		if secret == "" || len(secret) > 1024 {
+			return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
+		}
+		stored := NewID()
+		if err := s.Keys.Store(r.Context(), tx, s.Installation, stored, secrets.NotificationSecret, []byte(secret), nil); err != nil {
+			return err
+		}
+		secretID = &stored
+	}
+	// Callers hold the destination row, so the replaced secret can be deleted
+	// once nothing references it; a rotated or cleared secret must not linger.
+	var previous *string
+	if err := tx.QueryRow(r.Context(),
+		"SELECT secret_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&previous); err != nil {
 		return err
 	}
-	var secret string
-	if err := json.Unmarshal(*raw, &secret); err != nil {
-		return Invalid("secret", "Use a signing secret string or null.")
-	}
-	if secret == "" || len(secret) > 1024 {
-		return Invalid("secret", "Use a signing secret of 1–1024 bytes.")
-	}
-	secretID := NewID()
-	if err := s.Keys.Store(r.Context(), tx, s.Installation, secretID, secrets.NotificationSecret, []byte(secret), nil); err != nil {
+	if _, err := tx.Exec(r.Context(),
+		"UPDATE olp.notification_destinations SET secret_id=$2 WHERE id=$1", id, secretID); err != nil {
 		return err
 	}
-	_, err := tx.Exec(r.Context(),
-		"UPDATE olp.notification_destinations SET secret_id=$2 WHERE id=$1", id, secretID)
+	if previous == nil {
+		return nil
+	}
+	_, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *previous, secrets.NotificationSecret)
 	return err
 }
 

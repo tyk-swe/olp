@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -103,13 +102,7 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	source, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		source = r.RemoteAddr
-	}
-	if s.ClientIP != nil {
-		source = s.ClientIP(r)
-	}
+	source := s.clientIP(r)
 	sourceLimit := 60
 	if action == "invitation" {
 		sourceLimit = 30
@@ -303,7 +296,7 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	if !u.Active || u.Role != "owner" {
+	if !u.Active || u.Role != "owner" || u.AccessScope != "global" {
 		if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
 			return Reply{}, err
 		}

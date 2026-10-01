@@ -287,7 +287,10 @@ func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []by
 			return
 		}
 	}
-	if eventType == "response.create" || eventType == "input_audio_buffer.commit" {
+	// Only response.create asks for a model response. Committing the input
+	// audio buffer never creates one, so a manual turn sends both and the
+	// provider answers once.
+	if eventType == "response.create" {
 		if s.requested == maxRealtimePendingResponses {
 			s.unknown = true
 		} else {
@@ -566,7 +569,15 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	defer s.resourceSettle(r.Context(), x, p)
+	// A realtime session settles its observed usage against key and slot
+	// limits the way a Gemini Live session does; a session whose billing is
+	// uncertain keeps at least the reserved estimate.
+	x.estimate = resourceEstimate
+	defer func() {
+		settled := geminiLiveSettlement(x)
+		s.settlePinHold(r.Context(), x, p.hold, settled)
+		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
+	}()
 	if x.strict() {
 		if _, ok := snapshot.RealtimeTemplate(route.Slug, p.target.ID); !ok {
 			fail(policyUnavailable("realtime_contract_unavailable", "The selected target has no compiled strict realtime contract."))

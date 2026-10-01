@@ -101,12 +101,10 @@ export function mediaJobPending(job: {
   );
 }
 
-export function mediaJobPollInterval(
-  pending: boolean,
-  hidden = typeof document !== 'undefined' &&
-    document.visibilityState === 'hidden'
-): number | false {
-  if (hidden) return false;
+// TanStack Query already skips interval fetches while the page is in the
+// background. Returning false for a hidden tab would clear the interval, and
+// nothing re-evaluates it when the tab becomes visible again.
+export function mediaJobPollInterval(pending: boolean): number | false {
   return pending ? 3_000 : false;
 }
 

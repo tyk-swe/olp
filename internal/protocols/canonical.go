@@ -196,6 +196,10 @@ func encodeParts(parts []Part, family string) ([]Object, error) {
 			return nil, unsupported("image detail")
 		}
 		if p.URL == "" {
+			if p.Text == "" {
+				// Anthropic and Gemini both reject empty text blocks.
+				continue
+			}
 			v := Object{"text": raw(p.Text)}
 			if family == "anthropic" {
 				v["type"] = raw("text")

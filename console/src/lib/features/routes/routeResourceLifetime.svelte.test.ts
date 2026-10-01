@@ -571,6 +571,78 @@ describe('route draft resource lifetime', () => {
   });
 });
 
+describe('route draft dry-run controls', () => {
+  function select(selector: string, value: string) {
+    const element = host.querySelector<HTMLSelectElement>(selector)!;
+    element.value = value;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  }
+
+  it('does not replace an unchanged draft', async () => {
+    render({});
+    await hydrated(draftA.slug);
+    save();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.textContent).toContain('No unsaved changes.');
+    });
+    expect(replaceRouteDraft).not.toHaveBeenCalled();
+  });
+
+  it('simulates instead of saving when Enter is pressed in the seed', async () => {
+    vi.mocked(simulateRoute).mockResolvedValue({
+      deterministic_seed: 'abc',
+      mode: 'unary',
+      operation: 'generation',
+      surface: 'openai',
+      targets: []
+    });
+    render({});
+    await hydrated(draftA.slug);
+    const seed = host.querySelector<HTMLInputElement>('#simulation-seed')!;
+    seed.value = 'abc';
+    seed.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true
+    });
+    seed.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    await vi.waitFor(() =>
+      expect(simulateRoute).toHaveBeenCalledWith(
+        draftA.id,
+        expect.objectContaining({ seed: 'abc' })
+      )
+    );
+    expect(replaceRouteDraft).not.toHaveBeenCalled();
+  });
+
+  it('drops a dialect that no longer matches the client surface', async () => {
+    vi.mocked(simulateRoute).mockResolvedValue({
+      deterministic_seed: 'abc',
+      mode: 'unary',
+      operation: 'generation',
+      surface: 'openai',
+      targets: []
+    });
+    render({});
+    await hydrated(draftA.slug);
+    select('#simulation-dialect', 'openai-responses');
+    select('#simulation-surface', 'anthropic');
+    expect(
+      host.querySelector<HTMLSelectElement>('#simulation-dialect')!.value
+    ).toBe('');
+    button('Simulate order').click();
+    await vi.waitFor(() => expect(simulateRoute).toHaveBeenCalled());
+    const input = vi.mocked(simulateRoute).mock.calls[0]![1];
+    expect(input.surface).toBe('anthropic');
+    expect(input.dialect).toBeUndefined();
+  });
+});
+
 describe('routing policy resource lifetime', () => {
   it('does not invoke the new resource callback or reset its edits when a stale policy save resolves', async () => {
     const onSaved = vi.fn();

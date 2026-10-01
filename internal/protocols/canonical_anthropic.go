@@ -156,7 +156,11 @@ func encodeAnthropicGeneration(c *Generation, model string, count bool) (Object,
 				return nil, unsupported("tool result")
 			}
 			role = "user"
-			parts = []Object{{"type": raw("tool_result"), "tool_use_id": raw(m.ToolID), "content": raw(parts)}}
+			result := Object{"type": raw("tool_result"), "tool_use_id": raw(m.ToolID)}
+			if len(parts) > 0 {
+				result["content"] = raw(parts)
+			}
+			parts = []Object{result}
 		}
 		for _, t := range m.Calls {
 			if !json.Valid([]byte(t.Arguments)) {
@@ -189,7 +193,12 @@ func encodeAnthropicGeneration(c *Generation, model string, count bool) (Object,
 	if len(c.Tools) > 0 {
 		tools := []Object{}
 		for _, t := range c.Tools {
-			tools = append(tools, Object{"name": raw(t.Name), "description": raw(t.Description), "input_schema": t.Schema})
+			schema := t.Schema
+			if !present(schema) {
+				// Anthropic requires an object schema, even for zero-argument tools.
+				schema = json.RawMessage(`{"type":"object","properties":{}}`)
+			}
+			tools = append(tools, Object{"name": raw(t.Name), "description": raw(t.Description), "input_schema": schema})
 		}
 		f["tools"] = raw(tools)
 	}

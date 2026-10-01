@@ -274,10 +274,40 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 		}
 	}
 	out, err := rewriteID(body, "id", res.ID)
+	if err == nil {
+		out, err = s.mapPreviousResponse(ctx, out, authority.ID, fact.ProviderID, x.pin)
+	}
 	if err != nil {
 		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
 	return out, nil
+}
+
+// previousResponseLocal resolves an upstream previous_response_id echoed by
+// a non-strict provider to the caller's local id. It returns "" when the
+// gateway holds no mapping, and the caller then withholds the upstream id.
+func (s *Server) previousResponseLocal(ctx context.Context, keyID, providerID string, pin *resources.Resource, upstream string) string {
+	if pin != nil && pin.UpstreamID == upstream {
+		return pin.ID
+	}
+	if s.Resources == nil {
+		return ""
+	}
+	res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, keyID, providerID, upstream)
+	if err != nil {
+		return ""
+	}
+	return res.ID
+}
+
+// mapPreviousResponse maps a non-strict response object's echoed
+// previous_response_id so callers only see gateway-owned response ids.
+func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, keyID, providerID string, pin *resources.Resource) ([]byte, error) {
+	upstream, ok := upstreamString(body, "previous_response_id")
+	if !ok {
+		return body, nil
+	}
+	return rewritePrevious(body, s.previousResponseLocal(ctx, keyID, providerID, pin, upstream))
 }
 
 func responseUsage(body []byte) *openai.Usage {
@@ -405,6 +435,9 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 		out = strictResultDoc.Bytes()
 	} else {
 		out, err = rewriteID(result, "id", res.ID)
+		if err == nil {
+			out, err = s.mapPreviousResponse(commitCtx, out, res.APIKeyID, res.ProviderID, nil)
+		}
 	}
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
@@ -441,7 +474,9 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				commitCtx, stopCommit := resourceCommitContext(ctx)
+				defer stopCommit()
+				_ = s.Resources.Tombstone(commitCtx, res.ID)
 				return notFoundError("not_found", "No stored response with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -449,7 +484,11 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 		defer resp.Body.Close()
 		x.dispatched = true
 		result, _ := readBounded(resp.Body, s.cfg.MaxResponseBytes)
-		if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+		// The provider already deleted the response: the mapping must follow
+		// even when the client has gone.
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		defer stopCommit()
+		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The response mapping could not be deleted.")
 		}
 		out, err := rewriteID(result, "id", res.ID)
@@ -589,7 +628,19 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		}
 		mapped, err = projection.project(doc, "/response")
 	} else {
-		mapped, err = oif.Apply(doc, []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}})
+		changes := []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
+		if previous, present := response.Lookup("previous_response_id"); present {
+			if upstream, valid := previous.Text(); valid && upstream != "" {
+				value := "null"
+				commitCtx, stopCommit := resourceCommitContext(ctx)
+				if local := s.previousResponseLocal(commitCtx, x.keyID, fact.ProviderID, x.pin, upstream); local != "" {
+					value = quotedResponseID(local)
+				}
+				stopCommit()
+				changes = append(changes, oif.Change{Pointer: "/response/previous_response_id", Value: value, Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
+			}
+		}
+		mapped, err = oif.Apply(doc, changes)
 	}
 	if err != nil {
 		return nil, errResponseMapping

@@ -20,6 +20,7 @@
   import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
+    expiryUnchanged,
     type ApiKeyPolicyInput
   } from '$lib/features/access/api-keys/apiKeyPolicy';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
@@ -119,7 +120,8 @@
       maxConcurrency: numberValue(form.maxConcurrency),
       dailyCostLimit: form.dailyCostLimit,
       monthlyCostLimit: form.monthlyCostLimit,
-      expiresAt: form.expiresAt
+      // An untouched expiry is not re-sent, so it needs no future check.
+      expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt
     });
     if (Object.keys(errors).length) {
       await focusFormError(root);
@@ -130,7 +132,7 @@
       await focusFormError(root);
       return;
     }
-    const input = buildApiKeyPolicyInput(form);
+    const input = buildApiKeyPolicyInput(form, editing);
     if (editing) delete input.project_id;
     const saved = await onSubmit(input, form.allowedRoutes[0]);
     if (saved) dirty = false;

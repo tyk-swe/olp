@@ -24,7 +24,7 @@ func (o *Overview) summary(r *http.Request, p access.Principal) (access.Reply, e
 	err = o.Access.Pool.QueryRow(r.Context(),
 		"SELECT "+
 			"(SELECT count(*) FROM olp.providers WHERE active_revision IS NOT NULL AND ($1 OR project_id = ANY($2::uuid[]))),"+
-			"(SELECT count(*) FROM olp.routes WHERE ($1 OR project_id = ANY($2::uuid[]))),"+
+			"(SELECT count(*) FROM olp.routes WHERE state='active' AND ($1 OR project_id = ANY($2::uuid[]))),"+
 			"(SELECT count(*) FROM olp.provider_models WHERE enabled AND ($1 OR provider_id IN"+
 			" (SELECT id FROM olp.providers WHERE project_id = ANY($2::uuid[])))),"+
 			"EXISTS(SELECT 1 FROM olp.api_keys WHERE revoked_at IS NULL AND ($1 OR project_id = ANY($2::uuid[])))",

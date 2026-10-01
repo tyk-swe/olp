@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -125,6 +126,9 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		fail(e)
 		return
 	}
+	// Bedrock inference is metered like any other generation: the request
+	// size bounds the reservation and the reported usage settles it.
+	x.estimate = max(resourceEstimate, int64(len(body))/4)
 	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *runtime.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})
@@ -132,7 +136,11 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		fail(e)
 		return
 	}
-	defer s.resourceSettle(r.Context(), x, p)
+	defer func() {
+		actual := x.settledTokens()
+		s.settlePinHold(r.Context(), x, p.hold, actual)
+		settleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
+	}()
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(r.Context(), x, authority, overall); e != nil {
 		fail(e)
@@ -147,7 +155,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	resp, failure := s.bedrockCall(ctx, x, p, endpoint, body, mode == "streaming")
 	if failure != nil {
-		x.dispatched = true
+		x.dispatched = failure.dispatched
 		fail(upstreamError(failure))
 		return
 	}
@@ -289,6 +297,12 @@ func (s *Server) validateBedrockInvoke(x *execution, model string, body []byte) 
 		if err := validateTitanImage(body); err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan image response.")
 		}
+		// Titan image responses report no token usage, so the invoke keeps
+		// its request-sized reservation instead of settling at zero.
+		if len(x.facts) > 0 {
+			fact := &x.facts[len(x.facts)-1]
+			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = false, false, true
+		}
 		return nil
 	}
 	return serverError(http.StatusUnprocessableEntity, "unsupported_invoke_model",
@@ -351,8 +365,12 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 			truncated = true
 			break
 		}
-		if u := bedrockStreamUsage(&message); u != nil {
-			usage = u
+		if u, authoritative := bedrockStreamUsage(&message); u != nil {
+			if authoritative {
+				usage = u
+			} else {
+				usage = mergeBedrockUsage(usage, u)
+			}
 		}
 		if err := encoder.Encode(w, message); err != nil {
 			truncated = true
@@ -377,69 +395,165 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
-func bedrockStreamUsage(message *eventstream.Message) *openai.Usage {
+// bedrockStreamUsage reads the token usage one Bedrock eventstream message
+// carries. Converse's metadata event and the invocation metrics on an invoke
+// stream's final chunk are authoritative totals. The Anthropic message_start
+// and message_delta usage inside an invoke chunk is partial: it merges into
+// what earlier chunks reported.
+func bedrockStreamUsage(message *eventstream.Message) (usage *openai.Usage, authoritative bool) {
 	kind := ""
 	if v := message.Headers.Get(":event-type"); v != nil {
 		kind = v.String()
-	}
-	var payload map[string]json.RawMessage
-	if json.Unmarshal(message.Payload, &payload) != nil {
-		return nil
 	}
 	switch kind {
 	case "metadata":
 		var wire struct {
 			Usage *struct {
-				InputTokens           int64 `json:"inputTokens"`
-				OutputTokens          int64 `json:"outputTokens"`
-				CacheReadInputTokens  int64 `json:"cacheReadInputTokens"`
-				CacheWriteInputTokens int64 `json:"cacheWriteInputTokens"`
+				InputTokens           int64  `json:"inputTokens"`
+				OutputTokens          int64  `json:"outputTokens"`
+				TotalTokens           *int64 `json:"totalTokens"`
+				CacheReadInputTokens  int64  `json:"cacheReadInputTokens"`
+				CacheWriteInputTokens int64  `json:"cacheWriteInputTokens"`
 			} `json:"usage"`
 		}
 		if json.Unmarshal(message.Payload, &wire) != nil || wire.Usage == nil {
-			return nil
+			return nil, false
 		}
-		if wire.Usage.InputTokens < 0 || wire.Usage.OutputTokens < 0 ||
-			wire.Usage.CacheReadInputTokens < 0 || wire.Usage.CacheReadInputTokens > wire.Usage.InputTokens ||
-			wire.Usage.CacheWriteInputTokens < 0 || wire.Usage.CacheWriteInputTokens > wire.Usage.InputTokens {
-			return nil
+		u := wire.Usage
+		if u.TotalTokens != nil && *u.TotalTokens < 0 {
+			return nil, false
 		}
-		usage := &openai.Usage{InputTokens: wire.Usage.InputTokens, OutputTokens: wire.Usage.OutputTokens}
-		if wire.Usage.CacheReadInputTokens > 0 {
-			cached := wire.Usage.CacheReadInputTokens
-			usage.CachedInputTokens = &cached
+		usage := bedrockTokenUsage(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheWriteInputTokens)
+		if usage != nil && u.TotalTokens != nil {
+			usage.TotalTokens = max(usage.TotalTokens, *u.TotalTokens)
 		}
-		if wire.Usage.CacheWriteInputTokens > 0 {
-			write := wire.Usage.CacheWriteInputTokens
-			usage.CacheWriteInputTokens = &write
-		}
-		return usage
-	case "message_delta", "message_stop":
-		var wire struct {
-			Usage *struct {
-				InputTokens  int64 `json:"input_tokens"`
-				OutputTokens int64 `json:"output_tokens"`
-			} `json:"usage"`
-		}
-		if json.Unmarshal(message.Payload, &wire) != nil || wire.Usage == nil ||
-			wire.Usage.InputTokens < 0 || wire.Usage.OutputTokens < 0 {
-			return nil
-		}
-		return &openai.Usage{InputTokens: wire.Usage.InputTokens, OutputTokens: wire.Usage.OutputTokens}
-	case "message_start":
-		var wire struct {
-			Message *struct {
-				Usage *struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(message.Payload, &wire) != nil || wire.Message == nil || wire.Message.Usage == nil ||
-			wire.Message.Usage.InputTokens < 0 || wire.Message.Usage.OutputTokens < 0 {
-			return nil
-		}
-		return &openai.Usage{InputTokens: wire.Message.Usage.InputTokens, OutputTokens: wire.Message.Usage.OutputTokens}
+		return usage, usage != nil
+	case "chunk":
+		return bedrockChunkUsage(message.Payload)
 	}
-	return nil
+	return nil, false
+}
+
+// bedrockTokenUsage normalizes Bedrock's split counts: inputTokens excludes
+// cache reads and writes, while input usage here includes them.
+func bedrockTokenUsage(input, output, cacheRead, cacheWrite int64) *openai.Usage {
+	if input < 0 || output < 0 || cacheRead < 0 || cacheWrite < 0 {
+		return nil
+	}
+	in := addBounded(addBounded(input, cacheRead), cacheWrite)
+	usage := &openai.Usage{InputTokens: in, OutputTokens: output, TotalTokens: addBounded(in, output)}
+	if cacheRead > 0 {
+		usage.CachedInputTokens = &cacheRead
+	}
+	if cacheWrite > 0 {
+		usage.CacheWriteInputTokens = &cacheWrite
+	}
+	return usage
+}
+
+type bedrockAnthropicUsage struct {
+	InputTokens   *int64 `json:"input_tokens"`
+	OutputTokens  *int64 `json:"output_tokens"`
+	CacheRead     *int64 `json:"cache_read_input_tokens"`
+	CacheCreation *int64 `json:"cache_creation_input_tokens"`
+}
+
+// bedrockChunkUsage decodes an InvokeModelWithResponseStream chunk, whose
+// payload wraps the model's native event as base64 bytes.
+func bedrockChunkUsage(payload []byte) (*openai.Usage, bool) {
+	var chunk struct {
+		Bytes string `json:"bytes"`
+	}
+	if json.Unmarshal(payload, &chunk) != nil || chunk.Bytes == "" {
+		return nil, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(chunk.Bytes)
+	if err != nil {
+		return nil, false
+	}
+	var event struct {
+		Type    string `json:"type"`
+		Message *struct {
+			Usage *bedrockAnthropicUsage `json:"usage"`
+		} `json:"message"`
+		Usage   *bedrockAnthropicUsage `json:"usage"`
+		Metrics *struct {
+			InputTokenCount           *int64 `json:"inputTokenCount"`
+			OutputTokenCount          *int64 `json:"outputTokenCount"`
+			CacheReadInputTokenCount  int64  `json:"cacheReadInputTokenCount"`
+			CacheWriteInputTokenCount int64  `json:"cacheWriteInputTokenCount"`
+		} `json:"amazon-bedrock-invocationMetrics"`
+	}
+	if json.Unmarshal(decoded, &event) != nil {
+		return nil, false
+	}
+	if m := event.Metrics; m != nil && m.InputTokenCount != nil && m.OutputTokenCount != nil {
+		if usage := bedrockTokenUsage(*m.InputTokenCount, *m.OutputTokenCount, m.CacheReadInputTokenCount, m.CacheWriteInputTokenCount); usage != nil {
+			return usage, true
+		}
+	}
+	var native *bedrockAnthropicUsage
+	switch event.Type {
+	case "message_start":
+		if event.Message != nil {
+			native = event.Message.Usage
+		}
+	case "message_delta":
+		native = event.Usage
+	}
+	if native == nil {
+		return nil, false
+	}
+	value := func(v *int64) int64 {
+		if v == nil {
+			return 0
+		}
+		return *v
+	}
+	for _, v := range []*int64{native.InputTokens, native.OutputTokens, native.CacheRead, native.CacheCreation} {
+		if v != nil && *v < 0 {
+			return nil, false
+		}
+	}
+	// A partial event carries only the counts it names; the merge keeps the
+	// rest from earlier events.
+	usage := &openai.Usage{OutputTokens: value(native.OutputTokens)}
+	if native.InputTokens != nil {
+		usage.InputTokens = addBounded(addBounded(*native.InputTokens, value(native.CacheRead)), value(native.CacheCreation))
+	}
+	if native.CacheRead != nil {
+		read := *native.CacheRead
+		usage.CachedInputTokens = &read
+	}
+	if native.CacheCreation != nil {
+		write := *native.CacheCreation
+		usage.CacheWriteInputTokens = &write
+	}
+	return usage, false
+}
+
+// mergeBedrockUsage folds a partial Anthropic usage event into the usage seen
+// so far: input and cache counts come from message_start, and the cumulative
+// output count from the latest message_delta.
+func mergeBedrockUsage(prev, next *openai.Usage) *openai.Usage {
+	if prev == nil {
+		merged := *next
+		merged.TotalTokens = addBounded(merged.InputTokens, merged.OutputTokens)
+		return &merged
+	}
+	merged := *prev
+	if next.InputTokens != 0 {
+		merged.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens != 0 {
+		merged.OutputTokens = next.OutputTokens
+	}
+	if next.CachedInputTokens != nil {
+		merged.CachedInputTokens = next.CachedInputTokens
+	}
+	if next.CacheWriteInputTokens != nil {
+		merged.CacheWriteInputTokens = next.CacheWriteInputTokens
+	}
+	merged.TotalTokens = addBounded(merged.InputTokens, merged.OutputTokens)
+	return &merged
 }

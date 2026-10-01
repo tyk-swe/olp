@@ -290,7 +290,8 @@ authenticates with a [grant](plugins.md#grant-enrollment) exports its
 principal or grant facts. Slot `allowed_api_keys` restrictions are not portable
 — API keys are installation-local — so export always emits an empty list and
 import rejects a non-empty one; re-establish them on the destination after
-creating keys.
+creating keys. Apply keeps the restriction an existing destination slot already
+has.
 
 Every exported route carries an explicit
 [fidelity](provider-routing.md#route-fidelity) mode. A route entry without

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
@@ -36,6 +36,7 @@
     onFeedback: (feedback: { status: string; error: string }) => void;
   } = $props();
 
+  const queryClient = useQueryClient();
   const services = useServiceCapabilities();
   const access = useRole();
   const canEditPricing = $derived(access.can('pricing.update'));
@@ -72,11 +73,15 @@
       providerKind = providerKinds.data[0].kind;
   });
 
-  const pricing = createQuery(() => ({
-    queryKey: pricingKeys.page(pricingPagination.cursor),
-    enabled: services.limitsEnforced,
-    queryFn: () => listPricing(pricingPagination.cursor)
-  }));
+  const pricing = createQuery(() => {
+    // The page a key names, so a fetch never stores another page under it.
+    const cursor = pricingPagination.cursor;
+    return {
+      queryKey: pricingKeys.page(cursor),
+      enabled: services.limitsEnforced,
+      queryFn: () => listPricing(cursor)
+    };
+  });
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
@@ -159,7 +164,9 @@
       if (effectiveAt === submitted.effectiveAt)
         effectiveAt = dateTimeLocalValue(new Date());
       resetCursor(pricingPagination);
-      await pricing.refetch();
+      // The query observes the first page only once its options update, so
+      // mark every cached page stale rather than refetching the current one.
+      await queryClient.invalidateQueries({ queryKey: pricingKeys.pages() });
     } catch (cause) {
       onFeedback({
         status: '',

@@ -111,8 +111,7 @@ ingress:
 worker:
   enabled: true
   # One replica keeps the default footprint small. Production installations
-  # should run at least three so stream reclaim and outbox takeover remain
-  # available through a worker failure.
+  # should run at least three so stream reclaim remains available through a worker failure.
   replicas: 1
   podDisruptionBudget:
     enabled: true
@@ -132,6 +131,11 @@ migration:
   enabled: true
   databaseSecretName: ""
   databaseSecretKey: ""
+  # Existing runtime login granted schema and table access after every
+  # migration. Required when databaseSecretName differs from
+  # config.databaseSecretName, so each pre-install and pre-upgrade hook
+  # reapplies grants for tables it creates.
+  runtimeRole: ""
   backoffLimit: 3
   activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 300
@@ -219,11 +223,10 @@ monitoring:
   scrapeTimeout: 5s
   rules:
     enabled: true
-    # Zero implements the default runbook policy for both thresholds below:
-    # any sustained backlog warns. Raise either value only with a documented
+    # Zero implements the default runbook policy: any sustained
+    # request-metadata backlog warns. Raise it only with a documented
     # installation-specific noise budget.
     requestMetadataPendingThreshold: 0
-    runtimeOutboxPendingThreshold: 0
 
 networkPolicy:
   enabled: false

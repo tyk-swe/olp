@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     createPricingSource,
@@ -74,6 +74,12 @@
     }
   }
 
+  function updateError(cause: unknown): string {
+    return isEtagMismatch(cause)
+      ? 'This pricing source changed meanwhile. Review it as it is now, then try again.'
+      : errorMessage(cause, 'The pricing source could not be updated.');
+  }
+
   async function saveEdit(source: PricingSource) {
     if (!canEdit || busy || !editName.trim() || !editUrl.trim()) return;
     busy = source.id;
@@ -86,10 +92,11 @@
       });
       editId = '';
       notice = 'Pricing source updated.';
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
     } catch (cause) {
-      error = errorMessage(cause, 'The pricing source could not be updated.');
+      error = updateError(cause);
     } finally {
+      // Refreshed even after a refusal: trying again needs the current ETag.
+      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
       busy = '';
     }
   }
@@ -100,10 +107,10 @@
     error = notice = '';
     try {
       await updatePricingSource(source, { enabled: !source.enabled });
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
     } catch (cause) {
-      error = errorMessage(cause, 'The pricing source could not be updated.');
+      error = updateError(cause);
     } finally {
+      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
       busy = '';
     }
   }

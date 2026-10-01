@@ -159,3 +159,15 @@ func TestStrictRealtimeFrameAccountingRequiresUnambiguousNativeJSON(t *testing.T
 		t.Fatalf("accepted case-folded native fields changed classification: usage=%+v state=%+v", got, state)
 	}
 }
+
+func TestRealtimeManualCommitTurnCompletes(t *testing.T) {
+	var s realtimeResponseState
+	s.clientFrame(websocket.MessageText, []byte(`{"type":"input_audio_buffer.commit"}`))
+	s.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
+	s.providerFrame(websocket.MessageText, []byte(`{"type":"input_audio_buffer.committed","item_id":"i"}`), true)
+	s.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"r1"}}`), true)
+	s.providerFrame(websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"r1"}}`), true)
+	if s.pending() {
+		t.Fatalf("manual commit turn left pending state: %+v", s)
+	}
+}

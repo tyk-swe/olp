@@ -37,7 +37,10 @@ export function preservedTime(
   value = value.trim();
   if (applied && value === dateTimeLocalValue(applied)) return applied;
   if (!timeValid(value)) return undefined;
-  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : instant(value);
+  // The API parses RFC 3339, whose T and Z designators are uppercase.
+  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+    ? value.toUpperCase()
+    : instant(value);
 }
 
 /** A sortable key that keeps nanosecond fractions `Date` would drop. */

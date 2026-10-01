@@ -165,6 +165,12 @@ function submit() {
   flushSync();
 }
 
+function radio(value: string) {
+  return [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')
+  ].find((item) => item.value === value)!;
+}
+
 function streamToggle() {
   return host.querySelector<HTMLInputElement>(
     '.stream-toggle input[type="checkbox"]'
@@ -208,6 +214,62 @@ describe('basic composer', () => {
     await settle(0);
     expect(host.textContent).toContain('the answer');
     expect(host.textContent).toContain('Output tokens');
+  });
+
+  it('restores generation when switching back from an Advanced operation', async () => {
+    vi.mocked(runPlayground).mockResolvedValue(unaryReply);
+    await establish();
+    radio('advanced').click();
+    flushSync();
+    const operation = host.querySelector<HTMLSelectElement>(
+      '#playground-operation'
+    )!;
+    operation.value = 'translation';
+    operation.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    radio('basic').click();
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    expect(
+      host.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled
+    ).toBe(false);
+    expect(streamToggle()).not.toBeNull();
+    const surface = host.querySelector<HTMLSelectElement>(
+      '#playground-surface'
+    )!;
+    surface.value = 'anthropic';
+    surface.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(surface.value).toBe('anthropic');
+    submit();
+    await settle(0);
+    expect(runPlayground).toHaveBeenCalledWith(
+      expect.objectContaining({ input: 'hello', surface: 'anthropic' }),
+      expect.anything()
+    );
+  });
+
+  it('runs the dry run instead of the request when Enter is pressed in the seed', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    fill('#playground-simulate-seed', 'abc');
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true
+    });
+    input('#playground-simulate-seed').dispatchEvent(enter);
+    flushSync();
+    await settle(0);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(inspectRouting).toHaveBeenCalledOnce();
+    expect(vi.mocked(inspectRouting).mock.calls[0]![0].seed).toBe('abc');
+    expect(runPlayground).not.toHaveBeenCalled();
+    expect(streamPlayground).not.toHaveBeenCalled();
   });
 });
 
@@ -328,6 +390,37 @@ describe('advanced composer', () => {
     flushSync();
     expect(host.textContent).toContain('9007199254740993');
     expect(host.textContent).toMatch(/messages\s+1 · user/);
+  });
+
+  it('drops an inspector dialect that no longer matches the surface', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([eligibleDecision]);
+    await establish();
+    radio('advanced').click();
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    const dialect = host.querySelector<HTMLSelectElement>(
+      '#playground-inspect-dialect'
+    )!;
+    dialect.value = 'openai-responses';
+    dialect.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const surface = host.querySelector<HTMLSelectElement>(
+      '#playground-surface'
+    )!;
+    surface.value = 'anthropic';
+    surface.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(dialect.value).toBe('');
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Inspect plan')!
+      .click();
+    flushSync();
+    await settle(0);
+    expect(inspectRouting).toHaveBeenCalledOnce();
+    const sent = vi.mocked(inspectRouting).mock.calls[0]![0];
+    expect(sent.surface).toBe('anthropic');
+    expect(sent.dialect).toBeUndefined();
   });
 });
 
@@ -491,6 +584,96 @@ describe('streaming', () => {
     expect(host.textContent).not.toContain(
       'No published target reports streaming eligibility'
     );
+  });
+
+  it('reports a stream that closes without a terminal event', async () => {
+    vi.mocked(simulateRouting).mockResolvedValue([eligibleDecision]);
+    vi.mocked(streamPlayground).mockImplementation(
+      (_request, handlers: PlaygroundStreamHandlers) => {
+        handlers.frame('partial');
+        return Promise.resolve();
+      }
+    );
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hi');
+    await enableStream();
+    submit();
+    await settle(0);
+    flushSync();
+    expect(host.textContent).toContain('partial');
+    expect(host.querySelector('.result [role="alert"]')?.textContent).toContain(
+      'The stream ended before completion.'
+    );
+  });
+
+  it('replaces a previous unary result with the streamed run', async () => {
+    vi.mocked(runPlayground).mockResolvedValue({
+      ...unaryReply,
+      routing: [eligibleDecision]
+    });
+    vi.mocked(simulateRouting).mockResolvedValue([eligibleDecision]);
+    vi.mocked(streamPlayground).mockImplementation(
+      (_request, handlers: PlaygroundStreamHandlers) => {
+        handlers.frame('x');
+        handlers.done({
+          id: 's1',
+          routing: [{ ...eligibleDecision, upstream_model: 'stream-model' }]
+        });
+        return Promise.resolve();
+      }
+    );
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hi');
+    submit();
+    await settle(0);
+    flushSync();
+    expect(host.textContent).toContain('7 ms');
+    expect(host.textContent).toContain('From the request that just ran.');
+    expect(host.textContent).toContain('vendor-model');
+    await enableStream();
+    submit();
+    await settle(0);
+    flushSync();
+    expect(streamPlayground).toHaveBeenCalledOnce();
+    expect(host.textContent).not.toContain('7 ms');
+    expect(host.textContent).toContain('From the request that just ran.');
+    expect(host.textContent).toContain('stream-model');
+    expect(host.textContent).not.toContain('vendor-model');
+  });
+
+  it('ignores an older eligibility check that finishes after a newer one', async () => {
+    const first = Promise.withResolvers<RoutingDecision[]>();
+    const second = Promise.withResolvers<RoutingDecision[]>();
+    vi.mocked(simulateRouting)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    await establish();
+    fill('#playground-model', 'chat-route');
+    fill('#playground-input', 'hello');
+    await enableStream();
+    const surface = host.querySelector<HTMLSelectElement>(
+      '#playground-surface'
+    )!;
+    surface.value = 'anthropic';
+    surface.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    await enableStream();
+    second.resolve([{ ...eligibleDecision, eligible: false }]);
+    await settle(0);
+    expect(host.textContent).toContain(
+      'No published target reports streaming eligibility'
+    );
+    first.resolve([eligibleDecision]);
+    await settle(0);
+    expect(host.textContent).toContain(
+      'No published target reports streaming eligibility'
+    );
+    submit();
+    await settle(0);
+    expect(streamPlayground).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Streaming has not been verified');
   });
 
   it('warns instead of streaming when the route has an output policy', async () => {

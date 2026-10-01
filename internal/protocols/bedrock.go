@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 
@@ -49,7 +50,11 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 			inference[to] = v
 		}
 	}
-	messages := []Object{}
+	type turn struct {
+		role    string
+		content []Object
+	}
+	turns := []turn{}
 	system := []Object{}
 	for _, m := range c.Messages {
 		if m.Name != "" {
@@ -64,7 +69,10 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 				return nil, unsupported("image detail")
 			}
 			if p.URL == "" {
-				parts = append(parts, Object{"text": raw(p.Text)})
+				// Converse rejects blank text blocks.
+				if p.Text != "" {
+					parts = append(parts, Object{"text": raw(p.Text)})
+				}
 				continue
 			}
 			if !strings.HasPrefix(p.URL, "data:") {
@@ -117,7 +125,20 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 		if role != "user" && role != "assistant" {
 			return nil, unsupported("message role")
 		}
-		messages = append(messages, Object{"role": raw(role), "content": raw(parts)})
+		if len(parts) == 0 {
+			return nil, unsupported("empty message content")
+		}
+		// Converse requires alternating roles, with every toolResult for an
+		// assistant turn in the next user message, so adjacent turns merge.
+		if n := len(turns); n > 0 && turns[n-1].role == role {
+			turns[n-1].content = append(turns[n-1].content, parts...)
+		} else {
+			turns = append(turns, turn{role, parts})
+		}
+	}
+	messages := make([]Object, 0, len(turns))
+	for _, t := range turns {
+		messages = append(messages, Object{"role": raw(t.role), "content": raw(t.content)})
 	}
 	f := Object{"messages": raw(messages)}
 	if len(system) > 0 {
@@ -148,7 +169,12 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 			if _, e := object(t.Schema); e != nil {
 				return nil, unsupported("tool schema")
 			}
-			tools = append(tools, Object{"toolSpec": raw(map[string]any{"name": t.Name, "description": t.Description, "inputSchema": map[string]any{"json": t.Schema}})})
+			spec := map[string]any{"name": t.Name, "inputSchema": map[string]any{"json": t.Schema}}
+			// Converse requires a non-empty description when one is sent.
+			if t.Description != "" {
+				spec["description"] = t.Description
+			}
+			tools = append(tools, Object{"toolSpec": raw(spec)})
 		}
 		cfg := Object{"tools": raw(tools)}
 		choice := c.Parameters["tool_choice"]
@@ -199,10 +225,7 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	if !hasIn || !hasOut {
 		return nil, protocolError("invalid Bedrock usage")
 	}
-	usage := &openai.Usage{InputTokens: in, OutputTokens: out, TotalTokens: in + out}
-	if n, ok := count(u["totalTokens"]); ok {
-		usage.TotalTokens = n
-	}
+	usage := &openai.Usage{InputTokens: in, OutputTokens: out}
 	optional := func(key string) (*int64, error) {
 		if !present(u[key]) {
 			return nil, nil
@@ -256,14 +279,33 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 		}
 		return *v
 	}
-	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
+	short, long := value(usage.CacheWrite5MInputTokens), value(usage.CacheWrite1HInputTokens)
+	if short > math.MaxInt64-long {
 		return nil, protocolError("Bedrock cache write detail exceeds total")
 	}
-	if value(usage.CachedInputTokens)+value(usage.CacheWriteInputTokens) > in {
-		return nil, protocolError("Bedrock cache usage exceeds input")
+	if usage.CacheWriteInputTokens == nil && (usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil) {
+		return nil, protocolError("Bedrock cache write detail without total")
+	}
+	if short+long > value(usage.CacheWriteInputTokens) {
+		return nil, protocolError("Bedrock cache write detail exceeds total")
+	}
+	// Converse reports cache reads and writes beside inputTokens, while the
+	// canonical input total includes both cache categories.
+	read, write := value(usage.CachedInputTokens), value(usage.CacheWriteInputTokens)
+	if read > math.MaxInt64-in || write > math.MaxInt64-in-read {
+		return nil, protocolError("usage count overflow")
+	}
+	usage.InputTokens = in + read + write
+	if n, ok := count(u["totalTokens"]); ok {
+		usage.TotalTokens = n
+	} else if out > math.MaxInt64-usage.InputTokens {
+		return nil, protocolError("usage count overflow")
+	} else {
+		usage.TotalTokens = usage.InputTokens + out
 	}
 	return usage, nil
 }
+
 func decodeBedrock(body []byte, route string) (*openai.Completion, error) {
 	f, e := object(body)
 	if e != nil {
@@ -335,6 +377,10 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	frame := make([]byte, int(size))
 	copy(frame, prelude[:])
 	if _, err := io.ReadFull(r, frame[12:]); err != nil {
+		// A stream that ends after a whole prelude is truncated, not finished.
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
 		return eventstream.Message{}, err
 	}
 	if err := awsframe.ValidateHeaders(frame[12 : 12+headerBytes]); err != nil {

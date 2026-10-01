@@ -111,6 +111,20 @@ func ParseUUID(value string) (string, error) {
 	return id.String(), nil
 }
 
+// parseProjectID canonicalises an optional project_id, so project lookups,
+// ownership comparisons and idempotency fingerprints see one spelling.
+func parseProjectID(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*value)
+	if err != nil {
+		return nil, Invalid("project_id", "Use a valid UUID.")
+	}
+	canonical := id.String()
+	return &canonical, nil
+}
+
 // AdvanceAuthority advances key authority, so every gateway reloads API keys
 // and which credential versions may serve on its next poll.
 func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
@@ -179,6 +193,11 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
+	projectID, err := parseProjectID(input.ProjectID)
+	if err != nil {
+		return Reply{}, err
+	}
+	input.ProjectID = projectID
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
@@ -277,7 +296,9 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	var revoked *time.Time
 	var projectID *string
 	var groupID *string
-	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
+	// Seed expiry from the authoritative column, so an omitted patch field
+	// preserves it even when the policy JSON is missing or has a stale value.
+	if err = tx.QueryRow(r.Context(), "SELECT policy||jsonb_build_object('name',name,'expires_at',expires_at),etag::text,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&data, &etag, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
 	if err := p.Project(projectID, Change); err != nil {

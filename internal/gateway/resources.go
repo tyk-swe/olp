@@ -166,7 +166,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateSlot(ctx, &provider, slot, resourceEstimate, deadline)
+		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
@@ -312,13 +312,13 @@ func (s *Server) stateDeadline(ctx context.Context, route *runtime.Route) (conte
 
 func (s *Server) reserveState(ctx context.Context, x *execution, authority access.Authority, overall time.Duration) *Error {
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, resourceEstimate, overall)
+	x.lease, e = s.Admission.reserveKey(ctx, authority, max(resourceEstimate, x.estimate), overall)
 	return e
 }
 
 func (s *Server) resourceSettle(ctx context.Context, x *execution, p *pin) {
-	if p != nil && p.hold != nil {
-		p.hold.settle(ctx, x.dispatched, nil)
+	if p != nil {
+		s.settlePinHold(ctx, x, p.hold, nil)
 	}
 	settleKey(ctx, x.lease, x.dispatched, nil, s.log)
 }
@@ -349,6 +349,29 @@ func rewriteID(body []byte, name, value string) ([]byte, error) {
 		return nil, err
 	}
 	obj[name] = encoded
+	return json.Marshal(obj)
+}
+
+// rewritePrevious replaces an echoed upstream previous_response_id with its
+// local id, or with null when no local id is known, so a provider identifier
+// never reaches the caller.
+func rewritePrevious(body []byte, local string) ([]byte, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil, err
+	}
+	raw, present := obj["previous_response_id"]
+	if !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return body, nil
+	}
+	obj["previous_response_id"] = json.RawMessage("null")
+	if local != "" {
+		encoded, err := json.Marshal(local)
+		if err != nil {
+			return nil, err
+		}
+		obj["previous_response_id"] = encoded
+	}
 	return json.Marshal(obj)
 }
 
@@ -428,18 +451,27 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	}
 	obj := map[string]json.RawMessage{}
 	for name, raw := range meta {
-		if name == "upstream_model" {
+		if name == "upstream_model" || name == batchLocalInputKey {
 			continue
 		}
 		obj[name] = raw
 	}
+	// The input file is the one the client named at create time. Projecting
+	// it from the stored local ID keeps it stable after the client deletes
+	// that file, instead of minting a new mapping for the upstream ID.
+	if local, ok := meta[batchLocalInputKey]; ok {
+		obj["input_file_id"] = local
+	}
+	// Stored provider fields are upstream identifiers, whatever their
+	// spelling. Output and error files are first seen here, so they get a
+	// mapping on demand.
 	for _, name := range []string{"output_file_id", "error_file_id"} {
 		raw, ok := obj[name]
 		if !ok {
 			continue
 		}
 		var upstreamID string
-		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" || strings.HasPrefix(upstreamID, "file_") {
+		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" {
 			continue
 		}
 		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID)
@@ -556,12 +588,27 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 	return encoded, state, expires
 }
 
-func batchMetadata(body []byte, model string) (json.RawMessage, string) {
+// batchLocalInputKey stores the gateway file ID a transformed batch was
+// created from beside the provider's batch object.
+const batchLocalInputKey = "local_input_file_id"
+
+// batchLocalInput returns the gateway input file ID stored on a batch.
+func batchLocalInput(res *resources.Resource) string {
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(res.Metadata, &meta) != nil {
+		return ""
+	}
+	var local string
+	_ = json.Unmarshal(meta[batchLocalInputKey], &local)
+	return local
+}
+
+func batchMetadata(body []byte, model, localInput string) (json.RawMessage, string) {
 	meta := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
 		for name, raw := range obj {
-			if name == "id" {
+			if name == "id" || name == batchLocalInputKey {
 				continue
 			}
 			meta[name] = raw
@@ -570,6 +617,10 @@ func batchMetadata(body []byte, model string) (json.RawMessage, string) {
 	if model != "" {
 		encoded, _ := json.Marshal(model)
 		meta["upstream_model"] = encoded
+	}
+	if localInput != "" {
+		encoded, _ := json.Marshal(localInput)
+		meta[batchLocalInputKey] = encoded
 	}
 	state := "validating"
 	if raw, ok := meta["status"]; ok {
@@ -684,6 +735,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if x.strict() {
 		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
 		if !ok {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
 			return
 		}
@@ -691,6 +743,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		var validationErr error
 		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
 		if validationErr != nil {
+			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
 			return
 		}
@@ -709,7 +762,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, purpose, extra, file, fileFirst)
 	if failure != nil {
-		x.dispatched = true
+		x.dispatched = failure.dispatched
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -937,12 +990,19 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	if authority.Policy.AllowProviderState {
 		kinds = append(kinds, resources.KindStrictFile)
 	}
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
+	// One extra row reports whether another page follows; it is never
+	// authorized or projected.
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file list could not be read."), x.family)
 		return
 	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
 	items := make([]json.RawMessage, 0, len(rows))
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
@@ -957,8 +1017,9 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, obj)
+		ids = append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, listBody(items))
+	s.writeStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
@@ -1206,13 +1267,21 @@ func listArgs(r *http.Request) (int, string, *Error) {
 	return limit, after, nil
 }
 
-func listBody(items []json.RawMessage) []byte {
+// listBody writes the OpenAI cursor page shape: SDK auto-pagination follows
+// has_more and resumes after the last item's id.
+func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 	data, _ := json.Marshal(items)
-	out, _ := json.Marshal(map[string]json.RawMessage{
+	more, _ := json.Marshal(hasMore)
+	body := map[string]json.RawMessage{
 		"object":   json.RawMessage(`"list"`),
 		"data":     data,
-		"has_more": json.RawMessage(`false`),
-	})
+		"has_more": more,
+	}
+	if len(ids) > 0 {
+		body["first_id"], _ = json.Marshal(ids[0])
+		body["last_id"], _ = json.Marshal(ids[len(ids)-1])
+	}
+	out, _ := json.Marshal(body)
 	return out
 }
 
@@ -1334,7 +1403,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, upstream, "application/json")
 	if failure != nil {
-		x.dispatched = true
+		x.dispatched = failure.dispatched
 		s.stateFail(x, w, upstreamError(failure), x.family)
 		return
 	}
@@ -1357,7 +1426,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	metadata, state := batchMetadata(result, p.model)
+	metadata, state := batchMetadata(result, p.model, localFile)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindBatch
@@ -1463,12 +1532,19 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	if authority.Policy.AllowProviderState {
 		kinds = append(kinds, resources.KindStrictBatch)
 	}
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit, after)
+	// One extra row reports whether another page follows; it is never
+	// authorized or projected.
+	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch list could not be read."), x.family)
 		return
 	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
 	items := make([]json.RawMessage, 0, len(rows))
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
@@ -1483,8 +1559,9 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, obj)
+		ids = append(ids, row.ID)
 	}
-	s.writeStateJSON(w, x, listBody(items))
+	s.writeStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
@@ -1530,7 +1607,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	metadata, state := batchMetadata(result, resourceModel(res))
+	metadata, state := batchMetadata(result, resourceModel(res), batchLocalInput(res))
 	commitCtx := ctx
 	stopCommit := func() {}
 	if method == http.MethodPost {

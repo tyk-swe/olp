@@ -80,10 +80,9 @@ func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, er
 	query := r.URL.Query()
 	filters := manageFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {
-		switch raw {
-		case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse:
-		default:
-			return access.Reply{}, access.Invalid("kind", "Use file, batch, response, continuation, or strict_response.")
+		if !contract.ListProviderResourcesParamsKind(raw).Valid() {
+			return access.Reply{}, access.Invalid("kind",
+				"Use file, batch, response, continuation, strict_response, interaction, strict_file, or strict_batch.")
 		}
 		filters.kind = &raw
 	}

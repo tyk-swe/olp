@@ -983,7 +983,10 @@ const (
 	ProviderResourceItemKindBatch          ProviderResourceItemKind = "batch"
 	ProviderResourceItemKindContinuation   ProviderResourceItemKind = "continuation"
 	ProviderResourceItemKindFile           ProviderResourceItemKind = "file"
+	ProviderResourceItemKindInteraction    ProviderResourceItemKind = "interaction"
 	ProviderResourceItemKindResponse       ProviderResourceItemKind = "response"
+	ProviderResourceItemKindStrictBatch    ProviderResourceItemKind = "strict_batch"
+	ProviderResourceItemKindStrictFile     ProviderResourceItemKind = "strict_file"
 	ProviderResourceItemKindStrictResponse ProviderResourceItemKind = "strict_response"
 )
 
@@ -996,7 +999,13 @@ func (e ProviderResourceItemKind) Valid() bool {
 		return true
 	case ProviderResourceItemKindFile:
 		return true
+	case ProviderResourceItemKindInteraction:
+		return true
 	case ProviderResourceItemKindResponse:
+		return true
+	case ProviderResourceItemKindStrictBatch:
+		return true
+	case ProviderResourceItemKindStrictFile:
 		return true
 	case ProviderResourceItemKindStrictResponse:
 		return true
@@ -1343,7 +1352,10 @@ const (
 	ListProviderResourcesParamsKindBatch          ListProviderResourcesParamsKind = "batch"
 	ListProviderResourcesParamsKindContinuation   ListProviderResourcesParamsKind = "continuation"
 	ListProviderResourcesParamsKindFile           ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindInteraction    ListProviderResourcesParamsKind = "interaction"
 	ListProviderResourcesParamsKindResponse       ListProviderResourcesParamsKind = "response"
+	ListProviderResourcesParamsKindStrictBatch    ListProviderResourcesParamsKind = "strict_batch"
+	ListProviderResourcesParamsKindStrictFile     ListProviderResourcesParamsKind = "strict_file"
 	ListProviderResourcesParamsKindStrictResponse ListProviderResourcesParamsKind = "strict_response"
 )
 
@@ -1356,7 +1368,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 		return true
 	case ListProviderResourcesParamsKindFile:
 		return true
+	case ListProviderResourcesParamsKindInteraction:
+		return true
 	case ListProviderResourcesParamsKindResponse:
+		return true
+	case ListProviderResourcesParamsKindStrictBatch:
+		return true
+	case ListProviderResourcesParamsKindStrictFile:
 		return true
 	case ListProviderResourcesParamsKindStrictResponse:
 		return true
@@ -1993,8 +2011,8 @@ type CreateBudgetGroupResponse struct {
 type CreateInvitationRequest struct {
 	Email string `json:"email"`
 
-	// ExpiresInHours Invitation lifetime in hours. Defaults to seven days and is capped at
-	// thirty days.
+	// ExpiresInHours Invitation lifetime in hours, from 1 to 720. Defaults to seven days (168)
+	// and is capped at thirty days.
 	ExpiresInHours nullable.Nullable[int32] `json:"expires_in_hours,omitempty"`
 	Role           string                   `json:"role"`
 }
@@ -5347,6 +5365,15 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// PutCredentialSlotParams defines parameters for PutCredentialSlot.
+type PutCredentialSlotParams struct {
+	// IfMatch Current credential-slot ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListProviderCredentialsParams defines parameters for ListProviderCredentials.
 type ListProviderCredentialsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -5574,6 +5601,15 @@ type DiffRouteRevisionsParams struct {
 
 // RestoreRouteRevisionParams defines parameters for RestoreRouteRevision.
 type RestoreRouteRevisionParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PutRoutingPolicyParams defines parameters for PutRoutingPolicy.
+type PutRoutingPolicyParams struct {
+	// IfMatch Current policy ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 

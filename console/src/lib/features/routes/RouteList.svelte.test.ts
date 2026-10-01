@@ -324,9 +324,11 @@ describe('cancellation', () => {
       etag: 'route-etag-a2',
       runtime_generation: { id: 'gen-2', sequence: 2 }
     });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     button('Retire', 'published-routes-heading').click();
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('route-0'));
     expect(retireRoute).toHaveBeenCalledWith('route-0', 'route-etag-a');
     await settle();
     expect(vi.mocked(listRoutePage).mock.calls.length).toBeGreaterThan(1);
@@ -335,6 +337,7 @@ describe('cancellation', () => {
   it('reports a failed retirement without hiding the list', async () => {
     await establish([routeItem(0)]);
     vi.mocked(retireRoute).mockRejectedValue(new Error('etag mismatch'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     button('Retire', 'published-routes-heading').click();
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
@@ -342,5 +345,17 @@ describe('cancellation', () => {
       'etag mismatch'
     );
     expect(host.textContent).toContain('route-0');
+  });
+
+  it('does not retire a route when the confirmation is declined', async () => {
+    await establish([routeItem(0)]);
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    button('Retire', 'published-routes-heading').click();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(retireRoute).not.toHaveBeenCalled();
+    expect(
+      button('Retire', 'published-routes-heading').textContent?.trim()
+    ).toBe('Retire');
   });
 });

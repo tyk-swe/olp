@@ -290,6 +290,16 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	h.want(owner, "POST", providerPath+"/credential-slots/"+slotID+"/validate", nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "publish-second"}), 200)
 	assertAvailability(map[string]bool{"first": false, "second": true})
+	// Every contract surface filters the inventory; an openai-only model is
+	// not available on another surface.
+	for _, surface := range []string{"bedrock", "native"} {
+		for _, item := range h.want(owner, "GET", "/api/v1/provider-models?surface="+surface, nil, nil, 200)["items"].([]any) {
+			if item.(map[string]any)["available"] != false {
+				t.Fatalf("openai-only model available on %s: %v", surface, item)
+			}
+		}
+	}
+	h.want(owner, "GET", "/api/v1/provider-models?surface=bogus", nil, nil, 400)
 	// A route can keep serving the active model while an older provider
 	// revision becomes the draft, even when their model sets differ.
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{

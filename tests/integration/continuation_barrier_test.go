@@ -244,9 +244,12 @@ func TestPublicContinuationClaimFailureNeverDispatchesProvider(t *testing.T) {
 	h.Gateway.Resources = resources.NewEncrypted(h.Pool, installation, badRing)
 	headers := continuationHeaders()
 	source := strings.Replace(continuationInput, "ROUTE", slug, 1)
-	status, body, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(source), headers)
+	status, body, header := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(source), headers)
 	if status < 400 || calls.Load() != 0 || !bytes.Contains(body, []byte("continuation_unavailable")) {
 		t.Fatalf("failed encrypted claim dispatched: status=%d calls=%d %s", status, calls.Load(), body)
+	}
+	if header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("an unavailable continuation invited a retry: status=%d headers=%v", status, header)
 	}
 	var claimed int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE submission_id=$1`, headers["X-OLP-Submission-ID"]).Scan(&claimed); err != nil || claimed != 0 {

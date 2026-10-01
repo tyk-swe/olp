@@ -70,8 +70,8 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	var p *pin
 	defer func() {
 		s.finish(x, out, status)
-		if p != nil && p.hold != nil {
-			p.hold.settle(r.Context(), x.dispatched, totalTokens(x.usage()))
+		if p != nil {
+			s.settlePinHold(r.Context(), x, p.hold, totalTokens(x.usage()))
 		}
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
@@ -364,8 +364,8 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	var p *pin
 	defer func() {
 		s.finish(x, out, status)
-		if p != nil && p.hold != nil {
-			p.hold.settle(r.Context(), x.dispatched, nil)
+		if p != nil {
+			s.settlePinHold(r.Context(), x, p.hold, nil)
 		}
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
@@ -747,17 +747,21 @@ func (s *Server) recordGeminiInteractionUsage(x *execution, object oif.Value) {
 		return
 	}
 	var native struct {
-		Input  *int64 `json:"total_input_tokens"`
-		Output *int64 `json:"total_output_tokens"`
-		Cached *int64 `json:"total_cached_tokens"`
+		Input    *int64 `json:"total_input_tokens"`
+		Output   *int64 `json:"total_output_tokens"`
+		Cached   *int64 `json:"total_cached_tokens"`
+		Thoughts *int64 `json:"total_thought_tokens"`
+		ToolUse  *int64 `json:"total_tool_use_tokens"`
+		Total    *int64 `json:"total_tokens"`
 	}
 	if json.Unmarshal(usageValue.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
 		return
 	}
-	fact := &x.facts[len(x.facts)-1]
-	fact.Usage = &openai.Usage{InputTokens: *native.Input, OutputTokens: *native.Output}
-	if native.Cached != nil {
-		fact.Usage.CachedInputTokens = native.Cached
+	usage := geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
+	if usage == nil {
+		return
 	}
+	fact := &x.facts[len(x.facts)-1]
+	fact.Usage = usage
 	fact.recordEvidence(false)
 }

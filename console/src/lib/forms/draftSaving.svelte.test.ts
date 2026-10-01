@@ -795,7 +795,9 @@ it('uses the credential editor snapshot ETag after a background refetch', async 
     expect(put).toHaveBeenCalledWith(
       '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
       expect.objectContaining({
-        headers: expect.objectContaining({ 'If-Match': 'original-etag' }),
+        params: expect.objectContaining({
+          header: expect.objectContaining({ 'If-Match': 'original-etag' })
+        }),
         body: expect.objectContaining({
           slot: expect.objectContaining({ name: 'Original slot' })
         })

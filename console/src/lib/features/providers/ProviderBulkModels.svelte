@@ -73,12 +73,18 @@
             : ['generation']
           : [operation];
       const surface = await nativeSurface();
-      const suggested = options.capabilities.filter(
+      const candidates = options.capabilities.filter(
         (tuple) =>
           desired.includes(tuple.operation) &&
-          (tuple.mode === 'unary' || tuple.mode === 'streaming') &&
-          tuple.surface === surface
+          (tuple.mode === 'unary' || tuple.mode === 'streaming')
       );
+      // Prefer the native surface, but some operations (embeddings on
+      // Gemini, for example) are only certifiable on another surface.
+      const suggested = desired.flatMap((op) => {
+        const forOp = candidates.filter((tuple) => tuple.operation === op);
+        const native = forOp.filter((tuple) => tuple.surface === surface);
+        return native.length ? native : forOp;
+      });
       for (const id of selected) {
         if (cancelled) break;
         const model = models.data?.find((m) => m.id === id);
@@ -98,7 +104,13 @@
             operation === 'configured' &&
               vendor !== 'voyage' &&
               model.capabilities.length
-              ? model.capabilities
+              ? // Responses carry source and certification fields the
+                // request schema refuses.
+                model.capabilities.map(({ operation, surface, mode }) => ({
+                  operation,
+                  surface,
+                  mode
+                }))
               : suggested
           );
           if (cancelled) break;

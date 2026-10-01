@@ -103,10 +103,13 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 	if policyErr != nil {
 		return preparedProvider{}, policyErr
 	}
+	if e := inputPolicyWireGate(x.route, compiled, invocation.Wire); e != nil {
+		return preparedProvider{}, e
+	}
 	if compiled != nil {
 		for _, rule := range compiled.Input {
 			matched, blocked := false, false
-			next := protocols.InspectInputText(native, func(text string) (string, bool) {
+			next, err := protocols.InspectInputText(native, func(text string) (string, bool) {
 				if !rule.Re.MatchString(text) {
 					return text, false
 				}
@@ -117,6 +120,9 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 				}
 				return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 			})
+			if err != nil {
+				return preparedProvider{}, policyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
+			}
 			if blocked {
 				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
 				return preparedProvider{policyDecisions: decisions}, invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
@@ -178,4 +184,13 @@ func (x *execution) providerEstimate(provider *runtime.Provider) int64 {
 		estimate = max(estimate, prepared.estimate)
 	}
 	return max(estimate, 1)
+}
+
+// inputPolicyWireGate refuses a destination wire the input rules cannot
+// inspect, so an input policy never dispatches a body it has not seen.
+func inputPolicyWireGate(route *runtime.Route, compiled *contentpolicy.Compiled, wire openai.Family) *Error {
+	if compiled == nil || len(compiled.Input) == 0 || protocols.InputInspectable(wire) {
+		return nil
+	}
+	return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(wire)+"` provider wire.")
 }

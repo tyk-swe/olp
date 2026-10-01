@@ -14,6 +14,7 @@
     auditFilters,
     auditProblem,
     AUDIT_RANGE_MESSAGE,
+    auditActorLabel,
     auditSearch,
     auditUrl,
     readAuditForm
@@ -183,7 +184,7 @@
         ><tbody
           >{#each audit.data?.items ?? [] as event (event.id)}<tr
               ><td>{formatDate(event.occurred_at)}</td><td
-                >{event.actor_email ?? 'System'}</td
+                >{auditActorLabel(event)}</td
               ><td><code>{event.action}</code></td><td
                 ><strong>{event.resource_type}</strong
                 >{#if event.resource_id}<small class="mono"

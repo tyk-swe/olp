@@ -29,6 +29,7 @@
 
   import {
     applyUsageDraft,
+    clearedUsageState,
     defaultUsageState,
     readUsageState,
     usageDraft,
@@ -37,10 +38,13 @@
     type UsageState
   } from '$lib/features/usage/usageState';
 
-  const defaults = defaultUsageState();
-  const applied = $derived(readUsageState(page.url.searchParams, defaults));
+  // The default window is taken whenever the URL changes, so returning to a
+  // bare /usage later shows the last 24 hours from then, not from mount.
+  const applied = $derived(
+    readUsageState(page.url.searchParams, defaultUsageState())
+  );
   const urlProblem = $derived(usageProblem(applied));
-  let draft = $state(usageDraft(defaults));
+  let draft = $state(usageDraft(defaultUsageState()));
   let validation = $state<string | null>(null);
 
   $effect(() => {
@@ -65,8 +69,10 @@
             usageSeries(snapshot.filters, snapshot.granularity),
             usageBreakdown(snapshot.filters, snapshot.dimension),
             usageCompleteness(snapshot.filters),
+            // The key only adds its budget; a key that can't be read, such
+            // as a removed one, leaves the report itself intact.
             snapshot.filters.api_key_id
-              ? getApiKey(snapshot.filters.api_key_id, signal)
+              ? getApiKey(snapshot.filters.api_key_id, signal).catch(() => null)
               : Promise.resolve(null)
           ]);
         return {
@@ -96,11 +102,7 @@
   }
 
   function clear() {
-    void showUsage({
-      ...defaultUsageState(),
-      dimension: draft.dimension,
-      granularity: draft.granularity
-    });
+    void showUsage(clearedUsageState(draft));
   }
 
   function titleCase(value: string) {

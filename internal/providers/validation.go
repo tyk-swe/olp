@@ -75,7 +75,7 @@ func (row *slotRow) certificationTime(cfg *Configuration, models []storedModel) 
 }
 
 func (s *Server) validateModelAccess(ctx context.Context, cfg *Configuration, credential []byte, row *slotRow, models []storedModel) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := probeBudget(ctx)
 	defer cancel()
 	checked := 0
 	for _, model := range models {

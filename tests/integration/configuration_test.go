@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -366,6 +367,69 @@ func TestConfigurationPromotion(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the changed artifact must update draft models", models)
+	}
+
+	// API keys are not portable, so apply keeps a destination slot's own key
+	// restriction instead of widening the slot to every key.
+	const restrictedKey = "00000000-0000-0000-0000-000000000001"
+	if _, err = destination.Pool.Exec(t.Context(), `UPDATE olp.provider_slots SET restrictions=jsonb_set(restrictions,'{allowed_api_keys}',$2::jsonb) WHERE id=$1`, slotID, `["`+restrictedKey+`"]`); err != nil {
+		t.Fatal(err)
+	}
+	clone := func(source map[string]any) map[string]any {
+		encoded, _ := json.Marshal(source)
+		copied := map[string]any{}
+		if err := json.Unmarshal(encoded, &copied); err != nil {
+			t.Fatal(err)
+		}
+		return copied
+	}
+	extended := clone(updated)
+	extendedModels := extended["providers"].([]any)[0].(map[string]any)["models"].([]any)
+	extra := clone(extendedModels[0].(map[string]any))
+	extra["upstream_model"], extra["display_name"] = "extra-model", "extra-model"
+	extended["providers"].([]any)[0].(map[string]any)["models"] = append(extendedModels, extra)
+	bindings := map[string]any{bindingKey: vendorSecret}
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": extended, "secret_bindings": bindings}, idem("apply-extra"), 200)
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": updated, "secret_bindings": bindings}, idem("apply-drop-extra"), 200)
+	var allowedKeys string
+	destination.Pool.QueryRow(t.Context(), "SELECT restrictions->>'allowed_api_keys' FROM olp.provider_slots WHERE id=$1", slotID).Scan(&allowedKeys)
+	if allowedKeys != `["`+restrictedKey+`"]` {
+		t.Fatal("apply must keep the destination slot's API-key restriction", allowedKeys)
+	}
+	// The dropped model stays as a disabled row; re-planning must not see it.
+	replanned := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": updated, "secret_bindings": bindings}, nil, 200)
+	if !slices.ContainsFunc(replanned["actions"].([]any), func(item any) bool {
+		entry := item.(map[string]any)
+		return entry["kind"] == "provider" && entry["key"] == "Promoted vendor" && entry["action"] == "noop"
+	}) {
+		t.Fatal("re-planning after a model was dropped must be a noop", replanned)
+	}
+
+	// A provider may name a destination project the document does not declare.
+	undeclared := clone(document)
+	undeclared["projects"] = []any{}
+	undeclared["routes"] = []any{}
+	delete(undeclared, "pricing")
+	fresh := undeclared["providers"].([]any)[0].(map[string]any)
+	fresh["name"], fresh["project"] = "Fresh vendor", "Other"
+	freshRef := "Fresh vendor/" + slotName
+	for _, slot := range fresh["slots"].([]any) {
+		if slot.(map[string]any)["credential_ref"] != nil {
+			slot.(map[string]any)["credential_ref"] = "Fresh vendor/" + slot.(map[string]any)["name"].(string)
+		}
+	}
+	undeclared["providers"] = []any{fresh}
+	undeclaredBody := map[string]any{"document": undeclared, "secret_bindings": map[string]any{freshRef: vendorSecret}}
+	undeclaredPlan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", undeclaredBody, nil, 200)
+	if len(undeclaredPlan["blockers"].([]any)) != 0 || len(undeclaredPlan["conflicts"].([]any)) != 0 {
+		t.Fatal("a destination project must resolve without being declared", undeclaredPlan)
+	}
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", undeclaredBody, idem("apply-undeclared"), 200)
+	var freshProject, otherProject string
+	destination.Pool.QueryRow(t.Context(), "SELECT coalesce(project_id::text,'') FROM olp.providers WHERE name='Fresh vendor'").Scan(&freshProject)
+	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.projects WHERE name='Other'").Scan(&otherProject)
+	if freshProject == "" || freshProject != otherProject {
+		t.Fatal("apply must stage the provider in the destination project", freshProject, otherProject)
 	}
 }
 

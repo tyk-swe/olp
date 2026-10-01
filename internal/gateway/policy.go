@@ -66,7 +66,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 	for i := range compiled.Input {
 		rule := &compiled.Input[i]
 		matched, blocked := false, false
-		transformed := protocols.InspectInputText(x.parsed, func(text string) (string, bool) {
+		transformed, err := protocols.InspectInputText(x.parsed, func(text string) (string, bool) {
 			if !rule.Re.MatchString(text) {
 				return text, false
 			}
@@ -77,6 +77,9 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			}
 			return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 		})
+		if err != nil {
+			return policyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
+		}
 		switch {
 		case blocked:
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})

@@ -404,13 +404,18 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 func (s *Server) inferenceOperation(family openai.Family, dialect string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		if dialect == "" && requestSurface(r) == "gemini" {
+			// Gemini embeddings match OpenAI embedding capabilities but
+			// speak Gemini on the wire.
+			x.ingress = "gemini"
+		}
 		writeError := func(w http.ResponseWriter, e *Error) {
 			if x.strict() && x.dispatched && e.Status >= 500 {
 				copy := *e
 				copy.NoRetry = true
 				e = &copy
 			}
-			writeSurfaceError(w, e, family.Surface())
+			writeSurfaceError(w, e, x.clientSurface())
 		}
 		x.semanticHeaders = r.Header.Clone()
 		query, queryErr := url.ParseQuery(r.URL.RawQuery)
@@ -572,7 +577,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if family == openai.FamilyResponses && authority.Policy.AllowProviderState {
+		if family == openai.FamilyResponses && x.providerState {
 			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
 			if me != nil {
 				out.err = me
@@ -647,7 +652,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 			param := "query"
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
-		if x.family.Surface() == "gemini" {
+		if x.clientSurface() == "gemini" {
 			if e := x.dropQueryKey(); e != nil {
 				return e
 			}

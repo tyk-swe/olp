@@ -184,12 +184,17 @@
   async function confirmLinkIdentity(password: string) {
     reauthenticationBusy = true;
     reauthenticationError = '';
+    error = '';
     try {
       await reauthenticateWithPassword(password, 'oidc_link');
       reauthenticating = false;
       window.location.assign(await beginOidcLink());
     } catch (cause) {
-      reauthenticationError = errorMessage(cause);
+      // The dialog closes once the password is accepted, so a link failure
+      // after that point must surface on the panel itself.
+      const detail = errorMessage(cause);
+      if (reauthenticating) reauthenticationError = detail;
+      else error = detail;
     } finally {
       reauthenticationBusy = false;
     }

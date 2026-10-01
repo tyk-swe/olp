@@ -81,8 +81,8 @@ func inspectableContent(value oif.Value, responseInput bool) error {
 	case oif.Object:
 		for _, field := range value.Members() {
 			switch field.Name {
-			case "role", "type", "name", "id", "tool_call_id", "tool_use_id", "is_error":
-			case "text", "refusal", "content", "parts":
+			case "role", "type", "name", "id", "call_id", "status", "tool_call_id", "tool_use_id", "is_error":
+			case "text", "refusal", "content", "parts", "arguments":
 				if err := inspectableContent(field.Value, responseInput); err != nil {
 					return err
 				}
@@ -162,7 +162,7 @@ func collectPolicyText(value oif.Value, texts *[]string, schema bool) {
 		}
 	case oif.Object:
 		for _, field := range value.Members() {
-			if !schema && slices.Contains([]string{"role", "type", "id", "tool_call_id", "tool_use_id"}, field.Name) {
+			if !schema && slices.Contains([]string{"role", "type", "id", "call_id", "status", "tool_call_id", "tool_use_id"}, field.Name) {
 				continue
 			}
 			if schema {
@@ -174,7 +174,10 @@ func collectPolicyText(value oif.Value, texts *[]string, schema bool) {
 					collectPolicyText(arguments.Root(), texts, true)
 				}
 			}
-			collectPolicyText(field.Value, texts, schema || field.Name == "parameters" || field.Name == "input_schema")
+			// Structured tool arguments/results are inspected like parsed OpenAI
+			// arguments, so text in key or scalar positions cannot bypass rules.
+			structured := field.Value.Kind() == oif.Object && slices.Contains([]string{"input", "args", "response"}, field.Name)
+			collectPolicyText(field.Value, texts, schema || structured || field.Name == "parameters" || field.Name == "input_schema")
 		}
 	}
 }

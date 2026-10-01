@@ -151,9 +151,24 @@ def unary_turn(
         raise ValueError("Incomplete continuation delivery")
     return {
         "submission": submission, "handle": ext["handle"],
-        "assistant": response.choices[0].message,
+        "assistant": _assistant_message(response.choices[0].message),
         "native_usage": ext["native_usage"], "response": response,
     }
+
+
+def _assistant_message(message: Any) -> dict[str, Any]:
+    """Build the same plain assistant dict stream_turn returns, so next_turn
+    accepts either result and both serialize identical history."""
+    assistant: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
+    if message.tool_calls:
+        assistant["tool_calls"] = [
+            {
+                "id": call.id, "type": "function",
+                "function": {"name": call.function.name, "arguments": call.function.arguments},
+            }
+            for call in message.tool_calls
+        ]
+    return assistant
 
 
 def recover_submission(origin: str, api_key: str, submission: str) -> dict[str, Any]:

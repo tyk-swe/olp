@@ -154,7 +154,7 @@ func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, e
 	if err := principal.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, principal, nil)
+	claim, replayed, err := a.Replay(r, tx, principal, policy)
 	if err != nil {
 		return access.Reply{}, err
 	}

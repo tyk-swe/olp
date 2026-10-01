@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -233,6 +235,10 @@ func jsonDoc(fields map[string]any, extra map[string]any) ([]byte, *Error) {
 		if value == nil {
 			continue
 		}
+		// Typed nil pointers are absent options, not explicit nulls.
+		if v := reflect.ValueOf(value); v.Kind() == reflect.Pointer && v.IsNil() {
+			continue
+		}
 		doc[name] = value
 	}
 	for name, value := range extra {
@@ -413,37 +419,9 @@ func decodeJSON(body []byte, wire any, known ...string) (map[string]any, error) 
 	if len(doc) == 0 {
 		return nil, nil
 	}
-	extra := make(map[string]any, len(doc))
-	for name, value := range doc {
-		extra[name] = normalizeJSON(value)
-	}
-	return extra, nil
-}
-
-// normalizeJSON decodes numbers as their wire values rather than json.Number
-// so extension fields re-encode identically upstream.
-func normalizeJSON(value any) any {
-	switch value := value.(type) {
-	case json.Number:
-		if i, err := value.Int64(); err == nil {
-			return i
-		}
-		if f, err := value.Float64(); err == nil {
-			return f
-		}
-		return value.String()
-	case map[string]any:
-		for k, v := range value {
-			value[k] = normalizeJSON(v)
-		}
-		return value
-	case []any:
-		for i, v := range value {
-			value[i] = normalizeJSON(v)
-		}
-		return value
-	}
-	return value
+	// Numbers stay json.Number so extension fields re-encode upstream with
+	// the client's exact spelling.
+	return doc, nil
 }
 
 // DecodeImageEdit validates a parsed image-edit form.
@@ -654,7 +632,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	if file == nil {
 		return nil, invalidMedia("The audio file is required.")
 	}
-	if temperature != nil && (*temperature < 0 || *temperature > 1) {
+	if temperature != nil && (math.IsNaN(*temperature) || *temperature < 0 || *temperature > 1) {
 		return nil, invalidMedia("The transcription temperature must be between 0 and 1.")
 	}
 	format := "json"
@@ -1651,7 +1629,9 @@ type TranscriptionResult struct {
 
 // TranscriptionSegment is one timed text span.
 type TranscriptionSegment struct {
-	ID      *int64
+	// ID is kept as raw JSON: verbose_json uses integer ids and diarized_json
+	// uses string ids such as "seg_001".
+	ID      json.RawMessage
 	Start   float64
 	End     float64
 	Text    string
@@ -1671,11 +1651,11 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 		Language *string  `json:"language"`
 		Duration *float64 `json:"duration"`
 		Segments []struct {
-			ID      *int64  `json:"id"`
-			Start   float64 `json:"start"`
-			End     float64 `json:"end"`
-			Text    string  `json:"text"`
-			Speaker *string `json:"speaker"`
+			ID      json.RawMessage `json:"id"`
+			Start   float64         `json:"start"`
+			End     float64         `json:"end"`
+			Text    string          `json:"text"`
+			Speaker *string         `json:"speaker"`
 		} `json:"segments"`
 	}
 	var doc map[string]any
@@ -1686,6 +1666,19 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	decoder.UseNumber()
 	if err := decoder.Decode(&wire); err != nil {
 		return nil, protocolError("The provider transcription is not valid JSON.")
+	}
+	for _, segment := range wire.Segments {
+		if len(segment.ID) == 0 || string(segment.ID) == "null" {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(segment.ID, &text); err == nil {
+			continue
+		}
+		var number int64
+		if err := json.Unmarshal(segment.ID, &number); err != nil {
+			return nil, protocolError("The provider transcription segment ID must be a string or integer.")
+		}
 	}
 	result := &TranscriptionResult{
 		Text: wire.Text, Language: wire.Language, DurationSeconds: wire.Duration,
@@ -1726,8 +1719,8 @@ func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	segments := make([]any, len(result.Segments))
 	for i, segment := range result.Segments {
 		item := map[string]any{"start": segment.Start, "end": segment.End, "text": segment.Text}
-		if segment.ID != nil {
-			item["id"] = *segment.ID
+		if len(segment.ID) > 0 && string(segment.ID) != "null" {
+			item["id"] = segment.ID
 		}
 		if segment.Speaker != nil {
 			item["speaker"] = *segment.Speaker

@@ -11,7 +11,7 @@
     type ManagementTokenScope,
     type ManagementTokenSecret
   } from '$lib/features/access/tokens/api';
-  import { listProjectPage } from '$lib/features/access/projects/api';
+  import { listProjects } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';
@@ -30,7 +30,9 @@
     { days: 30, label: '30 days' },
     { days: 90, label: '90 days' },
     { days: 180, label: '180 days' },
-    { days: 366, label: '366 days' }
+    // The server caps expiry at 366 days on its own clock; 365 leaves a
+    // day of headroom for client clock skew.
+    { days: 365, label: '365 days' }
   ];
   const scopeLabels: Record<string, string> = {
     read: 'Read management state',
@@ -70,12 +72,12 @@
     enabled: isOwner
   }));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.page(),
-    queryFn: ({ signal }) => listProjectPage(undefined, signal),
+    queryKey: projectKeys.all,
+    queryFn: ({ signal }) => listProjects(signal),
     enabled: isOwner
   }));
   const projectNames = $derived(
-    new Map((projects.data?.items ?? []).map((item) => [item.id, item.name]))
+    new Map((projects.data ?? []).map((item) => [item.id, item.name]))
   );
 
   onDestroy(() => {
@@ -271,7 +273,7 @@
                 type="button"
                 onclick={() => projects.refetch()}>Retry</button
               ></span
-            >{:else}{#each projects.data?.items ?? [] as project (project.id)}<label
+            >{:else}{#each projects.data ?? [] as project (project.id)}<label
                 class="scope-option"
                 ><input
                   type="checkbox"

@@ -391,6 +391,114 @@ func TestBudgetAlertRetryAndFailure(t *testing.T) {
 	}
 }
 
+func TestBudgetAlertDisabledRuleOrDestinationHoldsDeliveries(t *testing.T) {
+	h := newAccessHarness(t)
+	policy := alertPolicy()
+	h.Server.Egress = policy
+	owner := h.owner()
+	hook := newWebhookFixture(t)
+	hook.setStatus(http.StatusInternalServerError)
+
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := h.Pool.Exec(context.Background(), query, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	key := h.want(owner, "POST", "/api/v1/api-keys",
+		map[string]any{"name": "held key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	windows := limits.BudgetWindows(time.Now())
+	exec(`INSERT INTO olp.api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
+	      VALUES ($1, 'day', $2, '9.000000000000', 0)`, key["id"], windows.DailyID)
+	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
+		map[string]any{"name": "held hook", "url": hook.URL + "/held"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	rule := h.want(owner, "POST", "/api/v1/notifications/rules",
+		map[string]any{"name": "held rule", "event": "budget.threshold", "subject_kind": "api_key", "subject_id": key["id"],
+			"window_kind": "day", "threshold_percent": 50, "destination_id": destination["id"]},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	ruleID := rule["id"].(string)
+
+	deliveryPass(t, h, policy)
+	if rows := alertDeliveries(t, h, ruleID); len(rows) != 1 || rows[0]["status"] != "failed" || rows[0]["attempts"].(float64) != 1 {
+		t.Fatalf("failed delivery = %v", rows)
+	}
+
+	backdate := func() {
+		exec("UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '1 hour' WHERE rule_id=$1", ruleID)
+	}
+	exec("UPDATE olp.notification_destinations SET enabled=false WHERE id=$1", destination["id"])
+	backdate()
+	deliveryPass(t, h, policy)
+	if rows := alertDeliveries(t, h, ruleID); hook.count() != 1 || rows[0]["attempts"].(float64) != 1 {
+		t.Fatalf("disabled destination still received a retry: hits=%d rows=%v", hook.count(), rows)
+	}
+
+	exec("UPDATE olp.notification_destinations SET enabled=true WHERE id=$1", destination["id"])
+	exec("UPDATE olp.notification_rules SET enabled=false WHERE id=$1", ruleID)
+	deliveryPass(t, h, policy)
+	if rows := alertDeliveries(t, h, ruleID); hook.count() != 1 || rows[0]["attempts"].(float64) != 1 {
+		t.Fatalf("disabled rule still sent a retry: hits=%d rows=%v", hook.count(), rows)
+	}
+
+	exec("UPDATE olp.notification_rules SET enabled=true WHERE id=$1", ruleID)
+	hook.setStatus(http.StatusOK)
+	deliveryPass(t, h, policy)
+	if rows := alertDeliveries(t, h, ruleID); hook.count() != 2 || rows[0]["status"] != "delivered" {
+		t.Fatalf("re-enabled delivery = hits %d rows %v", hook.count(), rows)
+	}
+}
+
+func TestBudgetAlertBackedOffDeliveriesDoNotStarveNewOnes(t *testing.T) {
+	h := newAccessHarness(t)
+	policy := alertPolicy()
+	h.Server.Egress = policy
+	owner := h.owner()
+	dead := newWebhookFixture(t)
+	healthy := newWebhookFixture(t)
+
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := h.Pool.Exec(context.Background(), query, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	exec("INSERT INTO olp.pricing_currency (singleton, currency) VALUES (true, 'USD')")
+	rule := func(name, url string) string {
+		key := h.want(owner, "POST", "/api/v1/api-keys",
+			map[string]any{"name": name + " key", "scopes": []string{"inference"}, "daily_cost_limit": "10.00"},
+			map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+		destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
+			map[string]any{"name": name + " hook", "url": url},
+			map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+		created := h.want(owner, "POST", "/api/v1/notifications/rules",
+			map[string]any{"name": name, "event": "budget.threshold", "subject_kind": "api_key", "subject_id": key["id"],
+				"window_kind": "day", "threshold_percent": 50, "destination_id": destination["id"]},
+			map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+		return created["id"].(string)
+	}
+	deadRule := rule("dead", dead.URL+"/dead")
+	healthyRule := rule("healthy", healthy.URL+"/healthy")
+	windows := limits.BudgetWindows(time.Now())
+	// More backed-off failures than one delivery page holds, all older than the new delivery.
+	exec(`INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency,
+	        status, attempts, last_attempt_at, created_at)
+	      SELECT gen_random_uuid(), $1, $2 - n, 50, '9.000000000000', '10.000000000000', 'USD', 'failed', 1, now(), now() - interval '1 hour'
+	      FROM generate_series(1, 201) AS n`, deadRule, windows.DailyID)
+	exec(`INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
+	      VALUES (gen_random_uuid(), $1, $2, 50, '9.000000000000', '10.000000000000', 'USD', 'pending')`, healthyRule, windows.DailyID)
+
+	deliveryPass(t, h, policy)
+	if rows := alertDeliveries(t, h, healthyRule); len(rows) != 1 || rows[0]["status"] != "delivered" || healthy.count() != 1 {
+		t.Fatalf("new delivery starved behind backed-off ones: hits=%d rows=%v", healthy.count(), rows)
+	}
+	if dead.count() != 0 {
+		t.Fatalf("backed-off deliveries retried early: %d", dead.count())
+	}
+}
+
 func TestBudgetAlertValidationAndScope(t *testing.T) {
 	h := newAccessHarness(t)
 	policy := alertPolicy()
@@ -478,4 +586,42 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 		t.Fatalf("stale etag patch = %d %v", status, problem)
 	}
 	_ = updated
+}
+
+func TestNotificationSecretRotationDeletesReplacedSecret(t *testing.T) {
+	h := newAccessHarness(t)
+	h.Server.Egress = alertPolicy()
+	owner := h.owner()
+	hook := newWebhookFixture(t)
+	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
+		map[string]any{"name": "rotating", "url": hook.URL + "/rotating", "secret": "first"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	path := "/api/v1/notifications/destinations/" + destination["id"].(string)
+	secretState := func() (*string, int) {
+		var current *string
+		var stored int
+		if err := h.Pool.QueryRow(t.Context(), `SELECT d.secret_id::text,
+		    (SELECT count(*) FROM olp.secrets WHERE purpose='notification_secret')
+		    FROM olp.notification_destinations d WHERE d.id=$1`, destination["id"]).Scan(&current, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return current, stored
+	}
+	first, stored := secretState()
+	if first == nil || stored != 1 {
+		t.Fatalf("created secret = %v, %d stored", first, stored)
+	}
+
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"secret": "second"}, withMatch(detail, nil), 200)
+	second, stored := secretState()
+	if second == nil || *second == *first || stored != 1 {
+		t.Fatalf("rotated secret = %v, %d stored", second, stored)
+	}
+
+	detail = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"secret": nil}, withMatch(detail, nil), 200)
+	if cleared, stored := secretState(); cleared != nil || stored != 0 {
+		t.Fatalf("cleared secret = %v, %d stored", cleared, stored)
+	}
 }

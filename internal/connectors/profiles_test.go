@@ -363,6 +363,21 @@ func TestBedrockAnthropicFramingRetainsPayloadAndRejectsDrift(t *testing.T) {
 	}
 }
 
+func TestBedrockAnthropicFramingIgnoresPaddingMember(t *testing.T) {
+	cfg := profileConfig(t, "bedrock-anthropic-invoke")
+	native := base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))
+	payload := `{"bytes":"` + native + `","p":"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0"}`
+	var frame bytes.Buffer
+	headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}
+	if err := eventstream.NewEncoder().Encode(&frame, eventstream.Message{Headers: headers, Payload: []byte(payload)}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(cfg.StreamPayload(&frame, 4096))
+	if err != nil || string(data) != "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n" {
+		t.Fatalf("padded event=%q err=%v", data, err)
+	}
+}
+
 func TestBedrockHostingEnvelopeRejectsAmbiguousMembers(t *testing.T) {
 	cfg := profileConfig(t, "bedrock-anthropic-invoke")
 	native := base64.StdEncoding.EncodeToString([]byte(`{"type":"message_stop"}`))
@@ -374,6 +389,9 @@ func TestBedrockHostingEnvelopeRejectsAmbiguousMembers(t *testing.T) {
 		{"duplicate body member", `{"bytes":"` + native + `","bytes":"` + native + `"}`, false},
 		{"trailing document", valid + `{}`, false},
 		{"duplicate reserved header", valid, true},
+		{"duplicate padding member", `{"bytes":"` + native + `","p":"abc","p":"abc"}`, false},
+		{"non-string padding member", `{"bytes":"` + native + `","p":1}`, false},
+		{"unknown member", `{"bytes":"` + native + `","q":"abc"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			headers := eventstream.Headers{{Name: ":message-type", Value: eventstream.StringValue("event")}, {Name: ":event-type", Value: eventstream.StringValue("chunk")}}

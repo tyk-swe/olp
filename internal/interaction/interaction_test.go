@@ -208,6 +208,23 @@ func TestQualifiedTextMatchesIndependentNativeFixture(t *testing.T) {
 	if err != nil || result.OutputText != "hello" || result.FinishReason != "stop" || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
 		t.Fatalf("qualified client projection lost text/usage: %+v %v", result, err)
 	}
+	realistic := strings.Replace(valid, `"usage":{"input_tokens":2,"output_tokens":1}`, `"usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}`, 1)
+	if err := plan.ValidateUnary([]byte(realistic)); err != nil {
+		t.Fatalf("real Anthropic usage shape rejected: %v", err)
+	}
+	result, err = protocols.DecodeRequest(plan.Wire(), openai.FamilyChat, []byte(realistic), "team-chat", "", source)
+	if err != nil || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 1 {
+		t.Fatalf("qualified client projection lost realistic usage: %+v %v", result, err)
+	}
+	for _, usage := range []string{
+		`{"input_tokens":2,"output_tokens":1,"future_token_category":1}`,
+		`{"input_tokens":2,"output_tokens":1,"cache_creation_input_tokens":-1}`,
+		`{"input_tokens":2,"output_tokens":1,"cache_creation":{"ephemeral_2h_input_tokens":0}}`,
+		`{"input_tokens":2,"output_tokens":1,"service_tier":7}`,
+	} {
+		invalid := strings.Replace(valid, `{"input_tokens":2,"output_tokens":1}`, usage, 1)
+		assertReason(t, plan.ValidateUnary([]byte(invalid)), "fidelity_protocol_violation")
+	}
 }
 
 func TestQualifiedMappingRejectsUndischargedRequirements(t *testing.T) {
@@ -352,6 +369,38 @@ func TestEffectivePolicyChecksDefaultsAndRejectsOpaqueCoverage(t *testing.T) {
 	config.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "redact", Phase: "input", Action: "redact", Pattern: "secret"}}}
 	_, err = Compile(config)
 	assertReason(t, err, "policy_conflict")
+}
+
+func TestResponsesToolLoopIsInspectableByInputPolicy(t *testing.T) {
+	config := configuration(t, "openai-responses")
+	config.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block_secret", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: "secret"}}}
+	compiled := template(t, config)
+	loop := func(arguments string) string {
+		return `{"model":"route","store":false,"input":[{"role":"user","content":"hi"},{"type":"function_call","call_id":"c1","name":"f","arguments":` + arguments + `,"status":"completed"},{"type":"function_call_output","call_id":"c1","output":"ok"}]}`
+	}
+	plan := bind(t, compiled, request(t, openai.FamilyResponses, loop(`"{}"`)), Context{})
+	if _, err := plan.CheckInput(); err != nil {
+		t.Fatal(err)
+	}
+	blocked := bind(t, compiled, request(t, openai.FamilyResponses, loop(`"{\"q\":\"secret\"}"`)), Context{})
+	_, err := blocked.CheckInput()
+	assertReason(t, err, "content_policy_blocked")
+	_, err = compiled.Bind(request(t, openai.FamilyResponses, `{"model":"route","store":false,"input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","future_opaque":"x"}]}`), Context{})
+	assertReason(t, err, "policy_conflict")
+}
+
+func TestInputPolicyInspectsStructuredToolInputKeys(t *testing.T) {
+	for _, test := range []struct{ pattern, input string }{
+		{"forbidden", `{"forbidden instructions here":1}`},
+		{"4242", `{"k":4242}`},
+	} {
+		config := configuration(t, "anthropic-messages")
+		config.Policy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: test.pattern}}}
+		body := `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":` + test.input + `}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}]}`
+		plan := bind(t, template(t, config), request(t, openai.FamilyAnthropic, body), Context{})
+		_, err := plan.CheckInput()
+		assertReason(t, err, "content_policy_blocked")
+	}
 }
 
 func TestQualifiedOutputGuardRejectsLossBeforeProjection(t *testing.T) {

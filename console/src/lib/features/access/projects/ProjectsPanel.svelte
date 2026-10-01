@@ -3,6 +3,7 @@
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import {
     createProject,
+    listAllProjectMembers,
     listProjectMemberPage,
     listProjectPage,
     putProjectMember,
@@ -16,13 +17,19 @@
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { formatDate } from '$lib/format';
+  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import {
+    cursorPaginationProps,
+    emptyCursorHistory,
+    resetCursor
+  } from '$lib/lists/pagination';
 
   const queryClient = useQueryClient();
 
-  let cursor = $state<string | undefined>();
+  const pagination = $state(emptyCursorHistory());
   const projects = createQuery(() => ({
-    queryKey: projectKeys.page(cursor),
-    queryFn: ({ signal }) => listProjectPage(cursor, signal)
+    queryKey: projectKeys.page(pagination.cursor),
+    queryFn: ({ signal }) => listProjectPage(pagination.cursor, signal)
   }));
   const items = $derived(projects.data?.items ?? []);
 
@@ -44,7 +51,7 @@
       const project = await createProject(createName);
       createName = '';
       await queryClient.invalidateQueries({ queryKey: projectKeys.root });
-      selectedId = project.id;
+      open(project);
     } catch (error) {
       createError = errorMessage(error);
     } finally {
@@ -54,18 +61,28 @@
 
   let selectedId = $state('');
   const selected = $derived(items.find((project) => project.id === selectedId));
-  let memberCursor = $state<string | undefined>();
+  const memberPagination = $state(emptyCursorHistory());
   const members = createQuery(() => ({
-    queryKey: projectKeys.members(selectedId, memberCursor),
+    queryKey: projectKeys.members(selectedId, memberPagination.cursor),
     enabled: Boolean(selectedId),
     queryFn: ({ signal }) =>
-      listProjectMemberPage(selectedId, memberCursor, signal)
+      listProjectMemberPage(selectedId, memberPagination.cursor, signal)
   }));
   const memberItems = $derived(members.data?.items ?? []);
+  // The add-member picker must exclude members on every page: adding an
+  // existing member is an upsert that silently overwrites their role.
+  const allMembers = createQuery(() => ({
+    queryKey: projectKeys.allMembers(selectedId),
+    enabled: Boolean(selectedId),
+    queryFn: ({ signal }) => listAllProjectMembers(selectedId, signal)
+  }));
+  const memberIds = $derived(
+    new Set((allMembers.data ?? []).map((member) => member.user_id))
+  );
   const candidates = $derived(
-    (users.data ?? []).filter(
-      (user) => !memberItems.some((member) => member.user_id === user.id)
-    )
+    allMembers.data
+      ? (users.data ?? []).filter((user) => !memberIds.has(user.id))
+      : []
   );
 
   let renameValue = $state('');
@@ -75,12 +92,17 @@
   let addUserId = $state('');
   let addRole = $state<ProjectRole>('viewer');
 
-  function select(project: Project) {
-    selectedId = selectedId === project.id ? '' : project.id;
-    memberCursor = undefined;
+  function open(project: Project) {
+    selectedId = project.id;
+    resetCursor(memberPagination);
     memberError = '';
     memberNotice = '';
     renameValue = project.name;
+  }
+
+  function select(project: Project) {
+    if (selectedId === project.id) selectedId = '';
+    else open(project);
   }
 
   async function refreshSelected() {
@@ -112,7 +134,12 @@
   async function submitAddMember(event: SubmitEvent) {
     event.preventDefault();
     const project = selected;
-    if (!project || memberBusy || !addUserId) return;
+    if (!project || memberBusy || !addUserId || !allMembers.data) return;
+    if (memberIds.has(addUserId)) {
+      memberError =
+        'That user is already a member; change their role in the list.';
+      return;
+    }
     memberBusy = 'add';
     memberError = memberNotice = '';
     try {
@@ -207,7 +234,7 @@
         onclick={() => projects.refetch()}>Retry</button
       >
     </div>
-  {:else if !items.length}<p class="empty">
+  {:else if !items.length && pagination.history.length === 0}<p class="empty">
       No projects exist. Create one to scope resources and memberships.
     </p>
   {:else}
@@ -242,12 +269,14 @@
         </tbody>
       </table>
     </div>
-    {#if projects.data?.nextCursor}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => (cursor = projects.data?.nextCursor ?? undefined)}
-        >Load more</button
-      >{/if}
+    <CursorPagination
+      label="Project pages"
+      {...cursorPaginationProps(
+        pagination,
+        projects.data?.nextCursor,
+        () => (selectedId = '')
+      )}
+    />
   {/if}
 
   {#if selected}
@@ -340,14 +369,23 @@
             </tbody>
           </table>
         </div>
-        {#if members.data?.nextCursor}<button
-            class="button button-secondary"
-            type="button"
-            onclick={() =>
-              (memberCursor = members.data?.nextCursor ?? undefined)}
-            >Load more members</button
-          >{/if}
+        <CursorPagination
+          label="Member pages"
+          {...cursorPaginationProps(memberPagination, members.data?.nextCursor)}
+        />
 
+        {#if allMembers.isPending}<p class="inline-status" role="status">
+            Loading current members…
+          </p>
+        {:else if allMembers.isError}<div class="inline-problem" role="alert">
+            Current members could not be loaded, so new members can't be added.
+            <button
+              class="button button-secondary"
+              type="button"
+              onclick={() => allMembers.refetch()}>Retry</button
+            >
+          </div>
+        {/if}
         <form class="create-form" onsubmit={submitAddMember}>
           <div class="form-field">
             <label for="member-user">Add member</label><select
@@ -375,7 +413,7 @@
           <button
             class="button button-primary"
             type="submit"
-            disabled={Boolean(memberBusy) || !addUserId}
+            disabled={Boolean(memberBusy) || !addUserId || !allMembers.data}
             >{memberBusy === 'add' ? 'Adding…' : 'Add member'}</button
           >
         </form>

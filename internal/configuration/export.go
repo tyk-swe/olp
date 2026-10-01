@@ -42,6 +42,9 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		live  bool
 	}
 	var pending []pendingProvider
+	// live maps an active provider's index in doc.Providers to its ID, so its
+	// slots take their stored positions once the provider rows are read.
+	live := map[int]string{}
 	for providersRows.Next() {
 		var id, name, state string
 		var projectName *string
@@ -81,6 +84,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			}
 			portableNetwork(&entry)
 			referenceGrants(&entry)
+			live[len(doc.Providers)] = id
 			doc.Providers = append(doc.Providers, entry)
 			continue
 		}
@@ -88,6 +92,12 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	}
 	if err = providersRows.Err(); err != nil {
 		return nil, err
+	}
+	providersRows.Close()
+	for index, id := range live {
+		if err = exportSlotPositions(ctx, q, id, doc.Providers[index].Slots); err != nil {
+			return nil, err
+		}
 	}
 	for _, pp := range pending {
 		var configuration []byte
@@ -232,6 +242,51 @@ func exportSlots(ctx context.Context, q access.Queryer, providerID, providerName
 		slots = append(slots, s)
 	}
 	return slots, rows.Err()
+}
+
+// exportSlotPositions gives revision slots the positions their draft slots
+// store, so an export plans as a noop against its own installation.
+func exportSlotPositions(ctx context.Context, q access.Queryer, providerID string, slots []SlotEntry) error {
+	rows, err := q.Query(ctx, "SELECT name,position FROM olp.provider_slots WHERE provider_id=$1", providerID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	positions := map[string]int{}
+	for rows.Next() {
+		var name string
+		var position int
+		if err = rows.Scan(&name, &position); err != nil {
+			return err
+		}
+		positions[name] = position
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	applySlotPositions(slots, positions)
+	return nil
+}
+
+// applySlotPositions sets each slot to its stored draft position when the
+// draft holds every slot at a distinct position. Otherwise, for example when
+// the draft has deleted a revision slot, the slots keep their revision order,
+// because mixing the two numberings could repeat a position.
+func applySlotPositions(slots []SlotEntry, positions map[string]int) {
+	seen := make(map[int]bool, len(slots))
+	for _, slot := range slots {
+		position, ok := positions[slot.Name]
+		if !ok || seen[position] {
+			for i := range slots {
+				slots[i].Position = i
+			}
+			return
+		}
+		seen[position] = true
+	}
+	for i := range slots {
+		slots[i].Position = positions[slots[i].Name]
+	}
 }
 
 func providerNameMap(ctx context.Context, q access.Queryer) (map[string]string, error) {

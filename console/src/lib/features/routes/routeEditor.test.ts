@@ -192,21 +192,27 @@ describe('Route Studio model eligibility', () => {
 describe('Route Studio editor validation', () => {
   it('accepts the current valid slug, attempt, and target contract', () => {
     expect(validateRouteEditor(validEditor)).toBeNull();
-    expect(
-      validateRouteEditor({ ...validEditor, slug: `a${'b'.repeat(62)}` })
-    ).toBeNull();
+  });
+
+  it.each([
+    'gpt-4.1',
+    'support_chat',
+    'gpt-4o.mini',
+    'trailing-hyphen-',
+    'double--hyphen',
+    `a${'b'.repeat(99)}`
+  ])('accepts server-valid route slug %j', (slug) => {
+    expect(validateRouteEditor({ ...validEditor, slug })).toBeNull();
   });
 
   it.each([
     '',
     'Uppercase',
     '.leading-dot',
-    'trailing-hyphen-',
-    'double--hyphen',
-    'contains.dot',
-    'contains_underscore',
+    '-leading-hyphen',
+    '_leading',
     'contains/slash',
-    `a${'b'.repeat(63)}`
+    `a${'b'.repeat(100)}`
   ])('rejects invalid route slug %j', (slug) => {
     expect(validateRouteEditor({ ...validEditor, slug })).toContain(
       'lowercase letters'
@@ -241,16 +247,39 @@ describe('Route Studio editor validation', () => {
     }
   );
 
-  it.each([{ priority: -1 }, { weight: 0 }, { timeoutMs: 99 }])(
-    'rejects an invalid target bound: %o',
-    (override) => {
-      expect(
-        validateRouteEditor({
-          ...validEditor,
-          targets: [{ ...target, ...override }]
-        })
-      ).toBe(
-        'Every target needs a priority from 0 to 65535, a positive weight, and a timeout of at least 100 ms.'
+  it.each([
+    { priority: -1 },
+    { priority: 32768 },
+    { weight: 0 },
+    { weight: 1_000_001 },
+    { timeoutMs: 0 },
+    { timeoutMs: 120_001 }
+  ])('rejects an invalid target bound: %o', (override) => {
+    expect(
+      validateRouteEditor({
+        ...validEditor,
+        targets: [{ ...target, ...override }]
+      })
+    ).toBe(
+      'Every target needs a priority from 0 to 32767, a weight from 1 to 1000000, and a timeout from 1 ms up to the overall deadline.'
+    );
+  });
+
+  it('accepts target bounds the server accepts', () => {
+    expect(
+      validateRouteEditor({
+        ...validEditor,
+        overallTimeoutMs: 1000,
+        targets: [{ ...target, priority: 32767, weight: 50_000, timeoutMs: 50 }]
+      })
+    ).toBeNull();
+  });
+
+  it.each([0, 3_600_001, Number.NaN])(
+    'rejects overall deadline %s',
+    (overallTimeoutMs) => {
+      expect(validateRouteEditor({ ...validEditor, overallTimeoutMs })).toBe(
+        'Overall deadline must be from 1 to 3600000 ms.'
       );
     }
   );
@@ -463,10 +492,17 @@ describe('Route Studio content policy', () => {
     expect(validateContentPolicy(rules)).toContain('combined');
   });
 
-  it('rejects a replacement on a block rule and an oversized replacement', () => {
+  it('ignores a hidden replacement on a block rule and omits it from the wire', () => {
     expect(
       validateContentPolicy([{ ...rule, action: 'block', replacement: 'x' }])
-    ).toContain('cannot carry a replacement');
+    ).toBeNull();
+    expect(
+      buildContentPolicy([{ ...rule, action: 'block', replacement: 'x' }])!
+        .rules[0]
+    ).not.toHaveProperty('replacement');
+  });
+
+  it('rejects an oversized replacement', () => {
     expect(
       validateContentPolicy([{ ...rule, replacement: 'x'.repeat(129) }])
     ).toContain('128');

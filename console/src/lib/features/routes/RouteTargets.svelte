@@ -55,7 +55,7 @@
               id={`priority-${index}`}
               type="number"
               min="0"
-              max="65535"
+              max="32767"
               bind:value={target.priority}
               oninput={editor.touch}
               disabled={!editor.canManage}
@@ -66,7 +66,7 @@
               id={`weight-${index}`}
               type="number"
               min="1"
-              max="10000"
+              max="1000000"
               bind:value={target.weight}
               oninput={editor.touch}
               disabled={!editor.canManage}
@@ -76,7 +76,7 @@
             <label for={`timeout-${index}`}>Attempt timeout (ms)</label><input
               id={`timeout-${index}`}
               type="number"
-              min="100"
+              min="1"
               bind:value={target.timeoutMs}
               oninput={editor.touch}
               disabled={!editor.canManage}

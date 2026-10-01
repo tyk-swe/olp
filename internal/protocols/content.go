@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/oif"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -15,11 +15,31 @@ type inspector struct {
 	fn    TextSlot
 	stop  bool
 	depth int
+	err   error
 }
 
 const inspectMaxDepth = 64
 
-func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
+// InputInspectable reports whether InspectInputText walks the prompt text of a
+// family. Callers enforcing input content policy must not dispatch a body whose
+// family it cannot inspect.
+func InputInspectable(family openai.Family) bool {
+	switch family {
+	case openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens,
+		openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank,
+		openai.FamilyAnthropic, openai.FamilyAnthropicCount,
+		openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
+		openai.FamilyBedrock, "bedrock_count",
+		openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch,
+		openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings:
+		return true
+	}
+	return false
+}
+
+// InspectInputText inspects declared input text and structured tool data. An
+// unsafe rewrite fails closed; callers must not dispatch a request on error.
+func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 	fields := r.Document()
 	w := &inspector{fn: fn}
 	switch r.Family {
@@ -50,13 +70,57 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 		} else {
 			w.geminiFields(fields)
 		}
+	case openai.FamilyBedrock:
+		w.bedrockFields(fields)
+	case "bedrock_count":
+		w.field(fields, "input", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, func(input map[string]json.RawMessage) {
+				w.field(input, "converse", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, w.bedrockFields)
+				})
+			})
+		})
+	case openai.FamilyGeminiEmbeddings:
+		w.field(fields, "title", w.text)
+		w.field(fields, "content", func(raw json.RawMessage) json.RawMessage {
+			return w.object(raw, w.geminiParts)
+		})
+	case openai.FamilyGeminiEmbeddingsBatch:
+		w.field(fields, "requests", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(req map[string]json.RawMessage) {
+					w.field(req, "title", w.text)
+					w.field(req, "content", func(raw json.RawMessage) json.RawMessage {
+						return w.object(raw, w.geminiParts)
+					})
+				})
+			})
+		})
+	case openai.FamilyVertexEmbeddings:
+		w.field(fields, "instances", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(instance map[string]json.RawMessage) {
+					w.field(instance, "title", w.text)
+					w.field(instance, "content", w.text)
+				})
+			})
+		})
+	case openai.FamilyBedrockEmbeddings:
+		w.field(fields, "inputText", w.text)
 	}
 	// Configured tool/schema text is part of the effective invocation too. Arrays
 	// remain ordered and atomic; the explicit mutation policy controls text values.
 	for _, name := range []string{"tools", "functions", "toolConfig", "response_format"} {
 		w.field(fields, name, w.stringValues)
 	}
-	return r.WithFields(fields, oif.ExplicitTransform)
+	if w.err != nil {
+		return nil, w.err
+	}
+	out := r.WithFields(fields, oif.ExplicitTransform)
+	if !out.OIF().Document().Valid() {
+		return nil, errors.New("input content policy rewrite produced an invalid document")
+	}
+	return out, nil
 }
 
 func (w *inspector) stringValues(raw json.RawMessage) json.RawMessage {
@@ -81,6 +145,81 @@ func (w *inspector) stringValues(raw json.RawMessage) json.RawMessage {
 				fields[name] = w.stringValues(value)
 			}
 		})
+	}
+	return raw
+}
+
+// structured inspects all data positions, including object names and non-string
+// scalars. The source parser bounds nesting, so this walk must not silently skip
+// valid input beyond the shallower limit used by text-content containers.
+func (w *inspector) structured(raw json.RawMessage) json.RawMessage {
+	if w.stop {
+		return raw
+	}
+	doc, err := oif.ParseJSON(raw, oif.Limits{})
+	if err != nil {
+		w.err = errors.New("structured tool data could not be inspected")
+		w.stop = true
+		return raw
+	}
+	return w.structuredValue(doc.Root())
+}
+
+func (w *inspector) structuredValue(value oif.Value) json.RawMessage {
+	raw := value.Bytes()
+	if w.stop {
+		return raw
+	}
+	switch value.Kind() {
+	case oif.String:
+		return w.text(raw)
+	case oif.Number, oif.Boolean, oif.Null:
+		next, stop := w.fn(value.Raw())
+		if stop {
+			w.stop = true
+			return raw
+		}
+		if next == value.Raw() {
+			return raw
+		}
+		// Keep a primitive's type when the replacement is valid for that type.
+		// Otherwise encode it as string data, never as raw JSON syntax.
+		if replacement, err := oif.ParseJSON([]byte(next), oif.Limits{}); err == nil && replacement.Root().Kind() == value.Kind() {
+			return replacement.Bytes()
+		}
+		encoded, _ := json.Marshal(next)
+		return encoded
+	case oif.Array:
+		items := value.Elements()
+		out := make([]json.RawMessage, len(items))
+		for i, item := range items {
+			out[i] = w.structuredValue(item)
+			if w.stop {
+				return raw
+			}
+		}
+		encoded, _ := json.Marshal(out)
+		return encoded
+	case oif.Object:
+		out := make(map[string]json.RawMessage, len(value.Members()))
+		for _, field := range value.Members() {
+			name, stop := w.fn(field.Name)
+			if stop {
+				w.stop = true
+				return raw
+			}
+			if _, exists := out[name]; exists {
+				w.err = errors.New("input content policy rewrite produced duplicate object names")
+				w.stop = true
+				return raw
+			}
+			out[name] = w.structuredValue(field.Value)
+			if w.stop {
+				return raw
+			}
+		}
+		encoded, _ := json.Marshal(out)
+		return encoded
 	}
 	return raw
 }
@@ -249,6 +388,42 @@ func (w *inspector) geminiFields(fields map[string]json.RawMessage) {
 	})
 	w.field(fields, "systemInstruction", func(raw json.RawMessage) json.RawMessage {
 		return w.object(raw, w.geminiParts)
+	})
+}
+
+// bedrockFields walks a Converse body: system and message text blocks, tool
+// results and tool-use input. toolConfig is covered by the generic walk.
+func (w *inspector) bedrockFields(fields map[string]json.RawMessage) {
+	w.field(fields, "system", w.textOrParts)
+	w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
+		return w.messageList(raw, inspectBedrockMessage)
+	})
+}
+
+func inspectBedrockMessage(m map[string]json.RawMessage, w *inspector) {
+	w.field(m, "content", func(raw json.RawMessage) json.RawMessage {
+		return w.list(raw, func(block *json.RawMessage) {
+			*block = w.object(*block, func(b map[string]json.RawMessage) {
+				w.field(b, "text", w.text)
+				w.field(b, "toolUse", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, func(use map[string]json.RawMessage) {
+						w.field(use, "input", w.structured)
+					})
+				})
+				w.field(b, "toolResult", func(raw json.RawMessage) json.RawMessage {
+					return w.object(raw, func(result map[string]json.RawMessage) {
+						w.field(result, "content", func(raw json.RawMessage) json.RawMessage {
+							return w.list(raw, func(item *json.RawMessage) {
+								*item = w.object(*item, func(c map[string]json.RawMessage) {
+									w.field(c, "text", w.text)
+									w.field(c, "json", w.structured)
+								})
+							})
+						})
+					})
+				})
+			})
+		})
 	})
 }
 

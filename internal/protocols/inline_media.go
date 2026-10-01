@@ -25,14 +25,32 @@ func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) erro
 	if request.Family == openai.FamilyResponses || request.Family == openai.FamilyInputTokens {
 		messages = arr(doc["input"])
 	}
-	if request.Family == openai.FamilyGemini || request.Family == "gemini_count" {
-		messages, partKey = arr(doc["contents"]), "parts"
+	switch request.Family {
+	case openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount:
+		content := doc
+		if nested, err := object(doc["generateContentRequest"]); err == nil {
+			content = nested
+		}
+		messages, partKey = arr(content["contents"]), "parts"
 	}
 	count, total := 0, int64(0)
-	for _, message := range messages {
-		m, _ := object(message)
-		for _, part := range arr(m[partKey]) {
+	var visit func(parts []json.RawMessage, depth int) error
+	visit = func(parts []json.RawMessage, depth int) error {
+		for _, part := range parts {
 			p, _ := object(part)
+			// Tool results nest their own media: Anthropic tool_result content
+			// and Gemini functionResponse parts.
+			if depth < 2 {
+				var nested []json.RawMessage
+				if str(p["type"]) == "tool_result" {
+					nested = arr(p["content"])
+				} else if response, err := object(p["functionResponse"]); err == nil {
+					nested = arr(response["parts"])
+				}
+				if err := visit(nested, depth+1); err != nil {
+					return err
+				}
+			}
 			encoded, dataURL := inlineMediaData(p)
 			if dataURL {
 				if !strings.HasPrefix(encoded, "data:") {
@@ -59,6 +77,13 @@ func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) erro
 			if n > limits.ItemBytes || total > limits.TotalBytes {
 				return requestError("content", "Inline media exceeds the configured decoded byte limit.")
 			}
+		}
+		return nil
+	}
+	for _, message := range messages {
+		m, _ := object(message)
+		if err := visit(arr(m[partKey]), 0); err != nil {
+			return err
 		}
 	}
 	return nil

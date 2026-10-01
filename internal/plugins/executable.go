@@ -238,7 +238,9 @@ func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, 
 	}
 	cmd := command(copied, name)
 	cmd.Dir, cmd.Env = u.dir, []string{}
-	stdin, err := cmd.StdinPipe()
+	// Every pipe end is closed on each early return; exec.Cmd would close
+	// pipes it made only in Start or Wait.
+	stdinReader, stdin, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
@@ -246,19 +248,25 @@ func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, 
 	// as it exits, whoever else holds the write ends.
 	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
+		stdinReader.Close()
+		stdin.Close()
 		return nil, err
 	}
 	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		stdinReader.Close()
+		stdin.Close()
 		stdout.Close()
 		stdoutWriter.Close()
 		return nil, err
 	}
-	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
 	err = cmd.Start()
+	stdinReader.Close()
 	stdoutWriter.Close()
 	stderrWriter.Close()
 	if err != nil {
+		stdin.Close()
 		stdout.Close()
 		stderr.Close()
 		return nil, refuse(CodeExecutableInvalid, "OLP could not start the executable: "+err.Error())

@@ -44,3 +44,4 @@ networkPolicy:
       kubernetes.io/metadata.name: monitoring
 migration:
   databaseSecretName: olp-postgresql-migration
+  runtimeRole: olp_runtime

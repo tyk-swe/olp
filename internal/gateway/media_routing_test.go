@@ -520,3 +520,48 @@ func TestGateProbeReleasedWhenDispatchAbandoned(t *testing.T) {
 		t.Fatal("released probe could not be claimed by a sibling")
 	}
 }
+
+func TestPinnedSettleReturnsHalfOpenProbe(t *testing.T) {
+	cases := []struct {
+		name       string
+		dispatched bool
+		fact       AttemptFact
+		open       bool
+	}{
+		{name: "success closes the circuit", dispatched: true, fact: AttemptFact{Class: "success"}, open: false},
+		{name: "failure reopens the circuit", dispatched: true, fact: AttemptFact{Class: classConnect}, open: true},
+		{name: "undispatched releases the probe", dispatched: false, open: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newMediaHarness(t)
+			aID, a := mediaProvider(t, h, "a")
+			for i := 0; i < circuitFailures; i++ {
+				h.gateway.health.record(aID, AttemptFact{Class: classConnect})
+			}
+			h.gateway.health.mu.Lock()
+			h.gateway.health.provider(aID).openUntil = time.Now().Add(-time.Second)
+			h.gateway.health.mu.Unlock()
+
+			slot := a.Slots[0]
+			gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute))
+			if gate.verdict != gateAdmitted || !gate.hold.probed {
+				t.Fatalf("expected an admitted probe, got %+v", gate)
+			}
+			x := &execution{dispatched: tc.dispatched}
+			if tc.dispatched {
+				x.facts = []AttemptFact{tc.fact}
+			}
+			h.gateway.settlePinHold(t.Context(), x, gate.hold, nil)
+			h.gateway.health.mu.Lock()
+			probing := h.gateway.health.provider(aID).probing
+			h.gateway.health.mu.Unlock()
+			if probing {
+				t.Fatal("pinned settle left the half-open probe claimed")
+			}
+			if got := h.gateway.health.open(aID); got != tc.open {
+				t.Fatalf("circuit open = %v, want %v", got, tc.open)
+			}
+		})
+	}
+}

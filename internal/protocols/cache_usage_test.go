@@ -39,6 +39,8 @@ func TestAnthropicCacheWriteValidation(t *testing.T) {
 		{"negative write", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":-1}`},
 		{"noninteger detail", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":1.5}}`},
 		{"detail without generic write", `{"input_tokens":3,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":4}}`},
+		{"zero detail without generic write", `{"input_tokens":3,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":0}}`},
+		{"detail sum overflow", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":9223372036854775807,"ephemeral_1h_input_tokens":9223372036854775807}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Decode(openai.FamilyAnthropic, openai.FamilyChat, anthropicBody(tc.usage), "team-model", ""); err == nil {
@@ -86,12 +88,25 @@ func bedrockUsageValue(t *testing.T, usage string) *openai.Usage {
 
 func TestBedrockCacheUsage(t *testing.T) {
 	u := bedrockUsageValue(t, `{"inputTokens":100,"outputTokens":2,"totalTokens":102,"cacheReadInputTokens":20,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":10},{"ttl":"1h","inputTokens":5}]}`)
-	if u.InputTokens != 100 || u.OutputTokens != 2 {
-		t.Fatalf("Bedrock totals must stay reported: %+v", u)
+	if u.InputTokens != 150 || u.OutputTokens != 2 || u.TotalTokens != 102 {
+		t.Fatalf("Bedrock input must include cache reads and writes: %+v", u)
 	}
 	if *u.CachedInputTokens != 20 || *u.CacheWriteInputTokens != 30 ||
 		*u.CacheWrite5MInputTokens != 10 || *u.CacheWrite1HInputTokens != 5 {
 		t.Fatalf("cache categories: %+v", u)
+	}
+	// AWS's prompt-caching example reports the cache write beside inputTokens.
+	u = bedrockUsageValue(t, `{"inputTokens":4,"outputTokens":1,"totalTokens":1153,"cacheReadInputTokens":0,"cacheWriteInputTokens":1148}`)
+	if u.InputTokens != 1152 || *u.CacheWriteInputTokens != 1148 || u.TotalTokens != 1153 {
+		t.Fatalf("cache write beyond uncached input: %+v", u)
+	}
+	u = bedrockUsageValue(t, `{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":1000}`)
+	if u.InputTokens != 1004 || *u.CachedInputTokens != 1000 || u.TotalTokens != 1005 {
+		t.Fatalf("derived total: %+v", u)
+	}
+	cached := bedrockUsageValue(t, `{"inputTokens":12,"outputTokens":200,"cacheReadInputTokens":4000}`)
+	if cached.InputTokens != 4012 || *cached.CachedInputTokens != 4000 || cached.TotalTokens != 4212 {
+		t.Fatalf("cache reads beyond uncached input: %+v", cached)
 	}
 }
 
@@ -100,11 +115,14 @@ func TestBedrockCacheUsageValidation(t *testing.T) {
 		{"unknown TTL", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"10m","inputTokens":5}]}`},
 		{"duplicate TTL", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":5},{"ttl":"5m","inputTokens":4}]}`},
 		{"detail beyond generic write", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":10,"cacheDetails":[{"ttl":"5m","inputTokens":8},{"ttl":"1h","inputTokens":5}]}`},
-		{"read plus write beyond input", `{"inputTokens":40,"outputTokens":2,"cacheReadInputTokens":20,"cacheWriteInputTokens":30}`},
+		{"input overflow", `{"inputTokens":9223372036854775800,"outputTokens":2,"cacheReadInputTokens":20}`},
 		{"negative write", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":-1}`},
 		{"noninteger read", `{"inputTokens":100,"outputTokens":2,"cacheReadInputTokens":1.5}`},
 		{"negative detail", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":-1}]}`},
 		{"malformed detail", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":["5m"]}`},
+		{"zero detail without generic write", `{"inputTokens":100,"outputTokens":2,"cacheDetails":[{"ttl":"5m","inputTokens":0}]}`},
+		{"read plus write overflow", `{"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":9223372036854775807,"cacheWriteInputTokens":9223372036854775807}`},
+		{"detail sum overflow", `{"inputTokens":10,"outputTokens":2,"cacheWriteInputTokens":10,"cacheDetails":[{"ttl":"5m","inputTokens":9223372036854775807},{"ttl":"1h","inputTokens":9223372036854775807}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := bedrockUsage([]byte(tc.usage)); err == nil {
@@ -138,7 +156,7 @@ func TestBedrockCacheUsageStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := c.Usage
-	if u == nil || u.InputTokens != 100 || *u.CachedInputTokens != 20 ||
+	if u == nil || u.InputTokens != 150 || *u.CachedInputTokens != 20 ||
 		*u.CacheWriteInputTokens != 30 || *u.CacheWrite5MInputTokens != 10 {
 		t.Fatalf("streamed cache usage: %+v", u)
 	}
