@@ -134,9 +134,15 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 				content = append(content, Object{"type": raw("text"), "text": raw(p.Text)})
 			}
 		}
-		if len(content) == 1 && str(content[0]["type"]) == "text" {
+		switch {
+		case len(content) == 1 && str(content[0]["type"]) == "text":
 			v["content"] = content[0]["text"]
-		} else {
+		case len(content) == 0 && len(m.Calls) > 0:
+			// Chat accepts null beside tool_calls but rejects an empty array.
+			v["content"] = raw(nil)
+		case len(content) == 0:
+			v["content"] = raw("")
+		default:
 			v["content"] = raw(content)
 		}
 		if len(m.Calls) > 0 {
@@ -158,7 +164,11 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 	if len(c.Tools) > 0 {
 		tools := []Object{}
 		for _, t := range c.Tools {
-			tools = append(tools, Object{"type": raw("function"), "function": raw(map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Schema})})
+			fn := map[string]any{"name": t.Name, "description": t.Description}
+			if present(t.Schema) {
+				fn["parameters"] = t.Schema
+			}
+			tools = append(tools, Object{"type": raw("function"), "function": raw(fn)})
 		}
 		f["tools"] = raw(tools)
 	}
@@ -173,12 +183,17 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 			if m.Role == "tool" {
 				input = append(input, Object{"type": raw("function_call_output"), "call_id": raw(m.ToolID), "output": raw(joinText(m.Parts))})
 			} else if len(m.Parts) > 0 {
+				// Responses assistant history carries output_text, never input_text.
+				textType := "input_text"
+				if m.Role == "assistant" {
+					textType = "output_text"
+				}
 				parts := []Object{}
 				for _, p := range m.Parts {
 					if p.URL != "" {
 						parts = append(parts, Object{"type": raw("input_image"), "image_url": raw(p.URL)})
 					} else {
-						parts = append(parts, Object{"type": raw("input_text"), "text": raw(p.Text)})
+						parts = append(parts, Object{"type": raw(textType), "text": raw(p.Text)})
 					}
 				}
 				input = append(input, Object{"role": raw(m.Role), "content": raw(parts)})
@@ -186,10 +201,42 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 		}
 		delete(f, "messages")
 		f["input"] = raw(input)
+		// input_tokens takes the Responses request shape and no sampling or
+		// output-limit controls.
+		for _, k := range []string{"max_completion_tokens", "temperature", "top_p", "stop", "n", "seed", "response_format"} {
+			delete(f, k)
+		}
+		if v := c.Parameters["response_format"]; present(v) {
+			rf, e := object(v)
+			if e != nil {
+				return nil, e
+			}
+			format := v
+			if str(rf["type"]) == "json_schema" {
+				schema, e := object(rf["json_schema"])
+				if e != nil {
+					return nil, e
+				}
+				schema["type"] = raw("json_schema")
+				format = raw(schema)
+			}
+			f["text"] = raw(Object{"format": format})
+		}
+		if v := c.Parameters["tool_choice"]; present(v) {
+			if tc, e := object(v); e == nil {
+				if fn, e := object(tc["function"]); e == nil && present(fn["name"]) {
+					f["tool_choice"] = raw(Object{"type": raw("function"), "name": fn["name"]})
+				}
+			}
+		}
 		if len(c.Tools) > 0 {
 			tools := []Object{}
 			for _, t := range c.Tools {
-				tools = append(tools, Object{"type": raw("function"), "name": raw(t.Name), "description": raw(t.Description), "parameters": t.Schema})
+				tool := Object{"type": raw("function"), "name": raw(t.Name), "description": raw(t.Description)}
+				if present(t.Schema) {
+					tool["parameters"] = t.Schema
+				}
+				tools = append(tools, tool)
 			}
 			f["tools"] = raw(tools)
 		}

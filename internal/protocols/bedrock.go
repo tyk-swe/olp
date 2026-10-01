@@ -65,7 +65,10 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 				return nil, unsupported("image detail")
 			}
 			if p.URL == "" {
-				parts = append(parts, Object{"text": raw(p.Text)})
+				// Converse rejects blank text blocks.
+				if p.Text != "" {
+					parts = append(parts, Object{"text": raw(p.Text)})
+				}
 				continue
 			}
 			if !strings.HasPrefix(p.URL, "data:") {

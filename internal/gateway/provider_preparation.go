@@ -103,6 +103,9 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 	if policyErr != nil {
 		return preparedProvider{}, policyErr
 	}
+	if e := inputPolicyWireGate(x.route, compiled, invocation.Wire); e != nil {
+		return preparedProvider{}, e
+	}
 	if compiled != nil {
 		for _, rule := range compiled.Input {
 			matched, blocked := false, false
@@ -178,4 +181,13 @@ func (x *execution) providerEstimate(provider *runtime.Provider) int64 {
 		estimate = max(estimate, prepared.estimate)
 	}
 	return max(estimate, 1)
+}
+
+// inputPolicyWireGate refuses a destination wire the input rules cannot
+// inspect, so an input policy never dispatches a body it has not seen.
+func inputPolicyWireGate(route *runtime.Route, compiled *contentpolicy.Compiled, wire openai.Family) *Error {
+	if compiled == nil || len(compiled.Input) == 0 || protocols.InputInspectable(wire) {
+		return nil
+	}
+	return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(wire)+"` provider wire.")
 }

@@ -183,7 +183,14 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 	if present(c.Parameters["parallel_tool_calls"]) {
 		return nil, unsupported("parallel_tool_calls")
 	}
-	contents := []Object{}
+	// Gemini requires every functionResponse answering one function-call turn
+	// in a single content, so adjacent tool results share one user turn.
+	type geminiTurn struct {
+		role  string
+		parts []Object
+		tool  bool
+	}
+	turns := []geminiTurn{}
 	system := []Object{}
 	started := false
 	names := map[string]string{}
@@ -216,8 +223,14 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 					return nil, unsupported("non-text tool result")
 				}
 			}
+			response := Object{"functionResponse": raw(map[string]any{"name": names[m.ToolID], "id": m.ToolID, "response": map[string]any{"output": joinText(m.Parts)}})}
+			if len(m.Calls) == 0 && len(turns) > 0 && turns[len(turns)-1].tool {
+				last := &turns[len(turns)-1]
+				last.parts = append(last.parts, response)
+				continue
+			}
 			role = "user"
-			parts = []Object{{"functionResponse": raw(map[string]any{"name": names[m.ToolID], "id": m.ToolID, "response": map[string]any{"output": joinText(m.Parts)}})}}
+			parts = []Object{response}
 		}
 		for _, t := range m.Calls {
 			if _, err := object([]byte(t.Arguments)); err != nil {
@@ -226,7 +239,11 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 			names[t.ID] = t.Name
 			parts = append(parts, Object{"functionCall": raw(map[string]any{"name": t.Name, "id": t.ID, "args": json.RawMessage(t.Arguments)})})
 		}
-		contents = append(contents, Object{"role": raw(role), "parts": raw(parts)})
+		turns = append(turns, geminiTurn{role: role, parts: parts, tool: m.Role == "tool" && len(m.Calls) == 0})
+	}
+	contents := make([]Object, 0, len(turns))
+	for _, t := range turns {
+		contents = append(contents, Object{"role": raw(t.role), "parts": raw(t.parts)})
 	}
 	f["contents"] = raw(contents)
 	if len(system) > 0 {
@@ -267,7 +284,11 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 	if len(c.Tools) > 0 {
 		tools := []Object{}
 		for _, t := range c.Tools {
-			tools = append(tools, Object{"name": raw(t.Name), "description": raw(t.Description), "parameters": t.Schema})
+			tool := Object{"name": raw(t.Name), "description": raw(t.Description)}
+			if present(t.Schema) {
+				tool["parameters"] = t.Schema
+			}
+			tools = append(tools, tool)
 		}
 		f["tools"] = raw([]Object{{"functionDeclarations": raw(tools)}})
 	}
