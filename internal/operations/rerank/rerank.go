@@ -358,10 +358,21 @@ func outputText(result oif.Result) ([]operations.Text, error) {
 				continue
 			}
 			p := path + "/" + strconv.Itoa(index) + "/" + field.Name
-			if field.Value.Kind() != oif.String {
+			switch field.Value.Kind() {
+			case oif.String:
+				out = append(out, operations.Text{Pointer: p, Value: operations.String(field.Value)})
+			case oif.Object:
+				// Object documents ({"text":...} or echoed all-string inputs) are
+				// inspected one level deep, matching inputText's document rule.
+				for _, member := range field.Value.Members() {
+					if member.Value.Kind() != oif.String {
+						return nil, operations.Error("policy_conflict", operations.Pointer(p, member.Name), "output_policy_coverage", "The output policy cannot inspect this native document result.")
+					}
+					out = append(out, operations.Text{Pointer: operations.Pointer(p, member.Name), Value: operations.String(member.Value)})
+				}
+			default:
 				return nil, operations.Error("policy_conflict", p, "output_policy_coverage", "The output policy cannot inspect this native document result.")
 			}
-			out = append(out, operations.Text{Pointer: p, Value: operations.String(field.Value)})
 		}
 	}
 	return out, nil

@@ -77,14 +77,30 @@ func (p *ToolProjection) chunk(delta any, observation map[string]any) ([]byte, e
 // ordinary Chat usage object has no fields for Anthropic cache-write TTLs.
 // Unknown categories fail closed before a ready result can be published.
 func (p *ToolProjection) recordNativeUsage(usage oif.Value) error {
-	if !onlyMembers(usage, "input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens cache_creation") {
+	if !onlyMembers(usage, "input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens cache_creation service_tier server_tool_use") {
 		return guardFailure("/usage", "qualified_native_usage_categories")
 	}
 	if p.nativeUsage == nil {
 		p.nativeUsage = map[string]json.RawMessage{}
 	}
 	for _, field := range usage.Members() {
-		if field.Name == "cache_creation" {
+		switch field.Name {
+		case "service_tier":
+			if kind := field.Value.Kind(); kind != oif.String && kind != oif.Null {
+				return guardFailure("/usage/service_tier", "native_service_tier")
+			}
+		case "server_tool_use":
+			if field.Value.Kind() != oif.Null {
+				if field.Value.Kind() != oif.Object {
+					return guardFailure("/usage/server_tool_use", "native_server_tool_usage")
+				}
+				for _, detail := range field.Value.Members() {
+					if !nonnegativeInteger(detail.Value) {
+						return guardFailure("/usage/server_tool_use", "native_server_tool_count")
+					}
+				}
+			}
+		case "cache_creation":
 			if !onlyMembers(field.Value, "ephemeral_5m_input_tokens ephemeral_1h_input_tokens") {
 				return guardFailure("/usage/cache_creation", "qualified_native_cache_ttls")
 			}
@@ -93,8 +109,10 @@ func (p *ToolProjection) recordNativeUsage(usage oif.Value) error {
 					return guardFailure("/usage/cache_creation", "native_cache_token_count")
 				}
 			}
-		} else if !nonnegativeInteger(field.Value) {
-			return guardFailure("/usage/"+field.Name, "native_token_count")
+		default:
+			if !nonnegativeInteger(field.Value) {
+				return guardFailure("/usage/"+field.Name, "native_token_count")
+			}
 		}
 		p.nativeUsage[field.Name] = field.Value.Bytes()
 	}

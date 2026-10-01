@@ -151,6 +151,23 @@ func inputField(id string) string {
 	}
 }
 
+// tokenIDs counts pre-tokenized inputs, reserving one token per ID.
+func tokenIDs(input oif.Value) int64 {
+	if input.Kind() != oif.Array {
+		return 0
+	}
+	var n int64
+	for _, v := range input.Elements() {
+		switch v.Kind() {
+		case oif.Number:
+			n++
+		case oif.Array:
+			n += int64(len(v.Elements()))
+		}
+	}
+	return n
+}
+
 func liftRequest(source oif.Request, id string) (Request, error) {
 	r := Request{source: source, dialect: id, format: Format{Layout: "dense", DType: "float", Encoding: "array", BitsPerDimension: 0}, estimate: 1}
 	if id == "voyage-embeddings" || id == "bedrock-embeddings" || strings.HasPrefix(id, "tei-") {
@@ -309,6 +326,9 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 	}
 	for _, text := range texts {
 		r.estimate += int64((len(text.Value) + 3) / 4)
+	}
+	if id == "openai-embeddings" || strings.HasPrefix(id, "tei-") {
+		r.estimate += tokenIDs(input)
 	}
 	dimension := operations.Member(root, "dimensions")
 	switch id {
