@@ -352,6 +352,29 @@ func rewriteID(body []byte, name, value string) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
+// rewritePrevious replaces an echoed upstream previous_response_id with its
+// local id, or with null when no local id is known, so a provider identifier
+// never reaches the caller.
+func rewritePrevious(body []byte, local string) ([]byte, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil, err
+	}
+	raw, present := obj["previous_response_id"]
+	if !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return body, nil
+	}
+	obj["previous_response_id"] = json.RawMessage("null")
+	if local != "" {
+		encoded, err := json.Marshal(local)
+		if err != nil {
+			return nil, err
+		}
+		obj["previous_response_id"] = encoded
+	}
+	return json.Marshal(obj)
+}
+
 func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byte, error) {
 	if res.Kind == resources.KindStrictFile {
 		_, contract, err := s.readDurable(ctx, res.Kind, res.APIKeyID, res.ID)

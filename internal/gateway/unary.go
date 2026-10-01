@@ -34,6 +34,19 @@ func (x *execution) surfaceName() string {
 	}
 	return x.family.Surface()
 }
+
+// clientSurface is the wire surface the caller speaks, which shapes error
+// envelopes and credential query parameters. It can differ from surfaceName,
+// the capability surface: Gemini embeddings match OpenAI embedding targets.
+func (x *execution) clientSurface() string {
+	if x.unary != nil && x.unary.surface == "native" {
+		return "native"
+	}
+	if x.ingress != "" {
+		return x.ingress
+	}
+	return x.surfaceName()
+}
 func (s *Server) selectUnary(x *execution, family openai.Family, dialect string, body []byte, pathModel string) (bool, error) {
 	explicit := dialect != ""
 	if !explicit {
@@ -125,7 +138,7 @@ func (s *Server) prepareUnary(x *execution) *Error {
 	if x.semanticQueryInvalid {
 		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
 	}
-	if x.surfaceName() == "gemini" {
+	if x.clientSurface() == "gemini" {
 		if e := x.dropQueryKey(); e != nil {
 			return e
 		}
@@ -166,8 +179,11 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 			copy.NoRetry = true
 			e = &copy
 		}
-		writeSurfaceError(w, e, x.surfaceName())
-		return &outcome{err: e}, e.Status
+		// A cancelled client has no status to receive and nothing to read.
+		if e.Status > 0 {
+			writeSurfaceError(w, e, x.clientSurface())
+		}
+		return &outcome{err: e, cancelled: e.Status == 0}, e.Status
 	}
 	var e *Error
 	x.preferences, e = routingPreferences(r)
@@ -189,7 +205,9 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 		return s.unaryAttempt(ctx, x, a, p, slot, n)
 	}})
 	if result.err != nil {
-		return fail(result.err)
+		out, status := fail(result.err)
+		out.committed, out.cancelled = result.committed, out.cancelled || result.cancelled
+		return out, status
 	}
 	rc := http.NewResponseController(w)
 	if rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)) != nil {

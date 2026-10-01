@@ -76,6 +76,7 @@ type execution struct {
 	sourceSummary        *requestSummary
 	request              request
 	family               openai.Family
+	ingress              string // the caller's wire surface, when it differs from family.Surface()
 	parsed               *openai.Request
 	media                *media.Request
 	actor                string
@@ -534,7 +535,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 
 		if fact.Interaction != nil || fact.Carried {
-			f.noRetry = f.dispatched
+			f.noRetry = f.noRetry || f.dispatched
 		}
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = string(f.acceptance)
