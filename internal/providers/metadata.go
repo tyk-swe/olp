@@ -5,9 +5,35 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 
 	"github.com/tyk-swe/olp/internal/runtime"
 )
+
+// mergeDiscoveredFacts places upstream-listed facts under the operator's
+// metadata for one model. Facts that would leave the configuration invalid,
+// or a new entry beyond the metadata bound, are not stored, so discovery can
+// never make the saved configuration fail its own validation.
+func mergeDiscoveredFacts(cfg *Configuration, model string, discovered map[string]json.RawMessage) {
+	if len(discovered) == 0 {
+		return
+	}
+	facts := maps.Clone(discovered)
+	var existing map[string]json.RawMessage
+	_ = json.Unmarshal(cfg.Options.Models[model], &existing)
+	maps.Copy(facts, existing)
+	encoded, err := json.Marshal(facts)
+	if err != nil || validateMetadata(encoded) != nil {
+		return
+	}
+	if _, stored := cfg.Options.Models[model]; !stored && len(cfg.Options.Models) >= 2000 {
+		return
+	}
+	if cfg.Options.Models == nil {
+		cfg.Options.Models = map[string]json.RawMessage{}
+	}
+	cfg.Options.Models[model] = encoded
+}
 
 func validateMetadata(raw json.RawMessage) error {
 	var m runtime.ModelMetadata

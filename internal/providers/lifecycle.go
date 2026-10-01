@@ -200,6 +200,13 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		if value(input.Configuration.Options.VendorID) == "voyage" {
 			operation = "embeddings"
 		}
+		// A dedicated operation profile, such as an embeddings or rerank
+		// dialect, declares the tuple it can actually certify.
+		if input.Configuration.ProfileID != "" && !probeable(&input.Configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: ModeUnary}) {
+			if tuple := defaultProbeTuple(&input.Configuration); probeable(&input.Configuration, tuple) {
+				operation, surface = tuple.Operation, tuple.Surface
+			}
+		}
 		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: ModeUnary, Source: "declared"}}
 		if operation == "generation" {
 			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})

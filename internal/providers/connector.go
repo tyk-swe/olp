@@ -34,6 +34,20 @@ const (
 	probeBodyLimit = 1 << 20
 )
 
+// probeBudget bounds a sequence of probes by the caller's deadline less a
+// reserve for recording the outcome: one probeTimeout, or half the remaining
+// time when less than two remain, so a caller whose earlier probes consumed
+// most of its deadline still keeps time to persist. Each upstream call keeps
+// its own probeTimeout bound.
+func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	reserve := min(probeTimeout, time.Until(deadline)/2)
+	return context.WithDeadline(ctx, deadline.Add(-max(reserve, 0)))
+}
+
 // probeError is a classified, content-free upstream failure.
 type probeError struct {
 	Code   string
@@ -239,13 +253,14 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 }
 
 func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
 	listing, discovery, err := listingFor(cfg)
 	if err != nil {
 		return nil, err
 	}
 	if !discovery {
+		// Each declared model is its own bounded upstream probe.
+		ctx, cancel := probeBudget(ctx)
+		defer cancel()
 		names := append([]string{}, cfg.ProbeModels...)
 		if cfg.Kind == KindAzure {
 			names = append(names, value(cfg.Deployment))
@@ -267,14 +282,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 				continue
 			}
 			previous = name
-			operation := "generation"
-			if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
-				operation = "token_count"
-			}
-			if value(cfg.Options.VendorID) == "voyage" {
-				operation = "embeddings"
-			}
-			tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"}
+			tuple := defaultProbeTuple(cfg)
 			err := s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
 			if err != nil && cfg.Kind == KindAzure {
 				tuple.Operation = "embeddings"
@@ -287,6 +295,8 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		}
 		return out, nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	out := []discoveredModel{}
 	seen, cursors := map[string]bool{}, map[string]bool{}
 	path := listing.path

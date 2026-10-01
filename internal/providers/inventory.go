@@ -39,7 +39,9 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		return access.Reply{}, access.Fail(400, "invalid_query", "Use at most 100 search characters.")
 	}
 	surface := query.Get("surface")
-	if surface != "" && surface != SurfaceOpenAI && surface != "anthropic" && surface != "gemini" {
+	switch surface {
+	case "", SurfaceOpenAI, "anthropic", "gemini", "bedrock", "native":
+	default:
 		return access.Reply{}, access.Fail(400, "invalid_query", "Unknown surface.")
 	}
 	var enabled *bool
@@ -126,14 +128,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}", s.updateProvider, access.MaxBody(1<<20))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/activate", s.activateProvider)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/disable", s.disableProvider)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20))
+	// Each advertised capability, or each declared model of a provider without
+	// discovery, can consume a full probe budget; reserve another management
+	// budget for preparation, queueing, and persistence.
+	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/models", s.models)
 	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}/models/{model_id}", s.setModel)
-	// Each advertised capability can consume a full probe budget; reserve
-	// another management budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/network-credentials", s.networkCredentials)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials", s.createNetworkCredential, access.MaxBody(256<<10))
