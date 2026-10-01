@@ -175,3 +175,27 @@ func TestPriceDecimalsAreExactAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestSamePriceComparesRatesNumerically(t *testing.T) {
+	rate := func(v string) *string { return &v }
+	source := Price{Currency: "USD", InputPerMillion: rate("2.5"), OutputPerMillion: rate("10"), UnitPrice: rate("3")}
+	stored := Price{Currency: "USD", InputPerMillion: rate("2.500000000000"), OutputPerMillion: rate("10.000000000000"), UnitPrice: rate("3.000000000000")}
+	if !samePrice(source, stored) {
+		t.Fatal("rates differing only in scale must compare equal")
+	}
+	changed := stored
+	changed.InputPerMillion = rate("2.500000000001")
+	if samePrice(source, changed) {
+		t.Fatal("a changed rate must not compare equal")
+	}
+	missing := stored
+	missing.UnitPrice = nil
+	if samePrice(source, missing) {
+		t.Fatal("a removed rate must not compare equal")
+	}
+	other := stored
+	other.Currency = "EUR"
+	if samePrice(source, other) {
+		t.Fatal("a changed currency must not compare equal")
+	}
+}

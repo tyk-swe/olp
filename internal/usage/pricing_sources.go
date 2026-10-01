@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -479,11 +480,22 @@ func samePrice(a, b Price) bool {
 		if (pair[0] == nil) != (pair[1] == nil) {
 			return false
 		}
-		if pair[0] != nil && *pair[0] != *pair[1] {
+		if pair[0] != nil && !sameRate(*pair[0], *pair[1]) {
 			return false
 		}
 	}
 	return a.Currency == b.Currency
+}
+
+// sameRate compares two decimal rates by value: numeric(24,12) columns read back
+// padded to twelve fractional digits while source text keeps its own scale.
+func sameRate(a, b string) bool {
+	x, errA := decimal.NewFromString(a)
+	y, errB := decimal.NewFromString(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x.Equal(y)
 }
 
 func (s *Server) listPricingSourceSnapshots(r *http.Request, p access.Principal) (access.Reply, error) {

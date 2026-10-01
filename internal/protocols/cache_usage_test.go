@@ -39,6 +39,8 @@ func TestAnthropicCacheWriteValidation(t *testing.T) {
 		{"negative write", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":-1}`},
 		{"noninteger detail", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":1.5}}`},
 		{"detail without generic write", `{"input_tokens":3,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":4}}`},
+		{"zero detail without generic write", `{"input_tokens":3,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":0}}`},
+		{"detail sum overflow", `{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":9223372036854775807,"ephemeral_1h_input_tokens":9223372036854775807}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Decode(openai.FamilyAnthropic, openai.FamilyChat, anthropicBody(tc.usage), "team-model", ""); err == nil {
@@ -118,6 +120,9 @@ func TestBedrockCacheUsageValidation(t *testing.T) {
 		{"noninteger read", `{"inputTokens":100,"outputTokens":2,"cacheReadInputTokens":1.5}`},
 		{"negative detail", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"5m","inputTokens":-1}]}`},
 		{"malformed detail", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":["5m"]}`},
+		{"zero detail without generic write", `{"inputTokens":100,"outputTokens":2,"cacheDetails":[{"ttl":"5m","inputTokens":0}]}`},
+		{"read plus write overflow", `{"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":9223372036854775807,"cacheWriteInputTokens":9223372036854775807}`},
+		{"detail sum overflow", `{"inputTokens":10,"outputTokens":2,"cacheWriteInputTokens":10,"cacheDetails":[{"ttl":"5m","inputTokens":9223372036854775807},{"ttl":"1h","inputTokens":9223372036854775807}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := bedrockUsage([]byte(tc.usage)); err == nil {

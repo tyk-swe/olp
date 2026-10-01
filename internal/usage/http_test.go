@@ -127,3 +127,25 @@ func TestRequestFiltersRejectAnImpossibleWindow(t *testing.T) {
 		t.Fatalf("code = %s, want invalid_operation", problem.Code)
 	}
 }
+
+func TestRequestFiltersApplyAttribution(t *testing.T) {
+	key, value, bad := "team", "billing", "not a key!"
+	if problem := usageProblem(t, RequestFilters{AttributionValue: &value}.Validate()); problem.Status != 400 || problem.Code != "invalid_filter" {
+		t.Fatalf("value without key gave %d %s, want 400 invalid_filter", problem.Status, problem.Code)
+	}
+	if problem := usageProblem(t, RequestFilters{AttributionKey: &bad}.Validate()); problem.Status != 400 || problem.Code != "invalid_filter" {
+		t.Fatalf("invalid key gave %d %s, want 400 invalid_filter", problem.Status, problem.Code)
+	}
+	filters := RequestFilters{AttributionKey: &key, AttributionValue: &value, AllProjects: true}
+	if err := filters.Validate(); err != nil {
+		t.Fatalf("a valid attribution filter was rejected: %v", err)
+	}
+	var q filterQuery
+	filters.push(&q)
+	if got, want := q.sql(), " AND r.attribution ? $1 AND r.attribution->>$2 = $3"; got != want {
+		t.Fatalf("sql = %q, want %q", got, want)
+	}
+	if len(q.args) != 3 || q.args[0] != key || q.args[1] != key || q.args[2] != value {
+		t.Fatalf("args = %v", q.args)
+	}
+}

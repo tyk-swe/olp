@@ -279,7 +279,14 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 		}
 		return *v
 	}
-	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
+	short, long := value(usage.CacheWrite5MInputTokens), value(usage.CacheWrite1HInputTokens)
+	if short > math.MaxInt64-long {
+		return nil, protocolError("Bedrock cache write detail exceeds total")
+	}
+	if usage.CacheWriteInputTokens == nil && (usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil) {
+		return nil, protocolError("Bedrock cache write detail without total")
+	}
+	if short+long > value(usage.CacheWriteInputTokens) {
 		return nil, protocolError("Bedrock cache write detail exceeds total")
 	}
 	// Converse reports cache reads and writes beside inputTokens, while the
@@ -298,6 +305,7 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	}
 	return usage, nil
 }
+
 func decodeBedrock(body []byte, route string) (*openai.Completion, error) {
 	f, e := object(body)
 	if e != nil {

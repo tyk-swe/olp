@@ -181,6 +181,34 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			e.Attempts[1].Usage.OutputTokens = &tokens
 		}},
 		{"negative media units", func(e *Event) { e.Attempts[1].Usage.MediaUnits = &negative }},
+		{"attempt 5m cache detail without a cache write total", func(e *Event) {
+			zero := int64(0)
+			e.Attempts[1].Usage.CacheWrite5MInputTokens = &zero
+		}},
+		{"attempt 1h cache detail without a cache write total", func(e *Event) {
+			zero := int64(0)
+			e.Attempts[1].Usage.CacheWrite1HInputTokens = &zero
+		}},
+		{"request cache detail without a cache write total", func(e *Event) {
+			zero := int64(0)
+			e.CacheWrite5MInputTokens = &zero
+		}},
+		{"attempt cache reads and writes overflowing the input total", func(e *Event) {
+			huge := int64(math.MaxInt64)
+			e.Attempts[1].Usage.CachedInputTokens = &huge
+			e.Attempts[1].Usage.CacheWriteInputTokens = &huge
+		}},
+		{"attempt cache write detail overflowing the write total", func(e *Event) {
+			total, huge := int64(5), int64(math.MaxInt64)
+			e.Attempts[1].Usage.CacheWriteInputTokens = &total
+			e.Attempts[1].Usage.CacheWrite5MInputTokens = &huge
+			e.Attempts[1].Usage.CacheWrite1HInputTokens = &huge
+		}},
+		{"request cache reads and writes overflowing the input total", func(e *Event) {
+			huge := int64(math.MaxInt64)
+			e.CachedInputTokens = &huge
+			e.CacheWriteInputTokens = &huge
+		}},
 		{"malformed media units", func(e *Event) {
 			units := "1.2.3"
 			e.Attempts[1].Usage.MediaUnits = &units

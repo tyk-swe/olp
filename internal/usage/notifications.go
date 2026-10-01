@@ -65,8 +65,10 @@ const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,r.event,v.attempts
 FROM olp.notification_deliveries v
 JOIN olp.notification_rules r ON r.id=v.rule_id
 JOIN olp.notification_destinations d ON d.id=r.destination_id
-WHERE v.status IN ('pending','failed') AND v.attempts<$1
-ORDER BY v.created_at
+WHERE v.status IN ('pending','failed') AND v.attempts<$1 AND r.enabled AND d.enabled
+  AND (v.last_attempt_at IS NULL OR v.attempts<1
+       OR v.last_attempt_at+make_interval(mins => 1<<GREATEST(v.attempts-1,0))<=now())
+ORDER BY v.created_at,v.id
 LIMIT $2`
 
 type dueAlert struct {
@@ -153,6 +155,8 @@ type notificationWorker struct {
 // notifications to their rules' destinations every minute until ctx ends,
 // checkpointing each pass as the notification_delivery worker task. A
 // delivery that fails is retried with backoff, up to maxDeliveryAttempts.
+// Deliveries for a disabled rule or destination wait, unsent, until both are
+// enabled again.
 func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger) {
 	w := &notificationWorker{
 		pool:         pool,

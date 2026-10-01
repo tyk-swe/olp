@@ -124,12 +124,14 @@ func (s *Server) listRequests(r *http.Request, p access.Principal) (access.Reply
 	var err error
 	query := r.URL.Query()
 	filters := RequestFilters{
-		Route:           textParam(query, "route"),
-		Model:           textParam(query, "model"),
-		Operation:       textParam(query, "operation"),
-		ErrorClass:      textParam(query, "error_class"),
-		AllProjects:     p.AllProjects,
-		AllowedProjects: p.ProjectIDs(),
+		Route:            textParam(query, "route"),
+		Model:            textParam(query, "model"),
+		Operation:        textParam(query, "operation"),
+		ErrorClass:       textParam(query, "error_class"),
+		AttributionKey:   textParam(query, "attribution_key"),
+		AttributionValue: textParam(query, "attribution_value"),
+		AllProjects:      p.AllProjects,
+		AllowedProjects:  p.ProjectIDs(),
 	}
 	if filters.ProviderID, err = uuidParam(query, "provider_id"); err != nil {
 		return access.Reply{}, err

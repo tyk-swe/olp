@@ -227,6 +227,34 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 	}
 	if family == "anthropic" {
 		n, hasCreation := count(f["cache_creation_input_tokens"])
+		creation, e := optionalObject(f["cache_creation"])
+		if e != nil {
+			return nil, e
+		}
+		if creation != nil {
+			detail, hasDetail := int64(0), false
+			for field, slot := range map[string]**int64{
+				"ephemeral_5m_input_tokens": &u.CacheWrite5MInputTokens,
+				"ephemeral_1h_input_tokens": &u.CacheWrite1HInputTokens,
+			} {
+				if v, ok := count(creation[field]); ok {
+					if v > math.MaxInt64-detail {
+						return nil, protocolError("usage count overflow")
+					}
+					*slot = &v
+					detail += v
+					hasDetail = true
+				} else if present(creation[field]) {
+					return nil, protocolError("invalid usage count")
+				}
+			}
+			if hasDetail && !hasCreation {
+				return nil, protocolError("cache write detail without total")
+			}
+			if detail > n {
+				return nil, protocolError("cache write detail exceeds total")
+			}
+		}
 		if hasCreation {
 			u.CacheWriteInputTokens = &n
 		}
@@ -234,27 +262,6 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 			return nil, protocolError("usage count overflow")
 		}
 		u.InputTokens += n
-		creation, e := optionalObject(f["cache_creation"])
-		if e != nil {
-			return nil, e
-		}
-		if creation != nil {
-			detail := int64(0)
-			for field, slot := range map[string]**int64{
-				"ephemeral_5m_input_tokens": &u.CacheWrite5MInputTokens,
-				"ephemeral_1h_input_tokens": &u.CacheWrite1HInputTokens,
-			} {
-				if v, ok := count(creation[field]); ok {
-					*slot = &v
-					detail += v
-				} else if present(creation[field]) {
-					return nil, protocolError("invalid usage count")
-				}
-			}
-			if detail > n {
-				return nil, protocolError("cache write detail exceeds total")
-			}
-		}
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	if n, ok := count(f[reason]); ok {
