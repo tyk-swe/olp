@@ -675,3 +675,46 @@ func TestValidateDocumentRejectsPricesForUnknownProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestApplySlotPositionsKeepsExportedPositionsUnique(t *testing.T) {
+	withSlots := func(names ...string) *Document {
+		doc := testDocument()
+		base := doc.Providers[0].Slots[0]
+		doc.Providers[0].Slots = nil
+		for i, name := range names {
+			slot := base
+			slot.Name = name
+			slot.IsDefault = i == 0
+			slot.Position = i
+			ref := CredentialRef(doc.Providers[0].Name, name)
+			slot.CredentialRef = &ref
+			doc.Providers[0].Slots = append(doc.Providers[0].Slots, slot)
+		}
+		return doc
+	}
+	cases := []struct {
+		name      string
+		positions map[string]int
+		want      []int
+	}{
+		{"draft holds every slot", map[string]int{"default": 0, "b": 2, "c": 3}, []int{0, 2, 3}},
+		{"draft deleted a slot after a gap", map[string]int{"default": 0, "b": 2}, []int{0, 1, 2}},
+		{"draft repeats a position", map[string]int{"default": 0, "b": 2, "c": 2}, []int{0, 1, 2}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := withSlots("default", "b", "c")
+			applySlotPositions(doc.Providers[0].Slots, tc.positions)
+			var got []int
+			for _, slot := range doc.Providers[0].Slots {
+				got = append(got, slot.Position)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("positions = %v, want %v", got, tc.want)
+			}
+			if _, err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
+				t.Fatalf("exported document rejected: %v", err)
+			}
+		})
+	}
+}

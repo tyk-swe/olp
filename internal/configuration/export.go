@@ -245,8 +245,7 @@ func exportSlots(ctx context.Context, q access.Queryer, providerID, providerName
 }
 
 // exportSlotPositions gives revision slots the positions their draft slots
-// store, so an export plans as a noop against its own installation. A slot the
-// draft no longer has keeps its revision order.
+// store, so an export plans as a noop against its own installation.
 func exportSlotPositions(ctx context.Context, q access.Queryer, providerID string, slots []SlotEntry) error {
 	rows, err := q.Query(ctx, "SELECT name,position FROM olp.provider_slots WHERE provider_id=$1", providerID)
 	if err != nil {
@@ -265,12 +264,29 @@ func exportSlotPositions(ctx context.Context, q access.Queryer, providerID strin
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	for i := range slots {
-		if position, ok := positions[slots[i].Name]; ok {
-			slots[i].Position = position
-		}
-	}
+	applySlotPositions(slots, positions)
 	return nil
+}
+
+// applySlotPositions sets each slot to its stored draft position when the
+// draft holds every slot at a distinct position. Otherwise, for example when
+// the draft has deleted a revision slot, the slots keep their revision order,
+// because mixing the two numberings could repeat a position.
+func applySlotPositions(slots []SlotEntry, positions map[string]int) {
+	seen := make(map[int]bool, len(slots))
+	for _, slot := range slots {
+		position, ok := positions[slot.Name]
+		if !ok || seen[position] {
+			for i := range slots {
+				slots[i].Position = i
+			}
+			return
+		}
+		seen[position] = true
+	}
+	for i := range slots {
+		slots[i].Position = positions[slots[i].Name]
+	}
 }
 
 func providerNameMap(ctx context.Context, q access.Queryer) (map[string]string, error) {
