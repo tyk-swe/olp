@@ -7073,7 +7073,10 @@
               "batch",
               "response",
               "continuation",
-              "strict_response"
+              "strict_response",
+              "interaction",
+              "strict_file",
+              "strict_batch"
             ],
             "type": "string"
           },
@@ -18563,7 +18566,10 @@
                 "batch",
                 "response",
                 "continuation",
-                "strict_response"
+                "strict_response",
+                "interaction",
+                "strict_file",
+                "strict_batch"
               ],
               "type": "string"
             }

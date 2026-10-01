@@ -126,6 +126,26 @@ func TestOverlaysRetainSourceAndRejectAmbiguousArrayPointers(t *testing.T) {
 		t.Fatal("overlapping overlay accepted")
 	}
 }
+
+func TestApplyRejectsOverlapSeparatedBySortedSibling(t *testing.T) {
+	limits := oif.Limits{MaxBytes: 8192, MaxNodes: 256, MaxDepth: 16}
+	change := func(pointer, value string) oif.Change {
+		return oif.Change{Pointer: pointer, Value: value, Origin: oif.ExplicitTransform, Reason: "fixture"}
+	}
+	for _, sibling := range []string{"a!", "a-x", "a.x"} {
+		d, err := oif.ParseJSON([]byte(`{"a":{"b":1},"`+sibling+`":2}`), limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := oif.Apply(d, []oif.Change{change("/a", `{"b":5}`), change("/"+sibling, `3`), change("/a/b", `9`)}); err == nil {
+			t.Fatalf("overlap hidden by sibling %q accepted", sibling)
+		}
+		if _, err := oif.Apply(d, []oif.Change{change("/a", `{"b":5}`), change("/"+sibling, `3`)}); err != nil {
+			t.Fatalf("disjoint overlay with sibling %q rejected: %v", sibling, err)
+		}
+	}
+}
+
 func FuzzSourceRetainsValidNativeLexemes(f *testing.F) {
 	for _, s := range []string{`{"n":9007199254740993}`, `{"x":"\ud83d\ude00"}`, `[]`, `null`, `{"a":[false,0,""]}`} {
 		f.Add([]byte(s))

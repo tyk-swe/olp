@@ -75,5 +75,6 @@ with openai.OpenAI(api_key=key, base_url=f"{origin}/v1", max_retries=0, timeout=
     final = unary_turn(client, next_request, handle=first["handle"])
     assert final["response"].choices[0].message.content == "Both tools completed."
     assert final["response"].choices[0].finish_reason == "stop"
+    assert final["assistant"] == {"role": "assistant", "content": "Both tools completed."}
     assert final["native_usage"] == {"input_tokens": 30, "output_tokens": 4}
     print(f"openai-python-3.8.0: {len(first['observations'])} observations; two native dispatches")
