@@ -33,13 +33,18 @@ type connection struct {
 	server   *http.Server
 	conn     *trackedConn
 	hijacked atomic.Bool
+	// finished closes once the connection's goroutine has released its
+	// admission, whether the connection was served, drained or hijacked.
+	finished chan struct{}
 }
 
-// awaitHijacked waits for the handler that owns a hijacked connection to close
-// it, closing it itself if ctx ends first.
-func (c *connection) awaitHijacked(ctx context.Context) error {
+// await waits for the connection's goroutine to finish. http.Server does not
+// track hijacked connections, and a hijack untracks the connection before its
+// ConnState hook runs, so Shutdown cannot rely on the hijacked flag. If ctx
+// ends first, closing the socket also ends a hijacked handler's hold on it.
+func (c *connection) await(ctx context.Context) error {
 	select {
-	case <-c.conn.done:
+	case <-c.finished:
 		return nil
 	case <-ctx.Done():
 		c.conn.Close()
@@ -84,7 +89,7 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 			continue
 		}
 		conn := &trackedConn{Conn: raw, done: make(chan struct{})}
-		entry := &connection{conn: conn}
+		entry := &connection{conn: conn, finished: make(chan struct{})}
 		one := &singleConnection{conn: conn, done: make(chan struct{})}
 		protocols := new(http.Protocols)
 		protocols.SetHTTP1(true)
@@ -106,6 +111,7 @@ func (s *listenerServer) Serve(socket net.Listener) error {
 		s.connections[entry] = struct{}{}
 		s.mu.Unlock()
 		go func() {
+			defer close(entry.finished)
 			timer := time.AfterFunc(s.age, func() {
 				ctx, cancel := context.WithTimeout(context.Background(), s.drain)
 				defer cancel()
@@ -154,11 +160,11 @@ func (s *listenerServer) Shutdown(ctx context.Context) error {
 		wg.Go(func() {
 			err := entry.server.Shutdown(ctx)
 			if err != nil {
+				// Close also drops a socket the handler hijacked.
 				entry.server.Close()
-			}
-			// http.Server does not track hijacked connections.
-			if entry.hijacked.Load() {
-				err = errors.Join(err, entry.awaitHijacked(ctx))
+				entry.conn.Close()
+			} else {
+				err = entry.await(ctx)
 			}
 			if err != nil {
 				mu.Lock()
