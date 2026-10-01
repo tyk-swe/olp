@@ -5347,6 +5347,15 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// PutCredentialSlotParams defines parameters for PutCredentialSlot.
+type PutCredentialSlotParams struct {
+	// IfMatch Current credential-slot ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListProviderCredentialsParams defines parameters for ListProviderCredentials.
 type ListProviderCredentialsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -5574,6 +5583,15 @@ type DiffRouteRevisionsParams struct {
 
 // RestoreRouteRevisionParams defines parameters for RestoreRouteRevision.
 type RestoreRouteRevisionParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PutRoutingPolicyParams defines parameters for PutRoutingPolicy.
+type PutRoutingPolicyParams struct {
+	// IfMatch Current policy ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 

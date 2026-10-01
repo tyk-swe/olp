@@ -631,3 +631,90 @@ func TestExportsReferenceEveryCredentialSlotAGrantBacks(t *testing.T) {
 		t.Fatalf("an imported grant provider awaiting enrollment changed: %+v", result.Actions)
 	}
 }
+
+// Apply keeps a model a document omits as a disabled row without
+// capabilities; re-planning the same document must not see it as a change.
+func TestCanonicalEqualProviderIgnoresTombstonedModels(t *testing.T) {
+	desired := testDocument().Providers[0]
+	current := testDocument().Providers[0]
+	current.Models = append(current.Models, ModelEntry{UpstreamModel: "retired", DisplayName: "retired"})
+	if !canonicalEqualProvider(&desired, &current) {
+		t.Fatal("a tombstoned model made the provider differ")
+	}
+	if len(current.Models) != 2 {
+		t.Fatalf("comparison mutated the current entry: %+v", current.Models)
+	}
+	enabled := testDocument().Providers[0]
+	enabled.Models = append(enabled.Models, ModelEntry{UpstreamModel: "retired", Enabled: true})
+	if canonicalEqualProvider(&desired, &enabled) {
+		t.Fatal("an enabled undeclared model must differ")
+	}
+	capable := testDocument().Providers[0]
+	capable.Models = append(capable.Models, ModelEntry{UpstreamModel: "retired", Capabilities: []CapabilityEntry{{Operation: "generation", Surface: "openai", Mode: "unary"}}})
+	if canonicalEqualProvider(&desired, &capable) {
+		t.Fatal("an undeclared model with capabilities must differ")
+	}
+}
+
+// A price naming an unknown provider would otherwise apply to every provider
+// of its kind.
+func TestValidateDocumentRejectsPricesForUnknownProviders(t *testing.T) {
+	s := testServer()
+	q := mapQueryer{t: t, stub: []queryStub{{match: "FROM olp.providers", rows: [][]any{{"other-id", "Other"}}}}}
+	doc := testDocument()
+	doc.Pricing.Prices[0].Provider = ptr("acme-typo")
+	var problem *access.Problem
+	if _, err := s.validateDocument(t.Context(), q, doc); !errors.As(err, &problem) || problem.Field != "pricing.prices.0.provider" {
+		t.Fatalf("expected an invalid price provider, got %v", err)
+	}
+	for _, name := range []string{"ACME", "other"} {
+		doc = testDocument()
+		doc.Pricing.Prices[0].Provider = ptr(name)
+		if _, err := s.validateDocument(t.Context(), q, doc); err != nil {
+			t.Fatalf("price for %s: %v", name, err)
+		}
+	}
+}
+
+func TestApplySlotPositionsKeepsExportedPositionsUnique(t *testing.T) {
+	withSlots := func(names ...string) *Document {
+		doc := testDocument()
+		base := doc.Providers[0].Slots[0]
+		doc.Providers[0].Slots = nil
+		for i, name := range names {
+			slot := base
+			slot.Name = name
+			slot.IsDefault = i == 0
+			slot.Position = i
+			ref := CredentialRef(doc.Providers[0].Name, name)
+			slot.CredentialRef = &ref
+			doc.Providers[0].Slots = append(doc.Providers[0].Slots, slot)
+		}
+		return doc
+	}
+	cases := []struct {
+		name      string
+		positions map[string]int
+		want      []int
+	}{
+		{"draft holds every slot", map[string]int{"default": 0, "b": 2, "c": 3}, []int{0, 2, 3}},
+		{"draft deleted a slot after a gap", map[string]int{"default": 0, "b": 2}, []int{0, 1, 2}},
+		{"draft repeats a position", map[string]int{"default": 0, "b": 2, "c": 2}, []int{0, 1, 2}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := withSlots("default", "b", "c")
+			applySlotPositions(doc.Providers[0].Slots, tc.positions)
+			var got []int
+			for _, slot := range doc.Providers[0].Slots {
+				got = append(got, slot.Position)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("positions = %v, want %v", got, tc.want)
+			}
+			if _, err := testServer().validateDocument(t.Context(), nil, doc); err != nil {
+				t.Fatalf("exported document rejected: %v", err)
+			}
+		})
+	}
+}

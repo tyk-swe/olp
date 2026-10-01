@@ -33,11 +33,8 @@ export async function putCredentialSlot(
       '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
       {
         params: {
-          path: { provider_id: providerId, slot_id: slot.slot.id! }
-        },
-        headers: {
-          'If-Match': etag,
-          'Idempotency-Key': crypto.randomUUID()
+          path: { provider_id: providerId, slot_id: slot.slot.id! },
+          header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
         },
         body: slot
       }
