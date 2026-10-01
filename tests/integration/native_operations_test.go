@@ -271,11 +271,15 @@ func TestRerank(t *testing.T) {
 					if _, ok := body["top_k"]; ok {
 						t.Errorf("cohere received voyage top_k: %v", body)
 					}
+					if _, ok := body["return_documents"]; ok {
+						t.Errorf("cohere v2 received return_documents: %v", body)
+					}
+					// Cohere v2 results never carry documents.
 					writeJSON(w, map[string]any{
 						"id": "rr-1",
 						"results": []any{
-							map[string]any{"index": 1, "relevance_score": 0.9, "document": "b"},
-							map[string]any{"index": 0, "relevance_score": 0.4, "document": "a"},
+							map[string]any{"index": 1, "relevance_score": 0.9},
+							map[string]any{"index": 0, "relevance_score": 0.4},
 						},
 						"meta": map[string]any{"billed_units": map[string]any{"search_units": 1.5}},
 					})
