@@ -136,6 +136,9 @@
       await goto(resolve(`/media-jobs${page.url.search}`));
     } catch (error) {
       actionError = errorMessage(error, 'The job could not be deleted.');
+      // A refused delete may still have moved the job (for example to
+      // delete_pending with a new ETag), so show the server's current state.
+      void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
     } finally {
       actionBusy = null;
     }

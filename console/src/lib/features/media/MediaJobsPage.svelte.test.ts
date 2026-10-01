@@ -9,6 +9,7 @@ import {
   refreshMediaJob,
   type MediaJob
 } from './api';
+import { ApiProblem } from '$lib/api/http';
 import MediaJobsProbe from './test/MediaJobsProbe.svelte';
 
 const navigation = vi.hoisted(() => ({ goto: vi.fn() }));
@@ -239,5 +240,42 @@ describe('operator actions', () => {
     );
     await settle();
     expect(navigation.goto).toHaveBeenCalledWith('/media-jobs');
+  });
+
+  it('reloads the job after a refused delete moves it to delete_pending', async () => {
+    vi.mocked(getMediaJob)
+      .mockImplementationOnce(() => deferred(succeededJob))
+      .mockImplementation(() =>
+        deferred({
+          ...succeededJob,
+          lifecycle: 'delete_pending',
+          etag: 'job-etag-2'
+        })
+      );
+    vi.mocked(deleteMediaJob).mockRejectedValue(
+      new ApiProblem({
+        title: 'Delete pending',
+        status: 409,
+        detail: 'The provider has not confirmed the delete yet.'
+      })
+    );
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true)
+    );
+    await establish(succeededJob.id);
+    button('Delete content')!.click();
+    flushSync();
+    await settle();
+    flushSync();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'not confirmed'
+    );
+    expect(getMediaJob).toHaveBeenCalledTimes(2);
+    const lifecycle = [...host.querySelectorAll('dt')].find(
+      (term) => term.textContent === 'Lifecycle'
+    )!.nextElementSibling!;
+    expect(lifecycle.textContent).not.toBe('Active');
+    expect(navigation.goto).not.toHaveBeenCalled();
   });
 });

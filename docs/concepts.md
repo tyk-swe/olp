@@ -13,9 +13,9 @@ the route through their stored mapping. Callers never select an upstream
 provider/model directly. Operators can change that mapping without changing the
 caller's model name.
 
-A slug contains at most 63 bytes of lowercase ASCII letters, digits, and single
-internal hyphens. It starts and ends with a letter or digit. Uppercase,
-underscores, dots, slashes, and consecutive hyphens are rejected.
+A slug contains 1–100 bytes of lowercase ASCII letters, digits, `.`, `_`, and
+`-`, and starts with a letter or digit. Uppercase letters, slashes, and other
+characters are rejected.
 
 A route defines allowed operations, an overall deadline, an attempt budget, and
 targets with provider models, priorities, weights, and timeouts. Target timeouts

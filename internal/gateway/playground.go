@@ -453,12 +453,15 @@ type playgroundStreamWriter struct {
 
 func (sw *playgroundStreamWriter) emit(frame []byte) error {
 	payload, _ := json.Marshal(map[string]any{"data": string(frame)})
-	return sw.write("frame", payload)
+	return sw.write("frame", payload, true)
 }
 
-func (sw *playgroundStreamWriter) write(event string, data []byte) error {
+// write sends one SSE event. Only provider frames count against maxTotal: the
+// terminal done or error event is gateway-generated and must still arrive after
+// the frames have exhausted the budget, or the client sees a silent truncation.
+func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool) error {
 	chunk := int64(len(event) + len(data) + len("event: \ndata: \n\n"))
-	if sw.total+chunk > sw.maxTotal {
+	if limited && sw.total+chunk > sw.maxTotal {
 		return errResponseTooLarge
 	}
 	rc := http.NewResponseController(sw.w)
@@ -482,7 +485,7 @@ func (sw *playgroundStreamWriter) write(event string, data []byte) error {
 func (sw *playgroundStreamWriter) finish(x *execution, out *outcome) {
 	if out.err != nil {
 		data, _ := json.Marshal(map[string]any{"code": out.err.Code, "message": out.err.Message, "status": out.err.Status})
-		_ = sw.write("error", data)
+		_ = sw.write("error", data, false)
 		return
 	}
 	meta := map[string]any{
@@ -494,7 +497,7 @@ func (sw *playgroundStreamWriter) finish(x *execution, out *outcome) {
 		meta["usage"] = out.completion.Usage
 	}
 	data, _ := json.Marshal(meta)
-	_ = sw.write("done", data)
+	_ = sw.write("done", data, false)
 }
 
 func uuidString() string { return access.NewID() }
