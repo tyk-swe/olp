@@ -380,6 +380,17 @@ func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconc
 	claimID := *record.ReconciliationClaimID
 	outcome := s.reconcileOperation(ctx, &record, claimID)
 	if errors.Is(outcome, errClaimLost) {
+		// The refusal may be lifecycle drift under this worker's own claim
+		// (for example a gateway BeginDeletion during a poll); release it so
+		// the row is not stranded for the extended lease. The release is
+		// claim-fenced, so a real handoff is refused and leaves the new owner
+		// untouched.
+		if err := FinishReconciliation(ctx, s.Pool, record.ID, claimID, s.now().Add(5*time.Second), nil); err != nil {
+			var jobErr *JobError
+			if !errors.As(err, &jobErr) || jobErr.Kind != JobErrorPrecondition {
+				s.log().Warn("media reconciliation claim release failed", "job_id", record.ID, "error", err)
+			}
+		}
 		return outcomeHandedOff
 	}
 	now := s.now()
@@ -390,7 +401,7 @@ func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconc
 			(record.State == StateQueued || record.State == StateRunning) {
 			next = now.Add(5 * time.Second)
 		} else {
-			next = now.Add(24 * time.Hour)
+			next = nextTerminalReconciliation(record, now)
 		}
 	} else {
 		code := outcome.Error()
@@ -612,12 +623,33 @@ func failureClassCode(f *Failure) string {
 	}
 }
 
+// nextTerminalReconciliation schedules the next pass for a job that is no
+// longer polling, capped at its expiry so expired jobs are reclaimed on time.
+func nextTerminalReconciliation(record JobRecord, now time.Time) time.Time {
+	next := now.Add(24 * time.Hour)
+	if record.Lifecycle != LifecycleActive {
+		return next
+	}
+	deadline := record.CreatedAt.Add(30 * 24 * time.Hour)
+	if record.ExpiresAt != nil && record.ExpiresAt.Before(deadline) {
+		deadline = *record.ExpiresAt
+	}
+	if deadline.Before(next) {
+		next = deadline
+		if next.Before(now) {
+			next = now
+		}
+	}
+	return next
+}
+
 func refreshable(record *JobRecord, now time.Time) bool {
 	switch record.Lifecycle {
 	case LifecycleCreateAmbiguous, LifecycleCreateCleanupPending, LifecycleDeletePending:
 		return true
 	case LifecycleCreating:
-		return !record.UpdatedAt.Add(5 * time.Minute).After(now)
+		// A creating job is abandoned only once its dispatch window passes.
+		return !record.NextReconciliationAt.After(now)
 	case LifecycleActive:
 		return record.UpstreamJobID != nil && (record.State == StateQueued || record.State == StateRunning)
 	}

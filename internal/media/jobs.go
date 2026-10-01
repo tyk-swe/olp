@@ -158,6 +158,10 @@ type Reservation struct {
 	Surface             string
 	CredentialVersionID *string
 	SlotID              string
+	// StaleAfter is when an unattached creating job may be treated as
+	// abandoned. It should cover the whole create dispatch; zero falls back
+	// to five minutes after the reservation.
+	StaleAfter time.Time
 }
 
 // JobUpdate carries one upstream poll result.
@@ -493,6 +497,10 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid,
 			Message: "the pinned provider authority is unavailable or incompatible with current video support"}
 	}
+	var staleAfter *time.Time
+	if !input.StaleAfter.IsZero() {
+		staleAfter = &input.StaleAfter
+	}
 	tag, err := tx.Exec(ctx, `WITH authority AS (
 			SELECT r.id AS runtime_generation_id, r.snapshot->'providers'->>$3::text AS provider_key,
 			       r.snapshot#>'{providers}' -> $3::text AS provider_entry
@@ -553,16 +561,16 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 			id, upstream_job_id, api_key_id, provider_id, provider_model,
 			route_slug, operation, surface, state, lifecycle_state,
 			runtime_generation_id, provider_revision_id, credential_version_id, etag, slot_id,
-			strict_contract
+			strict_contract, next_reconciliation_at
 		)
 		SELECT $1::uuid, NULL, $2::uuid, $3::uuid, $4, $5, $6, $7, 'queued', 'creating',
 		       compatible.runtime_generation_id, compatible.provider_revision_id, $9::uuid, $10::uuid, $11::uuid,
-		       $12::boolean
+		       $12::boolean, COALESCE($13::timestamptz, now() + interval '5 minutes')
 		FROM compatible`,
 		input.ID, input.APIKeyID, input.ProviderID, input.UpstreamModel,
 		input.RouteSlug, input.Operation, input.Surface,
 		input.RuntimeGenerationID, input.CredentialVersionID, uuid.Must(uuid.NewV7()), input.SlotID,
-		input.StrictContract)
+		input.StrictContract, staleAfter)
 	if err != nil {
 		return JobRecord{}, dbError(err)
 	}
@@ -607,6 +615,8 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 				error_class = $7,
 				last_polled_at = $8,
 				reconciliation_error = NULL,
+				-- The create's dispatch window no longer gates an attached job.
+				next_reconciliation_at = now(),
 				etag = $9,
 				native_source_id = $10::uuid
 			WHERE id = $1 AND lifecycle_state = 'creating'
@@ -978,8 +988,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 			       OR reconciliation_claimed_until <= $1)
 			  AND (
 			    lifecycle_state IN ('create_ambiguous','create_cleanup_pending','delete_pending')
-			    OR (lifecycle_state = 'creating'
-			        AND updated_at <= $1 - interval '5 minutes')
+			    OR lifecycle_state = 'creating'
 			    OR (lifecycle_state = 'active'
 			        AND upstream_job_id IS NOT NULL
 			        AND (
@@ -1096,7 +1105,7 @@ func ReconciliationSummary(ctx context.Context, q Querier, now time.Time) (Summa
 	err := q.QueryRow(ctx, `SELECT COUNT(*) FILTER (
 				WHERE lifecycle_state NOT IN ('active','deleted'))::bigint,
 			COUNT(*) FILTER (
-				WHERE (lifecycle_state = 'creating' AND updated_at < $1::timestamptz - interval '5 minutes')
+				WHERE (lifecycle_state = 'creating' AND next_reconciliation_at < $1::timestamptz)
 				   OR (lifecycle_state NOT IN ('creating','active','deleted')
 				       AND next_reconciliation_at < $1::timestamptz - interval '1 minute')
 				   OR (lifecycle_state = 'active'
