@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -271,16 +272,29 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			committed = true
 		}
 		if _, err := w.Write(projected); err != nil {
-			return err
+			return fmt.Errorf("%w: %v", errClientWrite, err)
 		}
 		x.delivered(s.now())
 		if fact.Interaction != nil {
 			fact.Interaction.ClientState = usage.ClientPartial
 		}
-		return http.NewResponseController(w).Flush()
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return fmt.Errorf("%w: %v", errClientWrite, err)
+		}
+		return nil
 	}
 	_, streamErr := protocols.StreamWithEvents(openai.FamilyResponses, openai.FamilyResponses,
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, nil)
+	if streamErr != nil && (errors.Is(streamErr, errClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
+		// The client left; the provider is not at fault.
+		x.failure = (&attemptFailure{class: classCancelled}).toError()
+		fact.Class = classCancelled
+		if fact.Interaction != nil {
+			fact.Interaction.UpstreamState = usage.UpstreamUnknown
+		}
+		s.finish(x, &outcome{err: x.failure, committed: committed, cancelled: true}, 0)
+		return nil
+	}
 	if streamErr != nil {
 		var upstream *openai.UpstreamError
 		if errors.As(streamErr, &upstream) && nativeTerminalFailure {

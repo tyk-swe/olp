@@ -88,6 +88,7 @@ type openaiFixture struct {
 	respCancelRaw   atomic.Value
 	lastRespQuery   atomic.Value
 	holdCreated     atomic.Bool
+	holdGet         atomic.Bool
 	dials           atomic.Int64
 }
 
@@ -310,7 +311,17 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		if r.URL.Query().Get("stream") == "true" {
 			w.Header().Set("Content-Type", "text/event-stream")
 			if custom := f.respGetStream.Load(); custom != nil {
-				_, _ = io.WriteString(w, custom.(string))
+				wire := custom.(string)
+				if f.holdGet.Load() {
+					// Serve the first event, then hold the stream open
+					// until the caller goes away.
+					end := strings.Index(wire, "\n\n")
+					_, _ = io.WriteString(w, wire[:end+2])
+					_ = http.NewResponseController(w).Flush()
+					<-r.Context().Done()
+					return
+				}
+				_, _ = io.WriteString(w, wire)
 				return
 			}
 			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": res})
@@ -839,6 +850,9 @@ func TestResponseLifecycle(t *testing.T) {
 	sent, _ := fixture.lastReq.Load().(map[string]any)
 	if sent["previous_response_id"] != "resp-up-1" {
 		t.Fatalf("previous_response_id was not rewritten upstream: %v", sent)
+	}
+	if next["previous_response_id"] != local {
+		t.Fatalf("chained response leaked the upstream previous_response_id: %v", next)
 	}
 
 	status, cancelled, _ := h.gateway("POST", "/v1/responses/"+local+"/cancel", opted, nil)
@@ -1518,6 +1532,117 @@ func TestRealtimeConcurrencyLeasesOutliveRouteTimeout(t *testing.T) {
 				return true
 			})
 		})
+	}
+}
+
+func TestChainedResponsesShowOnlyLocalPreviousIDs(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAI(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}}, []string{"generation"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	status, first, _ := h.gateway("POST", "/v1/responses", key, map[string]any{"model": slug, "input": "hi", "store": true})
+	if status != 200 {
+		t.Fatalf("create response: %d %v", status, first)
+	}
+	parent, _ := first["id"].(string)
+	child := map[string]any{"previous_response_id": "resp-up-1"}
+	for k, v := range fixture.resps["resp-up-1"] {
+		if _, set := child[k]; !set {
+			child[k] = v
+		}
+	}
+	child["id"] = "resp-up-2"
+	fixture.resps["resp-up-2"] = child
+	fixture.respID.Store("resp-up-2")
+
+	status, next, _ := h.gateway("POST", "/v1/responses", key, map[string]any{"model": slug, "input": "follow-up", "previous_response_id": parent, "store": true})
+	if status != 200 || next["previous_response_id"] != parent {
+		t.Fatalf("chained response leaked the upstream previous_response_id: %d %v", status, next)
+	}
+	status, raw, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"follow-up","previous_response_id":"`+parent+`","store":true,"stream":true}`), map[string]string{"Content-Type": "application/json"})
+	if status != 200 || bytes.Contains(raw, []byte("resp-up-1")) || !bytes.Contains(raw, []byte(`"previous_response_id":"`+parent+`"`)) {
+		t.Fatalf("chained stream leaked the upstream previous_response_id: %d %s", status, raw)
+	}
+	status, fetched, _ := h.gateway("GET", "/v1/responses/"+next["id"].(string), key, nil)
+	if status != 200 || fetched["previous_response_id"] != parent {
+		t.Fatalf("retrieved response leaked the upstream previous_response_id: %d %v", status, fetched)
+	}
+}
+
+func TestOmittedStoreKeepsTransformedResponseUnmapped(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAI(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}}, []string{"generation"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	// Unary and streaming agree: an omitted store on a transformed route
+	// passed no state gate, so neither records a retained mapping.
+	status, created, _ := h.gateway("POST", "/v1/responses", key, map[string]any{"model": slug, "input": "hi"})
+	if status != 200 || created["id"] != "resp-up-1" {
+		t.Fatalf("unary response: %d %v", status, created)
+	}
+	status, raw, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"hi","stream":true}`), map[string]string{"Content-Type": "application/json"})
+	if status != 200 || !bytes.Contains(raw, []byte(`"id":"resp-up-1"`)) {
+		t.Fatalf("streamed response: %d %s", status, raw)
+	}
+	var mapped int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='response'`).Scan(&mapped); err != nil || mapped != 0 {
+		t.Fatalf("omitted store recorded %d response mappings: %v", mapped, err)
+	}
+}
+
+func TestRetainedResponseStreamDisconnectIsCancelled(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}},
+		[]string{"generation"}, nil, map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	status, created, _ := h.gateway("POST", "/v1/responses", key, map[string]any{"model": slug, "input": "hi", "store": true})
+	if status != 200 {
+		t.Fatalf("create response: %d %v", status, created)
+	}
+	local := created["id"].(string)
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	fixture.holdGet.Store(true)
+	fixture.respGetStream.Store("event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":0,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-up-1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.HTTP.URL+"/v1/responses/"+local+"?stream=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+key)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		t.Fatalf("retained stream: %d %s", response.StatusCode, body)
+	}
+	first := make([]byte, 1)
+	if _, err := io.ReadFull(response.Body, first); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	response.Body.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for sink.count() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("disconnected retained stream emitted no envelope")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	env := sink.last()
+	if env.Outcome != "cancelled" || env.Status != 0 || len(env.Attempts) != 1 || env.Attempts[0].Class != "cancelled" || env.ErrorClass == "response_stream_incomplete" {
+		t.Fatalf("client disconnect recorded as a provider failure: %+v", env)
 	}
 }
 
