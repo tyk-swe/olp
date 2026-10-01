@@ -2047,9 +2047,10 @@
             "type": "string"
           },
           "expires_in_hours": {
-            "description": "Invitation lifetime in hours. Defaults to seven days and is capped at\nthirty days.",
+            "description": "Invitation lifetime in hours, from 1 to 720. Defaults to seven days (168)\nand is capped at thirty days.",
             "format": "int32",
-            "minimum": 0,
+            "maximum": 720,
+            "minimum": 1,
             "type": [
               "integer",
               "null"

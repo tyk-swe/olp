@@ -1993,8 +1993,8 @@ type CreateBudgetGroupResponse struct {
 type CreateInvitationRequest struct {
 	Email string `json:"email"`
 
-	// ExpiresInHours Invitation lifetime in hours. Defaults to seven days and is capped at
-	// thirty days.
+	// ExpiresInHours Invitation lifetime in hours, from 1 to 720. Defaults to seven days (168)
+	// and is capped at thirty days.
 	ExpiresInHours nullable.Nullable[int32] `json:"expires_in_hours,omitempty"`
 	Role           string                   `json:"role"`
 }

@@ -136,7 +136,9 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 		cancel()
 		return r, cancel, err
 	}
-	r = r.WithContext(ctx)
+	// Resolve the client once so audit rows written by any package attribute
+	// the same trusted-proxy client address that admission uses.
+	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.clientIP(r)))
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	_, machine := managementBearer(r)
 	if machine {
@@ -349,8 +351,36 @@ func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 
 // Audit records a metadata-only audit event inside the mutation's
 // transaction, attributed to actor.
+type clientIPKey struct{}
+
+// clientIP resolves the request's client address through the trusted-proxy
+// resolver when one is configured.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.ClientIP != nil {
+		return s.ClientIP(r)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// auditSource returns the client address guard resolved for r, falling back
+// to the peer address for requests that did not pass through guard.
+func auditSource(r *http.Request) any {
+	source, ok := r.Context().Value(clientIPKey{}).(string)
+	if !ok {
+		source, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+	if source == "" {
+		return nil
+	}
+	return source
+}
+
 func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string) error {
-	source, _, _ := net.SplitHostPort(r.RemoteAddr)
+	source := auditSource(r)
 	family := "other"
 	agent := r.UserAgent()
 	for _, known := range []string{"Firefox", "Chrome", "Safari", "curl"} {

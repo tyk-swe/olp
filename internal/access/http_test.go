@@ -206,3 +206,28 @@ func TestAccessBodyReadDeadlineAllowsKeepAlive(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardCarriesTrustedClientIPToAudit(t *testing.T) {
+	seen := make(chan any, 1)
+	s := &Server{Origin: "https://console.test", ClientIP: func(*http.Request) string { return "203.0.113.7" }}
+	server := httptest.NewServer(s.serve(1024, time.Minute, func(r *http.Request) (Reply, error) {
+		seen <- auditSource(r)
+		return OK(map[string]any{}), nil
+	}))
+	defer server.Close()
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := <-seen; got != "203.0.113.7" {
+		t.Fatalf("audit source: %v", got)
+	}
+	direct := &Server{}
+	if got := direct.clientIP(&http.Request{RemoteAddr: "10.0.0.5:1234"}); got != "10.0.0.5" {
+		t.Fatalf("peer address: %q", got)
+	}
+	if got := auditSource(&http.Request{}); got != nil {
+		t.Fatalf("unrouted request source: %v", got)
+	}
+}
