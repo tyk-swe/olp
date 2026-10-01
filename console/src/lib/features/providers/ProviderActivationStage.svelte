@@ -154,7 +154,7 @@
     font-weight: 500;
   }
   /* The one bright card in the wizard: `card-light` re-maps every token for
-     the bone surface, so nothing below may assume a dark background. */
+     the paper surface, so nothing below may assume a dark background. */
   .complete-panel {
     padding: 1.5rem;
     border-radius: var(--radius-panel);
@@ -170,12 +170,19 @@
     height: 2.5rem;
     place-items: center;
     margin: 0 auto 1rem;
-    border: 1px solid var(--metric);
     border-radius: 50%;
-    background: transparent;
-    color: var(--metric);
+    background: var(--button-fill);
+    box-shadow: 0 0 0 6px var(--signal-soft);
+    color: var(--button-fill-text);
     font-size: 1rem;
     font-weight: 500;
+    animation: complete-pop 560ms var(--ease-out) 120ms backwards;
+  }
+  @keyframes complete-pop {
+    from {
+      box-shadow: 0 0 0 0 var(--signal-soft);
+      transform: scale(0.5);
+    }
   }
   .complete-panel .form-actions {
     justify-content: center;

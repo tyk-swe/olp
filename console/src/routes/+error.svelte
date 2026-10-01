@@ -1,10 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
+  import BrandMark from '$lib/components/BrandMark.svelte';
 </script>
 
 <main class="error-shell">
   <section class="card card-light error-card">
+    <BrandMark size={28} />
     <p class="eyebrow">{page.status}</p>
     <h1>This page could not be loaded.</h1>
     <p>
@@ -25,17 +27,32 @@
 </main>
 
 <style>
+  /* The signal glow sits beneath the paper card, never behind the copy. */
   .error-shell {
     display: grid;
     min-height: 100dvh;
     padding: 1.5rem;
     place-items: center;
+    background:
+      radial-gradient(
+        40rem 22rem at 50% 58%,
+        color-mix(in srgb, var(--color-blue-500) 16%, transparent),
+        transparent 70%
+      ),
+      var(--canvas);
   }
 
   .error-card {
+    display: grid;
+    justify-items: start;
     width: min(100%, 31rem);
     padding: 2rem;
     border-radius: var(--radius-panel);
+    animation: rise 560ms var(--ease-out) backwards;
+  }
+
+  .error-card .eyebrow {
+    margin-top: 1.5rem;
   }
 
   h1 {

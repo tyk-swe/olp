@@ -11,6 +11,7 @@
   import { copyText } from '$lib/clipboard';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
+  import { slidingIndicator } from '$lib/components/indicator';
   import {
     SDK_OPTIONS,
     sdkLabel,
@@ -131,7 +132,12 @@
             >Route slugs are sent as the model.</small
           >
         </div>
-        <div class="tabs" role="tablist" aria-label="SDK language">
+        <div
+          class="tabs slide-indicator"
+          role="tablist"
+          aria-label="SDK language"
+          use:slidingIndicator={sdk}
+        >
           {#each SDK_OPTIONS as option, index (option)}<button
               id={`sdk-tab-${option}`}
               class:active={sdk === option}
@@ -266,8 +272,11 @@
     color: var(--foreground);
   }
   .tabs button.active {
-    border-color: var(--foreground);
-    color: var(--foreground);
+    border-color: var(--signal);
+    color: var(--foreground-hover);
+  }
+  .tabs:global([data-indicator]) button.active {
+    border-color: transparent;
   }
   pre {
     max-height: 18rem;

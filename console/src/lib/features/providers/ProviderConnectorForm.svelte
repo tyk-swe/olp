@@ -347,7 +347,10 @@
     padding: 0.8rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
-    transition: border-color var(--motion);
+    transition:
+      border-color var(--motion),
+      background-color var(--motion),
+      box-shadow var(--motion);
   }
   .connector-grid label:hover {
     border-color: var(--border-strong);
@@ -357,8 +360,9 @@
     outline-offset: 2px;
   }
   .connector-grid label.selected {
-    border-color: var(--foreground);
-    background: transparent;
+    border-color: var(--signal);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--signal);
   }
   .connector-grid input {
     position: absolute;

@@ -22,6 +22,9 @@ export default defineConfig({
   reporter: 'list',
   use: {
     ...devices['Desktop Chrome'],
+    // Entrance motion is decorative; accessibility scans and text assertions
+    // must never sample a half-faded frame.
+    reducedMotion: 'reduce',
     actionTimeout: 10_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'

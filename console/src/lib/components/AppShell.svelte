@@ -237,9 +237,57 @@
     top: 0;
     padding: 0 1.5rem;
     border-bottom: 1px solid var(--border-hairline);
-    background: color-mix(in srgb, var(--canvas) 85%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--canvas) 78%, transparent);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+  }
+
+  /* A faint signal seam along the header's lower edge. */
+  .topbar::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--signal) 45%, transparent) 50%,
+      transparent
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-slow) var(--ease-out);
+  }
+
+  /* Where scroll-driven animation is supported, the header starts clear and
+     firms up (and lights its seam) over the first 120px of scroll. */
+  @supports (animation-timeline: scroll()) {
+    .topbar {
+      animation: topbar-solidify linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 120px;
+    }
+
+    .topbar::after {
+      animation: topbar-seam linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 120px;
+    }
+  }
+
+  @keyframes topbar-solidify {
+    from {
+      border-bottom-color: transparent;
+      background-color: color-mix(in srgb, var(--canvas) 40%, transparent);
+    }
+  }
+
+  @keyframes topbar-seam {
+    to {
+      opacity: 1;
+    }
   }
 
   .topbar-row {
@@ -302,11 +350,21 @@
   }
 
   .edition-dot {
+    position: relative;
     width: 6px;
     height: 6px;
     flex: none;
     border-radius: 50%;
     background: var(--signal);
+  }
+
+  .edition-dot::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--signal);
+    animation: ping 2.4s var(--ease-out) infinite;
   }
 
   .edition-name {
@@ -349,14 +407,23 @@
     color: var(--foreground-hover);
   }
 
+  .account-menu summary :global(.icon-chevron) {
+    transition: transform var(--motion);
+  }
+
+  .account-menu[open] summary :global(.icon-chevron) {
+    transform: rotate(180deg);
+  }
+
   .avatar {
     display: grid;
     width: 1.75rem;
     height: 1.75rem;
     place-items: center;
     border-radius: var(--radius-control);
-    background: var(--foreground);
-    color: var(--canvas);
+    background: var(--button-fill);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 18%);
+    color: var(--button-fill-text);
     font-family: var(--font-mono);
     font-size: 0.75rem;
   }
@@ -372,6 +439,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
     background: var(--surface-raised);
+    box-shadow: var(--shadow-overlay);
+    transform-origin: top right;
+  }
+
+  .account-menu[open] .account-popover {
+    animation: pop-in 200ms var(--ease-out);
   }
 
   .account-popover a,
@@ -392,7 +465,7 @@
 
   .account-popover a:hover,
   .account-popover button:hover {
-    background: color-mix(in srgb, var(--foreground) 8%, var(--surface-raised));
+    background: color-mix(in srgb, var(--signal) 12%, var(--surface-raised));
     color: var(--foreground-hover);
   }
 
@@ -427,9 +500,13 @@
   }
 
   .mobile-dialog::backdrop {
-    background: rgb(16 16 16 / 78%);
+    background: var(--backdrop);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+  }
+
+  .mobile-dialog[open]::backdrop {
+    animation: fade 240ms var(--ease-out);
   }
 
   .mobile-drawer {
@@ -439,7 +516,11 @@
     padding: 1rem 0.75rem;
     border-right: 1px solid var(--border-hairline);
     background: var(--surface);
-    box-shadow: 4px 0 24px rgb(0 0 0 / 40%);
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .mobile-dialog[open] .mobile-drawer {
+    animation: slide-in-left 320ms var(--ease-out);
   }
 
   .drawer-heading {
@@ -511,6 +592,11 @@
     .edition-dot {
       border: 1px solid CanvasText;
       background: CanvasText;
+    }
+
+    .edition-dot::after,
+    .topbar::after {
+      display: none;
     }
 
     .account-popover a:hover,

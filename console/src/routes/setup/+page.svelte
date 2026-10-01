@@ -6,6 +6,7 @@
   import { getSetupStatus } from '$lib/features/access/setup/api';
   import OwnerSetup from '$lib/features/access/setup/OwnerSetup.svelte';
   import SetupFrame from '$lib/components/SetupFrame.svelte';
+  import BrandMark from '$lib/components/BrandMark.svelte';
 
   let setupView = $state<'checking' | 'ready' | 'error'>('checking');
   let message = $state('');
@@ -51,7 +52,7 @@
 <SetupFrame>
   {#if setupView === 'checking'}
     <div class="status-card" role="status">
-      <span class="spinner" aria-hidden="true"></span>
+      <BrandMark size={40} animated />
       <h2>Checking this installation</h2>
       <p>
         The console is asking the local control API whether first-run setup is
@@ -91,32 +92,15 @@
     color: var(--foreground-muted);
   }
 
-  .spinner,
   .error-symbol {
     display: grid;
     width: 2.5rem;
     height: 2.5rem;
     place-items: center;
-    border-radius: var(--radius-control);
-  }
-
-  .spinner {
-    border: 2px solid var(--border);
-    border-top-color: var(--signal);
-    border-radius: 50%;
-    animation: spin 700ms linear infinite;
-  }
-
-  .error-symbol {
     border: 1px solid var(--danger);
+    border-radius: var(--radius-control);
     color: var(--danger);
     font-size: 1.25rem;
     font-weight: 500;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

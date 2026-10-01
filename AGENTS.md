@@ -38,6 +38,22 @@ uses two-space indentation, single quotes, and no trailing commas through
 Prettier; use `camelCase` helpers and `PascalCase.svelte` components. Follow go
 vet and ESLint; keep route components thin.
 
+### Console design system
+
+The console is dark-only: black canvas, cool carbon surfaces, and electric blue
+as the one brand accent. Colours, motion tokens and shared keyframes live in
+`console/src/app.css`. Components use semantic tokens (`--signal`,
+`--button-fill`, `--warning`, `--metric`, `--chart`, …) and never raw colours;
+`.card-light` re-maps them for the paper hero card. Blue means live, active or
+primary. Green means success, amber means warning and red means danger. Every
+text pair must clear WCAG AA, which axe enforces in the browser suites.
+
+Motion is CSS-first and animates only `transform` and `opacity`. Use the
+`--ease-out` and `--dur-*` tokens and the shared keyframes. Never dim text with
+opacity on hover. Don't mutate text for effect. Don't put gradients behind
+console copy. Hover and entrance effects must disappear under
+`prefers-reduced-motion`. Both Playwright configs run with reduced motion.
+
 ## Testing Guidelines
 
 Place Go unit tests beside their feature as `*_test.go`. Process and service

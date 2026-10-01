@@ -24,6 +24,8 @@
     top: 12,
     bottom: 36
   };
+  const uid = $props.id();
+  const gradientId = `usage-area-${uid}`;
   const bucketLabel = $derived(granularity === 'day' ? formatDay : formatDate);
   const chart = $derived.by(() => {
     const width = bounds.width - bounds.left - bounds.right;
@@ -45,9 +47,14 @@
             : index / Math.max(1, points.length - 1)),
       y: bounds.top + height - (point.request_count * height) / ceiling
     }));
+    const polyline = coordinates.map(({ x, y }) => `${x},${y}`).join(' ');
+    const baseline = bounds.top + height;
     return {
       coordinates,
-      polyline: coordinates.map(({ x, y }) => `${x},${y}`).join(' '),
+      polyline,
+      area: coordinates.length
+        ? `${coordinates[0].x},${baseline} ${polyline} ${coordinates.at(-1)!.x},${baseline}`
+        : '',
       ticks: Array.from({ length: 5 }, (_, index) => ({
         y: bounds.top + (index * height) / 4,
         value: step * (4 - index)
@@ -78,6 +85,12 @@
         viewBox={`0 0 ${bounds.width} ${bounds.height}`}
         preserveAspectRatio="none"
       >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" class="area-top" />
+            <stop offset="1" class="area-bottom" />
+          </linearGradient>
+        </defs>
         {#each chart.ticks as tick (tick.y)}
           <line
             class="grid"
@@ -93,10 +106,17 @@
             text-anchor="end">{formatCompact(tick.value)}</text
           >
         {/each}
-        <polyline class="series" points={chart.polyline} />
-        {#each chart.coordinates as point, index (points[index].bucket)}
-          <circle class="point" cx={point.x} cy={point.y} r="2.5" />
-        {/each}
+        <g class="plot">
+          <polygon
+            class="area"
+            points={chart.area}
+            fill={`url(#${gradientId})`}
+          />
+          <polyline class="series" points={chart.polyline} />
+          {#each chart.coordinates as point, index (points[index].bucket)}
+            <circle class="point" cx={point.x} cy={point.y} r="2.5" />
+          {/each}
+        </g>
         <text class="axis-label" x={bounds.left} y={bounds.height - 8}
           >{bucketLabel(points[0].bucket)}</text
         >
@@ -196,8 +216,8 @@
   }
   .legend span {
     width: 1rem;
-    height: 1px;
-    background: var(--metric);
+    height: 2px;
+    background: var(--chart);
   }
   .chart {
     width: 100%;
@@ -211,19 +231,35 @@
   }
   .grid {
     stroke: var(--border-hairline);
+    stroke-dasharray: 2 4;
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
+  /* The series and its area draw in from the left when the chart renders. */
+  .plot {
+    animation: draw-x var(--dur-slow) var(--ease-out) backwards;
+  }
+  .area-top {
+    stop-color: var(--chart);
+    stop-opacity: 0.28;
+  }
+  .area-bottom {
+    stop-color: var(--chart);
+    stop-opacity: 0;
+  }
   .series {
     fill: none;
-    stroke: var(--metric);
-    stroke-width: 1;
+    stroke: var(--chart);
+    stroke-width: 1.5;
     stroke-linejoin: round;
     stroke-linecap: round;
     vector-effect: non-scaling-stroke;
   }
   .point {
-    fill: var(--metric);
+    fill: var(--canvas);
+    stroke: var(--chart);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
   .axis-label {
     fill: var(--foreground-subtle);
@@ -264,6 +300,9 @@
   @media (forced-colors: active) {
     .legend span {
       background: CanvasText;
+    }
+    .area {
+      display: none;
     }
   }
 </style>
