@@ -512,6 +512,31 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		if len(doc.Pricing.Prices) > maxPrices {
 			return nil, access.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
 		}
+		// A price that names an unknown provider would otherwise apply to every
+		// provider of its kind. Destination providers resolve as apply does.
+		var destination map[string]bool
+		for i, e := range doc.Pricing.Prices {
+			if e.Provider == nil {
+				continue
+			}
+			name := strings.ToLower(*e.Provider)
+			if _, ok := docProviders[name]; ok {
+				continue
+			}
+			if destination == nil {
+				names, err := providerNameMap(ctx, q)
+				if err != nil {
+					return nil, err
+				}
+				destination = map[string]bool{}
+				for _, n := range names {
+					destination[strings.ToLower(n)] = true
+				}
+			}
+			if !destination[name] {
+				return nil, access.Invalid("pricing.prices."+strconv.Itoa(i)+".provider", "Price "+strconv.Itoa(i)+" names a provider neither the document nor this installation declares.")
+			}
+		}
 	}
 	return unavailable, nil
 }
@@ -785,6 +810,21 @@ func canonicalEqualProvider(desired, current *ProviderEntry) bool {
 	a := *desired
 	canonicalProvider(&a)
 	b := *current
+	named := make(map[string]bool, len(a.Models))
+	for _, m := range a.Models {
+		named[m.UpstreamModel] = true
+	}
+	// Apply keeps a model the document omits as a disabled row with no
+	// capabilities, so that row is absent, not a difference. Filter into a new
+	// slice: b shares its backing array with current.
+	kept := make([]ModelEntry, 0, len(b.Models))
+	for _, m := range b.Models {
+		if !named[m.UpstreamModel] && !m.Enabled && len(m.Capabilities) == 0 {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	b.Models = kept
 	canonicalProvider(&b)
 	aj, _ := json.Marshal(a)
 	bj, _ := json.Marshal(b)

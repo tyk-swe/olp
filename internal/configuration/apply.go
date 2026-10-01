@@ -3,6 +3,8 @@ package configuration
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,9 @@ type resolvedSlot struct {
 	entry        *SlotEntry
 	id           string
 	credentialID *string
+	// allowedAPIKeys is the destination slot's own key restriction. API keys
+	// are not portable, so apply keeps it rather than widening the slot.
+	allowedAPIKeys []string
 }
 
 func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings map[string]string) error {
@@ -25,11 +30,12 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	if err != nil {
 		return err
 	}
-	projectIDs := map[string]string{}
+	// Plan resolves a project reference against both the document and the
+	// destination, so apply must resolve undeclared destination projects too.
+	projectIDs := maps.Clone(state.projects)
 	for _, project := range doc.Projects {
 		key := strings.ToLower(project.Name)
-		if id, ok := state.projects[key]; ok {
-			projectIDs[key] = id
+		if _, ok := projectIDs[key]; ok {
 			continue
 		}
 		id, _, err := access.CreateProject(ctx, tx, project.Name, p.UserID())
@@ -160,7 +166,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				effective = time.Now().UTC()
 			}
 			prices := make([]usage.Price, 0, len(doc.Pricing.Prices))
-			for _, entry := range doc.Pricing.Prices {
+			for i, entry := range doc.Pricing.Prices {
 				price := usage.Price{VendorID: entry.VendorID, ProviderKind: entry.ProviderKind, Model: entry.Model, Operation: entry.Operation,
 					InputPerMillion: entry.InputPerMillion, CachedInputPerMillion: entry.CachedInputPerMillion,
 					OutputPerMillion: entry.OutputPerMillion, CacheWriteInputPerMillion: entry.CacheWriteInputPerMillion,
@@ -168,9 +174,11 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 					CacheWrite1HInputPerMillion: entry.CacheWrite1HInputPerMillion,
 					UnitPrice:                   entry.UnitPrice, Currency: entry.Currency}
 				if entry.Provider != nil {
-					if id, ok := providerIDs[strings.ToLower(*entry.Provider)]; ok {
-						price.ProviderID = &id
+					id, ok := providerIDs[strings.ToLower(*entry.Provider)]
+					if !ok {
+						return access.Invalid("pricing.prices."+strconv.Itoa(i)+".provider", "Price "+strconv.Itoa(i)+" names a provider neither the document nor this installation declares.")
 					}
+					price.ProviderID = &id
 				}
 				prices = append(prices, price)
 			}
@@ -191,10 +199,23 @@ func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string,
 		slot := &entry.Slots[j]
 		slotID := access.NewID()
 		var credentialID *string
+		allowedAPIKeys := slot.Restrictions.AllowedAPIKeys
 		if ok {
 			if current, present := existing.Slots[slot.Name]; present {
 				slotID = current.ID
-				credentialID = current.CredentialID
+				// A slot the artifact declares without a credential holds none.
+				if slot.CredentialRef != nil {
+					credentialID = current.CredentialID
+				}
+				var stored []byte
+				if err := tx.QueryRow(ctx, "SELECT coalesce(restrictions->'allowed_api_keys','[]'::jsonb) FROM olp.provider_slots WHERE id=$1", current.ID).Scan(&stored); err != nil {
+					return nil, err
+				}
+				var keys []string
+				if err := json.Unmarshal(stored, &keys); err != nil {
+					return nil, err
+				}
+				allowedAPIKeys = keys
 			}
 		}
 		if slot.CredentialRef != nil {
@@ -212,7 +233,7 @@ func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string,
 				}
 			}
 		}
-		resolved = append(resolved, resolvedSlot{entry: slot, id: slotID, credentialID: credentialID})
+		resolved = append(resolved, resolvedSlot{entry: slot, id: slotID, credentialID: credentialID, allowedAPIKeys: allowedAPIKeys})
 	}
 	return resolved, nil
 }
@@ -294,7 +315,7 @@ func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID
 			AllowedAPIKeys []string `json:"allowed_api_keys"`
 			AllowedModels  []string `json:"allowed_models"`
 			AllowedRoutes  []string `json:"allowed_routes"`
-		}{orEmpty(slot.entry.Restrictions.AllowedAPIKeys), orEmpty(slot.entry.Restrictions.AllowedModels), orEmpty(slot.entry.Restrictions.AllowedRoutes)})
+		}{orEmpty(slot.allowedAPIKeys), orEmpty(slot.entry.Restrictions.AllowedModels), orEmpty(slot.entry.Restrictions.AllowedRoutes)})
 		limits, _ := json.Marshal(slot.entry.Limits)
 		if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", slot.id, providerID, slot.entry.IsDefault, slot.entry.Position, slot.entry.Name, slot.entry.Enabled, slot.entry.Priority, slot.entry.Weight, slot.credentialID, restrictions, limits); err != nil {
 			return err

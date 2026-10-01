@@ -64,7 +64,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, http.MethodPost, draftPath+"/validate", nil, etagHeader(draft), 200)
-	h.want(owner, http.MethodPost, draftPath+"/activate", nil,
+	activated := h.want(owner, http.MethodPost, draftPath+"/activate", nil,
 		withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	want(overview(), 1, 1, 1, false)
 
@@ -97,4 +97,11 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 		t.Fatalf("disabled provider lost its published revision: %v", disabled)
 	}
 	want(overview(), 1, 1, 1, false)
+
+	// A retired route serves no traffic, so it no longer counts as active.
+	routePath := "/api/v1/routes/" + activated["route_id"].(string)
+	route := h.want(owner, http.MethodGet, routePath, nil, nil, 200)
+	h.want(owner, http.MethodPost, routePath+"/retire", nil,
+		withMatch(route, map[string]string{"Idempotency-Key": "route-retire"}), 200)
+	want(overview(), 1, 0, 1, false)
 }

@@ -53,6 +53,9 @@ func TestRoutingPolicyPublicationIntersectionAndProvenance(t *testing.T) {
 		if replayed["etag"] != result["etag"] {
 			t.Fatal("policy mutation did not replay")
 		}
+		if problemCode(t, h.want(owner, "PUT", path, map[string]any{"allowed_strategies": []string{"latency"}}, headers, 409)) != "idempotency_conflict" {
+			t.Fatal("policy replay ignored a different body")
+		}
 		return result
 	}
 	before := h.Runtime.Release().Sequence

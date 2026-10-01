@@ -129,10 +129,9 @@ export async function replaceRoutingPolicy(
 ): Promise<RoutingPolicyResource> {
   return unwrap(
     await apiClient.PUT('/api/v1/routing-policies/{scope}/{id}', {
-      params: { path: { scope, id } },
-      headers: {
-        'If-Match': etag,
-        'Idempotency-Key': crypto.randomUUID()
+      params: {
+        path: { scope, id },
+        header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
       },
       body
     })
