@@ -204,14 +204,21 @@ func EncodeTarget(r *openai.Request, wire openai.Family, kind, vendor, model str
 	return prepared.Document().Bytes(), family, nil
 }
 
-// generationOnlyDefaults are sampling and output-limit controls that count
-// endpoints (Anthropic count_tokens, OpenAI input_tokens, Gemini countTokens)
-// reject as unknown input.
-var generationOnlyDefaults = []string{"max_tokens", "max_completion_tokens", "max_output_tokens", "temperature", "top_p", "top_k", "seed", "stop", "stop_sequences", "n", "presence_penalty", "frequency_penalty", "logprobs", "top_logprobs", "logit_bias", "stream_options"}
+// generationOnlyDefaults are sampling, output and dialect generation controls
+// that count endpoints (Anthropic count_tokens, OpenAI input_tokens) reject as
+// unknown input.
+var generationOnlyDefaults = []string{"max_tokens", "max_completion_tokens", "max_output_tokens", "temperature", "top_p", "top_k", "seed", "stop", "stop_sequences", "n", "presence_penalty", "frequency_penalty", "logprobs", "top_logprobs", "logit_bias", "stream_options", "response_format", "reasoning_effort", "verbosity", "service_tier", "generationConfig", "safetySettings", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "additionalModelResponseFieldPaths"}
 
-func countDefaults(defaults Object) Object {
+// countDefaults keeps generation-only provider defaults out of a token-count
+// body. Gemini countTokens and Bedrock CountTokens accept only their input
+// envelope (contents/generateContentRequest, input) at the top level, so no
+// provider default may be merged beside it.
+func countDefaults(wire openai.Family, defaults Object) Object {
 	if len(defaults) == 0 {
 		return defaults
+	}
+	if wire == openai.FamilyGeminiCount || wire == "bedrock_count" {
+		return nil
 	}
 	out := maps.Clone(defaults)
 	for _, key := range generationOnlyDefaults {
@@ -222,7 +229,7 @@ func countDefaults(defaults Object) Object {
 
 func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, model string, defaults Object, applied *[]oif.Provenance) ([]byte, openai.Family, error) {
 	if r.Family.Operation() == "token_count" {
-		defaults = countDefaults(defaults)
+		defaults = countDefaults(wire, defaults)
 	}
 	var f Object
 	if r.Family.Surface() != "openai" {

@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -199,6 +200,42 @@ func TestCountRequestsOmitGenerationDefaults(t *testing.T) {
 			}
 			for _, key := range []string{"max_tokens", "temperature", "max_output_tokens"} {
 				if strings.Contains(string(body), `"`+key+`"`) {
+					t.Fatalf("count body has %s: %s", key, body)
+				}
+			}
+		})
+	}
+	gemini := Object{"generationConfig": json.RawMessage(`{"temperature":0.2,"maxOutputTokens":100}`), "safetySettings": json.RawMessage(`[]`)}
+	bedrock := Object{"inferenceConfig": json.RawMessage(`{"maxTokens":100}`), "additionalModelRequestFields": json.RawMessage(`{"top_k":5}`)}
+	openaiDefaults := Object{"response_format": json.RawMessage(`{"type":"text"}`), "reasoning_effort": json.RawMessage(`"low"`), "verbosity": json.RawMessage(`"low"`), "service_tier": json.RawMessage(`"auto"`)}
+	for _, tc := range []struct {
+		name     string
+		family   openai.Family
+		kind     string
+		body     string
+		defaults Object
+		allowed  []string
+	}{
+		{"gemini native", openai.FamilyGeminiCount, "gemini", `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, gemini, []string{"contents"}},
+		{"gemini nested", openai.FamilyGeminiCount, "gemini", `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`, gemini, []string{"generateContentRequest"}},
+		{"anthropic to gemini", openai.FamilyAnthropicCount, "gemini", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, gemini, []string{"contents", "generateContentRequest"}},
+		{"anthropic to bedrock", openai.FamilyAnthropicCount, "bedrock", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, bedrock, []string{"input"}},
+		{"openai to bedrock", openai.FamilyInputTokens, "bedrock", `{"model":"m","input":"hi"}`, bedrock, []string{"input"}},
+		{"openai native", openai.FamilyInputTokens, "openai", `{"model":"m","input":"hi"}`, openaiDefaults, []string{"model", "input"}},
+		{"anthropic to openai", openai.FamilyAnthropicCount, "openai", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, openaiDefaults, []string{"model", "input"}},
+		{"anthropic native", openai.FamilyAnthropicCount, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, Object{"service_tier": json.RawMessage(`"auto"`)}, []string{"model", "messages"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _, err := Encode(parse(t, tc.family, tc.body), tc.kind, tc.kind, "wire-model", tc.defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var top map[string]json.RawMessage
+			if err := json.Unmarshal(body, &top); err != nil {
+				t.Fatal(err)
+			}
+			for key := range top {
+				if !slices.Contains(tc.allowed, key) {
 					t.Fatalf("count body has %s: %s", key, body)
 				}
 			}
