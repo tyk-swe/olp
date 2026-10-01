@@ -1,0 +1,237 @@
+# M3: Adaptive routing and resilience
+
+| Status | Depends on | Unlocks |
+| --- | --- | --- |
+| Planned | [M1](m01-measured-advantage.md) | Cost-optimized and capacity-aware deployments |
+
+OLP's planner already orders attempts by priority, preferred order and strategy
+under hard policy constraints, and explains the result through simulation. It
+lacks the adaptive behaviors LiteLLM offers: cross-model fallbacks,
+capacity-aware selection, queueing, supply-side budgets, proactive health,
+mirroring and automatic request routing. This milestone adds them inside the
+existing planner, so every new behavior is deterministic, bounded and visible in
+route simulation and plan decisions.
+
+## Outcome
+
+- Routes declare fallbacks to other routes for named failure classes.
+- Selection can prefer the credential slots with the most remaining capacity,
+  and keep a session on the target that holds its prompt cache.
+- Saturated gateways queue work by priority instead of refusing it, and
+  provider capacity can be reserved per priority.
+- Connections and slots carry spend caps that remove them from selection.
+- Health is proactive and shared across the gateway fleet.
+- Operators can mirror traffic to candidate targets and route requests by
+  declared rules, including classifier results.
+- Route templates publish newly certified models without uncertified wildcard
+  passthrough.
+
+## Baseline
+
+| | OLP today | LiteLLM reference |
+| --- | --- | --- |
+| Strategies | `weighted`, `price`, `latency`, `throughput` within priority and preferred-order tiers ([policies](../provider-routing.md#policies-and-caller-preferences)) | Weighted pick, rate-limit aware, latency, least busy, cost, custom ([routing](https://docs.litellm.ai/docs/routing)) |
+| Failover | Within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`upstream.go`](../../internal/upstream/upstream.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
+| Health | Per-gateway circuits (five counted failures in 30 seconds open for 30 seconds); credential and slot cooldowns shared in Valkey | Background health checks that remove deployments ([health check routing](https://docs.litellm.ai/docs/proxy/health_check_routing)) |
+| Overload | A full admission pool answers 503 with `Retry-After: 1` | A [priority queue](https://docs.litellm.ai/docs/scheduler) and [priority capacity shares](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) |
+| Automation | Bulk route creation in the console | [Auto router](https://docs.litellm.ai/docs/auto_router/), [adaptive router](https://docs.litellm.ai/docs/adaptive_router), [routing plugins](https://docs.litellm.ai/docs/routing_plugins), [wildcards](https://docs.litellm.ai/docs/wildcard_routing), [mirroring](https://docs.litellm.ai/docs/traffic_mirroring) |
+
+## Invariants
+
+Every workstream preserves these rules from [concepts](../concepts.md) and
+[gateway execution](../gateway.md):
+
+- A request can narrow published policy, never widen it.
+- A committed stream never restarts on another target, and an ambiguous
+  resource creation never repeats.
+- Every attempt, including fallback and shadow attempts, pins its revisions and
+  produces its own record.
+- Simulation explains the same decision the gateway makes, without contacting a
+  provider.
+
+## Scope
+
+### M3.1 Fallback routes
+
+A route revision gains an ordered `fallbacks` list:
+
+```json
+{
+  "fallbacks": [
+    { "route": "assistant-long-context", "on": ["context_window"] },
+    { "route": "assistant-backup", "on": ["exhausted", "content_filter"] }
+  ]
+}
+```
+
+- `on` names the conditions that start a fallback: `exhausted` (every
+  attempt failed with a retryable class), `context_window`, `content_filter`,
+  `rate_limit` and `budget` (supply-side caps from M3.4).
+- `content_filter` is a new class in [`internal/upstream`](../../internal/upstream/upstream.go)
+  for typed upstream refusals such as content-filter errors. It does not count
+  against provider health.
+- Fallback routes run with their own targets, policy and fidelity. A strict
+  route may fall back only to strict routes. The key must be permitted to use
+  the fallback route; otherwise the plan records `fallback_route_forbidden` and
+  skips it.
+- The primary route's overall deadline and attempt budget bound the whole
+  request, fallbacks included.
+- Fallback graphs must be acyclic, stay within one project boundary and be at
+  most three routes deep. Publication rejects anything else.
+
+### M3.2 Capacity-aware selection and session affinity
+
+- A `capacity` strategy orders credential slots by remaining headroom, the
+  smallest of their remaining request, token and concurrency fractions read
+  from the same Valkey windows that admission uses, in one pipelined read per
+  request. Slots without quotas rank after slots with known headroom, as
+  unknown prices rank after known ones.
+- **Session affinity.** A route may set `affinity` to keep requests carrying
+  the same session key on the same target and slot while it stays eligible.
+  The key comes from a configured attribution label or the dialect's own cache
+  key (OpenAI `prompt_cache_key`), and is hashed into the rendezvous seed. This
+  raises provider prompt-cache hit rates without any gateway state.
+
+### M3.3 Priority admission and capacity reservation
+
+- **Admission queue.** A bounded queue sits in front of each gateway's
+  inference admission pool, with four classes: `critical`, `high`, `normal`
+  and `low`. Dequeueing is weighted fair (8:4:2:1), so lower classes are never
+  starved. A queued request waits at most
+  `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` and never beyond its route deadline, then
+  receives today's 503. Queue depth is bounded by
+  `OLP_HTTP_ADMISSION_QUEUE_DEPTH`.
+- **Priority source.** A key policy sets a default priority and a
+  `max_priority`. Requests may choose a class up to that ceiling through
+  `X-OLP-Routing`, for example `{"priority":"high"}`; a higher value is refused
+  as a budget increase, like today's attempt and deadline controls.
+- **Capacity shares.** A connection or slot quota may declare per-priority
+  shares and a saturation threshold. Below the threshold any class may use idle
+  capacity; above it, each class is held to its share. The Valkey quota scripts
+  enforce shares atomically with the existing windows.
+- Metrics: `olp_admission_queue_depth{class}`,
+  `olp_admission_queue_wait_seconds{class}` and rejections by class.
+
+### M3.4 Supply-side budgets
+
+Connections, credential slots and routes gain optional daily and monthly cost
+caps. They use the same exact-decimal accounting, PostgreSQL authority and
+Valkey snapshots as key budgets ([spend reconciliation](../operations.md#spend-budget-reconciliation)).
+An exhausted cap removes the connection, slot or route from selection with the
+plan reason `connection_budget_exhausted`, `slot_budget_exhausted` or
+`route_budget_exhausted`, which can start a `budget` fallback. A missing or
+malformed snapshot skips the target, matching how unreadable provider quotas
+behave today.
+
+### M3.5 Proactive and fleet-shared health
+
+- **Shared circuits.** Gateways publish circuit transitions to Valkey with
+  bounded staleness, so a provider that fails on one replica is avoided by all
+  of them. Local circuits remain the fallback when Valkey is unavailable.
+- **Active probes.** A worker task, `health_probes`, sends bounded synthetic
+  requests to targets whose connection enables probing, using the certification
+  probe codecs with minimal output. Results join the shared health state.
+  Probes are opt-in because they cost money; their usage is accounted to the
+  installation under a `system` actor and appears in usage reports.
+- Targets marked unhealthy move to the end of the attempt order rather than
+  disappearing, so a fleet-wide false positive degrades latency instead of
+  availability.
+- `GET /api/v1/provider-health` reports probe results and shared circuit state.
+
+### M3.6 Shadow traffic
+
+A route target may be declared `shadow` with a sample ratio. Sampled requests
+are mirrored to it after admission:
+
+- The caller's response comes only from the primary path. Shadow attempts run
+  in their own low-priority admission pool, with their own deadline, and are
+  dropped rather than queued when capacity is short.
+- Shadow targets must satisfy every hard constraint the request is subject to,
+  including region, data collection and zero data retention, and the request's
+  content policy and guardrails.
+- Only stateless generation, embeddings and rerank are mirrored. Stateful
+  Responses fields, files, batches, realtime and media uploads never are.
+- Shadow attempts are recorded with `shadow: true` and accounted to the route,
+  not to the caller's key or budgets.
+- An experiment report compares the primary and shadow paths by status, latency,
+  time to first token, token usage and cost, from metadata only.
+
+### M3.7 Request selectors
+
+A route revision may carry ordered `selectors`. Each selector has a predicate
+and an action that chooses a subset of the route's targets or delegates to
+another route:
+
+- **Predicates** use features the gateway already computes during admission:
+  operation, estimated input tokens, requested output tokens, streaming, tool
+  presence, input modalities, structured-output requests and reasoning effort.
+  Attribution labels never take part, keeping labels free of routing effect.
+- **Classifier predicates** send the request text to an OLP classification or
+  generation route, for example a TEI classifier, and test the returned label.
+  The classifier call is an accounted request with its own deadline; a
+  classifier failure falls through to the next selector.
+- **Plugin predicates** run a confined WebAssembly function from an approved
+  [plugin](../plugins.md) over the same features. A plugin predicate can only
+  narrow the candidate set.
+- The first matching selector wins, and plan decisions record its identifier.
+  Route simulation evaluates selectors against a sample request, so tiered
+  routing (for example simple, complex and reasoning tiers) is testable before
+  publication.
+- Usage reports compare each selector's cost with the route's most expensive
+  eligible target, reporting savings without inventing usage.
+
+### M3.8 Route templates
+
+A route template turns certified models into ordinary routes. It names a
+provider selector (`vendor:<id>` or `provider:<uuid>`), a model filter, a slug
+pattern built from the canonical model identity, a fidelity, a policy and
+whether to publish automatically. When a provider activation certifies a model
+that matches, the template creates a route draft, or a published route when
+`auto_publish` is set. Every generated route is a normal route, with its own
+revision history, simulation and access control, so nothing reaches a caller
+without certification.
+
+### M3.9 Retry policy
+
+A route revision may declare `retry` per retryable failure class: a maximum
+number of same-target retries, a base and maximum backoff with full jitter, and
+whether to honor `Retry-After`. Retries consume the attempt budget and the
+overall deadline, never apply after commitment or to ambiguous creations, and
+are recorded as attempts.
+
+## Change map
+
+| Change | Start here |
+| --- | --- |
+| Fallback chains, selectors, templates, retry policy | `internal/routes/`, `internal/runtime/plan.go` |
+| Capacity reads, shares and supply-side caps | `internal/limits/` |
+| Admission queue | `internal/observability/admission.go`, `internal/gateway/` |
+| Shared circuits and probes | `internal/gateway/health.go`, `internal/process/workers.go` |
+| Shadow execution | `internal/gateway/attempts.go` |
+| Console | `console/src/lib/features/routes/` |
+
+## Decisions to settle
+
+1. Whether selectors live on ordinary routes or on a distinct router route kind
+   (recommended: ordinary routes, so one route model covers every behavior).
+2. The staleness bound for shared circuit state (recommended: five seconds,
+   matching key-authority polling).
+3. Whether shadow traffic may target another project's routes (recommended: no).
+
+## Exit criteria
+
+- [ ] Fallbacks, selectors, templates and retry policy round-trip through route
+      drafts, revisions, restore and configuration export, plan and apply.
+- [ ] Route simulation explains fallbacks, selector matches, capacity ordering
+      and affinity for a given request.
+- [ ] Integration tests prove that fallbacks never follow a committed stream,
+      that requests cannot raise priority above the key's ceiling, and that
+      capacity shares hold under concurrent load across two gateways.
+- [ ] A circuit opened on one gateway is honored by another within the staleness
+      bound.
+- [ ] Shadow attempts never change caller-visible latency in benchmark S1 and
+      are excluded from key budgets.
+- [ ] Every workstream meets the [performance budget](m01-measured-advantage.md#performance-budget)
+      when unconfigured; the `capacity` strategy adds at most one Valkey round
+      trip per request.
+- [ ] The [parity matrix](parity.md) routing rows are `Parity` or better.

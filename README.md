@@ -110,6 +110,7 @@ upstream.
 | [Security architecture](docs/security.md) | Trust boundaries, authorization, secrets, egress, and response headers |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
 | [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |
+| [Roadmap](docs/roadmap/README.md) | Milestones to LiteLLM feature parity and beyond, with the parity matrix |
 | [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
 
 OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities through
