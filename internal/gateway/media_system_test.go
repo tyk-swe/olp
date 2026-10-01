@@ -836,12 +836,12 @@ func TestIntegrationMediaReconciliationRefreshesAndExpires(t *testing.T) {
 	}
 
 	// A stale creating reservation with no upstream identity is ambiguous. The
-	// worker only adopts creating rows that stopped changing, so age the row
-	// past the staleness gate without firing the lifecycle guard.
+	// worker only adopts creating rows whose dispatch window has passed, so
+	// age the row past that gate without firing the lifecycle guard.
 	reserved := reserve()
 	for _, query := range []string{
 		"ALTER TABLE olp.media_jobs DISABLE TRIGGER ALL",
-		"UPDATE olp.media_jobs SET updated_at = now() - interval '10 minutes' WHERE id = '" + reserved.ID + "'",
+		"UPDATE olp.media_jobs SET updated_at = now() - interval '10 minutes', next_reconciliation_at = now() - interval '1 second' WHERE id = '" + reserved.ID + "'",
 		"ALTER TABLE olp.media_jobs ENABLE TRIGGER ALL",
 	} {
 		if _, err := f.pool.Exec(ctx, query); err != nil {

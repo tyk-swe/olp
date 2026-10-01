@@ -101,6 +101,8 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		Surface:             "openai",
 		CredentialVersionID: slot.CredentialID,
 		SlotID:              slot.ID,
+		// The detached create dispatch may run until the route deadline.
+		StaleAfter: deadline.Add(media.ReconciliationLeaseSlack),
 	})
 	if jobErr != nil {
 		// A local persistence failure before dispatch refunds the quota
