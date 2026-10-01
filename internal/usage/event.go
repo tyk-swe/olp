@@ -751,10 +751,14 @@ func validateCacheCategories(input, read, write, write5m, write1h *int64) error 
 		}
 		return *value
 	}
-	if input != nil && count(read)+count(write) > *input {
+	if (write5m != nil || write1h != nil) && write == nil {
+		return errors.New("cache write detail without a cache write total")
+	}
+	// Counts are non-negative, so subtracting cannot underflow where adding could overflow.
+	if input != nil && (count(read) > *input || count(write) > *input-count(read)) {
 		return errors.New("cache reads and writes exceed the input total")
 	}
-	if count(write5m)+count(write1h) > count(write) {
+	if count(write5m) > count(write) || count(write1h) > count(write)-count(write5m) {
 		return errors.New("cache write detail exceeds the cache write total")
 	}
 	return nil

@@ -189,14 +189,19 @@ func (f Filters) Validate() error {
 	if f.Operation != nil && !validOperation(*f.Operation) {
 		return access.Fail(400, "invalid_operation", "The operation filter is invalid.")
 	}
-	if f.AttributionValue != nil && f.AttributionKey == nil {
+	return validateAttributionFilter(f.AttributionKey, f.AttributionValue)
+}
+
+// validateAttributionFilter checks an attribution key and value filter pair.
+func validateAttributionFilter(key, value *string) error {
+	if value != nil && key == nil {
 		return access.Fail(400, "invalid_filter",
 			"The attribution_value filter requires attribution_key.")
 	}
-	if f.AttributionKey != nil && !AttributionKeyPattern.MatchString(*f.AttributionKey) {
+	if key != nil && !AttributionKeyPattern.MatchString(*key) {
 		return access.Fail(400, "invalid_filter", "The attribution_key filter is invalid.")
 	}
-	if f.AttributionValue != nil && !AttributionValuePattern.MatchString(*f.AttributionValue) {
+	if value != nil && !AttributionValuePattern.MatchString(*value) {
 		return access.Fail(400, "invalid_filter", "The attribution_value filter is invalid.")
 	}
 	return nil

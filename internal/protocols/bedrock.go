@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 
@@ -256,10 +257,17 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 		}
 		return *v
 	}
-	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
+	short, long := value(usage.CacheWrite5MInputTokens), value(usage.CacheWrite1HInputTokens)
+	if short > math.MaxInt64-long {
 		return nil, protocolError("Bedrock cache write detail exceeds total")
 	}
-	if value(usage.CachedInputTokens)+value(usage.CacheWriteInputTokens) > in {
+	if usage.CacheWriteInputTokens == nil && (usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil) {
+		return nil, protocolError("Bedrock cache write detail without total")
+	}
+	if short+long > value(usage.CacheWriteInputTokens) {
+		return nil, protocolError("Bedrock cache write detail exceeds total")
+	}
+	if value(usage.CachedInputTokens) > in || value(usage.CacheWriteInputTokens) > in-value(usage.CachedInputTokens) {
 		return nil, protocolError("Bedrock cache usage exceeds input")
 	}
 	return usage, nil

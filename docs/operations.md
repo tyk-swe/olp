@@ -225,7 +225,8 @@ the exact request body with HMAC-SHA256 in `X-OLP-Signature: sha256=<hex>`.
 Destination URLs pass the egress policy at creation and again on every delivery
 dial; a five-second timeout applies and responses are drained bounded. Delivery
 failures persist only a safe category (`timeout`, `network`, `http_4xx`,
-`http_5xx`, `invalid_destination`), never response bodies or raw error text.
+`http_5xx`, `invalid_destination`), never response bodies or raw error text. Deliveries
+for a disabled rule or destination wait, unsent, until both are enabled again.
 
 Webhook payloads are metadata only, and the management contract documents both
 under `webhooks`. A `budget.threshold` payload names the rule, subject, window,

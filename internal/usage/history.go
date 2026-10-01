@@ -14,17 +14,21 @@ import (
 // provider and model filters match a request through its attempts, so a request
 // that failed over is found by either provider it touched.
 type RequestFilters struct {
-	Route           *string
-	ProviderID      *string
-	Model           *string
-	APIKey          *string
-	Operation       *string
-	StatusCode      *int
-	ErrorClass      *string
-	StartedAfter    *time.Time
-	StartedBefore   *time.Time
-	AllProjects     bool
-	AllowedProjects []string
+	Route      *string
+	ProviderID *string
+	Model      *string
+	APIKey     *string
+	Operation  *string
+	StatusCode *int
+	ErrorClass *string
+	// AttributionKey keeps requests carrying that attribution key;
+	// AttributionValue, which requires the key, also matches its value.
+	AttributionKey   *string
+	AttributionValue *string
+	StartedAfter     *time.Time
+	StartedBefore    *time.Time
+	AllProjects      bool
+	AllowedProjects  []string
 }
 
 // Cursor is a position in a list ordered by timestamp and identifier.
@@ -220,6 +224,12 @@ func (f RequestFilters) push(q *filterQuery) {
 	if f.ErrorClass != nil {
 		q.pushBind(" AND r.error_class = ", *f.ErrorClass)
 	}
+	if f.AttributionKey != nil {
+		q.pushBind(" AND r.attribution ? ", *f.AttributionKey)
+	}
+	if f.AttributionValue != nil {
+		q.push(" AND r.attribution->>" + q.bind(*f.AttributionKey) + " = " + q.bind(*f.AttributionValue))
+	}
 	if f.StartedAfter != nil {
 		q.pushBind(" AND r.started_at >= ", *f.StartedAfter)
 	}
@@ -305,5 +315,5 @@ func (f RequestFilters) Validate() error {
 	if f.Operation != nil && !validOperation(*f.Operation) {
 		return access.Fail(400, "invalid_operation", "The operation filter is invalid.")
 	}
-	return nil
+	return validateAttributionFilter(f.AttributionKey, f.AttributionValue)
 }

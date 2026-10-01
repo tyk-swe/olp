@@ -50,12 +50,12 @@ func newSourceFixture(t *testing.T, document string) *sourceFixture {
 
 const sourceDocumentV1 = `{"currency":"USD","prices":[
  {"provider_kind":"openai","model":"gpt-source","operation":"generation","currency":"USD","input_per_million":"1.000000","output_per_million":"4.000000"},
- {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.020000000000"}
+ {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.02"}
 ]}`
 
 const sourceDocumentV2 = `{"currency":"USD","prices":[
  {"provider_kind":"openai","model":"gpt-source","operation":"generation","currency":"USD","input_per_million":"2.000000","output_per_million":"4.000000"},
- {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.020000000000"},
+ {"provider_kind":"openai","model":"embed-source","operation":"embeddings","currency":"USD","unit_price":"0.02"},
  {"provider_kind":"anthropic","model":"claude-source","operation":"generation","currency":"USD","input_per_million":"3.000000","output_per_million":"15.000000"}
 ]}`
 
