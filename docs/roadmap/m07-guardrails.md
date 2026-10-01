@@ -112,7 +112,12 @@ Deterministic, linear-time detectors run in process:
   and Anthropic credentials, with checksum validation where the format defines
   one.
 - **Keywords:** case-folded word lists compiled into a single automaton.
-- **Schema:** JSON Schema validation of structured outputs and tool arguments.
+- **Schema:** JSON Schema validation of complete structured outputs and tool
+  arguments, within the configured response or argument size cap. Full-document
+  schema checks use the unary `output` phase or complete tool arguments;
+  `output_stream` is unsupported because bounded holdback cannot prove required
+  properties or cross-field constraints. A streaming request with a required
+  output schema policy is refused before dispatch, never partly released.
 
 Detectors report categories (`pii.email`, `secret.aws_access_key`), never
 values.
@@ -238,7 +243,8 @@ the same evaluation as a guardrail playground that stores nothing.
 
 - [ ] **M7.1** Existing content-policy fixtures pass unchanged as
       `builtin.regex` guardrails.
-- [ ] **M7.1** Every phase and action has unary and streaming tests, including
+- [ ] **M7.1** Every supported phase/action combination has unary or streaming
+      tests as applicable, including
       `input_parallel` cancellation before and after commitment, and `monitor`
       mode records a decision without changing any response.
 - [ ] **M7.1** Policies attached at every available scope apply broadest first,
@@ -253,6 +259,9 @@ the same evaluation as a guardrail playground that stores nothing.
       provider submission with `422 guardrail_surface_unavailable`.
 - [ ] **M7.2** Built-in detectors pass a labeled corpus with no false negatives
       on checksum-validated formats.
+- [ ] **M7.2** Full-document schema checks reject invalid unary outputs and
+      complete tool arguments; unsupported streaming schema configurations and
+      requests are refused before any response bytes are released.
 - [ ] **M7.3, M7.4** Each vendor adapter and the webhook contract pass
       integration tests against local fakes, including timeouts under both
       failure policies.

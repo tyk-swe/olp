@@ -52,10 +52,16 @@ authentication, certified and pinned like any other tool.
 | None | For servers on a trusted network |
 | Static headers | Sealed under a new `mcp_credential` purpose |
 | OAuth 2.1 grant | Authorization code with PKCE, or device authorization, with refresh. Today's [grant](../plugins.md#grant-enrollment) flow is driven by a provider plugin and returns by paste-back, so this adds a native OAuth client and callback to the grant store |
-| Per-user grant | A grant bound to an API key or an end user, so a tool call acts with that user's upstream authority |
+| Per-user grant | A grant bound to a server-verified workload issuer and subject (M4.4), or explicitly to one API key representing that user; caller-supplied end-user labels never select grants |
 | Token exchange | The caller's workload JWT ([M4.4](m04-tenancy-identity.md#m44-workload-identity)) is exchanged for a token scoped to the server, through RFC 8693 or an identity-assertion grant, so the caller's own token is never forwarded |
 | AWS SigV4 | Reuses the Bedrock request signer and its credential modes |
 | Gateway assertion | OLP signs each outbound call with a short-lived JWT, and publishes its verification keys, so a server can refuse calls that did not come through the gateway |
+
+Per-user grant enrollment binds the authenticated identity, project and MCP
+server to the grant. Every tool invocation revalidates that binding; an
+`X-OLP-End-User` value, dialect attribution field or claimed session identity
+cannot switch upstream users. A shared API key without a separately verified
+subject can use only a grant explicitly bound to that key.
 
 **Certification and pinning.** Certifying a server runs `initialize` and
 `tools/list` (and `prompts/list` and `resources/list` when declared) within
@@ -71,7 +77,8 @@ servers. Keys reach toolsets through their allowlist, or through the
 this milestone extends to hold toolsets and agents.
 
 **Client endpoint.** `/mcp` is a Streamable HTTP MCP server that exposes the
-caller's permitted toolsets. It authenticates API keys with a new `tools` scope.
+caller's permitted toolsets. It authenticates API keys and verified M4.4
+workload principals with a new `tools` scope.
 Tool names are prefixed with their server name in a format that satisfies the
 MCP tool-name rules. `tools/call` is proxied with egress policy, per-key and
 per-server limits, a deadline and bounded results. A JSON facade,
@@ -214,6 +221,9 @@ use MCP tools:
 - [ ] **M10.1** Each authentication mode reaches a local fake that verifies it:
       a SigV4 signature, an exchanged token that is not the caller's, and a
       gateway assertion that verifies against the published keys.
+- [ ] **M10.1** A shared-key caller cannot select another user's grant by
+      changing end-user or session fields; grants are isolated by verified
+      subject or explicit key binding, project and MCP server.
 - [ ] **M10.1** A changed upstream tool definition never reaches a client
       before an operator approves it, for MCP servers and OpenAPI-backed
       servers alike.

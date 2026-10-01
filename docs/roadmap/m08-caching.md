@@ -83,6 +83,9 @@ Responses fields (`store`, `background`, `previous_response_id`), files,
 batches, realtime or media uploads, and those asking for more than one
 alternative (`n` or `candidateCount` above 1). Only successful responses are
 stored, and a stream only after its success terminal event.
+Requests using caller-supplied provider credentials are ineligible for both
+exact and semantic lookup and storage; sharing an OLP key must never share
+responses produced under different upstream credentials.
 
 **Order of operations.** Authentication, admission and input guardrails run
 before lookup, so blocked or over-limit requests never read the cache. Output
@@ -208,6 +211,9 @@ reports show cache read and write tokens by route.
 - [ ] **M8.1, M8.2** Near-identical prompts on the same route never hit entries
       from another client surface, dialect or transport mode, including unary
       versus streaming requests.
+- [ ] **M8.1, M8.2** Caller-credential requests always bypass lookup and
+      storage, including two requests sharing an OLP key but carrying different
+      upstream credentials.
 - [ ] **M8.1** Inspecting the cache Valkey reveals no plaintext response for
       exact entries.
 - [ ] **M8.1, M8.2** Losing the cache Valkey degrades to `bypass` without

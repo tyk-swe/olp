@@ -59,9 +59,10 @@ project with the same authorization as notification destinations.
   identifier as an idempotency key and an `X-OLP-Signature`. Delivery is at
   least once.
 - Failures retry with backoff and never block inference or accounting.
-  Retention keeps facts until every enabled sink's cursor has passed them or
-  the retention period expires, whichever is first, and an expiry ahead of a
-  sink is recorded as an export gap.
+  Facts remain available for their configured local retention period,
+  regardless of whether sinks have caught up or any sinks are enabled. Export
+  cursors never cause earlier deletion. At retention expiry, deletion may
+  proceed even if a sink lags, and every affected sink records an export gap.
 - Metrics: `olp_export_lag_seconds{sink,stream}`,
   `olp_export_deliveries_total{sink,outcome}`, plus readiness of the task.
 - Exported records keep the content-free schema of the durable facts. Audit
@@ -213,6 +214,9 @@ A capture policy on a project or route opts into content export:
 - [ ] **M5.1** Each sink type delivers every stream in integration tests,
       survives worker restarts without loss, and records a gap when retention
       overtakes it.
+- [ ] **M5.1** Caught-up and absent sinks never shorten local retention;
+      request, usage and audit facts remain queryable until their configured
+      expiry, and lagging sinks report a gap when those facts expire.
 - [ ] **M5.1, M5.4** Sinks, channels and rules round-trip through configuration
       export, plan and apply without their secrets.
 - [ ] **M5.2** Payload capture delivers sampled content to an owner-configured

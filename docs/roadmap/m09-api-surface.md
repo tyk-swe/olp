@@ -109,10 +109,12 @@ certification gate. Vertex AI tuning follows.
 - **WebRTC.** `POST /v1/realtime/client_secrets` mints a short-lived provider
   client secret bound to one route, key and session configuration, so browsers
   and mobile clients connect over WebRTC without holding a provider key. The
-  key's limits are reserved when the secret is minted. Usage is accounted
-  through the provider's server-side session channel where the provider offers
-  one; otherwise the session is recorded as billing-uncertain, as WebSocket
-  sessions without usage events are today.
+  key's limits are reserved when the secret is minted. Direct WebRTC is
+  supported only when a certified server-side control channel lets OLP track
+  session usage and terminate the session on key revocation, limit exhaustion
+  or loss of control. Providers without that capability are refused before
+  minting a secret. Uncertain usage still produces billing-uncertain evidence;
+  it never substitutes for revocation or limit enforcement.
 - **Providers.** xAI realtime, Vertex AI Live, and Amazon Nova Sonic through
   Bedrock bidirectional streaming.
 - **Transcription sessions.** Realtime transcription-only sessions where the
@@ -224,7 +226,9 @@ operator who needs inspection in OLP uses a modeled operation instead.
       for any new resource family, and another key's identifier is
       indistinguishable from a missing one.
 - [ ] **M9.6** WebRTC sessions honor key revocation and limits; sessions
-      without usage are recorded as billing-uncertain.
+      terminate on control-channel loss, and providers lacking certified
+      termination control cannot mint client secrets. Missing usage is recorded
+      as billing-uncertain without extending a session beyond its limits.
 - [ ] **M9.7** OCR and search pass conformance fixtures for every listed
       vendor, natively and translated, and each search is priced as one unit.
 - [ ] **M9.9** Pass-through routes refuse paths outside their allowlist before
