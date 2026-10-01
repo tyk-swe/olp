@@ -120,10 +120,16 @@ outage degrades to `bypass`, never to an error.
 
 - `embedding_route` names an OLP embeddings route, whose calls are accounted
   attempts; `similarity_threshold` and `max_candidates` bound matching.
+  Each vector and query pins an embedding-space identity: the embedding-route
+  revision, concrete embedding model revision and vector dimension. One space
+  uses one certified model/dimension pair; fallback to a different pair cannot
+  query that space. Republishing the embedding route or changing its model or
+  dimensions creates a fresh space, so old vectors miss rather than being
+  compared with incompatible query vectors.
 - **Isolation.** An approximate lookup cannot rely on the exact cache key, so
   every vector is indexed with its project ID, scope identifier, route revision
-  ID, guardrail policy revisions, project and route namespace generations,
-  client surface, dialect and transport mode. A query requires exact equality
+  ID, embedding-space identity, guardrail policy revisions, project and route
+  namespace generations, client surface, dialect and transport mode. A query requires exact equality
   on all of these fields before similarity is compared. A semantic hit
   therefore never crosses a scope, revision, client-surface, dialect or
   transport boundary that an exact entry could not, and a purge or a new
@@ -170,7 +176,7 @@ reports show cache read and write tokens by route.
 | --- | --- | --- | --- |
 | Cached responses | The cache Valkey, sealed | The entry TTL, at most the route's `ttl_seconds`, or until evicted or purged | New seal purpose `response_cache` |
 | Cache keys | The cache Valkey, as HMAC digests | With the entry | New digest purpose `cache_key` |
-| Semantic vectors, tagged with project, scope, revisions, namespace generations, surface, dialect and transport mode | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
+| Semantic vectors, tagged with project, scope, revisions, embedding space, namespace generations, surface, dialect and transport mode | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
 | Cache configuration | Route revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
 | Cache-hit attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
 
@@ -200,9 +206,10 @@ reports show cache read and write tokens by route.
 
 - [ ] **M8.1** Hits and misses are correct for unary and streamed responses on
       every surface, and replayed streams validate against the protocol corpus.
-- [ ] **M8.1, M8.2** No entry, exact or semantic, is ever served across a key
-      or project boundary in an isolation test with `key` and `project` scopes,
-      including for a near-identical prompt from another key.
+- [ ] **M8.1, M8.2** With `key` scope, another key always misses exact and
+      semantic entries, including for a near-identical prompt. With `project`
+      scope, authorized keys may share within that project, but another
+      project always misses.
 - [ ] **M8.1, M8.2** `route` scope also isolates different calling projects,
       including keys using the same installation-wide route and identical
       requests; wider scope never removes the project partition.
@@ -226,6 +233,10 @@ reports show cache read and write tokens by route.
 - [ ] **M8.2** A semantic cache cannot be enabled without its acknowledgement,
       serves only requests above the similarity threshold, and never serves a
       multi-turn request unless the route opts in.
+- [ ] **M8.2** Republishing the embedding route misses all older vectors,
+      including for same-dimensional model changes. Different dimensions and
+      fallback models never compare incompatible vectors or return their
+      entries; a new space is populated independently.
 - [ ] **M8.3** Prompt-cache insertion raises measured cache-read tokens on a
       fixture replaying multi-turn traffic, and never applies on strict routes.
 - [ ] The [parity matrix](parity.md) caching rows are `Parity` or better.

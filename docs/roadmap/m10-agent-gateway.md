@@ -55,13 +55,24 @@ authentication, certified and pinned like any other tool.
 | Per-user grant | A grant bound to a server-verified workload issuer and subject (M4.4), or explicitly to one API key representing that user; caller-supplied end-user labels never select grants |
 | Token exchange | The caller's workload JWT ([M4.4](m04-tenancy-identity.md#m44-workload-identity)) is exchanged for a token scoped to the server, through RFC 8693 or an identity-assertion grant, so the caller's own token is never forwarded |
 | AWS SigV4 | Reuses the Bedrock request signer and its credential modes |
-| Gateway assertion | OLP signs each outbound call with a short-lived JWT, and publishes its verification keys, so a server can refuse calls that did not come through the gateway |
+| Gateway assertion | OLP signs each outbound call with a short-lived, destination- and call-bound JWT and publishes its verification keys; the server verifies all claims and rejects replay |
 
 Per-user grant enrollment binds the authenticated identity, project and MCP
 server to the grant. Every tool invocation revalidates that binding; an
 `X-OLP-End-User` value, dialect attribution field or claimed session identity
 cannot switch upstream users. A shared API key without a separately verified
 subject can use only a grant explicitly bound to that key.
+
+A gateway assertion names the immutable MCP server identity and approved
+origin in `aud`, the authenticated principal and project, and a digest of the
+canonical call (HTTP method/path, MCP method, tool identity and arguments).
+It carries `iss`, `iat`, `exp` and a unique `jti`. The receiving server verifies
+the audience and call digest as well as the signature and bounded clock skew,
+and atomically rejects a reused `jti` until expiry plus skew. An assertion
+cannot authorize a different server, modified call or repeat execution;
+ambiguous retries require the tool's explicit idempotency contract, never a
+fresh assertion that silently repeats a side effect. Certification verifies
+the receiver's binding and replay behavior before enabling this mode.
 
 **Certification and pinning.** Certifying a server runs `initialize` and
 `tools/list` (and `prompts/list` and `resources/list` when declared) within
@@ -220,7 +231,9 @@ use MCP tools:
       suite through `/mcp`, including OAuth grant refresh and per-user grants.
 - [ ] **M10.1** Each authentication mode reaches a local fake that verifies it:
       a SigV4 signature, an exchanged token that is not the caller's, and a
-      gateway assertion that verifies against the published keys.
+      gateway assertion that verifies against the published keys. Assertions
+      for another server or call, changed arguments, expired claims and reused
+      `jti` values are refused, including concurrent replay.
 - [ ] **M10.1** A shared-key caller cannot select another user's grant by
       changing end-user or session fields; grants are isolated by verified
       subject or explicit key binding, project and MCP server.

@@ -31,7 +31,7 @@ route simulation and plan decisions.
 | | OLP today | LiteLLM reference |
 | --- | --- | --- |
 | Strategies | `weighted`, `price`, `latency`, `throughput` within priority and preferred-order tiers ([policies](../provider-routing.md#policies-and-caller-preferences)) | Weighted pick, rate-limit aware, latency, least busy, cost, custom ([routing](https://docs.litellm.ai/docs/routing)) |
-| Failover | On transformed routes: within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`attempts.go`](../../internal/gateway/attempts.go)). Strict routes, the default, keep every later attempt on the first serving identity and dispatch at most once, so a 5xx or a timeout after send is never retried ([`interaction.go`](../../internal/gateway/interaction.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
+| Failover | Within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`attempts.go`](../../internal/gateway/attempts.go)). Strict routes, the default, restrict later attempts to the first serving identity and model, and pin the slot when the principal is unknown. They can still dispatch again to an eligible candidate with that identity after an uncommitted retryable failure; at-most-once dispatch is not guaranteed ([`interaction.go`](../../internal/gateway/interaction.go), [same-principal slot test](../../internal/gateway/interaction_test.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
 | Health | Per-gateway circuits (five counted failures in 30 seconds open for 30 seconds); credential and slot cooldowns shared in Valkey | Background health checks that remove deployments ([health check routing](https://docs.litellm.ai/docs/proxy/health_check_routing)) |
 | Overload | A full admission pool answers 503 with `Retry-After: 1`. The pool admits by path, before authentication ([`public.go`](../../internal/observability/public.go)) | A [priority queue](https://docs.litellm.ai/docs/scheduler) and [priority capacity shares](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) |
 | Caller controls | `X-OLP-Routing` picks a strategy the policy allows, orders targets, narrows constraints and lowers `max_attempts` | Request metadata, tags and [budget fallbacks](https://docs.litellm.ai/docs/proxy/budget_fallbacks) |
@@ -45,13 +45,16 @@ Every workstream preserves these rules from [concepts](../concepts.md) and
 - A request can narrow published policy, never widen it.
 - A committed stream never restarts on another target, and an ambiguous
   resource creation never repeats.
-- A strict route keeps one serving identity per request and sends the request
-  to a provider at most once. Once a request has been sent, its result is
-  final: it is never retried, on the same target or another.
+- A strict route keeps one serving identity and model binding per request;
+  an unknown principal also pins its credential slot.
 - Every attempt, including fallback and shadow attempts, pins its revisions and
   produces its own record.
 - Simulation explains the same decision the gateway makes, without contacting a
   provider.
+
+M3.9 adds a stricter rule, also applied by M3.1: once a strict request has been
+sent, it is never retried on the same target or another. This is a planned
+tightening of the current attempt loop, not an existing at-most-once guarantee.
 
 ## Scope
 
@@ -85,8 +88,8 @@ A route revision gains an ordered `fallbacks` list:
   skips it.
 - On a strict route a fallback starts only while no dispatch has been admitted:
   from planning-time conditions such as `context_window` by model facts,
-  `budget`, or no eligible target. After a dispatch, the strict invariant
-  holds.
+  `budget`, or no eligible target. It follows the planned post-send prohibition
+  in M3.9 rather than today's more permissive same-identity attempt loop.
 - The primary route's overall deadline and attempt budget bound the whole
   request, fallbacks included.
 - Fallback graphs must be acyclic, stay within one project boundary and be at
@@ -100,8 +103,19 @@ A route revision gains an ordered `fallbacks` list:
   request. Slots without quotas rank after slots with known headroom, as
   unknown prices rank after known ones.
 - **Input and output token quotas.** Connection and slot quotas may declare
-  separate input and output token windows beside the combined one, for
-  providers that publish separate limits. Headroom uses whichever is tightest.
+  separate input (ITPM) and output (OTPM) token windows beside the combined one,
+  for providers that publish separate limits. Before every provider attempt,
+  distributed admission reserves the effective request's conservative input
+  and output estimates independently in shared Valkey windows; a configured
+  combined quota reserves their sum. Each scope atomically checks all its
+  configured dimensions, and both connection and slot reservations must succeed
+  before dispatch. A refusal refunds any partial reservation. Settlement
+  reconciles each dimension against its own complete usage, retaining the
+  conservative reservation and recording a gap for any unknown dimension;
+  combined usage requires both counts. Undispatched attempts refund all token
+  reservations, and retries reserve anew. Unreadable quota state fails closed.
+  Headroom uses whichever remaining fraction is tightest; capacity ranking
+  never substitutes for these admission checks.
 - **Sessions.** A session is a caller-chosen key that groups related requests:
   the value of the attribution label a route names as its session label, or
   the dialect's own cache key (OpenAI `prompt_cache_key`). This is the one
@@ -238,11 +252,15 @@ whether to honor `Retry-After`. Retries consume the attempt budget and the
 overall deadline, never apply after commitment or to ambiguous creations, and
 are recorded as attempts.
 
-A same-target retry keeps the serving identity, so it is the only retry a
-strict route can make, and only when the failure proves the request was never
-sent, such as a connect error. A rate-limit rejection answers a request that
-was sent, so a strict route returns it to the caller; retrying it is behavior
-for transformed routes.
+This workstream tightens strict execution beyond today's serving-identity
+restriction: a same-target retry is allowed only when transport evidence proves
+the request was never sent. A connect error alone is not sufficient evidence.
+After a send, or when sending is uncertain, a strict route returns the failure
+without another dispatch, including for 429, 5xx and timeout failures and even
+when another slot has the same known principal. Post-send retries remain
+available only on transformed routes, subject to the commitment and ambiguous
+creation rules above. Tests that currently permit same-principal retry after
+429 change with this workstream.
 
 ## Non-goals
 
@@ -261,6 +279,7 @@ for transformed routes.
 | Fallbacks, selectors, retry policy, affinity and shadow settings | Route drafts and immutable revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
 | Route templates | PostgreSQL | Until deleted | None |
 | Supply-side spend counters | PostgreSQL authority, Valkey snapshots | As key budget windows today | None |
+| Input, output and combined quota reservations and counters | Shared limits Valkey | The quota window | None; metadata only |
 | Shared circuit and probe state | Valkey | The staleness bound | None |
 | Shadow, probe and classifier attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
 | Session labels | Request records, as attribution, as labels are today | Request retention | None |
@@ -285,11 +304,11 @@ for transformed routes.
 2. The staleness bound for shared circuit state (recommended: five seconds,
    matching key-authority polling).
 3. Whether shadow traffic may target another project's routes (recommended: no).
-4. Strict-route post-send retries are excluded by the invariant above,
-   including explicit rate-limit rejections. Confirm this contract before
-   implementation; any proposal to change it must revise the invariant and
-   its exit tests together. Operators who want that resilience use transformed
-   routes under the current contract.
+4. Confirm M3.9's proposed tightening: strict routes exclude all post-send
+   retries, including explicit rate-limit rejections that today's loop can
+   retry within one serving identity. Implement and test that change together;
+   it must not be claimed as baseline behavior. Under the proposed contract,
+   operators who want post-send retry resilience use transformed routes.
 5. Where the priority queue sits relative to the pre-authentication pool
    (recommended: after authentication, with the outer pool sized to the queue
    depth).
@@ -301,9 +320,20 @@ for transformed routes.
       configuration export, plan and apply.
 - [ ] **M3.1, M3.2, M3.7** Route simulation explains fallbacks, selector
       matches, capacity ordering and affinity for a given request.
+- [ ] **M3.2** Reservation and settlement tests independently exercise input,
+      output and combined token counters at both connection and slot scope,
+      including partial-admission rollback, undispatched refunds, retries,
+      missing usage, duplicate settlement and window rollover.
+- [ ] **M3.2** Two gateways concurrently exhaust ITPM while OTPM and combined
+      headroom remain, then OTPM while ITPM and combined headroom remain, at
+      each quota scope. No over-limit attempt dispatches; settlement restores
+      unused reservations using each counter's corresponding usage, and unreadable
+      quota state never admits unmetered work.
 - [ ] **M3.1, M3.9** Integration tests prove that fallbacks and retries never
-      follow a committed stream, that a strict route never sends a request
-      twice or leaves its serving identity, and that a `budget` fallback never
+      follow a committed stream, and that the new strict rule prevents a second
+      send after 429, 5xx, post-send timeout or uncertain-send failures, even
+      with another slot under the same principal. Proven pre-send failures may
+      retry without leaving the serving identity, and a `budget` fallback never
       exceeds the key's overall budget.
 - [ ] **M3.3** Requests cannot raise priority above the key's ceiling, the
       queue never exceeds its depth or its timeout, and capacity shares hold

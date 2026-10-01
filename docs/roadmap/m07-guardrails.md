@@ -87,6 +87,12 @@ code.
   plus tool-call arguments and tool results. Batch input files are inspected
   line by line at upload, the one moment the gateway holds their content, and
   realtime sessions are inspected per turn at their transcript events.
+  A provider-generated audio transcript may arrive after generation starts,
+  so it cannot prove pre-response input enforcement. Audio with an enforcing
+  input guardrail is refused with `422 guardrail_surface_unavailable` unless
+  a certified, bounded pre-dispatch transcription path inspects the complete
+  turn before any audio is sent upstream. A post-dispatch transcript alone
+  never qualifies that path; no new transcription service is included here.
   Cloud-bucket batches in [M9.2](m09-api-surface.md#m92-files-and-batches-across-providers)
   bypass upload inspection, so they are rejected before submission whenever
   an input guardrail applies.
@@ -254,7 +260,10 @@ the same evaluation as a guardrail playground that stores nothing.
 - [ ] **M7.1** Strict routes refuse `redact` and `mask` at validation,
       activation and configuration plan.
 - [ ] **M7.1** A violating line in a batch input file is refused at upload, and
-      a violating realtime turn ends before the model responds. Once M9.2
+      a violating inspectable realtime text turn ends before the model
+      responds. Enforcing input policies refuse audio sessions without the
+      certified pre-dispatch inspection path, including a fake provider that
+      emits audio before its transcript. Once M9.2
       ships, cloud-bucket batches with an input guardrail are refused before
       provider submission with `422 guardrail_surface_unavailable`.
 - [ ] **M7.2** Built-in detectors pass a labeled corpus with no false negatives
