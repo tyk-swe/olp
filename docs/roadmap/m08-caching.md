@@ -17,8 +17,8 @@ scoped and bounded.
 ## Outcome
 
 - Routes opt into exact-match caching, with sealed entries in a dedicated
-  Valkey, scoped so that no response crosses a key or project boundary unless
-  the operator says so.
+  Valkey, scoped so that no response crosses a project boundary, and sharing
+  across keys requires an explicit wider scope.
 - Streamed responses replay from cache with their original event sequence.
 - Semantic caching serves single-turn traffic that tolerates approximate
   matches.
@@ -55,7 +55,9 @@ scoped and bounded.
 ```
 
 `scope` is `key` (the default), `project` or `route`. A key policy may forbid
-caching for that key.
+caching for that key. Every scope is partitioned by the caller's project:
+`route` shares only among authorized keys in that project, never across
+projects. Scope identifiers use resource IDs, not display names or slugs.
 
 **Storage.** Entries live in a Valkey deployment named by
 `OLP_CACHE_VALKEY_URL`, never in the Valkey that holds limits, leases and
@@ -65,8 +67,9 @@ purpose, with the cache key and installation as associated data, following the
 sealing pattern of the continuation store. Nothing is written to PostgreSQL.
 
 **Keys.** The cache key is an HMAC (new digest purpose `cache_key`) over the
-route revision, every guardrail policy revision in effect for the request, the
-surface and dialect, the transport mode, the scope identifier, and the
+project ID, globally unique route revision ID, every guardrail policy revision
+in effect for the request, the surface and dialect, the transport mode, the
+scope identifier, the current project and route namespace generations, and the
 canonical request after input guardrails and model rewriting. The canonical
 form uses the decoded source that ingress already validates (no duplicate
 members, exact numbers), with members sorted. A new route or guardrail revision
@@ -100,8 +103,9 @@ changes that. Usage reports show hits, misses and the provider cost avoided at
 current prices.
 
 **Purge.** `POST /api/v1/cache/purge` invalidates a route's or project's
-entries by advancing a namespace generation in the cache Valkey, in constant
-time. It requires the `configure` operation.
+entries by advancing that project's or route's namespace generation in the
+cache Valkey, in constant time. Every lookup includes both current generations
+so either purge invalidates the entry. It requires the `configure` operation.
 
 **Metrics.** `olp_cache_requests_total{route,result}`,
 `olp_cache_bytes_stored_total` and `olp_cache_errors_total`. A cache Valkey
@@ -114,11 +118,13 @@ outage degrades to `bypass`, never to an error.
 - `embedding_route` names an OLP embeddings route, whose calls are accounted
   attempts; `similarity_threshold` and `max_candidates` bound matching.
 - **Isolation.** An approximate lookup cannot rely on the exact cache key, so
-  every vector is indexed with its scope identifier, route revision, guardrail
-  policy revisions and namespace generation, and a query filters on all of
-  them before similarity is compared. A semantic hit therefore never crosses a
-  boundary that an exact entry could not, and a purge or a new revision
-  invalidates semantic entries too.
+  every vector is indexed with its project ID, scope identifier, route revision
+  ID, guardrail policy revisions, project and route namespace generations,
+  client surface, dialect and transport mode. A query requires exact equality
+  on all of these fields before similarity is compared. A semantic hit
+  therefore never crosses a scope, revision, client-surface, dialect or
+  transport boundary that an exact entry could not, and a purge or a new
+  revision invalidates semantic entries too.
 - The vector index uses the Valkey Search module on the cache Valkey. Vectors
   are derived from content and cannot be sealed while indexed, so enabling a
   semantic cache requires an explicit acknowledgement, recorded in audit and
@@ -149,7 +155,7 @@ reports show cache read and write tokens by route.
 
 ## Non-goals
 
-- Serving an entry across a key or project boundary by default.
+- Serving an entry across a project boundary, or across keys by default.
 - Caching stateful, realtime or content-retaining operations.
 - Storing cached content in PostgreSQL, or in the Valkey that holds limits.
 - Retrieval pipelines. The cache stores responses; it does not ingest
@@ -161,7 +167,7 @@ reports show cache read and write tokens by route.
 | --- | --- | --- | --- |
 | Cached responses | The cache Valkey, sealed | The entry TTL, at most the route's `ttl_seconds`, or until evicted or purged | New seal purpose `response_cache` |
 | Cache keys | The cache Valkey, as HMAC digests | With the entry | New digest purpose `cache_key` |
-| Semantic vectors, tagged with scope, revisions and namespace | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
+| Semantic vectors, tagged with project, scope, revisions, namespace generations, surface, dialect and transport mode | The cache Valkey search index, unsealed | With the entry | None; requires the semantic-cache acknowledgement |
 | Cache configuration | Route revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
 | Cache-hit attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
 
@@ -194,12 +200,19 @@ reports show cache read and write tokens by route.
 - [ ] **M8.1, M8.2** No entry, exact or semantic, is ever served across a key
       or project boundary in an isolation test with `key` and `project` scopes,
       including for a near-identical prompt from another key.
+- [ ] **M8.1, M8.2** `route` scope also isolates different calling projects,
+      including keys using the same installation-wide route and identical
+      requests; wider scope never removes the project partition.
 - [ ] **M8.1, M8.2** A new route revision, or a new guardrail policy revision
       at any attachment scope, misses every older entry, exact or semantic.
+- [ ] **M8.1, M8.2** Near-identical prompts on the same route never hit entries
+      from another client surface, dialect or transport mode, including unary
+      versus streaming requests.
 - [ ] **M8.1** Inspecting the cache Valkey reveals no plaintext response for
       exact entries.
-- [ ] **M8.1** Losing the cache Valkey degrades to `bypass` without request
-      errors, and a purge makes every entry of its route or project miss.
+- [ ] **M8.1, M8.2** Losing the cache Valkey degrades to `bypass` without
+      request errors, and a purge makes every exact and semantic entry of its
+      route or project miss.
 - [ ] **M8.1** A hit is recorded as a `cache_hit` attempt with zero provider
       cost and counts against exactly the limits `count_hits_against` names.
 - [ ] **M8.1** A cache hit adds at most 1 ms at p95 over scenario S1's added

@@ -135,6 +135,22 @@ This covers Kubernetes service account tokens, GitHub Actions and other CI
 OIDC tokens, and cloud workload identity federation without distributing static
 keys. Issuer administration requires the `access` operation.
 
+Subject to decision 5, owners may instead configure an opaque-token issuer
+with a fixed RFC 7662 introspection endpoint, fetched only through identity
+egress. Requests select one configured issuer; the gateway never probes
+unrelated issuers with the caller's token. The endpoint uses an owner-provided
+client credential sealed under a new `introspection_credential` purpose.
+Only authenticated responses with `active: true`, an unexpired `exp`, a stable
+nonempty subject and the configured audience and scopes produce the same
+issuer-and-subject workload principal. A positive result is cached under the
+configured issuer ID, its current policy revision and a token HMAC
+(`workload_token`) for the
+shortest of its remaining lifetime, configured cache TTL and the authority
+freshness bound. Disabling an issuer invalidates its cache. Inactive,
+malformed or expired responses, timeouts and endpoint errors fail closed;
+expired entries are never served stale. Tokens and introspection response
+content never enter durable records or telemetry.
+
 ### M4.5 Enterprise identity
 
 - **SAML 2.0.** A service provider for console sign-in with signed assertions,
@@ -188,6 +204,8 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
 | End-user digests, policies and counters | PostgreSQL; Valkey counters | Usage retention; the budget window | New digest purpose `end_user` |
 | Workload principals (issuer and subject) | PostgreSQL usage records | Usage retention | New digest purpose `workload_principal` |
 | Trusted issuers and cached JWKS | PostgreSQL; gateway memory | Until removed; the key-authority freshness bound | None; public keys |
+| Introspection client credentials | PostgreSQL, sealed | Until rotated or issuer deletion | New seal purpose `introspection_credential` |
+| Opaque workload tokens and introspection results | Tokens in request memory; positive results in bounded gateway memory keyed by issuer ID, policy revision and token HMAC | Token until request completion; result until the shortest of token expiry, cache TTL and authority freshness bound | New digest purpose `workload_token`; never logged or persisted |
 | SAML service-provider signing key | PostgreSQL, sealed | Until rotated | New seal purpose `saml_key` |
 | TOTP secrets and WebAuthn credentials | PostgreSQL, sealed; recovery codes as digests | Until the factor is removed | New seal purpose `mfa_secret` |
 | Templates, access groups, organizations, temporary increases | PostgreSQL; key authority | Until deleted; increases until their expiry | None |
@@ -200,18 +218,21 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
 | End users, templates, access groups, key policies | `internal/access/`, `console/src/lib/features/access/` |
 | Key authority and authentication | `internal/runtime/manager.go`, `internal/gateway/credentials.go` |
 | Hierarchical budgets and windows | `internal/access/budgets.go`, `internal/limits/`, `internal/usage/` |
-| JWT issuers and workload principals | `internal/access/`, `internal/runtime/manager.go` |
+| JWT and introspection issuers and workload principals | `internal/access/`, `internal/runtime/manager.go`, `internal/egress/`, `internal/secrets/purpose.go` |
 | SAML, SCIM, MFA, organizations | `internal/access/`, [`openapi/management.json`](../../openapi/management.json) |
 | Caller-supplied credentials | `internal/runtime/credentials.go`, `internal/egress/` |
 | Desired state for templates, groups and issuers | `internal/configuration/artifact.go` |
 
 ## Decisions to settle
 
-1. Organization depth: one level above projects, or arbitrary nesting. LiteLLM
-   documents four levels (organizations, teams, projects, keys); OLP reaches
-   the same depth with organizations, projects, budget groups and keys
+1. Organization depth: one level above projects, or an intermediate tenancy
+   scope. LiteLLM documents four levels (organizations, teams, projects, keys).
+   Budget groups are shared cost pools, not membership or resource boundaries,
+   so OLP's organization → project → key model has fewer tenancy levels
    (recommended: one organization level, which keeps authorization decidable
-   by `Principal.Project` plus one ancestor).
+   by `Principal.Project` plus one ancestor). Under that choice the hierarchy
+   depth row remains `Partial`; it cannot close until an intermediate tenancy
+   scope is specified and tested or its exclusion is explicitly decided.
 2. Whether end-user digests are installation-wide or per project (recommended:
    per project, so the same identifier in two projects cannot be correlated).
 3. Window migration: whether existing daily and monthly budgets adopt the
@@ -234,8 +255,10 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
       exhausted, including a per-route limit and an access-group budget, and
       reports show which level refused it.
 - [ ] **M4.2** Weekly windows and non-UTC time zones reset at the correct
-      boundary, including across daylight-saving transitions, and a
-      fixed-duration window resets exactly one duration after it began.
+      boundary, including across daylight-saving transitions. If decision 4
+      includes fixed-duration windows, they reset exactly one duration after
+      they began; otherwise the parity row is split and that portion is
+      explicitly `Excluded` as the decision requires.
 - [ ] **M4.2** Editing a template changes every member's limits within the
       authority freshness bound, a temporary increase ends at its expiry and is
       audited, and a pinned attribution label cannot be overridden by a caller.
@@ -245,6 +268,13 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
 - [ ] **M4.4** Workload JWTs from a test issuer authenticate, survive
       signing-key rotation, and stop working within the authority freshness
       bound after the issuer is disabled.
+- [ ] **M4.4** If decision 5 includes introspection, a local issuer fake
+      verifies endpoint authentication and mapped principal limits; inactive,
+      malformed, wrong-audience and expired tokens, failed introspection and
+      expired cache entries are refused. Cache TTL, credential rotation and
+      issuer disablement obey the authority freshness bound, and raw tokens
+      never appear in records or logs. The same token bytes under two issuers
+      never share a cached principal, and a missing subject is refused.
 - [ ] **M4.5** SAML sign-in, SCIM provisioning and MFA pass Chromium journeys;
       SCIM passes a protocol conformance suite; group mappings grant and revoke
       project membership.
@@ -255,4 +285,6 @@ targeting it supply the provider credential in `X-OLP-Provider-Credential`:
 - [ ] **M4.2, M4.3, M4.4** Templates, access groups, end-user policies and
       issuers round-trip through configuration export, plan and apply.
 - [ ] The [parity matrix](parity.md) identity and budget rows are `Parity` or
-      better.
+      better, except hierarchy depth remains `Partial` under decision 1's
+      recommended single-organization-level model and keeps the overall
+      parity gate open.

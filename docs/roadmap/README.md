@@ -145,6 +145,7 @@ dependencies have shipped; it does not wait for the rest of the earlier wave.
 | Guardrails on shadow traffic | M3.6, M7.1 | Shadow targets honor content policy |
 | Organization-scoped guardrail policies | M4.5, M7.1 | Policies attach to the other four scopes |
 | Capture redaction and decision export | M5.1, M5.2, M7.1 | Unredacted capture for owners only; the stream carries content-policy decisions |
+| Agent usage export | M5.1, M10.1–M10.4 | Tool-call, agent-message and prompt facts are available through usage reports; durable delivery joins when both ship |
 | Batch pricing | M6.1, M9.2 | `batch_multiplier` ships with the first of the two |
 | Batch file inspection | M7.1, M9.2 | Guardrails cover the batch surfaces that exist |
 | Server-side web search tool | M9.7, M10.2 | Gateway-executed tools without built-in search |

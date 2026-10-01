@@ -2,7 +2,7 @@
 
 | Status | Depends on | Integrates with | Unlocks |
 | --- | --- | --- | --- |
-| Planned | [M4](m04-tenancy-identity.md) | [M2](m02-provider-catalog.md) (retirement events), [M3](m03-routing-resilience.md) (circuit events, sessions), [M7](m07-guardrails.md) (redaction, guardrail decisions) | [M6](m06-cost-management.md) |
+| Planned | [M4](m04-tenancy-identity.md) | [M2](m02-provider-catalog.md) (retirement events), [M3](m03-routing-resilience.md) (circuit events, sessions), [M7](m07-guardrails.md) (redaction, guardrail decisions), [M10](m10-agent-gateway.md) (agent usage export) | [M6](m06-cost-management.md) |
 
 OLP records precise, content-free facts for every accounted request and
 attempt, and exposes them through its usage API, Prometheus metrics and OTLP
@@ -68,6 +68,9 @@ project with the same authorization as notification destinations.
   export reaches security tools through OTLP collectors or HTTPS.
 - The `guardrail_decisions` stream carries content-policy decisions until
   [M7](m07-guardrails.md) ships, and guardrail decisions afterwards.
+- Tool-call, agent-message and prompt usage facts join the existing request
+  and attempt streams once [M10](m10-agent-gateway.md) ships. Until both
+  milestones ship, M10 facts remain available through usage reports only.
 
 ### M5.2 Payload capture
 
@@ -212,9 +215,11 @@ A capture policy on a project or route opts into content export:
       overtakes it.
 - [ ] **M5.1, M5.4** Sinks, channels and rules round-trip through configuration
       export, plan and apply without their secrets.
-- [ ] **M5.2** Payload capture delivers sampled, redacted content to a sink, a
-      caller opt-out suppresses it, and no captured content appears in
-      PostgreSQL, Valkey or OLP logs.
+- [ ] **M5.2** Payload capture delivers sampled content to an owner-configured
+      sink, a caller opt-out suppresses it, and no captured content appears in
+      PostgreSQL, Valkey or OLP logs. Before M7 ships, only the explicitly
+      permitted unredacted capture is available; once M7 ships, a configured
+      redaction guardrail is applied before delivery.
 - [ ] **M5.3** Langfuse and Arize Phoenix display OLP traces with model, usage
       and latency through their OpenTelemetry ingestion, verified against
       pinned versions.

@@ -285,10 +285,11 @@ for transformed routes.
 2. The staleness bound for shared circuit state (recommended: five seconds,
    matching key-authority polling).
 3. Whether shadow traffic may target another project's routes (recommended: no).
-4. Whether a strict route may retry, fall back or fail over after a request
-   was sent and explicitly rejected, for example with a rate-limit error
-   (recommended: no; strict sends at most once and keeps one serving identity,
-   and operators who want that resilience choose transformed routes).
+4. Strict-route post-send retries are excluded by the invariant above,
+   including explicit rate-limit rejections. Confirm this contract before
+   implementation; any proposal to change it must revise the invariant and
+   its exit tests together. Operators who want that resilience use transformed
+   routes under the current contract.
 5. Where the priority queue sits relative to the pre-authentication pool
    (recommended: after authentication, with the outer pool sized to the queue
    depth).

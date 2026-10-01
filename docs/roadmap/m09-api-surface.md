@@ -56,7 +56,15 @@ honor them.
   and owner-only access.
 - **Cloud batch jobs.** Vertex AI batch prediction and Bedrock batch inference
   read inputs from and write outputs to operator-configured Cloud Storage or S3
-  locations, declared on the connection and validated by egress policy.
+  locations, declared on the connection and validated by egress policy. These
+  inputs do not pass through OLP's upload inspection. If today's input content
+  policy or, after M7 ships, any input guardrail applies (including monitor
+  mode), submission is refused before dispatch with
+  `422 content_policy_surface_unavailable`, renamed
+  `guardrail_surface_unavailable` by M7. Supporting guarded cloud
+  batches requires a separately specified, egress-approved inspection mechanism
+  bound to the exact immutable object version submitted to the provider; it is
+  outside this milestone's bucket-only flow.
 - **Managed batches.** On transformed routes, an OpenAI-format batch whose
   target speaks another dialect is translated line by line through the
   canonical codecs and submitted in the target's batch format, then its results
@@ -172,7 +180,7 @@ operator who needs inspection in OLP uses a modeled operation instead.
 | --- | --- | --- | --- |
 | Resource mappings for the new families | PostgreSQL, with gateway-owned identifiers and pinned credentials | Until the resource is deleted or expires | None |
 | Strict file and batch payloads for new native surfaces | PostgreSQL, sealed | Seven days, as today | Existing `provider_continuation` |
-| Batch inputs and outputs for cloud batch jobs | The operator's bucket | Outside OLP | None; OLP never holds them |
+| Batch inputs and outputs for cloud batch jobs | The operator's bucket | Outside OLP | None; OLP never holds them and refuses submission when an input content policy or guardrail applies |
 | Batch settlement state and per-line usage | PostgreSQL | Usage retention | None; metadata only |
 | Realtime client secrets | Returned to the caller | Never stored | None |
 | Pass-through bodies | Relayed in memory | Never stored | None |
@@ -203,6 +211,11 @@ operator who needs inspection in OLP uses a modeled operation instead.
       API defines both.
 - [ ] **M9.2** Batch results settle exactly once under concurrent workers and
       restarts, priced with the batch multiplier.
+- [ ] **M9.2** Vertex and Bedrock bucket-input batches with an input content
+      policy, or an input guardrail at any attachment scope after M7 ships
+      (including monitor mode), are refused before provider submission with
+      the corresponding surface-unavailable error. Egress approval alone
+      cannot bypass inspection.
 - [ ] **M9.3** A fine-tuned model cannot serve traffic before certification.
 - [ ] **M9.4** A vector store created through OLP is searchable through its
       gateway identifier on a native route and through a retrieval connector on

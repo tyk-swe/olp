@@ -87,6 +87,9 @@ code.
   plus tool-call arguments and tool results. Batch input files are inspected
   line by line at upload, the one moment the gateway holds their content, and
   realtime sessions are inspected per turn at their transcript events.
+  Cloud-bucket batches in [M9.2](m09-api-surface.md#m92-files-and-batches-across-providers)
+  bypass upload inspection, so they are rejected before submission whenever
+  an input guardrail applies.
   Surfaces that cannot be inspected keep answering
   `422 content_policy_surface_unavailable`, renamed
   `guardrail_surface_unavailable`.
@@ -238,12 +241,16 @@ the same evaluation as a guardrail playground that stores nothing.
 - [ ] **M7.1** Every phase and action has unary and streaming tests, including
       `input_parallel` cancellation before and after commitment, and `monitor`
       mode records a decision without changing any response.
-- [ ] **M7.1** Policies attached at every scope apply broadest first, and a
-      `mandatory` guardrail cannot be detached at a narrower scope.
+- [ ] **M7.1** Policies attached at every available scope apply broadest first,
+      and a `mandatory` guardrail cannot be detached at a narrower scope.
+      Organization scope joins this test when M4.5 ships; before then the
+      other four scopes are tested.
 - [ ] **M7.1** Strict routes refuse `redact` and `mask` at validation,
       activation and configuration plan.
 - [ ] **M7.1** A violating line in a batch input file is refused at upload, and
-      a violating realtime turn ends before the model responds.
+      a violating realtime turn ends before the model responds. Once M9.2
+      ships, cloud-bucket batches with an input guardrail are refused before
+      provider submission with `422 guardrail_surface_unavailable`.
 - [ ] **M7.2** Built-in detectors pass a labeled corpus with no false negatives
       on checksum-validated formats.
 - [ ] **M7.3, M7.4** Each vendor adapter and the webhook contract pass

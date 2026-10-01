@@ -131,8 +131,11 @@ adds the first control that prices the estimate.
   `calibrated` or `heuristic`) and the reported usage. Usage reports expose the
   estimation error by route and model family, and route simulation shows the
   estimate and its provenance.
-- Estimation runs once per request and is cached for every attempt, including
-  translated targets.
+- The validated source is parsed once. Estimation is cached by the effective
+  request after target-specific translation, defaults and content-policy
+  changes, plus tokenizer or model family and calibration revision. Each
+  target obtains its own demand before context eligibility and token-limit
+  reservation; attempts reuse a count only when those inputs match.
 
 ### M1.3 Client and agent qualification
 
@@ -225,6 +228,10 @@ before users notice.
 - [ ] **M1.2** Estimates for OpenAI encodings match the provider-reported
       prompt tokens exactly on the text fixtures of the protocol corpus, and
       usage reports show estimation error for every family.
+- [ ] **M1.2** Two translated targets with different tokenizers, framing or
+      defaults obtain distinct effective demand where appropriate; context
+      eligibility and reservations use that demand, while repeated attempts
+      with identical effective inputs reuse the estimate.
 - [ ] **M1.3** The client qualification suite passes in CI for every client
       above, and `docs/clients.md` documents each configuration.
 - [ ] **M1.4** Rate-limit headers appear on the OpenAI and Anthropic surfaces

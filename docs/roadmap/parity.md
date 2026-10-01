@@ -148,7 +148,7 @@ goal. A breadth row reaches `Parity` when both conditions hold:
 | Scheduled key rotation | [Enterprise](https://docs.litellm.ai/docs/proxy/virtual_keys), with a grace period and delivery to a secret manager | On-demand rotation with no overlap | `Partial` | M4.3, M11.3 |
 | Teams | [Teams](https://docs.litellm.ai/docs/proxy/multi_tenant_architecture) | Projects with manager and viewer membership | `Parity` | |
 | Organizations and delegated admins | [Enterprise](https://docs.litellm.ai/docs/proxy/access_control) | Installation roles and project managers | `Gap` | M4.5 |
-| Hierarchy depth | [Projects](https://docs.litellm.ai/docs/proxy/project_management) between teams and keys (Enterprise, beta) | Projects and keys, with budget groups across keys | `Partial` | M4.5 |
+| Hierarchy depth | [Projects](https://docs.litellm.ai/docs/proxy/project_management) between teams and keys (Enterprise, beta) | Projects and keys; budget groups are cost pools, not a tenancy level | `Partial` | M4.5; remains partial under its recommended single-organization-level model |
 | Roles | [RBAC](https://docs.litellm.ai/docs/proxy/access_control) | Owner, operator, developer and viewer, contract-declared per operation | `Parity` | |
 | End users with limits | [Customers](https://docs.litellm.ai/docs/proxy/customers) | Attribution labels only | `Gap` | M4.1 |
 | Service accounts | [Service accounts](https://docs.litellm.ai/docs/proxy/service_accounts) | Keys outlive their issuer and keep their project | `Parity` | |

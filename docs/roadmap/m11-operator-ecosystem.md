@@ -77,10 +77,27 @@ API. Writes send `If-Match` and `Idempotency-Key` as the API requires.
   external version where the store has versions. Rotation remains a new
   credential version that is validated before activation.
 - **Key delivery.** An API key may name a secret-store path as its rotation
-  destination. The worker then rotates the key on its interval, writes the new
-  secret to the store and keeps the
-  [M4.3](m04-tenancy-identity.md#m43-access-ergonomics) overlap period, so
-  scheduled rotation never produces a secret that nobody receives.
+  destination. Each scheduled rotation has one durable, idempotent pending
+  record, a sealed secret under the new `key_rotation` purpose, and a pinned
+  destination and immutable external version. Retries and concurrent workers
+  resume that record rather than generating another secret. The worker writes
+  and reads back that external version before atomically activating its digest
+  and recording activation in PostgreSQL; an unverified version never becomes
+  valid, and activation rechecks that the key and rotation remain authorized.
+  It then publishes and verifies the active-version reference in the store.
+  Consumers use that reference, never an unversioned `latest` lookup
+  that could expose a pending, not-yet-valid secret. Store adapters without this
+  staged-version delivery contract do not support scheduled rotation.
+  The old secret remains valid until publication is verified; only then does
+  the [M4.3](m04-tenancy-identity.md#m43-access-ergonomics) overlap clock start.
+  Activation and publication are independently idempotent and fenced against
+  stale workers, retries never reset overlap, and another rotation cannot start
+  while delivery is pending.
+  Failures cannot retire the old secret; explicit revocation and existing key
+  expiry still apply. The sealed pending secret is deleted after verified
+  publication or pre-activation cancellation; uncertain external outcomes must
+  be reconciled before advancing state. Its purpose joins startup checks,
+  `doctor`, master-key rotation and retirement inventory.
 - Secret-store endpoints pass the provider egress policy, and resolution
   failures surface as credential ineligibility in plan decisions, never as
   silent fallbacks.
@@ -130,7 +147,14 @@ include secret values.
 - An installation name and logo within the console design system.
 - A comparison view in the playground that sends one prompt to up to three
   routes the member may use and shows output, latency, tokens and cost side by
-  side. Like the playground today, it stores nothing.
+  side. Unlike today's unaccounted playground traffic, each comparison requires
+  an explicitly authorized accounting API key, records the member as actor and
+  the key and project as usage attribution, and applies both the member's route
+  access and the key's permissions and limits. Every provider attempt, including
+  retries and failures, produces metadata-only usage or completeness evidence
+  with pinned pricing; all applicable budgets apply before dispatch and settle
+  through the normal accounting path. Prompt and output content stays ephemeral
+  in request and browser memory and never enters these records.
 - Bulk member editing, and session-scoped saved filters for usage and request
   history.
 
@@ -149,21 +173,25 @@ include secret values.
 | KMS-wrapped data keys | The mounted master-key ring file | Until rotated | Existing master-key ring; no plaintext key at rest |
 | Secret-store references | Credential versions in PostgreSQL, as a reference instead of sealed bytes | As credential versions today | None |
 | Resolved external secrets | Gateway memory, in a bounded cache | The cache bound | None |
-| Rotated API key secrets | The operator's secret store | Outside OLP | None; OLP keeps only the digest |
+| Pending API key rotation secrets | PostgreSQL, sealed; staged immutable version in the operator's secret store | Sealed copy until verified publication or pre-activation cancellation; external retention is operator-owned | New seal purpose `key_rotation` |
+| Published API key secrets | The operator's secret store | Outside OLP | OLP keeps only the digest after delivery, using existing `api_key` purpose |
+| Rotation state and external version references | PostgreSQL | Key lifecycle and audit retention | None; metadata only, including idempotency identity, delivery state and overlap deadline |
 | CLI sign-in tokens | The operator's machine | The token lifetime | Existing management-token digests in PostgreSQL |
 | Regional limit counters | Each region's Valkey | The limit window | None |
 | Installation name and logo | PostgreSQL settings | Until changed | None |
+| Comparison requests, provider attempts and priced usage or gaps | PostgreSQL | Request and usage retention | None; metadata only, attributed to the member, accounting key and project |
+| Comparison prompts and outputs | Request and browser memory | Never stored durably | None |
 
 ## Change map
 
 | Change | Start here |
 | --- | --- |
 | CLI | `cmd/olp/`, generated client from `openapi/` |
-| KMS and secret references | `internal/secrets/`, `internal/runtime/credentials.go` |
+| KMS, secret references and scheduled key delivery | `internal/secrets/`, `internal/runtime/credentials.go`, `internal/process/workers.go` |
 | Catalog | `internal/routes/`, new `console/src/lib/features/catalog/` |
 | Read replicas and regions | `internal/database/`, `internal/runtime/`, `internal/limits/` |
 | Management MCP server | `internal/access/` (routing, authorization, ETags, idempotency and audit), `internal/management/` (the served contract) |
-| Comparison playground | `console/src/lib/features/inference/playground/` |
+| Comparison playground and accounting | `console/src/lib/features/inference/playground/`, `internal/gateway/`, `internal/usage/`, `internal/limits/` |
 
 ## Decisions to settle
 
@@ -191,6 +219,14 @@ include secret values.
       identity, a referenced credential rotates through validation and
       activation, and a key with a rotation destination rotates on schedule
       with both secrets valid during the overlap.
+- [ ] **M11.3** Failure and restart tests cover pending-record creation,
+      external version write/read-back, atomic activation and active-version
+      publication/read-back, including lost acknowledgements and concurrent
+      workers. No unverified secret activates, consumers never select a pending
+      version, and the old secret is not retired before verified delivery plus
+      overlap. Retries reuse one secret and deadline, cancellation or revocation
+      prevents activation, stale workers cannot republish an older version, and
+      pending seals pass master-key retirement tests.
 - [ ] **M11.4** The catalog lists exactly the routes its viewer may use, hides
       upstream identity unless the route opts in, and its code samples run
       against the SDK suites.
@@ -202,6 +238,10 @@ include secret values.
       scopes do not admit.
 - [ ] **M11.7** The comparison view and branding pass Chromium journeys and the
       axe checks.
+- [ ] **M11.7** A three-route comparison accounts every provider attempt exactly
+      once under its actor and accounting key, preserves usage-gap evidence,
+      refuses unauthorized or budget-exhausted dispatches, and leaves no prompt
+      or output content in durable records.
 - [ ] The [parity matrix](parity.md) administration rows are `Parity` or
       better, with the secret-manager row closed under the
       [breadth rule](parity.md#how-to-read-the-matrix).

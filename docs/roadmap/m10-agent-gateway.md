@@ -2,7 +2,7 @@
 
 | Status | Depends on | Integrates with | Unlocks |
 | --- | --- | --- | --- |
-| Planned | [M4](m04-tenancy-identity.md), [M7](m07-guardrails.md) | [M9](m09-api-surface.md) (search routes as a tool), [M11](m11-operator-ecosystem.md) (Terraform resources) | None |
+| Planned | [M4](m04-tenancy-identity.md), [M7](m07-guardrails.md) | [M5](m05-observability.md) (usage export), [M9](m09-api-surface.md) (search routes as a tool), [M11](m11-operator-ecosystem.md) (Terraform resources, catalog listings) | None |
 
 LiteLLM positions itself as one gateway for models, MCP tools and A2A agents,
 with per-key access, cost tracking and OAuth. OLP governs models only. This
@@ -153,9 +153,13 @@ use MCP tools:
   rendered prompts and variable values are request content and are never
   stored.
 - **Skills.** Subject to decision 4, the registry also lists agent skills: a
-  name, a source repository and a pinned revision that developers and agents
-  discover through the [developer catalog](m11-operator-ecosystem.md#m114-developer-catalog).
-  OLP indexes skills; it does not execute them.
+  project-scoped name, a source repository and a pinned immutable revision.
+  Operators create and promote listings through contract-declared management
+  operations; a key-visible registry API exposes only permitted listings.
+  Once M11.4 ships, developers and agents also discover them through the
+  [developer catalog](m11-operator-ecosystem.md#m114-developer-catalog).
+  Before then the registry API provides discovery. Listings round-trip
+  through configuration promotion. OLP indexes skills; it does not execute them.
 
 ## Non-goals
 
@@ -227,6 +231,12 @@ use MCP tools:
       freshness bound.
 - [ ] **M10.4** Prompt revisions render identically from the API, the
       playground and configuration import.
+- [ ] **M10.4** If decision 4 includes skills, a listing can be created,
+      pinned to an immutable source revision and promoted; configuration
+      export and import preserve it, and the registry API returns only
+      listings the key may access. Once M11.4 ships, catalog discovery passes
+      the same access-isolation test.
 - [ ] **M10.1–M10.4** Tool calls, agent messages and prompt usage appear in
-      usage reports and exports.
+      usage reports. Once M5.1 ships, the same metadata-only facts also appear
+      in durable exports; before then reports provide access to them.
 - [ ] The [parity matrix](parity.md) agent rows are `Parity` or better.
