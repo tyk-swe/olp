@@ -223,8 +223,9 @@ Route drafts carry a slug, allowed operations (default `generation`), an overall
 deadline, an attempt budget, and 1–64 targets with priority, weight, and
 timeout. Supported operations also include `token_count`, `embeddings`,
 `rerank`, `moderation`, `image_generation`, `image_edit`, `image_variation`,
-`speech`, `transcription`, the `video_*` operations, `batch`, `realtime`, and
-`bedrock_invoke`; see the [compatibility matrix](compatibility.md).
+`speech`, `transcription`, `translation`, the `video_*` operations, `batch`,
+`realtime`, and `bedrock_invoke`; see the
+[compatibility matrix](compatibility.md).
 
 The overall deadline is 1–3,600,000 milliseconds; target timeouts cannot exceed
 it. The attempt budget is 1–32,767 and counts credential attempts, so it can

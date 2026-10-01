@@ -118,11 +118,19 @@ the model to the upstream identifier. Native calls preserve unknown request
 fields; translation refuses semantic extensions it cannot represent. Failover to
 the next eligible attempt happens only before any response bytes have been sent
 to the client and only for connect, timeout, rate-limit, credential, and
-upstream server failures; upstream client errors, protocol errors, and
-cancellations are terminal. A committed stream never restarts on another
-provider: a later failure is reported in-band as an error event and the stream
-ends without a success marker. Retained resources, realtime, and native Bedrock
-ingress pin one provider/credential without cross-target failover; see
+upstream server failures. Generation, token-counting, embedding, rerank, and
+moderation attempts also fail over on a typed context-window rejection, an
+upstream error code or type of `context_length_exceeded`,
+`context_window_exceeded`, `max_context_length_exceeded`, or `prompt_too_long`,
+because a target with a larger context window may serve the request; message
+text never triggers it. Other upstream client errors, protocol errors, and
+cancellations are terminal. A request that ends on an upstream rejection
+returns `upstream_rejected` with the redacted upstream message, keeping an
+upstream 400, 404, 405, 409, 413, 415, or 422 status and otherwise answering
+502. A committed stream never restarts on another provider: a later failure
+is reported in-band as an error event and the stream ends without a success
+marker. Retained resources, realtime, and native Bedrock ingress pin one
+provider/credential without cross-target failover; see
 [compatibility](compatibility.md). Translation and native tool validation bound
 retained text/tool state by the event-size limit. Distinct native Chat choice
 tracking is bounded to `max(1, OLP_PROVIDER_MAX_EVENT_BYTES / 16)` entries.

@@ -73,6 +73,7 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `POST /v1/images/variations` | image_variation | native | — | — | — | — | — | — |
 | `POST /v1/audio/speech` | speech | native | — | — | — | — | — | — |
 | `POST /v1/audio/transcriptions` | transcription | native | — | — | — | — | — | — |
+| `POST /v1/audio/translations` | translation | native | — | — | — | — | — | — |
 | `POST /v1/videos` | video_create | native | — | — | — | — | — | — |
 | `GET /v1/videos` | video_list | native | — | — | — | — | — | — |
 | `GET /v1/videos/{video_id}` | video_get | native | — | — | — | — | — | — |
@@ -143,6 +144,19 @@ Replace `{version}` below with `v1` or `v1beta`.
 | `POST /gemini/{version}/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | — |
 | `POST /gemini/{version}/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
 | `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
+| `POST /gemini/{version}/models/{model}:embedContent` | embeddings | — | — | qualified | — | — | — | — |
+| `POST /gemini/{version}/models/{model}:batchEmbedContents` | embeddings | — | — | qualified | — | — | — | — |
+
+The two Gemini embedding endpoints are served only on
+[strict routes](provider-routing.md#route-fidelity) whose targets hold the
+certified `embeddings` capability and use a Gemini API profile:
+`gemini-generation` serves `embedContent`, and `gemini-batch-embeddings` serves
+`batchEmbedContents`. The request reaches the provider unchanged apart from
+model rewriting. No qualified mapping links Gemini embedding requests to another
+provider's embedding dialect, so other targets are refused with
+`target_capability`, and transformed routes refuse both endpoints with HTTP 400.
+To reach Gemini, Vertex AI, or Bedrock embeddings from another dialect, use
+`POST /v1/embeddings` on a transformed route.
 
 ### Bedrock surface
 

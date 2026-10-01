@@ -148,24 +148,26 @@ file; leave them empty to keep the binary defaults.
 ## OpenAI-compatible provider presets
 
 The release-owned wizard catalog resolves a reviewed HTTPS endpoint and
-`api_key` authentication into ordinary `openai_compatible` fields. The record
-stores the vendor ID separately from its editable resolved connection values:
+`api_key` authentication into ordinary `openai_compatible` fields. The `vllm`
+preset is the exception: it starts unauthenticated, with a placeholder endpoint
+to replace with the operator's server. The record stores the vendor ID
+separately from its editable resolved connection values:
 
 | ID | Provider | Endpoint |
 | --- | --- | --- |
 | `groq` | Groq | `https://api.groq.com/openai/v1` |
-| `mistral_ai` | Mistral AI | `https://api.mistral.ai/v1` |
-| `together_ai` | Together AI | `https://api.together.ai/v1` |
-| `xai` | xAI | `https://api.x.ai/v1` |
-| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` |
 | `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` |
+| `together` | Together AI | `https://api.together.xyz/v1` |
+| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) |
 | `deepseek` | DeepSeek | `https://api.deepseek.com/v1` |
-| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` |
+| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` |
 | `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |
 | `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |
 | `perplexity` | Perplexity | `https://api.perplexity.ai` |
 | `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |
-| `voyage` | Voyage | `https://api.voyageai.com/v1` |
+| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` |
+| `voyage` | Voyage AI | `https://api.voyageai.com/v1` |
 
 A preset is not provider or model certification. Creation and edits still run
 HTTPS, public-egress, SSRF, and reachability checks unless the host or address
