@@ -182,8 +182,8 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	var p *pin
 	defer func() {
 		settled := geminiLiveSettlement(x)
-		if p != nil && p.hold != nil {
-			p.hold.settle(r.Context(), x.dispatched, settled)
+		if p != nil {
+			s.settlePinHold(r.Context(), x, p.hold, settled)
 		}
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
@@ -422,6 +422,14 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 						} else {
 							observed.InputTokens = addBounded(observed.InputTokens, turn.InputTokens)
 							observed.OutputTokens = addBounded(observed.OutputTokens, turn.OutputTokens)
+							observed.TotalTokens = addBounded(observed.TotalTokens, turn.TotalTokens)
+							if turn.ReasoningTokens != nil {
+								reasoning := *turn.ReasoningTokens
+								if observed.ReasoningTokens != nil {
+									reasoning = addBounded(reasoning, *observed.ReasoningTokens)
+								}
+								observed.ReasoningTokens = &reasoning
+							}
 							if turn.CachedInputTokens != nil {
 								cached := *turn.CachedInputTokens
 								if observed.CachedInputTokens != nil {
@@ -550,16 +558,42 @@ func geminiLiveUsage(payload []byte, maxBytes int) *openai.Usage {
 		return nil
 	}
 	var native struct {
-		Input  *int64 `json:"promptTokenCount"`
-		Output *int64 `json:"responseTokenCount"`
-		Cached *int64 `json:"cachedContentTokenCount"`
+		Input    *int64 `json:"promptTokenCount"`
+		Output   *int64 `json:"responseTokenCount"`
+		Cached   *int64 `json:"cachedContentTokenCount"`
+		Thoughts *int64 `json:"thoughtsTokenCount"`
+		ToolUse  *int64 `json:"toolUsePromptTokenCount"`
+		Total    *int64 `json:"totalTokenCount"`
 	}
 	if json.Unmarshal(metadata.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
 		return nil
 	}
-	usageValue := &openai.Usage{InputTokens: *native.Input, OutputTokens: *native.Output}
-	if native.Cached != nil {
-		usageValue.CachedInputTokens = native.Cached
+	return geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
+}
+
+// geminiExtendedUsage folds the thinking and tool-use counts Gemini reports
+// apart from its prompt and response counts into output and input usage, as
+// the generateContent codec does, so every billed token reaches settlement.
+// It returns nil when any reported count is negative.
+func geminiExtendedUsage(input, output int64, cached, thoughts, toolUse, total *int64) *openai.Usage {
+	for _, v := range []*int64{thoughts, toolUse, total} {
+		if v != nil && *v < 0 {
+			return nil
+		}
+	}
+	usageValue := &openai.Usage{CachedInputTokens: cached}
+	if toolUse != nil {
+		input = addBounded(input, *toolUse)
+	}
+	if thoughts != nil {
+		output = addBounded(output, *thoughts)
+		reasoning := *thoughts
+		usageValue.ReasoningTokens = &reasoning
+	}
+	usageValue.InputTokens, usageValue.OutputTokens = input, output
+	usageValue.TotalTokens = addBounded(input, output)
+	if total != nil {
+		usageValue.TotalTokens = max(usageValue.TotalTokens, *total)
 	}
 	return usageValue
 }

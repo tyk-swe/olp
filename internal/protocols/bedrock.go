@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 
@@ -199,10 +200,7 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	if !hasIn || !hasOut {
 		return nil, protocolError("invalid Bedrock usage")
 	}
-	usage := &openai.Usage{InputTokens: in, OutputTokens: out, TotalTokens: in + out}
-	if n, ok := count(u["totalTokens"]); ok {
-		usage.TotalTokens = n
-	}
+	usage := &openai.Usage{InputTokens: in, OutputTokens: out}
 	optional := func(key string) (*int64, error) {
 		if !present(u[key]) {
 			return nil, nil
@@ -259,8 +257,17 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
 		return nil, protocolError("Bedrock cache write detail exceeds total")
 	}
-	if value(usage.CachedInputTokens)+value(usage.CacheWriteInputTokens) > in {
-		return nil, protocolError("Bedrock cache usage exceeds input")
+	// Bedrock reports inputTokens without the cache reads and writes, as
+	// Anthropic does; input usage here always includes them.
+	cache := value(usage.CachedInputTokens)
+	write := value(usage.CacheWriteInputTokens)
+	if cache > math.MaxInt64-in || write > math.MaxInt64-in-cache || out > math.MaxInt64-in-cache-write {
+		return nil, protocolError("usage count overflow")
+	}
+	usage.InputTokens = in + cache + write
+	usage.TotalTokens = usage.InputTokens + out
+	if n, ok := count(u["totalTokens"]); ok {
+		usage.TotalTokens = n
 	}
 	return usage, nil
 }

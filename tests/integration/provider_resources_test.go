@@ -547,6 +547,9 @@ func TestBatchLifecycle(t *testing.T) {
 	if len(items) != 1 || items[0].(map[string]any)["id"] != fileID {
 		t.Fatalf("file list: %v", list)
 	}
+	if list["has_more"] != false || list["first_id"] != fileID || list["last_id"] != fileID {
+		t.Fatalf("file list cursor: %v", list)
+	}
 	if fixture.dials.Load() != before {
 		t.Fatal("a metadata-only list must not contact the provider")
 	}
@@ -613,6 +616,9 @@ func TestBatchLifecycle(t *testing.T) {
 	if !strings.HasPrefix(batchID, "batch_") {
 		t.Fatalf("batch identifier: %v", batch)
 	}
+	if batch["input_file_id"] != fileID {
+		t.Fatalf("batch input file leaked upstream identifier: %v", batch)
+	}
 	sent, _ := fixture.lastReq.Load().(map[string]any)
 	if sent["input_file_id"] != "file-up-1" {
 		t.Fatalf("upstream did not receive the rewritten file identifier: %v", sent)
@@ -626,6 +632,7 @@ func TestBatchLifecycle(t *testing.T) {
 	fixture.batches["batch-up-1"]["status"] = "completed"
 	fixture.batches["batch-up-1"]["output_file_id"] = "file-up-out"
 	fixture.batches["batch-up-1"]["error_file_id"] = "file-up-err"
+	fixture.batches["batch-up-1"]["input_file_id"] = "file-up-1"
 	fixture.mu.Unlock()
 
 	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources
@@ -656,6 +663,23 @@ func TestBatchLifecycle(t *testing.T) {
 		if !strings.HasPrefix(mapped, "file_") || strings.Contains(mapped, "up-") {
 			t.Fatalf("%s leaked upstream identifier: %v", name, batch)
 		}
+	}
+	if batch["input_file_id"] != fileID {
+		t.Fatalf("input_file_id leaked upstream identifier: %v", batch)
+	}
+	// A provider whose own file IDs use the gateway's file_ prefix is still
+	// mapped, so its results stay reachable through the gateway.
+	fixture.mu.Lock()
+	fixture.batches["batch-up-1"]["output_file_id"] = "file_up_out"
+	fixture.files["file_up_out"] = map[string]any{"id": "file_up_out", "object": "file", "bytes": 16, "created_at": 1, "filename": "output.jsonl", "purpose": "batch_output", "status": "processed"}
+	fixture.mu.Unlock()
+	status, batch, _ = h.gateway("GET", "/v1/batches/"+batchID, secret, nil)
+	prefixed, _ := batch["output_file_id"].(string)
+	if status != 200 || prefixed == "file_up_out" || !strings.HasPrefix(prefixed, "file_") {
+		t.Fatalf("file_-prefixed upstream identifier was not mapped: %d %v", status, batch)
+	}
+	if status, fetched, _ := h.gateway("GET", "/v1/files/"+prefixed, secret, nil); status != 200 {
+		t.Fatalf("mapped file_-prefixed output file: %d %v", status, fetched)
 	}
 	status, batch, _ = h.gateway("GET", "/v1/batches/"+batchID, otherSecret, nil)
 	if status != 404 {
@@ -701,9 +725,39 @@ func TestBatchLifecycle(t *testing.T) {
 	if status != 200 || fetched["id"] != fileID {
 		t.Fatalf("get file after retire: %d %v", status, fetched)
 	}
+	status, list, _ = h.gateway("GET", "/v1/files", secret, nil)
+	if status != 200 {
+		t.Fatalf("list files before delete: %d %v", status, list)
+	}
+	listedBefore := map[string]bool{}
+	for _, item := range list["data"].([]any) {
+		listedBefore[item.(map[string]any)["id"].(string)] = true
+	}
 	status, deleted, _ := h.gateway("DELETE", "/v1/files/"+fileID, secret, nil)
 	if status != 200 || deleted["deleted"] != true {
 		t.Fatalf("delete file after retire: %d %v", status, deleted)
+	}
+	// A batch keeps naming the file it was created from after the client
+	// deletes that file, and reading it never resurrects the upstream file.
+	status, batch, _ = h.gateway("GET", "/v1/batches/"+batchID, secret, nil)
+	if status != 200 || batch["input_file_id"] != fileID {
+		t.Fatalf("batch after input file delete: %d %v", status, batch)
+	}
+	status, list, _ = h.gateway("GET", "/v1/files", secret, nil)
+	if status != 200 {
+		t.Fatalf("list files after delete: %d %v", status, list)
+	}
+	for _, item := range list["data"].([]any) {
+		if id := item.(map[string]any)["id"].(string); !listedBefore[id] {
+			t.Fatalf("batch read resurrected a deleted input file as %s: %v", id, list)
+		}
+	}
+	var inputMappings int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='file' AND upstream_id='file-up-1'`).Scan(&inputMappings); err != nil {
+		t.Fatal(err)
+	}
+	if inputMappings != 1 {
+		t.Fatalf("batch read created %d mappings for the deleted input file, want 1", inputMappings)
 	}
 }
 

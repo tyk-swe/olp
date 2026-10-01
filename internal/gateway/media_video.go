@@ -118,14 +118,19 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	x.dispatched = dispatchFailure == nil || dispatchFailure.dispatched
 	x.facts = append(x.facts, fact)
 	s.health.record(provider.ID, fact)
+	// A reply that lands just before the route deadline must still bind or
+	// retire its job: persistence gets its own bound, independent of the
+	// spent dispatch deadline.
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
 	if dispatchFailure != nil {
-		s.retireFailedCreate(dispatchCtx, reserved.ID, dispatchFailure)
+		s.retireFailedCreate(commitCtx, reserved.ID, dispatchFailure)
 		out := &mediaOutcome{err: dispatchFailure.toError(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == classCancelled}
 		s.finishMedia(x, out, out.err.Status)
 		writeSurfaceError(w, out.err, "openai")
 		return
 	}
-	out := s.attachCreated(dispatchCtx, x, reserved, result, localJobID)
+	out := s.attachCreated(commitCtx, x, reserved, result, localJobID)
 	if out.err != nil {
 		s.finishMedia(x, out, out.err.Status)
 		writeSurfaceError(w, out.err, "openai")
@@ -284,7 +289,10 @@ func (s *Server) handleFailedAttachment(ctx context.Context, x *execution, reser
 		compensated = s.compensateCreate(ctx, reservedRecord, upstreamID)
 	}
 	if compensated {
-		finalized, err := s.Media.Jobs.FinalizeDeletion(ctx, reservedRecord.ID)
+		// The compensating delete may outlast the caller's commit bound.
+		finalizeCtx, stopFinalize := resourceCommitContext(ctx)
+		defer stopFinalize()
+		finalized, err := s.Media.Jobs.FinalizeDeletion(finalizeCtx, reservedRecord.ID)
 		if err != nil || !finalized {
 			s.Media.Jobs.RecordGap()
 			s.Media.Jobs.Log.Error("upstream cleanup succeeded but tombstone was not finalized", "job_id", reservedRecord.ID, "error", err)
@@ -309,7 +317,9 @@ func (s *Server) compensateCreate(ctx context.Context, reserved media.JobRecord,
 	if failure != nil {
 		return false
 	}
-	callCtx, cancel := context.WithTimeout(ctx, routeTimeout+media.ReconciliationLeaseSlack)
+	// The delete is bounded by the route timeout, not by the caller's
+	// persistence deadline, which a slow provider would otherwise outlive.
+	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), routeTimeout+media.ReconciliationLeaseSlack)
 	defer cancel()
 	result, transportFailure := s.Media.Jobs.Transport.Do(callCtx, target.Target, call, nil)
 	if transportFailure != nil {
