@@ -428,14 +428,21 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	}
 	obj := map[string]json.RawMessage{}
 	for name, raw := range meta {
-		if name == "upstream_model" {
+		if name == "upstream_model" || name == batchLocalInputKey {
 			continue
 		}
 		obj[name] = raw
 	}
-	// Stored metadata is always the provider's own object, so every file
-	// reference in it is an upstream identifier, whatever its spelling.
-	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+	// The input file is the one the client named at create time. Projecting
+	// it from the stored local ID keeps it stable after the client deletes
+	// that file, instead of minting a new mapping for the upstream ID.
+	if local, ok := meta[batchLocalInputKey]; ok {
+		obj["input_file_id"] = local
+	}
+	// Stored provider fields are upstream identifiers, whatever their
+	// spelling. Output and error files are first seen here, so they get a
+	// mapping on demand.
+	for _, name := range []string{"output_file_id", "error_file_id"} {
 		raw, ok := obj[name]
 		if !ok {
 			continue
@@ -558,12 +565,27 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 	return encoded, state, expires
 }
 
-func batchMetadata(body []byte, model string) (json.RawMessage, string) {
+// batchLocalInputKey stores the gateway file ID a transformed batch was
+// created from beside the provider's batch object.
+const batchLocalInputKey = "local_input_file_id"
+
+// batchLocalInput returns the gateway input file ID stored on a batch.
+func batchLocalInput(res *resources.Resource) string {
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(res.Metadata, &meta) != nil {
+		return ""
+	}
+	var local string
+	_ = json.Unmarshal(meta[batchLocalInputKey], &local)
+	return local
+}
+
+func batchMetadata(body []byte, model, localInput string) (json.RawMessage, string) {
 	meta := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
 		for name, raw := range obj {
-			if name == "id" {
+			if name == "id" || name == batchLocalInputKey {
 				continue
 			}
 			meta[name] = raw
@@ -572,6 +594,10 @@ func batchMetadata(body []byte, model string) (json.RawMessage, string) {
 	if model != "" {
 		encoded, _ := json.Marshal(model)
 		meta["upstream_model"] = encoded
+	}
+	if localInput != "" {
+		encoded, _ := json.Marshal(localInput)
+		meta[batchLocalInputKey] = encoded
 	}
 	state := "validating"
 	if raw, ok := meta["status"]; ok {
@@ -1377,7 +1403,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	metadata, state := batchMetadata(result, p.model)
+	metadata, state := batchMetadata(result, p.model, localFile)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	kind := resources.KindBatch
@@ -1558,7 +1584,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	metadata, state := batchMetadata(result, resourceModel(res))
+	metadata, state := batchMetadata(result, resourceModel(res), batchLocalInput(res))
 	commitCtx := ctx
 	stopCommit := func() {}
 	if method == http.MethodPost {

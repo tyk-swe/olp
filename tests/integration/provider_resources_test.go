@@ -725,9 +725,39 @@ func TestBatchLifecycle(t *testing.T) {
 	if status != 200 || fetched["id"] != fileID {
 		t.Fatalf("get file after retire: %d %v", status, fetched)
 	}
+	status, list, _ = h.gateway("GET", "/v1/files", secret, nil)
+	if status != 200 {
+		t.Fatalf("list files before delete: %d %v", status, list)
+	}
+	listedBefore := map[string]bool{}
+	for _, item := range list["data"].([]any) {
+		listedBefore[item.(map[string]any)["id"].(string)] = true
+	}
 	status, deleted, _ := h.gateway("DELETE", "/v1/files/"+fileID, secret, nil)
 	if status != 200 || deleted["deleted"] != true {
 		t.Fatalf("delete file after retire: %d %v", status, deleted)
+	}
+	// A batch keeps naming the file it was created from after the client
+	// deletes that file, and reading it never resurrects the upstream file.
+	status, batch, _ = h.gateway("GET", "/v1/batches/"+batchID, secret, nil)
+	if status != 200 || batch["input_file_id"] != fileID {
+		t.Fatalf("batch after input file delete: %d %v", status, batch)
+	}
+	status, list, _ = h.gateway("GET", "/v1/files", secret, nil)
+	if status != 200 {
+		t.Fatalf("list files after delete: %d %v", status, list)
+	}
+	for _, item := range list["data"].([]any) {
+		if id := item.(map[string]any)["id"].(string); !listedBefore[id] {
+			t.Fatalf("batch read resurrected a deleted input file as %s: %v", id, list)
+		}
+	}
+	var inputMappings int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.provider_resources WHERE kind='file' AND upstream_id='file-up-1'`).Scan(&inputMappings); err != nil {
+		t.Fatal(err)
+	}
+	if inputMappings != 1 {
+		t.Fatalf("batch read created %d mappings for the deleted input file, want 1", inputMappings)
 	}
 }
 

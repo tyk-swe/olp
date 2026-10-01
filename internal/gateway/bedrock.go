@@ -297,6 +297,12 @@ func (s *Server) validateBedrockInvoke(x *execution, model string, body []byte) 
 		if err := validateTitanImage(body); err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan image response.")
 		}
+		// Titan image responses report no token usage, so the invoke keeps
+		// its request-sized reservation instead of settling at zero.
+		if len(x.facts) > 0 {
+			fact := &x.facts[len(x.facts)-1]
+			fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = false, false, true
+		}
 		return nil
 	}
 	return serverError(http.StatusUnprocessableEntity, "unsupported_invoke_model",
