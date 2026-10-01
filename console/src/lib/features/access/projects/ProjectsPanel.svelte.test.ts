@@ -282,6 +282,30 @@ it('omits members on other pages from the add-member picker', async () => {
   expect(options).not.toContain(manager.id);
 });
 
+it('explains and retries a failed current-members load for the add form', async () => {
+  vi.mocked(listAllProjectMembers).mockRejectedValueOnce(
+    new Error('members walk failed')
+  );
+  render();
+  await settle();
+  button('Members').click();
+  await settle();
+  expect(host.textContent).toContain('operator@example.com');
+  const alert = [...host.querySelectorAll('[role="alert"]')].find((node) =>
+    node.textContent?.includes('Current members could not be loaded')
+  );
+  expect(alert).toBeDefined();
+  expect((button('Add member') as HTMLButtonElement).disabled).toBe(true);
+  alert!.querySelector<HTMLButtonElement>('button')!.click();
+  await settle();
+  expect(listAllProjectMembers).toHaveBeenCalledTimes(2);
+  expect(host.textContent).not.toContain('Current members could not be loaded');
+  const options = [
+    ...host.querySelectorAll<HTMLOptionElement>('#member-user option')
+  ].map((option) => option.value);
+  expect(options).toContain(candidate.id);
+});
+
 it('opens a created project with a fresh member cursor and rename value', async () => {
   const created: Project = {
     ...project,

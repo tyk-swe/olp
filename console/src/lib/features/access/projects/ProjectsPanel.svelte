@@ -374,6 +374,18 @@
           {...cursorPaginationProps(memberPagination, members.data?.nextCursor)}
         />
 
+        {#if allMembers.isPending}<p class="inline-status" role="status">
+            Loading current members…
+          </p>
+        {:else if allMembers.isError}<div class="inline-problem" role="alert">
+            Current members could not be loaded, so new members can't be added.
+            <button
+              class="button button-secondary"
+              type="button"
+              onclick={() => allMembers.refetch()}>Retry</button
+            >
+          </div>
+        {/if}
         <form class="create-form" onsubmit={submitAddMember}>
           <div class="form-field">
             <label for="member-user">Add member</label><select
