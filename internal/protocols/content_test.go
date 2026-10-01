@@ -17,6 +17,15 @@ func parse(t *testing.T, family openai.Family, body string) *openai.Request {
 	return r
 }
 
+func inspectInputText(t *testing.T, r *openai.Request, fn TextSlot) *openai.Request {
+	t.Helper()
+	out, err := InspectInputText(r, fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func redactSecret(text string) (string, bool) {
 	return strings.ReplaceAll(text, "s3cr3t", "[REDACTED]"), false
 }
@@ -51,7 +60,7 @@ func TestInspectInputTextChat(t *testing.T) {
 			{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"q\":\"s3cr3t\"}"}}]},
 			{"role":"tool","tool_call_id":"c1","content":"result s3cr3t"}
 		]}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	doc := out.Document()
 	var messages []map[string]json.RawMessage
 	if err := json.Unmarshal(doc["messages"], &messages); err != nil {
@@ -96,7 +105,7 @@ func TestInspectInputTextChat(t *testing.T) {
 
 func TestInspectInputTextChatBlockStopsWalk(t *testing.T) {
 	r := parse(t, openai.FamilyChat, `{"model":"route","messages":[{"role":"user","content":"forbidden"}]}`)
-	out := InspectInputText(r, blockOnForbid)
+	out := inspectInputText(t, r, blockOnForbid)
 	if out == nil {
 		t.Fatal("nil envelope")
 	}
@@ -111,7 +120,7 @@ func TestInspectInputTextResponses(t *testing.T) {
 			{"type":"function_call","name":"f","arguments":"{\"x\":\"s3cr3t\"}"},
 			{"type":"function_call_output","output":"ran s3cr3t"}
 		]}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	doc := out.Document()
 	if got := fieldText(t, out, "instructions"); got != "guard [REDACTED]" {
 		t.Fatalf("instructions=%q", got)
@@ -139,7 +148,7 @@ func TestInspectInputTextResponses(t *testing.T) {
 
 func TestInspectInputTextResponsesString(t *testing.T) {
 	r := parse(t, openai.FamilyResponses, `{"model":"route","input":"raw s3cr3t"}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	if got := fieldText(t, out, "input"); got != "raw [REDACTED]" {
 		t.Fatalf("input=%q", got)
 	}
@@ -147,24 +156,24 @@ func TestInspectInputTextResponsesString(t *testing.T) {
 
 func TestInspectInputTextEmbeddingsAndModeration(t *testing.T) {
 	single := parse(t, openai.FamilyEmbeddings, `{"model":"route","input":"embed s3cr3t"}`)
-	if got := fieldText(t, InspectInputText(single, redactSecret), "input"); got != "embed [REDACTED]" {
+	if got := fieldText(t, inspectInputText(t, single, redactSecret), "input"); got != "embed [REDACTED]" {
 		t.Fatalf("embed input=%q", got)
 	}
 	list := parse(t, openai.FamilyEmbeddings, `{"model":"route","input":["one s3cr3t","two"]}`)
 	var inputs []string
-	json.Unmarshal(InspectInputText(list, redactSecret).Field("input"), &inputs)
+	json.Unmarshal(inspectInputText(t, list, redactSecret).Field("input"), &inputs)
 	if inputs[0] != "one [REDACTED]" || inputs[1] != "two" {
 		t.Fatalf("inputs=%v", inputs)
 	}
 	moderation := parse(t, openai.FamilyModeration, `{"model":"route","input":"mod s3cr3t"}`)
-	if got := fieldText(t, InspectInputText(moderation, redactSecret), "input"); got != "mod [REDACTED]" {
+	if got := fieldText(t, inspectInputText(t, moderation, redactSecret), "input"); got != "mod [REDACTED]" {
 		t.Fatalf("moderation input=%q", got)
 	}
 }
 
 func TestInspectInputTextRerank(t *testing.T) {
 	r := parse(t, openai.FamilyRerank, `{"model":"route","query":"find s3cr3t","documents":["doc s3cr3t","clean"]}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	if got := fieldText(t, out, "query"); got != "find [REDACTED]" {
 		t.Fatalf("query=%q", got)
 	}
@@ -183,7 +192,7 @@ func TestInspectInputTextAnthropic(t *testing.T) {
 			{"role":"user","content":"user s3cr3t"},
 			{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"res s3cr3t"}]}]}
 		]}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	doc := out.Document()
 	var system []map[string]json.RawMessage
 	json.Unmarshal(doc["system"], &system)
@@ -214,7 +223,7 @@ func TestInspectInputTextGemini(t *testing.T) {
 	r := parse(t, openai.FamilyGemini, `{
 		"systemInstruction":{"parts":[{"text":"sys s3cr3t"}]},
 		"contents":[{"role":"user","parts":[{"text":"hi s3cr3t"},{"inlineData":{"mimeType":"image/png","data":"s3cr3t"}}]}]}`)
-	out := InspectInputText(r, redactSecret)
+	out := inspectInputText(t, r, redactSecret)
 	doc := out.Document()
 	var contents []map[string]json.RawMessage
 	json.Unmarshal(doc["contents"], &contents)

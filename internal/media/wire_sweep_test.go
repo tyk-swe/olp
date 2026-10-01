@@ -162,3 +162,38 @@ func TestNextTerminalReconciliationHonoursExpiry(t *testing.T) {
 		}
 	}
 }
+
+func TestTranscriptionJSONRejectsMalformedSegmentIDs(t *testing.T) {
+	for _, id := range []string{`[]`, `{}`, `true`, `false`, `1.5`, `1e0`, `9223372036854775808`} {
+		t.Run(id, func(t *testing.T) {
+			body := []byte(`{"text":"hi","segments":[{"id":` + id + `,"start":0,"end":1,"text":"hi"}]}`)
+			if result, failure := DecodeTranscriptionJSON(body); failure == nil || result != nil {
+				t.Fatalf("accepted invalid segment ID %s: %+v, %v", id, result, failure)
+			}
+		})
+	}
+}
+
+func TestTranscriptionJSONAllowsAbsentNullAndExactIntegerIDs(t *testing.T) {
+	for _, fields := range []string{``, `"id":null,`, `"id":9223372036854775807,`, `"id":-1,`} {
+		t.Run(fields, func(t *testing.T) {
+			body := []byte(`{"text":"hi","segments":[{` + fields + `"start":0,"end":1,"text":"hi"}]}`)
+			result, failure := DecodeTranscriptionJSON(body)
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			encoded, failure := EncodeTranscriptionJSON(result)
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			if strings.Contains(fields, "9223372036854775807") && !bytes.Contains(encoded, []byte("9223372036854775807")) {
+				t.Fatalf("integer precision lost: %s", encoded)
+			}
+			if fields == "" || strings.Contains(fields, "null") {
+				if bytes.Contains(encoded, []byte(`"id"`)) {
+					t.Fatalf("absent ID emitted: %s", encoded)
+				}
+			}
+		})
+	}
+}

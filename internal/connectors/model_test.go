@@ -28,3 +28,25 @@ func TestBoundModelResourceNameIsNormalizedInURL(t *testing.T) {
 		t.Fatalf("vertex count URL = %q, %v", got, err)
 	}
 }
+
+func TestModelResourcePrefixIsScopedToConnectorKind(t *testing.T) {
+	for _, kind := range []string{"openai", "openai_compatible", "anthropic", "plugin", "bedrock", "gemini", "vertex_ai", "azure_openai"} {
+		t.Run(kind, func(t *testing.T) {
+			const upstream = "models/acme-v1"
+			want := upstream
+			if kind == "gemini" || kind == "vertex_ai" || kind == "azure_openai" {
+				want = "acme-v1"
+			}
+			for _, config := range []Config{
+				{Kind: kind},
+				{Kind: kind, Bindings: map[string]Binding{upstream: {Model: upstream}}},
+				{Kind: kind, Bindings: map[string]Binding{upstream: {Deployment: upstream}}},
+				{Kind: kind, Models: map[string]json.RawMessage{upstream: json.RawMessage(`{"deployment":"models/acme-v1"}`)}},
+			} {
+				if got := config.Model(upstream); got != want {
+					t.Errorf("Model = %q, want %q for %+v", got, want, config)
+				}
+			}
+		})
+	}
+}

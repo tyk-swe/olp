@@ -28,7 +28,7 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 			}
 			r := openai.NewEnvelope(tc.family, "route", false, decodeFields(t, tc.body))
 			hits := 0
-			out := InspectInputText(r, func(text string) (string, bool) {
+			out := inspectInputText(t, r, func(text string) (string, bool) {
 				if strings.Contains(text, "s3cr3t") {
 					hits++
 				}

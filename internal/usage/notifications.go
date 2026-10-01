@@ -403,19 +403,16 @@ func webhookBody(d delivery) ([]byte, error) {
 // rotating or clearing a secret deletes the old one, the share lock waits for
 // a rotation in flight to commit, and a rule moved to another destination
 // sends there, signed with that destination's secret. It reports
-// pgx.ErrNoRows when the rule or its destination is disabled.
-func (w *notificationWorker) notificationDestination(ctx context.Context, ruleID string) (string, []byte, error) {
-	tx, err := w.pool.Begin(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	defer tx.Rollback(ctx)
+// pgx.ErrNoRows when the rule or its destination is disabled. Both stay locked
+// until the delivery attempt is committed, so a disabled delivery is never
+// claimed and a rule cannot move while its destination is read.
+func (w *notificationWorker) notificationDestination(ctx context.Context, tx pgx.Tx, ruleID string) (string, []byte, error) {
 	var target string
 	var secretID *string
-	if err = tx.QueryRow(ctx,
+	if err := tx.QueryRow(ctx,
 		`SELECT d.url,d.secret_id::text FROM olp.notification_rules r
 		 JOIN olp.notification_destinations d ON d.id=r.destination_id
-		 WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF d`, ruleID).Scan(&target, &secretID); err != nil {
+		 WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF r,d`, ruleID).Scan(&target, &secretID); err != nil {
 		return "", nil, err
 	}
 	if secretID == nil {
@@ -434,13 +431,22 @@ func deliveryErrorCode(err error) string {
 }
 
 // deliver makes one attempt to deliver d and records how it ended, reporting
-// whether it made one. The attempt is recorded before it is made, unless
-// another replica recorded one since d was read, so replicas never make the
-// same attempt twice.
+// whether it made one. The attempt and its enabled destination are claimed in
+// one transaction. A disabled rule or destination leaves the attempt untouched;
+// another replica that already claimed it makes this claim a no-op. The locks
+// are released before sending, so a later disable cannot cancel an in-flight
+// attempt.
 func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
-	claimed, err := w.pool.Exec(ctx,
-		"UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now() WHERE id=$1 AND attempts=$2",
-		d.id, d.attempts)
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		w.log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
+		return false
+	}
+	defer tx.Rollback(ctx)
+	claimed, err := tx.Exec(ctx,
+		`UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now()
+		 WHERE id=$1 AND attempts=$2 AND attempts<$3 AND status IN ('pending','failed')`,
+		d.id, d.attempts, maxDeliveryAttempts)
 	if err != nil {
 		w.log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
 		return false
@@ -448,7 +454,19 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 	if claimed.RowsAffected() == 0 {
 		return false
 	}
-	code := w.send(ctx, d)
+	destination, secret, err := w.notificationDestination(ctx, tx, d.ruleID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		w.log.Warn("notification destination unavailable", "delivery", d.id, "error", err)
+		return false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		w.log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
+		return false
+	}
+	code := w.send(ctx, d, destination, secret)
 	delivered := code == ""
 	var lastError *string
 	if !delivered {
@@ -464,17 +482,9 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 	return true
 }
 
-func (w *notificationWorker) send(ctx context.Context, d delivery) string {
+func (w *notificationWorker) send(ctx context.Context, d delivery, destination string, secret []byte) string {
 	if w.policy == nil {
 		return "invalid_destination"
-	}
-	destination, secret, err := w.notificationDestination(ctx, d.ruleID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "invalid_destination"
-	}
-	if err != nil {
-		w.log.Warn("notification destination unavailable", "delivery", d.id, "error", err)
-		return "network"
 	}
 	target, err := w.policy.ValidateEndpoint(destination)
 	if err != nil {

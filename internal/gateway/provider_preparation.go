@@ -109,7 +109,7 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 	if compiled != nil {
 		for _, rule := range compiled.Input {
 			matched, blocked := false, false
-			next := protocols.InspectInputText(native, func(text string) (string, bool) {
+			next, err := protocols.InspectInputText(native, func(text string) (string, bool) {
 				if !rule.Re.MatchString(text) {
 					return text, false
 				}
@@ -120,6 +120,9 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 				}
 				return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 			})
+			if err != nil {
+				return preparedProvider{}, policyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
+			}
 			if blocked {
 				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
 				return preparedProvider{policyDecisions: decisions}, invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)

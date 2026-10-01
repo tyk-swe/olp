@@ -140,3 +140,93 @@ func TestContentPolicyUninspectableWireFailsClosed(t *testing.T) {
 		t.Fatalf("output-only policy refused: %+v", e)
 	}
 }
+
+// These structured-data regressions exercise the Bedrock destination contract
+// without an unrelated OpenAI fallback target.
+func useOnlyBedrockProvider(h *harness) {
+	useBedrockProvider(h)
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	var targets []runtime.Target
+	for _, target := range route.Targets {
+		if snapshot.Providers[target.ProviderID].Kind == "bedrock" {
+			targets = append(targets, target)
+		}
+	}
+	route.Targets = targets
+	snapshot.Routes[routeSlug] = route
+}
+
+func bedrockToolArguments(t *testing.T, input string) string {
+	t.Helper()
+	arguments, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `,"messages":[{"role":"user","content":"run the tool"},{"role":"assistant","content":null,"tool_calls":[{"id":"call","type":"function","function":{"name":"lookup","arguments":` + string(arguments) + `}}]},{"role":"tool","tool_call_id":"call","content":"done"}]`
+}
+
+func TestContentPolicyBedrockStructuredInputBlocksBeforeDispatch(t *testing.T) {
+	for _, tc := range []struct{ name, input, pattern string }{
+		{"object key", `{"s3cr3t":"safe"}`, "s3cr3t"},
+		{"escaped object key", `{"s3cr\u0033t":"safe"}`, "s3cr3t"},
+		{"number", `{"count":9007199254740993}`, "9007199254740993"},
+		{"boolean", `{"enabled":true}`, "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			useOnlyBedrockProvider(h)
+			h.mock.set("a", converseReply)
+			setRoutePolicy(h, contentpolicy.Rule{ID: "no-structured-secrets", Phase: contentpolicy.PhaseInput, Pattern: tc.pattern, Action: contentpolicy.ActionBlock})
+			resp, body := h.chat(fullKey, nil, bedrockToolArguments(t, tc.input))
+			if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "content_policy_blocked" {
+				t.Fatalf("status=%d body=%v", resp.StatusCode, body)
+			}
+			if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+				t.Fatalf("provider called: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
+			}
+		})
+	}
+}
+
+func TestContentPolicyBedrockStructuredInputRedactsBeforeDispatch(t *testing.T) {
+	h := newHarness(t, Config{})
+	useOnlyBedrockProvider(h)
+	setRoutePolicy(h, contentpolicy.Rule{ID: "mask-structured-secret", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t|12345", Action: contentpolicy.ActionRedact, Replacement: "[MASK]"})
+	calls := make(chan string, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		calls <- string(data)
+		converseReply(w, r)
+	})
+	resp, body := h.chat(fullKey, nil, bedrockToolArguments(t, `{"s3cr3t":12345,"safe":9007199254740993}`))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
+	}
+	select {
+	case upstream := <-calls:
+		if !json.Valid([]byte(upstream)) || strings.Contains(upstream, "s3cr3t") || strings.Contains(upstream, "12345") ||
+			!strings.Contains(upstream, `"input":{"[MASK]":"[MASK]","safe":9007199254740993}`) {
+			t.Fatalf("unsafe or incomplete structured redaction: %s", upstream)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bedrock target not dispatched")
+	}
+	decisions := policyDecisions(h)
+	if len(decisions) != 1 || decisions[0].Outcome != "redacted" || decisions[0].RuleID != "mask-structured-secret" {
+		t.Fatalf("decisions %+v", decisions)
+	}
+}
+
+func TestContentPolicyBedrockStructuredKeyCollisionFailsBeforeDispatch(t *testing.T) {
+	h := newHarness(t, Config{})
+	useOnlyBedrockProvider(h)
+	setRoutePolicy(h, contentpolicy.Rule{ID: "mask-secret", Phase: contentpolicy.PhaseInput, Pattern: "s3cr3t", Action: contentpolicy.ActionRedact, Replacement: "[MASK]"})
+	resp, body := h.chat(fullKey, nil, bedrockToolArguments(t, `{"s3cr3t":1,"[MASK]":2}`))
+	if resp.StatusCode != http.StatusUnprocessableEntity || errorCode(t, body) != "content_policy_surface_unavailable" {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
+	}
+	if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+		t.Fatalf("provider called: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
+	}
+}

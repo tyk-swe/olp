@@ -134,9 +134,14 @@ func (c Config) Validate(policy *egress.Policy) error {
 
 // Model is the upstream model a client model names: its binding's deployment
 // or model, its metadata deployment, or the name itself. A Gemini-style
-// "models/" resource prefix is dropped, as model validation accepts it.
+// "models/" resource prefix is dropped only for connector kinds whose model
+// validation recognizes that resource syntax.
 func (c Config) Model(model string) string {
-	return strings.TrimPrefix(c.boundModel(model), "models/")
+	model = c.boundModel(model)
+	if c.Kind == "gemini" || c.Kind == "vertex_ai" || c.Kind == "azure_openai" {
+		return strings.TrimPrefix(model, "models/")
+	}
+	return model
 }
 
 func (c Config) boundModel(model string) string {

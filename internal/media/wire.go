@@ -1667,6 +1667,19 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	if err := decoder.Decode(&wire); err != nil {
 		return nil, protocolError("The provider transcription is not valid JSON.")
 	}
+	for _, segment := range wire.Segments {
+		if len(segment.ID) == 0 || string(segment.ID) == "null" {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(segment.ID, &text); err == nil {
+			continue
+		}
+		var number int64
+		if err := json.Unmarshal(segment.ID, &number); err != nil {
+			return nil, protocolError("The provider transcription segment ID must be a string or integer.")
+		}
+	}
 	result := &TranscriptionResult{
 		Text: wire.Text, Language: wire.Language, DurationSeconds: wire.Duration,
 		Extra: diffFields(doc, "text", "language", "duration", "segments"),
