@@ -33,6 +33,7 @@ import {
   type RouteSimulation
 } from '$lib/features/routes/api';
 import { listProviderModelInventory } from '$lib/features/providers/api/models';
+import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
   buildCreateRouteDraftInput,
@@ -298,6 +299,12 @@ export class RouteDraftEditorState {
   };
   save = async (current: RouteDraft) => {
     if (!this.canManage || this.busy) return;
+    // Replacing an unchanged draft would only reset its validation state.
+    if (!this.sync.dirty) {
+      this.errorMessage = '';
+      this.notice = 'No unsaved changes.';
+      return;
+    }
     const issue = validateRouteEditor(this.editorValues);
     if (issue) {
       this.errorMessage = issue;
@@ -480,6 +487,16 @@ export class RouteDraftEditorState {
         this.simulationMode = modes[0] ?? 'unary';
       if (this.outputPolicyActive && this.simulationMode === 'streaming')
         this.simulationMode = 'unary';
+      if (
+        this.simulationDialect &&
+        !(
+          inspectionDialects(
+            this.simulationOperation,
+            this.simulationSurface
+          ) as string[]
+        ).includes(this.simulationDialect)
+      )
+        this.simulationDialect = '';
     });
     $effect(() => {
       void this.simulationInputs;

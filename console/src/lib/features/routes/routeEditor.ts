@@ -237,8 +237,6 @@ export function validateContentPolicy(
     if (patternLength < 1 || patternLength > POLICY_MAX_PATTERN_BYTES)
       return `Rule “${rule.id}” needs a RE2 pattern of 1–${POLICY_MAX_PATTERN_BYTES} bytes.`;
     patternBytes += patternLength;
-    if (rule.action === 'block' && rule.replacement)
-      return `Rule “${rule.id}” blocks, so it cannot carry a replacement.`;
     if (
       rule.action === 'redact' &&
       [...rule.replacement].length > POLICY_MAX_REPLACEMENT_CHARS
@@ -268,11 +266,9 @@ export function buildContentPolicy(
 }
 
 export function validateRouteEditor(values: RouteEditorValues): string | null {
-  const validSlug =
-    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(values.slug) &&
-    !values.slug.includes('--');
-  if (!validSlug) {
-    return 'Use 1–63 lowercase letters or numbers with single internal hyphens.';
+  // Matches the server's route slug format.
+  if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(values.slug)) {
+    return 'Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.';
   }
   if (!values.operations.length)
     return 'Select at least one supported operation.';
@@ -282,15 +278,24 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
     return 'Maximum attempts must be between 1 and 32767; each credential attempt counts.';
   }
   if (
+    !Number.isInteger(values.overallTimeoutMs) ||
+    values.overallTimeoutMs < 1 ||
+    values.overallTimeoutMs > 3600000
+  ) {
+    return 'Overall deadline must be from 1 to 3600000 ms.';
+  }
+  if (
     values.targets.some(
       (target) =>
-        target.weight < 1 ||
-        target.timeoutMs < 100 ||
         target.priority < 0 ||
-        target.priority > 65535
+        target.priority > 32767 ||
+        target.weight < 1 ||
+        target.weight > 1000000 ||
+        target.timeoutMs < 1 ||
+        target.timeoutMs > values.overallTimeoutMs
     )
   ) {
-    return 'Every target needs a priority from 0 to 65535, a positive weight, and a timeout of at least 100 ms.';
+    return 'Every target needs a priority from 0 to 32767, a weight from 1 to 1000000, and a timeout from 1 ms up to the overall deadline.';
   }
   return validateContentPolicy(values.contentPolicyRules);
 }

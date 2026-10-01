@@ -3,6 +3,7 @@ import { onDestroy } from 'svelte';
 import { routeKeys } from '$lib/features/routes/routeKeys';
 import { listRoutes, simulateRouting } from '$lib/features/routes/api';
 import { hasOutputRules } from '$lib/features/routes/routeEditor';
+import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { listApiKeys } from '$lib/features/access/api-keys/api';
 import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
 import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
@@ -51,6 +52,9 @@ export class PlaygroundState {
   streamDone = $state<PlaygroundStreamDone | null>(null);
   streamProblem = $state<string | null>(null);
   private streamAbort: AbortController | null = null;
+  // Bumped whenever a streaming check is started or invalidated, so a slower,
+  // older check cannot overwrite the verdict for the current inputs.
+  private streamCheckSerial = 0;
   temperature = $state('');
   maxOutputTokens = $state('');
   toolsJson = $state(
@@ -84,12 +88,17 @@ export class PlaygroundState {
   routeOperations = $derived(
     this.selectedRoute?.latest_revision?.operations ?? null
   );
+  // Basic mode always composes a generation request; the Advanced operation is
+  // kept for when the operator switches back.
+  activeOperation = $derived<PlaygroundOperation>(
+    this.composer === 'advanced' ? this.operation : 'generation'
+  );
   operationKnown = $derived(
     this.routeOperations == null ||
       this.routeOperations.includes(this.operation)
   );
   streamSelectable = $derived(
-    this.operation === 'generation' && !this.outputPolicyActive
+    this.activeOperation === 'generation' && !this.outputPolicyActive
   );
   simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
@@ -105,9 +114,11 @@ export class PlaygroundState {
     this.simulation.data?.length &&
       this.inspectedInputs === this.inspectionInputs()
       ? { dryRun: true, decisions: this.simulation.data }
-      : this.mutation.data?.routing?.length
-        ? { dryRun: false, decisions: this.mutation.data.routing }
-        : null
+      : this.streamDone?.routing?.length
+        ? { dryRun: false, decisions: this.streamDone.routing }
+        : this.mutation.data?.routing?.length
+          ? { dryRun: false, decisions: this.mutation.data.routing }
+          : null
   );
 
   applyTemplate = (key: string) => {
@@ -121,6 +132,7 @@ export class PlaygroundState {
   };
 
   private async checkStreamCapability() {
+    const serial = ++this.streamCheckSerial;
     this.streamCheckMessage = '';
     if (!this.selectedRoute) {
       this.streamCheck = 'unknown';
@@ -136,6 +148,7 @@ export class PlaygroundState {
         mode: 'streaming',
         preferences: JSON.parse(this.routing || '{}')
       });
+      if (serial !== this.streamCheckSerial) return;
       if (decisions.some((decision) => decision.eligible)) {
         this.streamCheck = 'ok';
       } else {
@@ -144,6 +157,7 @@ export class PlaygroundState {
           'No published target reports streaming eligibility for this route and surface.';
       }
     } catch {
+      if (serial !== this.streamCheckSerial) return;
       this.streamCheck = 'unknown';
       this.streamCheckMessage =
         'Streaming capability could not be verified; the route may reject the stream.';
@@ -154,6 +168,7 @@ export class PlaygroundState {
     this.streamEnabled = enabled;
     if (enabled) void this.checkStreamCapability();
     else {
+      this.streamCheckSerial++;
       this.streamCheck = 'idle';
       this.streamCheckMessage = '';
     }
@@ -187,6 +202,16 @@ export class PlaygroundState {
       this.nativeDialect
     ]);
   }
+
+  // The inspector dialect only applies while it belongs to the current
+  // operation and surface; a stale choice is dropped rather than sent.
+  currentInspectDialect = (): string | undefined =>
+    this.composer === 'advanced' &&
+    (inspectionDialects(this.operation, this.surface) as string[]).includes(
+      this.inspectDialect
+    )
+      ? this.inspectDialect
+      : undefined;
 
   currentNativeDialect = (): string => {
     const options = nativeDialects(this.operation);
@@ -229,13 +254,13 @@ export class PlaygroundState {
         nativeDialects(this.operation).length > 0;
       const selectedDialect = registeredNative
         ? this.currentNativeDialect()
-        : this.inspectDialect || undefined;
+        : this.currentInspectDialect();
       const input: InspectRoutingInput = {
         route: this.model.trim(),
-        operation: this.composer === 'advanced' ? this.operation : 'generation',
+        operation: this.activeOperation,
         surface: registeredNative ? 'native' : this.surface,
         mode:
-          this.operation === 'realtime'
+          this.activeOperation === 'realtime'
             ? 'realtime'
             : registeredNative
               ? 'unary'
@@ -274,12 +299,15 @@ export class PlaygroundState {
   };
 
   private async runStream(request: PlaygroundRequest) {
-    this.streamAbort = new AbortController();
+    const abort = new AbortController();
+    this.streamAbort = abort;
+    this.mutation.reset();
     this.streaming = true;
     this.streamFrames = [];
     this.streamDone = null;
     this.streamProblem = null;
     this.completedRequest = request;
+    let terminal = false;
     try {
       await streamPlayground(
         request,
@@ -288,15 +316,20 @@ export class PlaygroundState {
             this.streamFrames = [...this.streamFrames, frame];
           },
           done: (meta) => {
+            terminal = true;
             this.streamDone = meta;
           },
           error: (problem) => {
+            terminal = true;
             this.streamProblem =
               problem.message ?? 'The playground stream failed.';
           }
         },
-        this.streamAbort.signal
+        abort.signal
       );
+      // A clean close without done or error means the response was cut short.
+      if (!terminal && !abort.signal.aborted)
+        this.streamProblem = 'The stream ended before completion.';
     } catch (error) {
       if (!abortError(error))
         this.streamProblem = errorMessage(
@@ -334,16 +367,19 @@ export class PlaygroundState {
         'Use the qualified public client below for this strict route.';
       return;
     }
-    if (this.operation === 'translation') {
+    if (this.activeOperation === 'translation') {
       this.validationError = 'Use the audio upload form below.';
       return;
     }
-    if (this.operation === 'realtime') {
+    if (this.activeOperation === 'realtime') {
       this.validationError =
         'Use the local realtime event viewer below; it does not open a provider session.';
       return;
     }
-    if (this.operation === 'classification' || this.operation === 'scoring') {
+    if (
+      this.activeOperation === 'classification' ||
+      this.activeOperation === 'scoring'
+    ) {
       this.validationError =
         'This operation requires a strict registered native route and the public client below.';
       return;
@@ -355,7 +391,7 @@ export class PlaygroundState {
           routing: JSON.parse(this.routing),
           model: this.model.trim(),
           surface: this.surface,
-          operation: this.operation,
+          operation: this.activeOperation,
           request: this.advancedRequest(),
           stream: this.streamEnabled ? true : undefined
         };
@@ -380,6 +416,7 @@ export class PlaygroundState {
     this.streamFrames = [];
     this.streamDone = null;
     this.streamProblem = null;
+    this.mutation.reset();
     this.completedRequest = request;
     if (this.streamEnabled) {
       await this.runStream(request);
@@ -398,7 +435,8 @@ export class PlaygroundState {
     $effect(() => {
       void this.model;
       void this.surface;
-      void this.operation;
+      void this.activeOperation;
+      this.streamCheckSerial++;
       this.streamEnabled = false;
       this.streamCheck = 'idle';
       this.streamCheckMessage = '';
@@ -406,8 +444,8 @@ export class PlaygroundState {
 
     $effect(() => {
       if (
-        this.operation !== 'generation' &&
-        this.operation !== 'token_count' &&
+        this.activeOperation !== 'generation' &&
+        this.activeOperation !== 'token_count' &&
         this.surface !== 'openai'
       )
         this.surface = 'openai';

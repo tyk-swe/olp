@@ -58,7 +58,17 @@
       disabled={Boolean(editor.busy)}
     />
     <label for="simulation-seed">Dry-run seed</label>
-    <input id="simulation-seed" bind:value={editor.seed} />
+    <input
+      id="simulation-seed"
+      bind:value={editor.seed}
+      onkeydown={(event) => {
+        // Enter would implicitly submit the studio form and re-save the draft.
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        if (editor.canManage && !editor.publicationBlocked && !editor.busy)
+          void editor.simulate(editor.draft.data!);
+      }}
+    />
     <label for="simulation-dialect">Native request dialect</label>
     <select id="simulation-dialect" bind:value={editor.simulationDialect}>
       <option value="">Default for operation and surface</option>

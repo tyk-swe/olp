@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   mediaJobProblem,
   mediaJobSearch,
@@ -37,10 +37,17 @@ describe('mediaJobPollInterval', () => {
     expect(mediaJobPollInterval(true)).toBe(3_000);
   });
 
-  it('stops on terminal jobs and hidden tabs', () => {
+  it('stops on terminal jobs', () => {
     expect(mediaJobPollInterval(false)).toBe(false);
-    expect(mediaJobPollInterval(true, true)).toBe(false);
-    expect(mediaJobPollInterval(false, false)).toBe(false);
+  });
+
+  it('keeps the interval while the tab is hidden', () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    try {
+      expect(mediaJobPollInterval(true)).toBe(3_000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

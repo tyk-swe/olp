@@ -44,6 +44,12 @@
 
   async function retire(item: ActiveRoute) {
     if (retiring !== null) return;
+    if (
+      !confirm(
+        `Retire route “${item.slug}”? Clients calling this slug will get errors until a revision is restored and activated again.`
+      )
+    )
+      return;
     retiring = item.id;
     retireError = null;
     try {

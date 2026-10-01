@@ -180,7 +180,8 @@
             <label for="overall-timeout">Overall deadline (ms)</label><input
               id="overall-timeout"
               type="number"
-              min="100"
+              min="1"
+              max="3600000"
               bind:value={editor.overallTimeoutMs}
               oninput={editor.touch}
               disabled={!editor.canManage}
@@ -191,6 +192,7 @@
               id="max-attempts"
               type="number"
               min="1"
+              max="32767"
               bind:value={editor.maxAttempts}
               oninput={editor.touch}
               disabled={!editor.canManage}

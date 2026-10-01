@@ -265,7 +265,7 @@
         >
       </div>
     {/if}
-    {#if playground.operation === 'generation'}
+    {#if playground.activeOperation === 'generation'}
       <div class="form-field stream-toggle">
         <label class="checkbox-label"
           ><input
@@ -294,7 +294,7 @@
     {#if playground.validationError}<p class="field-error" role="alert">
         {playground.validationError}
       </p>{/if}
-    {#if playground.strictSelected && playground.operation !== 'realtime'}<p
+    {#if playground.strictSelected && playground.activeOperation !== 'realtime'}<p
         class="policy-note"
         role="status"
       >
@@ -318,7 +318,7 @@
             value={playground.strictSelected &&
             nativeDialects(playground.operation).length
               ? playground.currentNativeDialect()
-              : playground.inspectDialect}
+              : (playground.currentInspectDialect() ?? '')}
             onchange={(event) => {
               if (
                 playground.strictSelected &&
@@ -364,6 +364,12 @@
             maxlength="256"
             placeholder="Any stable value"
             aria-describedby="simulate-seed-help"
+            onkeydown={(event) => {
+              // Enter would implicitly submit the composer and start a real run.
+              if (event.key !== 'Enter' || event.isComposing) return;
+              event.preventDefault();
+              if (!playground.simulation.isPending) void playground.explain();
+            }}
           /><small id="simulate-seed-help"
             >Fixes weighted tie-breaks so the order is reproducible.</small
           >
@@ -389,8 +395,8 @@
         disabled={playground.mutation.isPending ||
           playground.streaming ||
           playground.strictSelected ||
-          playground.operation === 'realtime' ||
-          playground.operation === 'translation' ||
+          playground.activeOperation === 'realtime' ||
+          playground.activeOperation === 'translation' ||
           (playground.composer === 'advanced' && !playground.operationKnown)}
         >{playground.mutation.isPending || playground.streaming
           ? 'Running…'
@@ -575,7 +581,7 @@
   </section>
 </div>
 
-{#if playground.strictSelected && playground.operation !== 'translation'}
+{#if playground.strictSelected && playground.activeOperation !== 'translation'}
   {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
     {#key playground.model.trim()}
       <StrictToolPlayground
@@ -592,7 +598,7 @@
         bind:dialect={playground.nativeDialect}
       />
     {/key}
-  {:else if playground.operation !== 'realtime'}
+  {:else if playground.activeOperation !== 'realtime'}
     <section class="card strict-client-unavailable" role="status">
       This route needs a native or negotiated public client. Choose Advanced,
       Generation, OpenAI and the negotiated tool template for the currently
