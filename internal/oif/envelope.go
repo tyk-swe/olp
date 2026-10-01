@@ -175,9 +175,13 @@ func Apply(source Document, changes []Change) (Document, error) {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	for i := 1; i < len(paths); i++ {
-		if strings.HasPrefix(paths[i], paths[i-1]+"/") {
-			return Document{}, errors.New("overlapping overlay paths")
+	// Check every ancestor, not just sorted neighbours: keys such as "a!"
+	// sort between "/a" and "/a/b".
+	for _, p := range paths {
+		for i := strings.LastIndex(p, "/"); i >= 0; i = strings.LastIndex(p[:i], "/") {
+			if _, ok := byPath[p[:i]]; ok {
+				return Document{}, errors.New("overlapping overlay paths")
+			}
 		}
 	}
 	var out bytes.Buffer

@@ -262,20 +262,12 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 				task.Task, task.SuccessesTotal, task.Task, task.FailuresTotal,
 				task.Task, task.SkippedTotal)
 		}
-		body.WriteString("# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n" +
-			"# TYPE olp_request_metadata_events_reclaimed_total counter\n" +
-			"# HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n" +
-			"# TYPE olp_request_metadata_events_recovered_total counter\n" +
-			"# HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n" +
-			"# TYPE olp_request_metadata_persistence_duplicates_total counter\n" +
-			"# HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n" +
-			"# TYPE olp_request_metadata_events_processed_total counter\n")
-		fmt.Fprintf(&body, "olp_request_metadata_events_reclaimed_total %d\n"+
-			"olp_request_metadata_events_recovered_total %d\n"+
-			"olp_request_metadata_persistence_duplicates_total %d\n"+
-			"olp_request_metadata_events_processed_total %d\n",
-			counters.RequestMetadataReclaimed, counters.RequestMetadataRecovered,
-			counters.RequestMetadataDuplicates, counters.RequestMetadataProcessed)
+	}
+
+	// A failed counters read omits the series rather than publishing zeros,
+	// which Prometheus would read as a counter reset.
+	if countersErr == nil {
+		writeRecoveryCounters(&body, counters)
 	}
 
 	// Operations rollup.
@@ -309,38 +301,63 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 	}
 
 	// Provider health series.
-	if len(providers) > 0 {
-		body.WriteString("# HELP olp_provider_attempts_15m Number of sampled provider attempts in the trailing fifteen minutes.\n" +
-			"# TYPE olp_provider_attempts_15m gauge\n" +
-			"# HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n" +
-			"# TYPE olp_provider_health gauge\n" +
-			"# HELP olp_provider_success_ratio_15m Provider attempt success ratio over the trailing fifteen minutes.\n" +
-			"# TYPE olp_provider_success_ratio_15m gauge\n" +
-			"# HELP olp_provider_latency_seconds_15m Provider average attempt latency over the trailing fifteen minutes.\n" +
-			"# TYPE olp_provider_latency_seconds_15m gauge\n")
-		for _, provider := range providers {
-			id := prometheusLabel(provider.ProviderID)
-			name := prometheusLabel(provider.ProviderName)
-			kind := prometheusLabel(provider.ProviderKind)
-			fmt.Fprintf(&body, "olp_provider_health{provider_id=%q,provider_name=%q,provider_kind=%q,status=%q} 1\n",
-				id, name, kind, prometheusLabel(provider.Status))
-			fmt.Fprintf(&body, "olp_provider_attempts_15m{provider_id=%q,provider_kind=%q} %d\n",
-				id, kind, provider.AttemptCount)
-			if provider.AttemptCount == 0 {
-				continue
-			}
-			var averageLatency float64
-			if provider.AverageLatencyMs != nil {
-				averageLatency = *provider.AverageLatencyMs / 1000
-			}
-			fmt.Fprintf(&body, "olp_provider_success_ratio_15m{provider_id=%q,provider_kind=%q} %.6f\n"+
-				"olp_provider_latency_seconds_15m{provider_id=%q,provider_kind=%q} %.6f\n",
-				id, kind, successRatio(provider.SuccessCount, provider.AttemptCount),
-				id, kind, averageLatency)
-		}
-	}
+	writeProviderMetrics(&body, providers)
 
 	return body.String(), nil
+}
+
+// writeRecoveryCounters renders the durable async worker counters.
+func writeRecoveryCounters(body *strings.Builder, counters WorkerRecoveryCounters) {
+	body.WriteString("# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n" +
+		"# TYPE olp_request_metadata_events_reclaimed_total counter\n" +
+		"# HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n" +
+		"# TYPE olp_request_metadata_events_recovered_total counter\n" +
+		"# HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n" +
+		"# TYPE olp_request_metadata_persistence_duplicates_total counter\n" +
+		"# HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n" +
+		"# TYPE olp_request_metadata_events_processed_total counter\n")
+	fmt.Fprintf(body, "olp_request_metadata_events_reclaimed_total %d\n"+
+		"olp_request_metadata_events_recovered_total %d\n"+
+		"olp_request_metadata_persistence_duplicates_total %d\n"+
+		"olp_request_metadata_events_processed_total %d\n",
+		counters.RequestMetadataReclaimed, counters.RequestMetadataRecovered,
+		counters.RequestMetadataDuplicates, counters.RequestMetadataProcessed)
+}
+
+// writeProviderMetrics renders per-provider health series. Label values are
+// escaped once by prometheusLabel and written verbatim inside quotes.
+func writeProviderMetrics(body *strings.Builder, providers []ProviderHealthRecord) {
+	if len(providers) == 0 {
+		return
+	}
+	body.WriteString("# HELP olp_provider_attempts_15m Number of sampled provider attempts in the trailing fifteen minutes.\n" +
+		"# TYPE olp_provider_attempts_15m gauge\n" +
+		"# HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n" +
+		"# TYPE olp_provider_health gauge\n" +
+		"# HELP olp_provider_success_ratio_15m Provider attempt success ratio over the trailing fifteen minutes.\n" +
+		"# TYPE olp_provider_success_ratio_15m gauge\n" +
+		"# HELP olp_provider_latency_seconds_15m Provider average attempt latency over the trailing fifteen minutes.\n" +
+		"# TYPE olp_provider_latency_seconds_15m gauge\n")
+	for _, provider := range providers {
+		id := prometheusLabel(provider.ProviderID)
+		name := prometheusLabel(provider.ProviderName)
+		kind := prometheusLabel(provider.ProviderKind)
+		fmt.Fprintf(body, "olp_provider_health{provider_id=\"%s\",provider_name=\"%s\",provider_kind=\"%s\",status=\"%s\"} 1\n",
+			id, name, kind, prometheusLabel(provider.Status))
+		fmt.Fprintf(body, "olp_provider_attempts_15m{provider_id=\"%s\",provider_kind=\"%s\"} %d\n",
+			id, kind, provider.AttemptCount)
+		if provider.AttemptCount == 0 {
+			continue
+		}
+		var averageLatency float64
+		if provider.AverageLatencyMs != nil {
+			averageLatency = *provider.AverageLatencyMs / 1000
+		}
+		fmt.Fprintf(body, "olp_provider_success_ratio_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n"+
+			"olp_provider_latency_seconds_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n",
+			id, kind, successRatio(provider.SuccessCount, provider.AttemptCount),
+			id, kind, averageLatency)
+	}
 }
 
 // prometheusLabel escapes a label value per the exposition format.

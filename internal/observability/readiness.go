@@ -162,7 +162,7 @@ func CollectReadiness(ctx context.Context, s *State) (*Health, error) {
 	if s.MediaGaps != nil {
 		mediaGaps = s.MediaGaps()
 	}
-	degradedMedia := (store.media != nil && (store.media.Stale > 0 || store.media.Failed > 0)) || mediaGaps > 0
+	degradedMedia := mediaDegraded(store.media, mediaGaps)
 	localMetadataComplete := true
 	if s.ServesGateway && s.Emitter != nil {
 		if snapshot := s.Emitter(); snapshot != nil {
@@ -177,6 +177,12 @@ func CollectReadiness(ctx context.Context, s *State) (*Health, error) {
 	response := readinessResponse(s, now, generation, store, expectedTasks(limiterConfigured),
 		current, drained, metadataComplete, degradedLimits, degradedMedia, limitsHealthy, limiterConfigured, mediaGaps)
 	return response, nil
+}
+
+// mediaDegraded reports whether media reconciliation has stale or failed jobs
+// or recorded gaps.
+func mediaDegraded(summary *media.Summary, gaps int64) bool {
+	return (summary != nil && (summary.Stale > 0 || summary.Failed > 0)) || gaps > 0
 }
 
 // storeProbe bundles the store-side probes.
@@ -331,6 +337,9 @@ func readinessResponse(s *State, now time.Time, generation *int64, probe *storeP
 	}
 	if summary != nil {
 		h.MediaReconciliation = "ok"
+		if degradedMedia {
+			h.MediaReconciliation = "degraded"
+		}
 		h.MediaReconciliationPending = summary.Pending
 		h.MediaReconciliationStale = summary.Stale
 		h.MediaReconciliationFailed = summary.Failed
