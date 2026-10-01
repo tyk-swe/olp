@@ -587,3 +587,41 @@ func TestBudgetAlertValidationAndScope(t *testing.T) {
 	}
 	_ = updated
 }
+
+func TestNotificationSecretRotationDeletesReplacedSecret(t *testing.T) {
+	h := newAccessHarness(t)
+	h.Server.Egress = alertPolicy()
+	owner := h.owner()
+	hook := newWebhookFixture(t)
+	destination := h.want(owner, "POST", "/api/v1/notifications/destinations",
+		map[string]any{"name": "rotating", "url": hook.URL + "/rotating", "secret": "first"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	path := "/api/v1/notifications/destinations/" + destination["id"].(string)
+	secretState := func() (*string, int) {
+		var current *string
+		var stored int
+		if err := h.Pool.QueryRow(t.Context(), `SELECT d.secret_id::text,
+		    (SELECT count(*) FROM olp.secrets WHERE purpose='notification_secret')
+		    FROM olp.notification_destinations d WHERE d.id=$1`, destination["id"]).Scan(&current, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return current, stored
+	}
+	first, stored := secretState()
+	if first == nil || stored != 1 {
+		t.Fatalf("created secret = %v, %d stored", first, stored)
+	}
+
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"secret": "second"}, withMatch(detail, nil), 200)
+	second, stored := secretState()
+	if second == nil || *second == *first || stored != 1 {
+		t.Fatalf("rotated secret = %v, %d stored", second, stored)
+	}
+
+	detail = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"secret": nil}, withMatch(detail, nil), 200)
+	if cleared, stored := secretState(); cleared != nil || stored != 0 {
+		t.Fatalf("cleared secret = %v, %d stored", cleared, stored)
+	}
+}

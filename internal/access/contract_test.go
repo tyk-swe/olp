@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/openapi"
 )
 
 func TestTheContractDeclaresEveryManagementRequirement(t *testing.T) {
@@ -149,4 +151,24 @@ func TestRouteAuthorizationMatrix(t *testing.T) {
 	}
 	out.WriteString("  }\n}\n")
 	golden(t, "authorization.golden.json", out.Bytes())
+}
+
+func TestInvitationLifetimeContractMatchesHandler(t *testing.T) {
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Minimum *float64 `json:"minimum"`
+					Maximum *float64 `json:"maximum"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openapi.Document, &document); err != nil {
+		t.Fatal(err)
+	}
+	hours := document.Components.Schemas["CreateInvitationRequest"].Properties["expires_in_hours"]
+	if hours.Minimum == nil || *hours.Minimum != 1 || hours.Maximum == nil || *hours.Maximum != 720 {
+		t.Fatalf("expires_in_hours bounds = %v..%v, want 1..720", hours.Minimum, hours.Maximum)
+	}
 }

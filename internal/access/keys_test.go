@@ -3,6 +3,8 @@ package access
 import (
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,5 +101,31 @@ func TestKeyLimitRanges(t *testing.T) {
 	input := keyInput{Name: "unlimited", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
 	if err := validateKey(input, false); err != nil {
 		t.Fatalf("rejected omitted limits: %v", err)
+	}
+}
+
+func TestCreateRejectsMalformedProjectID(t *testing.T) {
+	s := &Server{}
+	for name, create := range map[string]func(*http.Request, Principal) (Reply, error){
+		"api key": s.createAPIKey, "budget group": s.createBudgetGroup,
+	} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"x","project_id":"abc"}`))
+		r.Header.Set("Content-Type", "application/json")
+		_, err := create(r, Principal{})
+		var problem *Problem
+		if !errors.As(err, &problem) || problem.Status != 422 || problem.Field != "project_id" {
+			t.Fatalf("%s: malformed project_id = %v", name, err)
+		}
+	}
+}
+
+func TestParseProjectIDCanonicalises(t *testing.T) {
+	upper := "0F8FAD5B-D9CB-469F-A165-70867728950E"
+	got, err := parseProjectID(&upper)
+	if err != nil || got == nil || *got != strings.ToLower(upper) {
+		t.Fatalf("canonical project id = %v, %v", got, err)
+	}
+	if got, err := parseProjectID(nil); got != nil || err != nil {
+		t.Fatalf("absent project id = %v, %v", got, err)
 	}
 }

@@ -111,6 +111,20 @@ func ParseUUID(value string) (string, error) {
 	return id.String(), nil
 }
 
+// parseProjectID canonicalises an optional project_id, so project lookups,
+// ownership comparisons and idempotency fingerprints see one spelling.
+func parseProjectID(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*value)
+	if err != nil {
+		return nil, Invalid("project_id", "Use a valid UUID.")
+	}
+	canonical := id.String()
+	return &canonical, nil
+}
+
 // AdvanceAuthority advances key authority, so every gateway reloads API keys
 // and which credential versions may serve on its next poll.
 func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
@@ -179,6 +193,11 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
+	projectID, err := parseProjectID(input.ProjectID)
+	if err != nil {
+		return Reply{}, err
+	}
+	input.ProjectID = projectID
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err

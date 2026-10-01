@@ -85,6 +85,11 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
+	projectID, err := parseProjectID(input.ProjectID)
+	if err != nil {
+		return Reply{}, err
+	}
+	input.ProjectID = projectID
 	tx, err := s.Begin(r)
 	if err != nil {
 		return Reply{}, err
