@@ -97,6 +97,8 @@ func (r *anthropicInvokeReader) Read(p []byte) (int, error) {
 	}
 	var envelope struct {
 		Bytes string `json:"bytes"`
+		// P is Bedrock's random-length obfuscation padding; it carries nothing.
+		P *string `json:"p"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(message.Payload))
 	decoder.DisallowUnknownFields()

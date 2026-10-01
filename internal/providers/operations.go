@@ -30,6 +30,41 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	}
 	return certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple)
 }
+
+// defaultProbeTuple is the unary tuple a provider without model discovery
+// certifies its declared models with. An explicit profile that cannot serve
+// the default tuple, such as a dedicated embeddings or rerank dialect, is
+// probed with the first unary tuple it can certify.
+func defaultProbeTuple(cfg *Configuration) CapabilityInput {
+	operation := "generation"
+	if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
+		operation = "token_count"
+	}
+	if value(cfg.Options.VendorID) == "voyage" {
+		operation = "embeddings"
+	}
+	tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: ModeUnary}
+	if cfg.ProfileID == "" || probeable(cfg, tuple) {
+		return tuple
+	}
+	profile, err := cfg.transport().Profile()
+	if err != nil {
+		return tuple
+	}
+	for _, op := range profile.Operations {
+		for _, surface := range []string{"openai", "native", "anthropic", "gemini", "bedrock"} {
+			if candidate := (CapabilityInput{Operation: op, Surface: surface, Mode: ModeUnary}); probeable(cfg, candidate) {
+				return candidate
+			}
+		}
+	}
+	return tuple
+}
+
+func probeable(cfg *Configuration, tuple CapabilityInput) bool {
+	return configurationCertifiable(cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+}
+
 func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {
 	template, err := operationplan.Compile(operationplan.Config{Provider: cfg.transport(), Model: model, Operation: tuple.Operation})
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"time"
 	"unicode"
@@ -228,17 +227,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during discovery; reload and retry.")
 	}
 	for _, m := range models {
-		facts := m.metadata
-		if facts == nil {
-			facts = map[string]json.RawMessage{}
-		}
-		var existing map[string]json.RawMessage
-		_ = json.Unmarshal(locked.Configuration.Options.Models[m.upstream], &existing)
-		maps.Copy(facts, existing)
-		if len(facts) > 0 {
-			encoded, _ := json.Marshal(facts)
-			locked.Configuration.Options.Models[m.upstream] = encoded
-		}
+		mergeDiscoveredFacts(&locked.Configuration, m.upstream, m.metadata)
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), id, m.upstream, m.display, at); err != nil {
 			return access.Reply{}, err
 		}
@@ -430,9 +419,6 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 }
 
 func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
-	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
-	defer cancel()
-	r = r.WithContext(ctx)
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -466,9 +452,13 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	at := time.Now().UTC()
 	results := make([]map[string]any, 0, len(m.Capabilities))
 	certified := 0
+	// The route deadline gives each capability a probe budget; the last one
+	// stays reserved so the results are always recorded.
+	probeCtx, cancel := probeBudget(r.Context())
+	defer cancel()
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(r.Context(), &current.Configuration, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
+		err := s.certifyTuple(probeCtx, &current.Configuration, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++

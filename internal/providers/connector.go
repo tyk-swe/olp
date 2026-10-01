@@ -34,6 +34,16 @@ const (
 	probeBodyLimit = 1 << 20
 )
 
+// probeBudget bounds a sequence of probes by the caller's deadline less one
+// probe budget, which stays reserved for recording the outcome. Each upstream
+// call keeps its own probeTimeout bound.
+func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 2*probeTimeout {
+		return context.WithDeadline(ctx, deadline.Add(-probeTimeout))
+	}
+	return context.WithCancel(ctx)
+}
+
 // probeError is a classified, content-free upstream failure.
 type probeError struct {
 	Code   string
@@ -239,13 +249,14 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 }
 
 func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-	defer cancel()
 	listing, discovery, err := listingFor(cfg)
 	if err != nil {
 		return nil, err
 	}
 	if !discovery {
+		// Each declared model is its own bounded upstream probe.
+		ctx, cancel := probeBudget(ctx)
+		defer cancel()
 		names := append([]string{}, cfg.ProbeModels...)
 		if cfg.Kind == KindAzure {
 			names = append(names, value(cfg.Deployment))
@@ -267,14 +278,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 				continue
 			}
 			previous = name
-			operation := "generation"
-			if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
-				operation = "token_count"
-			}
-			if value(cfg.Options.VendorID) == "voyage" {
-				operation = "embeddings"
-			}
-			tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"}
+			tuple := defaultProbeTuple(cfg)
 			err := s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
 			if err != nil && cfg.Kind == KindAzure {
 				tuple.Operation = "embeddings"
@@ -287,6 +291,8 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		}
 		return out, nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	out := []discoveredModel{}
 	seen, cursors := map[string]bool{}, map[string]bool{}
 	path := listing.path
