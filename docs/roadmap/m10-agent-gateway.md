@@ -1,8 +1,8 @@
 # M10: Agent gateway
 
-| Status | Depends on | Unlocks |
-| --- | --- | --- |
-| Planned | [M4](m04-tenancy-identity.md), [M7](m07-guardrails.md) | One control plane for models, tools and agents |
+| Status | Depends on | Integrates with | Unlocks |
+| --- | --- | --- | --- |
+| Planned | [M4](m04-tenancy-identity.md), [M7](m07-guardrails.md) | [M9](m09-api-surface.md) (search routes as a tool), [M11](m11-operator-ecosystem.md) (Terraform resources) | None |
 
 LiteLLM positions itself as one gateway for models, MCP tools and A2A agents,
 with per-key access, cost tracking and OAuth. OLP governs models only. This
@@ -23,10 +23,10 @@ attempt-level accounting.
 
 | | OLP today | LiteLLM reference |
 | --- | --- | --- |
-| MCP | None | [MCP gateway](https://docs.litellm.ai/docs/mcp) over Streamable HTTP, SSE and stdio, with [OAuth](https://docs.litellm.ai/docs/mcp_oauth), [per-user auth](https://docs.litellm.ai/docs/mcp_per_user_auth), [toolsets](https://docs.litellm.ai/docs/mcp_toolsets) and [cost tracking](https://docs.litellm.ai/docs/mcp_cost) |
+| MCP | None | [MCP gateway](https://docs.litellm.ai/docs/mcp) over Streamable HTTP, SSE and stdio, with [OAuth](https://docs.litellm.ai/docs/mcp_oauth), [per-user auth](https://docs.litellm.ai/docs/mcp_per_user_auth), [token exchange](https://docs.litellm.ai/docs/mcp_obo_auth), [SigV4](https://docs.litellm.ai/docs/mcp_aws_sigv4), [OpenAPI-backed servers](https://docs.litellm.ai/docs/mcp_openapi), [toolsets](https://docs.litellm.ai/docs/mcp_toolsets), [tool search](https://docs.litellm.ai/docs/mcp_tool_search) and [cost tracking](https://docs.litellm.ai/docs/mcp_cost) |
 | Agents | None | [A2A gateway](https://docs.litellm.ai/docs/a2a) with [iteration budgets](https://docs.litellm.ai/docs/a2a_iteration_budgets) and a [kill switch](https://docs.litellm.ai/docs/a2a_kill_switch) |
-| Prompts | None | [Prompt management](https://docs.litellm.ai/docs/proxy/prompt_management) |
-| Reusable building blocks | Grant enrollment and refresh ([plugins](../plugins.md#grant-enrollment)), egress policy, revisions, guardrails ([M7](m07-guardrails.md)) | |
+| Prompts and skills | None | [Prompt management](https://docs.litellm.ai/docs/proxy/prompt_management) and a [skills registry](https://docs.litellm.ai/docs/skills_gateway) |
+| Reusable building blocks | Plugin-mediated grant enrollment and refresh ([plugins](../plugins.md#grant-enrollment)), SigV4 signing, egress policy, immutable revisions and route content policy | |
 
 ## Scope
 
@@ -41,12 +41,21 @@ an endpoint and authentication:
 | HTTP with SSE | Supported for servers that have not moved to Streamable HTTP, which replaced it in the MCP specification |
 | stdio | Only as executables in the image's unconfined plugin directory, under the experimental [unconfined tier](../plugins.md#unconfined-plugins-experimental) |
 
-Authentication is one of: none, static headers sealed under a new
-`mcp_credential` purpose, or an OAuth 2.1 grant enrolled and refreshed through
-the existing [grant](../plugins.md#grant-enrollment) machinery (authorization
-code with PKCE, or device authorization). Per-user grants bind a grant to an
-API key or an end user, so a tool call acts with that user's upstream
-authority.
+A server may also be defined from an OpenAPI document. Each selected operation
+becomes a tool that the gateway calls over HTTP with the server's
+authentication, certified and pinned like any other tool.
+
+**Authentication.** A server uses one of:
+
+| Mode | Contract |
+| --- | --- |
+| None | For servers on a trusted network |
+| Static headers | Sealed under a new `mcp_credential` purpose |
+| OAuth 2.1 grant | Authorization code with PKCE, or device authorization, with refresh. Today's [grant](../plugins.md#grant-enrollment) flow is driven by a provider plugin and returns by paste-back, so this adds a native OAuth client and callback to the grant store |
+| Per-user grant | A grant bound to an API key or an end user, so a tool call acts with that user's upstream authority |
+| Token exchange | The caller's workload JWT ([M4.4](m04-tenancy-identity.md#m44-workload-identity)) is exchanged for a token scoped to the server, through RFC 8693 or an identity-assertion grant, so the caller's own token is never forwarded |
+| AWS SigV4 | Reuses the Bedrock request signer and its credential modes |
+| Gateway assertion | OLP signs each outbound call with a short-lived JWT, and publishes its verification keys, so a server can refuse calls that did not come through the gateway |
 
 **Certification and pinning.** Certifying a server runs `initialize` and
 `tools/list` (and `prompts/list` and `resources/list` when declared) within
@@ -57,8 +66,9 @@ serving, the console shows the diff, and the new definition serves only after
 an operator approves a new revision. This defeats silent tool redefinition.
 
 **Toolsets.** A toolset is a published, revisioned selection of tools across
-servers. Keys reach toolsets through their allowlist, or through route groups
-from [M4.3](m04-tenancy-identity.md#m43-access-ergonomics).
+servers. Keys reach toolsets through their allowlist, or through the
+[access groups](m04-tenancy-identity.md#m43-access-ergonomics) of M4.3, which
+this milestone extends to hold toolsets and agents.
 
 **Client endpoint.** `/mcp` is a Streamable HTTP MCP server that exposes the
 caller's permitted toolsets. It authenticates API keys with a new `tools` scope.
@@ -66,7 +76,8 @@ Tool names are prefixed with their server name in a format that satisfies the
 MCP tool-name rules. `tools/call` is proxied with egress policy, per-key and
 per-server limits, a deadline and bounded results. A JSON facade,
 `GET /v1/mcp/tools` and `POST /v1/mcp/tools/call`, serves clients that call
-tools without an MCP session.
+tools without an MCP session; its path follows the roadmap's
+[endpoint decision](README.md#cross-milestone-decisions).
 
 **Governance and accounting.** Every tool call is a request record with
 operation `tool_call`, an attempt per upstream call, latency, status, and a
@@ -88,21 +99,31 @@ use MCP tools:
   `mcp_call` and `mcp_approval_request` output items that the OpenAI SDKs
   already understand. Approval-required tools pause the loop and return an
   approval request.
+- **Tool search.** When the permitted tools exceed a configured count, the
+  gateway advertises a search tool and a call tool instead of every
+  definition. Search ranks tools by keyword, or by similarity through an OLP
+  embeddings route when one is configured, so large catalogs do not fill the
+  model's context.
+- **Web search.** A built-in `web_search` tool executes through a
+  [search route](m09-api-surface.md#m97-ocr-and-search), giving every model
+  server-side search. It ships when both this workstream and M9.7 have.
 - Strict routes forward the native `mcp` tool type unchanged to providers that
   host MCP themselves, and never run the loop in the gateway.
 
 ### M10.3 A2A agent gateway
 
 - An agent is a project-scoped resource registered from its agent card URL. OLP
-  fetches the card through egress policy, pins it by digest, and supports A2A
-  protocol versions 0.3 and 1.0.
+  fetches the card through egress policy, pins it by digest, and supports the
+  A2A protocol versions pinned in the compatibility guide (0.3 and 1.0 when
+  this was written).
 - `/a2a/{agent}` serves the protocol's JSON-RPC methods for sending and
-  streaming messages and for reading and cancelling tasks (in version 0.3,
+  streaming messages and for reading and canceling tasks (in version 0.3,
   `message/send`, `message/stream`, `tasks/get` and `tasks/cancel`), and OLP
   serves a rewritten agent card that advertises its own endpoint and
   authentication.
-- Keys reach agents through allowlists with a new `agents` scope. Limits cover
-  messages per minute, concurrent tasks and an iteration budget per task.
+- Keys reach agents through allowlists or access groups, with a new `agents`
+  scope. Limits cover messages per minute, concurrent tasks and an iteration
+  budget per task.
 - Disabling an agent stops new messages and cancels running tasks at the next
   authority refresh, which serves as the kill switch.
 - Each message and task is accounted. Model calls the agent makes back through
@@ -126,12 +147,37 @@ use MCP tools:
   configuration, stored in PostgreSQL and exported by configuration promotion;
   rendered prompts and variable values are request content and are never
   stored.
+- **Skills.** Subject to decision 4, the registry also lists agent skills: a
+  name, a source repository and a pinned revision that developers and agents
+  discover through the [developer catalog](m11-operator-ecosystem.md#m114-developer-catalog).
+  OLP indexes skills; it does not execute them.
+
+## Non-goals
+
+- Hosting MCP servers, agent runtimes or code-execution sandboxes. OLP governs
+  calls to them; a sandbox is reached as an MCP server.
+- Running stdio servers in the confined tier.
+- Template logic. Prompts substitute variables and nothing else.
+- Storing tool arguments, tool results, rendered prompts or variable values.
+
+## Data and secrets
+
+| Data | Where | Retention | Purpose |
+| --- | --- | --- | --- |
+| MCP servers, pinned tool definitions, toolsets, agents and agent cards | Immutable revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
+| Static MCP headers | PostgreSQL, sealed | Until rotated | New seal purpose `mcp_credential` |
+| OAuth grants and refresh tokens for MCP servers | The grant store in PostgreSQL, sealed | Until revoked or lapsed | New seal purpose `mcp_grant` |
+| Gateway assertion signing keys | PostgreSQL, sealed; public keys served | Until rotated | New seal purpose `mcp_assertion_key` |
+| Prompt templates and skill listings | Revisions in PostgreSQL; configuration export | Until deleted | None |
+| Tool-call, agent-message and prompt usage | Request and attempt records | Request retention | None; metadata only |
+| Tool arguments and results, rendered prompts | Request memory | Never stored | None |
 
 ## Change map
 
 | Change | Start here |
 | --- | --- |
-| MCP servers, toolsets, pinning | new `internal/mcp/`, `internal/grants/` |
+| MCP servers, toolsets, pinning | new `internal/mcp/` |
+| Native OAuth client and per-user grants | `internal/grants/`, which serves only plugin-driven grants today |
 | Gateway-executed tools | `internal/gateway/`, `internal/protocols/` |
 | A2A agents | new `internal/agents/` |
 | Prompt registry | new `internal/prompts/`, `internal/providerinvoke/` |
@@ -147,20 +193,30 @@ use MCP tools:
 3. Whether gateway-executed tools may stream intermediate steps on Chat
    Completions, which has no native item types for them (recommended: no;
    stream only the final answer there).
+4. Whether to ship a skills registry (recommended: yes, as an index only;
+   otherwise the parity row becomes `Excluded`).
 
 ## Exit criteria
 
-- [ ] MCP servers on each supported transport pass an MCP conformance suite
-      through `/mcp`, including OAuth grant refresh and per-user grants.
-- [ ] A changed upstream tool definition never reaches a client before an
-      operator approves it.
-- [ ] Gateway-executed tools complete multi-step tasks for OpenAI, Anthropic and
-      Gemini targets, respect every bound, and appear as separate attempts.
-- [ ] A2A messages and streams pass against reference agents for both protocol
-      versions, and disabling an agent stops it within the authority freshness
-      bound.
-- [ ] Prompt revisions render identically from the API, the playground and
-      configuration import.
-- [ ] Tool calls, agent messages and prompt usage appear in usage reports and
-      exports.
+- [ ] **M10.1** MCP servers on each supported transport pass an MCP conformance
+      suite through `/mcp`, including OAuth grant refresh and per-user grants.
+- [ ] **M10.1** Each authentication mode reaches a local fake that verifies it:
+      a SigV4 signature, an exchanged token that is not the caller's, and a
+      gateway assertion that verifies against the published keys.
+- [ ] **M10.1** A changed upstream tool definition never reaches a client
+      before an operator approves it, for MCP servers and OpenAPI-backed
+      servers alike.
+- [ ] **M10.2** Gateway-executed tools complete multi-step tasks for OpenAI,
+      Anthropic and Gemini targets, respect every bound, and appear as separate
+      attempts.
+- [ ] **M10.2** Above the tool-count threshold a model sees only the search and
+      call tools and can still reach every permitted tool, and none it is not
+      permitted.
+- [ ] **M10.3** A2A messages and streams pass against reference agents for both
+      protocol versions, and disabling an agent stops it within the authority
+      freshness bound.
+- [ ] **M10.4** Prompt revisions render identically from the API, the
+      playground and configuration import.
+- [ ] **M10.1–M10.4** Tool calls, agent messages and prompt usage appear in
+      usage reports and exports.
 - [ ] The [parity matrix](parity.md) agent rows are `Parity` or better.

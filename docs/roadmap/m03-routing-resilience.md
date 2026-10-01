@@ -1,8 +1,8 @@
 # M3: Adaptive routing and resilience
 
-| Status | Depends on | Unlocks |
-| --- | --- | --- |
-| Planned | [M1](m01-measured-advantage.md) | Cost-optimized and capacity-aware deployments |
+| Status | Depends on | Integrates with | Unlocks |
+| --- | --- | --- | --- |
+| Planned | [M1](m01-measured-advantage.md) | [M4](m04-tenancy-identity.md) (per-route key limits), [M5](m05-observability.md) (circuit events, sessions), [M7](m07-guardrails.md) (guardrails on shadow traffic), [M8](m08-caching.md) (prompt-cache keys) | None |
 
 OLP's planner already orders attempts by priority, preferred order and strategy
 under hard policy constraints, and explains the result through simulation. It
@@ -31,9 +31,10 @@ route simulation and plan decisions.
 | | OLP today | LiteLLM reference |
 | --- | --- | --- |
 | Strategies | `weighted`, `price`, `latency`, `throughput` within priority and preferred-order tiers ([policies](../provider-routing.md#policies-and-caller-preferences)) | Weighted pick, rate-limit aware, latency, least busy, cost, custom ([routing](https://docs.litellm.ai/docs/routing)) |
-| Failover | Within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`upstream.go`](../../internal/upstream/upstream.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
+| Failover | On transformed routes: within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`attempts.go`](../../internal/gateway/attempts.go)). Strict routes, the default, keep every later attempt on the first serving identity and dispatch at most once, so a 5xx or a timeout after send is never retried ([`interaction.go`](../../internal/gateway/interaction.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
 | Health | Per-gateway circuits (five counted failures in 30 seconds open for 30 seconds); credential and slot cooldowns shared in Valkey | Background health checks that remove deployments ([health check routing](https://docs.litellm.ai/docs/proxy/health_check_routing)) |
-| Overload | A full admission pool answers 503 with `Retry-After: 1` | A [priority queue](https://docs.litellm.ai/docs/scheduler) and [priority capacity shares](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) |
+| Overload | A full admission pool answers 503 with `Retry-After: 1`. The pool admits by path, before authentication ([`public.go`](../../internal/observability/public.go)) | A [priority queue](https://docs.litellm.ai/docs/scheduler) and [priority capacity shares](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) |
+| Caller controls | `X-OLP-Routing` picks a strategy the policy allows, orders targets, narrows constraints and lowers `max_attempts` | Request metadata, tags and [budget fallbacks](https://docs.litellm.ai/docs/proxy/budget_fallbacks) |
 | Automation | Bulk route creation in the console | [Auto router](https://docs.litellm.ai/docs/auto_router/), [adaptive router](https://docs.litellm.ai/docs/adaptive_router), [routing plugins](https://docs.litellm.ai/docs/routing_plugins), [wildcards](https://docs.litellm.ai/docs/wildcard_routing), [mirroring](https://docs.litellm.ai/docs/traffic_mirroring) |
 
 ## Invariants
@@ -44,6 +45,8 @@ Every workstream preserves these rules from [concepts](../concepts.md) and
 - A request can narrow published policy, never widen it.
 - A committed stream never restarts on another target, and an ambiguous
   resource creation never repeats.
+- A strict route keeps one serving identity per request and dispatches at most
+  once. An ambiguous result is never retried, on the same target or another.
 - Every attempt, including fallback and shadow attempts, pins its revisions and
   produces its own record.
 - Simulation explains the same decision the gateway makes, without contacting a
@@ -66,7 +69,12 @@ A route revision gains an ordered `fallbacks` list:
 
 - `on` names the conditions that start a fallback: `exhausted` (every
   attempt failed with a retryable class), `context_window`, `content_filter`,
-  `rate_limit` and `budget` (supply-side caps from M3.4).
+  `rate_limit` and `budget`.
+- `budget` fires on a supply-side cap from M3.4, and on the caller key's own
+  limit for this route once [M4.2](m04-tenancy-identity.md#m42-budget-hierarchy-windows-and-templates)
+  adds per-route limits. The key's overall budget still answers
+  `429 budget_exhausted`: a fallback moves spend to another route, never past
+  the key's ceiling.
 - `content_filter` is a new class in [`internal/upstream`](../../internal/upstream/upstream.go)
   for typed upstream refusals such as content-filter errors. It does not count
   against provider health.
@@ -74,6 +82,10 @@ A route revision gains an ordered `fallbacks` list:
   route may fall back only to strict routes. The key must be permitted to use
   the fallback route; otherwise the plan records `fallback_route_forbidden` and
   skips it.
+- On a strict route a fallback starts only while no dispatch has been admitted:
+  from planning-time conditions such as `context_window` by model facts,
+  `budget`, or no eligible target. After a dispatch, the strict invariant
+  holds.
 - The primary route's overall deadline and attempt budget bound the whole
   request, fallbacks included.
 - Fallback graphs must be acyclic, stay within one project boundary and be at
@@ -86,25 +98,38 @@ A route revision gains an ordered `fallbacks` list:
   from the same Valkey windows that admission uses, in one pipelined read per
   request. Slots without quotas rank after slots with known headroom, as
   unknown prices rank after known ones.
-- **Session affinity.** A route may set `affinity` to keep requests carrying
-  the same session key on the same target and slot while it stays eligible.
-  The key comes from a configured attribution label or the dialect's own cache
-  key (OpenAI `prompt_cache_key`), and is hashed into the rendezvous seed. This
-  raises provider prompt-cache hit rates without any gateway state.
+- **Input and output token quotas.** Connection and slot quotas may declare
+  separate input and output token windows beside the combined one, for
+  providers that publish separate limits. Headroom uses whichever is tightest.
+- **Sessions.** A session is a caller-chosen key that groups related requests:
+  the value of the attribution label a route names as its session label, or
+  the dialect's own cache key (OpenAI `prompt_cache_key`). This is the one
+  definition of a session in the roadmap;
+  [M5.5](m05-observability.md#m55-reports-and-sessions) and
+  [M8.3](m08-caching.md#m83-provider-prompt-cache-automation) reuse it.
+- **Session affinity.** A route may set `affinity` to keep requests with the
+  same session on the same target and slot while it stays eligible. The
+  session is hashed into the rendezvous seed and never stored, which raises
+  provider prompt-cache hit rates without any gateway state.
 
 ### M3.3 Priority admission and capacity reservation
 
-- **Admission queue.** A bounded queue sits in front of each gateway's
-  inference admission pool, with four classes: `critical`, `high`, `normal`
-  and `low`. Dequeueing is weighted fair (8:4:2:1), so lower classes are never
+- **Admission queue.** A bounded queue holds inference requests when the
+  gateway is saturated, with four classes: `critical`, `high`, `normal` and
+  `low`. Dequeueing is weighted fair (8:4:2:1), so lower classes are never
   starved. A queued request waits at most
   `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` and never beyond its route deadline, then
   receives today's 503. Queue depth is bounded by
   `OLP_HTTP_ADMISSION_QUEUE_DEPTH`.
+- **Placement.** Today's pool admits by path before authentication, where
+  neither the key's priority nor the route deadline is known. The queue
+  therefore sits after authentication and guards dispatch. The outer pool
+  keeps bounding connections and unauthenticated work, sized to hold the queue
+  depth.
 - **Priority source.** A key policy sets a default priority and a
   `max_priority`. Requests may choose a class up to that ceiling through
   `X-OLP-Routing`, for example `{"priority":"high"}`; a higher value is refused
-  as a budget increase, like today's attempt and deadline controls.
+  as an attempt to widen policy, like a `max_attempts` above the policy's.
 - **Capacity shares.** A connection or slot quota may declare per-priority
   shares and a saturation threshold. Below the threshold any class may use idle
   capacity; above it, each class is held to its share. The Valkey quota scripts
@@ -121,7 +146,9 @@ An exhausted cap removes the connection, slot or route from selection with the
 plan reason `connection_budget_exhausted`, `slot_budget_exhausted` or
 `route_budget_exhausted`, which can start a `budget` fallback. A missing or
 malformed snapshot skips the target, matching how unreadable provider quotas
-behave today.
+behave today. Like key budgets, a cap refuses work once accrued spend reaches
+it, so in-flight work can overshoot by the cost admitted between
+reconciliations.
 
 ### M3.5 Proactive and fleet-shared health
 
@@ -137,6 +164,9 @@ behave today.
   disappearing, so a fleet-wide false positive degrades latency instead of
   availability.
 - `GET /api/v1/provider-health` reports probe results and shared circuit state.
+- The `provider.circuit.open` and `provider.circuit.closed` events ship with
+  whichever of this workstream and
+  [M5.4](m05-observability.md#m54-alert-channels-and-events) lands second.
 
 ### M3.6 Shadow traffic
 
@@ -148,7 +178,8 @@ are mirrored to it after admission:
   dropped rather than queued when capacity is short.
 - Shadow targets must satisfy every hard constraint the request is subject to,
   including region, data collection and zero data retention, and the request's
-  content policy and guardrails.
+  content policy. Once [M7](m07-guardrails.md) ships, the same holds for its
+  guardrails.
 - Only stateless generation, embeddings and rerank are mirrored. Stateful
   Responses fields, files, batches, realtime and media uploads never are.
 - Shadow attempts are recorded with `shadow: true` and accounted to the route,
@@ -162,10 +193,15 @@ A route revision may carry ordered `selectors`. Each selector has a predicate
 and an action that chooses a subset of the route's targets or delegates to
 another route:
 
-- **Predicates** use features the gateway already computes during admission:
+- **Predicates** use features admission derives from the decoded request:
   operation, estimated input tokens, requested output tokens, streaming, tool
   presence, input modalities, structured-output requests and reasoning effort.
-  Attribution labels never take part, keeping labels free of routing effect.
+  Admission already has the operation, the token estimate and the supplied
+  parameter names; this workstream adds modalities and reasoning effort to
+  that view.
+- **Labels.** Attribution labels never take part in predicates. A session label
+  may seed affinity (M3.2) within the eligible set, but no label changes which
+  targets are eligible.
 - **Classifier predicates** send the request text to an OLP classification or
   generation route, for example a TEI classifier, and test the returned label.
   The classifier call is an accounted request with its own deadline; a
@@ -199,16 +235,42 @@ whether to honor `Retry-After`. Retries consume the attempt budget and the
 overall deadline, never apply after commitment or to ambiguous creations, and
 are recorded as attempts.
 
+A same-target retry keeps the serving identity, so it is the retry available
+to strict routes, and only for failures that prove the provider did no work:
+connect errors and explicit rate-limit rejections.
+
+## Non-goals
+
+- Selection that simulation cannot reproduce, such as routing weights learned
+  online. Classifier predicates are declared rules with recorded outcomes.
+- Uncertified wildcard passthrough. Route templates create certified routes
+  instead.
+- In-process routing code. Custom predicates are confined WebAssembly
+  functions.
+- Mirroring stateful or content-retaining operations.
+
+## Data and secrets
+
+| Data | Where | Retention | Purpose |
+| --- | --- | --- | --- |
+| Fallbacks, selectors, retry policy, affinity and shadow settings | Route drafts and immutable revisions in PostgreSQL; the runtime snapshot | As route revisions today | None |
+| Route templates | PostgreSQL | Until deleted | None |
+| Supply-side spend counters | PostgreSQL authority, Valkey snapshots | As key budget windows today | None |
+| Shared circuit and probe state | Valkey | The staleness bound | None |
+| Shadow, probe and classifier attempts | Attempt records in PostgreSQL | Request retention | None; metadata only |
+| Session keys | Request memory, hashed into the selection seed | Never stored | None |
+
 ## Change map
 
 | Change | Start here |
 | --- | --- |
-| Fallback chains, selectors, templates, retry policy | `internal/routes/`, `internal/runtime/plan.go` |
+| Fallbacks, selectors and retry policy as configuration | `internal/routes/`, `internal/runtime/plan.go`, `internal/configuration/` |
+| Fallback, retry and shadow execution | `internal/gateway/attempts.go`, `internal/gateway/interaction.go` |
 | Capacity reads, shares and supply-side caps | `internal/limits/` |
-| Admission queue | `internal/observability/admission.go`, `internal/gateway/` |
+| Admission queue | `internal/observability/admission.go`, `internal/observability/public.go`, `internal/gateway/server.go` |
 | Shared circuits and probes | `internal/gateway/health.go`, `internal/process/workers.go` |
-| Shadow execution | `internal/gateway/attempts.go` |
-| Console | `console/src/lib/features/routes/` |
+| Route templates | `internal/routes/`, provider activation in `internal/providers/` |
+| Console | `console/src/lib/features/routes/`, bulk creation in `console/src/lib/features/providers/` |
 
 ## Decisions to settle
 
@@ -217,20 +279,36 @@ are recorded as attempts.
 2. The staleness bound for shared circuit state (recommended: five seconds,
    matching key-authority polling).
 3. Whether shadow traffic may target another project's routes (recommended: no).
+4. Whether a strict route may fall back or fail over after a dispatch that
+   provably did no work (recommended: no; strict keeps one serving identity,
+   and operators who want cross-target resilience choose transformed routes).
+5. Where the priority queue sits relative to the pre-authentication pool
+   (recommended: after authentication, with the outer pool sized to the queue
+   depth).
 
 ## Exit criteria
 
-- [ ] Fallbacks, selectors, templates and retry policy round-trip through route
-      drafts, revisions, restore and configuration export, plan and apply.
-- [ ] Route simulation explains fallbacks, selector matches, capacity ordering
-      and affinity for a given request.
-- [ ] Integration tests prove that fallbacks never follow a committed stream,
-      that requests cannot raise priority above the key's ceiling, and that
-      capacity shares hold under concurrent load across two gateways.
-- [ ] A circuit opened on one gateway is honored by another within the staleness
-      bound.
-- [ ] Shadow attempts never change caller-visible latency in benchmark S1 and
-      are excluded from key budgets.
+- [ ] **M3.1, M3.7, M3.8, M3.9** Fallbacks, selectors, templates and retry
+      policy round-trip through route drafts, revisions, restore and
+      configuration export, plan and apply.
+- [ ] **M3.1, M3.2, M3.7** Route simulation explains fallbacks, selector
+      matches, capacity ordering and affinity for a given request.
+- [ ] **M3.1, M3.9** Integration tests prove that fallbacks and retries never
+      follow a committed stream, that a strict route never leaves its serving
+      identity after a dispatch, and that a `budget` fallback never exceeds the
+      key's overall budget.
+- [ ] **M3.3** Requests cannot raise priority above the key's ceiling, the
+      queue never exceeds its depth or its timeout, and capacity shares hold
+      under concurrent load across two gateways.
+- [ ] **M3.4** An exhausted connection, slot or route cap removes it from
+      selection on every gateway, and the plan records the reason.
+- [ ] **M3.5** A circuit opened on one gateway is honored by another within the
+      staleness bound, and a failing probe moves its target to the end of the
+      attempt order without removing it.
+- [ ] **M3.6** Shadow attempts never change caller-visible latency in benchmark
+      S1 and are excluded from key budgets.
+- [ ] **M3.8** A newly certified model that matches a template becomes a route
+      draft, or a published route only when `auto_publish` is set.
 - [ ] Every workstream meets the [performance budget](m01-measured-advantage.md#performance-budget)
       when unconfigured; the `capacity` strategy adds at most one Valkey round
       trip per request.
