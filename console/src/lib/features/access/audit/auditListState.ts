@@ -1,4 +1,4 @@
-import type { AuditFilters } from '$lib/features/access/audit/api';
+import type { AuditEvent, AuditFilters } from '$lib/features/access/audit/api';
 import { AUDIT_PAGE_SIZE } from '$lib/api/pageSizes';
 import {
   filteredListState,
@@ -132,3 +132,19 @@ export const auditUrl: ListUrlSpec<AuditListState> = {
     return auditProblem(form, true) ? null : auditSearch(auditFilters(form));
   }
 };
+
+type AuditActor = Pick<AuditEvent, 'actor_type'> &
+  Partial<
+    Pick<
+      AuditEvent,
+      'actor_label' | 'actor_user_id' | 'actor_management_token_id'
+    >
+  >;
+
+/** Names who performed an audited action, keeping token actors distinct from system events. */
+export function auditActorLabel(event: AuditActor): string {
+  if (event.actor_type === 'system') return 'System';
+  if (event.actor_type === 'management_token')
+    return `Token · ${event.actor_label ?? event.actor_management_token_id ?? 'unknown'}`;
+  return event.actor_label ?? event.actor_user_id ?? 'Unknown user';
+}

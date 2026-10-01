@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  auditActorLabel,
   auditProblem,
   auditSearch,
   auditState,
@@ -215,5 +216,40 @@ describe('audit applied URL filters', () => {
         )
       ).not.toBeNull();
     }
+  });
+});
+
+describe('auditActorLabel', () => {
+  it('names management-token actors instead of calling them System', () => {
+    expect(
+      auditActorLabel({
+        actor_type: 'management_token',
+        actor_label: 'deploy-automation',
+        actor_user_id: null,
+        actor_management_token_id: '01980000-0000-7000-8000-000000000201'
+      })
+    ).toBe('Token · deploy-automation');
+  });
+
+  it('falls back to the token ID when the token name is gone', () => {
+    expect(
+      auditActorLabel({
+        actor_type: 'management_token',
+        actor_label: null,
+        actor_management_token_id: '01980000-0000-7000-8000-000000000201'
+      })
+    ).toBe('Token · 01980000-0000-7000-8000-000000000201');
+  });
+
+  it('shows user actors by their label', () => {
+    expect(auditActorLabel({ actor_type: 'user', actor_label: 'a@b.c' })).toBe(
+      'a@b.c'
+    );
+  });
+
+  it('labels system events as System', () => {
+    expect(auditActorLabel({ actor_type: 'system', actor_label: null })).toBe(
+      'System'
+    );
   });
 });
