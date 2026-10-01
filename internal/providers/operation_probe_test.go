@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -62,15 +63,16 @@ func TestProbeBudgetReservesPersistenceTime(t *testing.T) {
 	if !ok || !inner.Equal(outer.Add(-probeTimeout)) {
 		t.Fatalf("probe deadline %v, route deadline %v", inner, outer)
 	}
-	// A route without room for a reserve keeps its own deadline, and an
-	// unbounded caller adds no fixed cap over its per-call probe timeouts.
+	// A route left with less than two probe budgets still reserves about half
+	// of what remains, so a late probe cannot run up to the route deadline,
+	// and an unbounded caller adds no fixed cap over its per-call timeouts.
 	short, cancelShort := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancelShort()
 	shortDeadline, _ := short.Deadline()
 	probes, done = probeBudget(short)
 	defer done()
-	if inner, _ := probes.Deadline(); !inner.Equal(shortDeadline) {
-		t.Fatalf("short route probe deadline %v, want %v", inner, shortDeadline)
+	if inner, _ := probes.Deadline(); !inner.Before(shortDeadline.Add(-probeTimeout/2 + time.Second)) {
+		t.Fatalf("short route probe deadline %v leaves no reserve before %v", inner, shortDeadline)
 	}
 	probes, done = probeBudget(context.Background())
 	defer done()

@@ -34,14 +34,18 @@ const (
 	probeBodyLimit = 1 << 20
 )
 
-// probeBudget bounds a sequence of probes by the caller's deadline less one
-// probe budget, which stays reserved for recording the outcome. Each upstream
-// call keeps its own probeTimeout bound.
+// probeBudget bounds a sequence of probes by the caller's deadline less a
+// reserve for recording the outcome: one probeTimeout, or half the remaining
+// time when less than two remain, so a caller whose earlier probes consumed
+// most of its deadline still keeps time to persist. Each upstream call keeps
+// its own probeTimeout bound.
 func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 2*probeTimeout {
-		return context.WithDeadline(ctx, deadline.Add(-probeTimeout))
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
 	}
-	return context.WithCancel(ctx)
+	reserve := min(probeTimeout, time.Until(deadline)/2)
+	return context.WithDeadline(ctx, deadline.Add(-max(reserve, 0)))
 }
 
 // probeError is a classified, content-free upstream failure.
