@@ -22,6 +22,11 @@ func remove(pointer string) oif.Change {
 func lowerEmbedding(request oif.Request, _ oif.View) (oif.Document, []oif.Provenance, error) {
 	root := request.Document().Root()
 	changes := []oif.Change{mappingChange("/truncation", "false")}
+	// An omitted OpenAI encoding means float arrays; pin Voyage's native float
+	// encoding so an absent-only target default cannot switch the wire format.
+	if _, present := root.Lookup("encoding_format"); !present {
+		changes = append(changes, mappingChange("/encoding_format", "null"))
+	}
 	for _, member := range root.Members() {
 		switch member.Name {
 		case "model", "input":

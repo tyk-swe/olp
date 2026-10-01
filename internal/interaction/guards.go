@@ -74,7 +74,7 @@ func validateAnthropicTextResult(document oif.Document) error {
 		return guardFailure("/stop_sequence", "unmapped_stop_sequence")
 	}
 	usage := member(root, "usage")
-	if !onlyMembers(usage, "input_tokens output_tokens cache_read_input_tokens") {
+	if !onlyMembers(usage, "input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens cache_creation service_tier") {
 		return guardFailure("/usage", "unmapped_usage")
 	}
 	for _, name := range []string{"input_tokens", "output_tokens"} {
@@ -82,8 +82,23 @@ func validateAnthropicTextResult(document oif.Document) error {
 			return guardFailure("/usage/"+name, "token_usage")
 		}
 	}
-	if cached, present := usage.Lookup("cache_read_input_tokens"); present && !nonnegativeInteger(cached) {
-		return guardFailure("/usage/cache_read_input_tokens", "token_usage")
+	for _, name := range []string{"cache_read_input_tokens", "cache_creation_input_tokens"} {
+		if count, present := usage.Lookup(name); present && !nonnegativeInteger(count) {
+			return guardFailure("/usage/"+name, "token_usage")
+		}
+	}
+	if creation, present := usage.Lookup("cache_creation"); present {
+		if !onlyMembers(creation, "ephemeral_5m_input_tokens ephemeral_1h_input_tokens") {
+			return guardFailure("/usage/cache_creation", "unmapped_usage")
+		}
+		for _, detail := range creation.Members() {
+			if !nonnegativeInteger(detail.Value) {
+				return guardFailure("/usage/cache_creation", "token_usage")
+			}
+		}
+	}
+	if tier, present := usage.Lookup("service_tier"); present && tier.Kind() != oif.String && tier.Kind() != oif.Null {
+		return guardFailure("/usage/service_tier", "token_usage")
 	}
 	return nil
 }

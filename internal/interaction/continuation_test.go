@@ -229,3 +229,54 @@ func TestNegotiatedToolProjectsNativeUsageCategoriesWithoutLoss(t *testing.T) {
 	_, _, err = unaryPlan.ProjectUnary(native, "continuation_unknown_usage", 1<<20)
 	assertReason(t, err, "fidelity_protocol_violation")
 }
+
+func TestNegotiatedToolAcceptsNativeServiceTierUsage(t *testing.T) {
+	plan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, toolSource), toolContext())
+	frozen, err := os.ReadFile("../../tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := func(usage string) ([]byte, error) {
+		stream := strings.Replace(string(frozen), `"usage":{"input_tokens":18,"output_tokens":1}`, `"usage":`+usage, 1)
+		projection, err := plan.NewToolProjection(1 << 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		completion, err := protocols.StreamWithEvents(openai.FamilyAnthropic, openai.FamilyAnthropic, strings.NewReader(stream), 1<<20, "route", true, func([]byte) error { return nil }, func(event oif.Event) error {
+			_, err := projection.Observe(event)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		_, delivery, err := projection.Complete(completion, "continuation_service_tier")
+		if err != nil {
+			return nil, err
+		}
+		return delivery.Frames[len(delivery.Frames)-1], nil
+	}
+	frame, err := observe(`{"input_tokens":18,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard","server_tool_use":null}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := oif.ParseJSON(frame, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tier, present := terminal.Lookup("/olp/native_usage/service_tier"); !present || tier.Raw() != `"standard"` {
+		t.Fatalf("native service tier was lost: %s", frame)
+	}
+	_, err = observe(`{"input_tokens":18,"output_tokens":1,"service_tier":7}`)
+	assertReason(t, err, "fidelity_protocol_violation")
+
+	unary := strings.Replace(toolSource, `"stream":true,`, "", 1)
+	unaryPlan := bind(t, toolsTemplate(t), request(t, openai.FamilyChat, unary), toolContext())
+	body := []byte(`{"id":"message-usage","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-weather","name":"weather","input":{"city":"Paris"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":28,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"}}`)
+	native, err := protocols.DecodeRequest(openai.FamilyAnthropic, openai.FamilyAnthropic, body, "route", "", unaryPlan.EffectiveRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = unaryPlan.ProjectUnary(native, "continuation_service_tier_unary", 1<<20); err != nil {
+		t.Fatal(err)
+	}
+}

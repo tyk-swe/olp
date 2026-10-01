@@ -42,6 +42,32 @@ func TestQualifiedEmbeddingControlsAndStorage(t *testing.T) {
 		t.Fatalf("target source discarded: %s", result.Body)
 	}
 }
+func TestQualifiedEmbeddingOmittedEncodingIgnoresTargetBase64Default(t *testing.T) {
+	c := config("voyage-embeddings", "embeddings")
+	c.Provider.OperationDefaults = map[string]connectors.DefaultSet{"embeddings": {Dialect: "voyage-embeddings", Values: map[string]json.RawMessage{"encoding_format": json.RawMessage(`"base64"`)}}}
+	template, err := operationplan.Compile(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for body, want := range map[string]string{
+		`{"model":"route","input":["a"]}`:                            "null",
+		`{"model":"route","input":["a"],"encoding_format":"base64"}`: `"base64"`,
+	} {
+		source, err := operationplan.Parse("openai-embeddings", []byte(body), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := template.Bind(source, operationplan.Context{Route: "route"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(plan.Body(), &fields)
+		if string(fields["encoding_format"]) != want {
+			t.Fatalf("%s: upstream encoding_format %s, want %s: %s", body, fields["encoding_format"], want, plan.Body())
+		}
+	}
+}
 func TestNativeDefaultsPreserveSourcePresenceAndRequireClient(t *testing.T) {
 	c := config("voyage-embeddings", "embeddings")
 	c.Provider.OperationDefaults = map[string]connectors.DefaultSet{"embeddings": {Dialect: "voyage-embeddings", Values: map[string]json.RawMessage{"output_dtype": json.RawMessage(`"uint8"`), "truncation": json.RawMessage(`true`), "encoding_format": json.RawMessage(`"base64"`)}}}
