@@ -61,7 +61,7 @@ WHERE r.event=$1 AND r.enabled AND d.enabled`
 const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,r.event,v.attempts,v.last_attempt_at,
  r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
  v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,
- d.url,d.secret_id::text
+ d.url
 FROM olp.notification_deliveries v
 JOIN olp.notification_rules r ON r.id=v.rule_id
 JOIN olp.notification_destinations d ON d.id=r.destination_id
@@ -103,7 +103,6 @@ type delivery struct {
 	currency      string
 	payload       []byte
 	url           string
-	secretID      *string
 }
 
 func thresholdEvidence(accrued string, limit *string, threshold int) (decimal.Decimal, decimal.Decimal, bool) {
@@ -354,7 +353,7 @@ func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
 		var d delivery
 		if err = rows.Scan(&d.id, &d.ruleID, &d.event, &d.attempts, &d.lastAttemptAt,
 			&d.ruleName, &d.subjectKind, &d.subjectID, &d.windowKind, &d.windowID, &d.threshold,
-			&d.accrued, &d.limit, &d.currency, &d.payload, &d.url, &d.secretID); err != nil {
+			&d.accrued, &d.limit, &d.currency, &d.payload, &d.url); err != nil {
 			return nil, err
 		}
 		deliveries = append(deliveries, d)
@@ -397,15 +396,25 @@ func webhookBody(d delivery) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-func (w *notificationWorker) notificationSecret(ctx context.Context, secretID *string) ([]byte, error) {
-	if secretID == nil {
-		return nil, nil
-	}
+// notificationSecret reads the signing secret the rule's destination holds
+// now, not when the delivery was read: rotating or clearing a secret deletes
+// the old one, and the share lock waits for a rotation in flight to commit.
+func (w *notificationWorker) notificationSecret(ctx context.Context, ruleID string) ([]byte, error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	var secretID *string
+	if err = tx.QueryRow(ctx,
+		`SELECT d.secret_id::text FROM olp.notification_rules r
+		 JOIN olp.notification_destinations d ON d.id=r.destination_id
+		 WHERE r.id=$1 FOR SHARE OF d`, ruleID).Scan(&secretID); err != nil {
+		return nil, err
+	}
+	if secretID == nil {
+		return nil, nil
+	}
 	return w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
 }
 
@@ -460,7 +469,7 @@ func (w *notificationWorker) send(ctx context.Context, d delivery) string {
 	if err != nil {
 		return "invalid_destination"
 	}
-	secret, err := w.notificationSecret(ctx, d.secretID)
+	secret, err := w.notificationSecret(ctx, d.ruleID)
 	if err != nil {
 		w.log.Warn("notification secret unavailable", "delivery", d.id, "error", err)
 		return "network"

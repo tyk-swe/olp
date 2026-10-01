@@ -349,8 +349,7 @@ func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 	return tx, nil
 }
 
-// Audit records a metadata-only audit event inside the mutation's
-// transaction, attributed to actor.
+// clientIPKey carries the client address guard resolved for a request.
 type clientIPKey struct{}
 
 // clientIP resolves the request's client address through the trusted-proxy
@@ -379,6 +378,8 @@ func auditSource(r *http.Request) any {
 	return source
 }
 
+// Audit records a metadata-only audit event inside the mutation's
+// transaction, attributed to actor.
 func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string) error {
 	source := auditSource(r)
 	family := "other"
