@@ -76,9 +76,11 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
 }
 
 // The native stream codec has already validated the SSE event grammar and
-// bound its model. One response-ID overlay is the only additional change on a
-// resource read; untouched extensions and numeric lexemes stay byte-identical.
-func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool) ([]byte, []byte, error) {
+// bound its model. A non-strict resource read overlays only the response ID
+// and an echoed previous_response_id, which previous resolves to the caller's
+// local id ("" withholds it); untouched extensions and numeric lexemes stay
+// byte-identical.
+func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool, previous func(string) string) ([]byte, []byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
 		return nil, nil, errors.New("response stream frame has no data")
@@ -110,7 +112,19 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 		mapped, err = projection.project(doc, "/response")
 	} else {
 		local, _ := json.Marshal(projection.localID)
-		mapped, err = oif.Apply(doc, []oif.Change{{Pointer: "/response/id", Value: string(local), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}})
+		changes := []oif.Change{{Pointer: "/response/id", Value: string(local), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
+		if prior, present := response.Lookup("previous_response_id"); present {
+			if upstream, valid := prior.Text(); valid && upstream != "" {
+				value := "null"
+				if previous != nil {
+					if mappedID := previous(upstream); mappedID != "" {
+						value = quotedResponseID(mappedID)
+					}
+				}
+				changes = append(changes, oif.Change{Pointer: "/response/previous_response_id", Value: value, Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
+			}
+		}
+		mapped, err = oif.Apply(doc, changes)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -228,8 +242,13 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	nativeTerminalFailure := false
 	fact := &x.facts[len(x.facts)-1]
 	credentialValues := x.sensitive
+	previous := func(upstream string) string {
+		lookupCtx, stopLookup := resourceCommitContext(ctx)
+		defer stopLookup()
+		return s.previousResponseLocal(lookupCtx, res.APIKeyID, res.ProviderID, nil, upstream)
+	}
 	emit := func(frame []byte) error {
-		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse)
+		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse, previous)
 		if err != nil || len(projected) > limit {
 			return errors.New("retained response event could not be projected")
 		}

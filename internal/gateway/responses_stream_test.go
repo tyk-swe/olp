@@ -41,13 +41,34 @@ func TestStrictResponseProjectionPreservesNativeSourceAndParentIdentity(t *testi
 func TestStrictResponseStreamProjectionRetainsSSEAndOpaqueNumbers(t *testing.T) {
 	frame := []byte("id: cursor-7\nevent: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"native\",\"native\":{\"large\":9007199254740993,\"zero\":-0}}}\n\n")
 	projection := responseProjection{upstreamID: "resp_up", localID: "strict_response_local", route: "published-route"}
-	out, original, err := projectStoredResponseFrame(frame, projection, true)
+	out, original, err := projectStoredResponseFrame(frame, projection, true, nil)
 	if err != nil || !bytes.HasPrefix(out, []byte("id: cursor-7\nevent: response.created\ndata: ")) ||
 		!bytes.Contains(out, []byte(`"id":"strict_response_local"`)) ||
 		!bytes.Contains(out, []byte(`"model":"published-route"`)) ||
 		!bytes.Contains(out, []byte(`"large":9007199254740993,"zero":-0`)) ||
 		!bytes.Contains(original, []byte(`"id":"resp_up"`)) || bytes.Contains(out, []byte(`"id":"resp_up"`)) {
 		t.Fatalf("native stream projection: err=%v output=%s original=%s", err, out, original)
+	}
+}
+
+func TestStoredResponseStreamProjectionMapsEchoedPreviousResponse(t *testing.T) {
+	frame := []byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\",\"previous_response_id\":\"resp_parent_up\",\"native\":{\"large\":9007199254740993}}}\n\n")
+	projection := responseProjection{upstreamID: "resp_up", localID: "resp_local"}
+	resolve := func(upstream string) string {
+		if upstream == "resp_parent_up" {
+			return "resp_parent_local"
+		}
+		return ""
+	}
+	out, _, err := projectStoredResponseFrame(frame, projection, false, resolve)
+	if err != nil || !bytes.Contains(out, []byte(`"id":"resp_local"`)) ||
+		!bytes.Contains(out, []byte(`"previous_response_id":"resp_parent_local"`)) ||
+		!bytes.Contains(out, []byte(`"large":9007199254740993`)) || bytes.Contains(out, []byte("resp_parent_up")) {
+		t.Fatalf("stored stream leaked or lost the prior response identity: err=%v output=%s", err, out)
+	}
+	out, _, err = projectStoredResponseFrame(frame, projection, false, func(string) string { return "" })
+	if err != nil || !bytes.Contains(out, []byte(`"previous_response_id":null`)) || bytes.Contains(out, []byte("resp_parent_up")) {
+		t.Fatalf("unmapped upstream prior response was forwarded: err=%v output=%s", err, out)
 	}
 }
 
