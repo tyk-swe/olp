@@ -88,6 +88,10 @@ Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
 protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
+Code-mode process tests run with a separate 15-minute suite deadline. The
+remaining process tests retain their 30-minute deadline; the two selections are
+disjoint and cover the complete package, with the same build tags and race
+detection.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the

@@ -63,7 +63,8 @@ restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=15m -v -run '^TestCode' ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -skip '^TestCode' ./tests/integration
 ./scripts/code-mode-qualification.sh cli
 go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media ./internal/usage
 # Test-only trusted registry additions run in their own process, so dynamic
