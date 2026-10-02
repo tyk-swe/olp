@@ -162,7 +162,7 @@ func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 		id := normalizeLimit(strings.TrimPrefix(prefix, "x-"))
 		for _, kind := range []string{"primary", "secondary"} {
 			base := prefix + "-" + kind
-			if w := allowanceWindow(id, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil {
+			if w := allowanceWindow(id, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil && (w.UsedPercent != 0 || w.WindowMinutes != nil && *w.WindowMinutes != 0 || w.ResetsAt != nil) {
 				result.Windows = append(result.Windows, *w)
 			}
 		}
