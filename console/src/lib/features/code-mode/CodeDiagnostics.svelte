@@ -253,6 +253,19 @@
         <dl>
           <dt>Attempt / state</dt>
           <dd>{attempt.id} / {attempt.state}</dd>
+          <dt>Upstream status</dt>
+          <dd>{attempt.upstream_status ?? 'Not observed'}</dd>
+          <dt>Outcome origin / result</dt>
+          <dd>
+            {attempt.outcome_origin ?? 'Not observed'} / {attempt.outcome ??
+              'Not observed'}
+          </dd>
+          <dt>Outcome observed</dt>
+          <dd>
+            {attempt.outcome_observed_at
+              ? formatDate(attempt.outcome_observed_at)
+              : 'Not observed'}
+          </dd>
           <dt>Route / revision</dt>
           <dd>{attempt.route_id} / {attempt.route_revision_id}</dd>
           <dt>Key / account</dt>

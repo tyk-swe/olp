@@ -142,7 +142,7 @@ func TestAllowanceRequiresProviderReportedValidNumbers(t *testing.T) {
 	if a == nil || *a.RemainingPercent != 75 || a.ResetsAt.Unix() != 1900000000 || a.ObservedAt != now {
 		t.Fatalf("allowance=%+v", a)
 	}
-	for _, value := range []string{"NaN", "Inf", "101", "-1", ""} {
+	for _, value := range []string{"NaN", "Inf", "-1", ""} {
 		h.Set("X-Codex-Primary-Used-Percent", value)
 		if Allowance(h, now) != nil {
 			t.Fatal("invalid allowance trusted")

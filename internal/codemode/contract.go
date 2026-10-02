@@ -44,11 +44,13 @@ type Account struct {
 
 // Allowance is provider-reported subscription metadata, never a local budget.
 type Allowance struct {
-	RemainingTokens   *int64     `json:"remaining_tokens"`
-	RemainingRequests *int64     `json:"remaining_requests"`
-	RemainingPercent  *float64   `json:"remaining_percent"`
-	ResetsAt          *time.Time `json:"resets_at"`
-	ObservedAt        time.Time  `json:"observed_at"`
+	Windows           []AllowanceWindow `json:"windows,omitempty"`
+	Credits           *Credits          `json:"credits,omitempty"`
+	RemainingTokens   *int64            `json:"remaining_tokens"`
+	RemainingRequests *int64            `json:"remaining_requests"`
+	RemainingPercent  *float64          `json:"remaining_percent"`
+	ResetsAt          *time.Time        `json:"resets_at"`
+	ObservedAt        time.Time         `json:"observed_at"`
 }
 
 func (a Allowance) Validate() error {
@@ -60,7 +62,7 @@ func (a Allowance) Validate() error {
 	if a.ObservedAt.IsZero() || a.RemainingPercent != nil && (math.IsNaN(*a.RemainingPercent) || math.IsInf(*a.RemainingPercent, 0) || *a.RemainingPercent < 0 || *a.RemainingPercent > 100) {
 		return fmt.Errorf("invalid provider allowance")
 	}
-	return nil
+	return a.validateObservations()
 }
 
 type ClientConfiguration struct {
@@ -173,26 +175,30 @@ type Budget struct {
 }
 
 type Attempt struct {
-	ID              string     `json:"id"`
-	ProjectID       string     `json:"project_id"`
-	RouteID         string     `json:"route_id"`
-	RouteRevisionID string     `json:"route_revision_id"`
-	APIKeyID        string     `json:"api_key_id"`
-	BindingID       string     `json:"binding_id"`
-	AccountID       string     `json:"account_id"`
-	Operation       string     `json:"operation"`
-	Model           string     `json:"model"`
-	State           string     `json:"state"`
-	ReservedTokens  int64      `json:"reserved_tokens"`
-	ReportedTokens  *int64     `json:"reported_tokens"`
-	InputTokens     *int64     `json:"input_tokens"`
-	OutputTokens    *int64     `json:"output_tokens"`
-	CachedTokens    *int64     `json:"cached_tokens"`
-	ReasoningTokens *int64     `json:"reasoning_tokens"`
-	BoundEvidence   *string    `json:"bound_evidence"`
-	Refusal         *string    `json:"refusal"`
-	CreatedAt       time.Time  `json:"created_at"`
-	FinishedAt      *time.Time `json:"finished_at"`
+	UpstreamStatus    *int       `json:"upstream_status"`
+	OutcomeOrigin     *string    `json:"outcome_origin"`
+	Outcome           *string    `json:"outcome"`
+	OutcomeObservedAt *time.Time `json:"outcome_observed_at"`
+	ID                string     `json:"id"`
+	ProjectID         string     `json:"project_id"`
+	RouteID           string     `json:"route_id"`
+	RouteRevisionID   string     `json:"route_revision_id"`
+	APIKeyID          string     `json:"api_key_id"`
+	BindingID         string     `json:"binding_id"`
+	AccountID         string     `json:"account_id"`
+	Operation         string     `json:"operation"`
+	Model             string     `json:"model"`
+	State             string     `json:"state"`
+	ReservedTokens    int64      `json:"reserved_tokens"`
+	ReportedTokens    *int64     `json:"reported_tokens"`
+	InputTokens       *int64     `json:"input_tokens"`
+	OutputTokens      *int64     `json:"output_tokens"`
+	CachedTokens      *int64     `json:"cached_tokens"`
+	ReasoningTokens   *int64     `json:"reasoning_tokens"`
+	BoundEvidence     *string    `json:"bound_evidence"`
+	Refusal           *string    `json:"refusal"`
+	CreatedAt         time.Time  `json:"created_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
 }
 
 // Usage's total includes cached input and reasoning output; the breakdowns
