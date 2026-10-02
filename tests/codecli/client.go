@@ -34,7 +34,24 @@ func New(t testing.TB, baseURL, key string, websocket bool) *Client {
 	if err != nil || strings.TrimSpace(string(output)) != "codex-cli "+Version {
 		t.Fatalf("expected official Codex %s: %s (%v)", Version, output, err)
 	}
-	c := &Client{Binary: binary, Home: t.TempDir(), Work: t.TempDir(), Key: key}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(cache, "olp-codecli")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp(root, "home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(home); err != nil {
+			t.Error(err)
+		}
+	})
+	c := &Client{Binary: binary, Home: home, Work: t.TempDir(), Key: key}
 	config := fmt.Sprintf(`model = %q
 model_provider = "olp"
 approval_policy = "never"

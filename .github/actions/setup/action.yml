@@ -36,7 +36,7 @@ runs:
         sudo apt-get update
         sudo apt-get install -y postgresql-common
         sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-        sudo apt-get install -y postgresql-client-18 bubblewrap
+        sudo apt-get install -y postgresql-client-18 bubblewrap ripgrep
         echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
         pnpm --dir console exec playwright install --with-deps chromium
     - if: inputs.services == 'true'
@@ -46,5 +46,6 @@ runs:
         # distribution package's AppArmor profile permits; prove it can start
         # here rather than inside a suite. Helper aliases are refused under the
         # system temporary directory, so give the check a home under RUNNER_TEMP.
-        home=$(mktemp -d "$RUNNER_TEMP/codex-sandbox.XXXXXX")
-        CODEX_HOME="$home" tests/clients/node_modules/.bin/codex sandbox -c 'sandbox_mode="workspace-write"' -- /bin/true
+        codex=$(./scripts/code-mode-qualification.sh install)
+        sandbox_home=$(mktemp -d "$RUNNER_TEMP/codex-sandbox.XXXXXX")
+        CODEX_HOME="$sandbox_home" "$codex" sandbox -c 'sandbox_mode="workspace-write"' -- /bin/true
