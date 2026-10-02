@@ -36,6 +36,12 @@ runs:
         sudo apt-get update
         sudo apt-get install -y postgresql-common
         sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-        sudo apt-get install -y postgresql-client-18
+        sudo apt-get install -y postgresql-client-18 bubblewrap ripgrep
         echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
         pnpm --dir console exec playwright install --with-deps chromium
+    - if: inputs.services == 'true'
+      shell: bash
+      run: |
+        codex=$(./scripts/code-mode-qualification.sh install)
+        home=$(mktemp -d "$RUNNER_TEMP/codex-sandbox.XXXXXX")
+        CODEX_HOME="$home" "$codex" sandbox -c 'sandbox_mode="workspace-write"' -- /bin/true

@@ -198,6 +198,14 @@ is whether to introduce explicit authenticated non-inference root registration.
 It cannot be implemented by silently binding an unresolved child.
 
 The local file/search task uses the officially advertised `exec_command` tool.
+Linux qualification requires `bubblewrap` and `ripgrep` on `PATH`, and a host
+that permits the official Codex sandbox to run. CI checks sandbox startup before
+starting the integration suite. See the [official sandbox prerequisites](https://developers.openai.com/codex/concepts/sandboxing#prerequisites)
+for distribution-specific setup; qualification does not disable the sandbox or
+change host security policy.
+The client harness creates each private home under the user cache and removes it
+after the test. Codex refuses helper aliases under the system temporary directory;
+those aliases are required by distribution bubblewrap versions without `--argv0`.
 The 0.160.0 bundled catalog lacks `gpt-5.4`, so this client uses fallback metadata
 with no freeform `apply_patch` tool. An attempted freeform call was rejected by
 the official tool router. Freeform patch support for this selected model remains
