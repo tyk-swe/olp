@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // CodeLedger is the durable authority and admission boundary used before each
@@ -23,3 +24,13 @@ type CodeLedger interface {
 // CodeTransport owns raw HTTP/SSE and WebSocket forwarding. Composition mounts
 // it only when an implementation is supplied; no inference is simulated here.
 type CodeTransport interface{ RegisterCode(*http.ServeMux, *Server) }
+
+// CodeAuthorization contains only the qualified adapter's upstream auth headers.
+type CodeAuthorization struct {
+	Headers   http.Header
+	Principal string
+}
+
+type CodeAuthorizer interface {
+	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (CodeAuthorization, error)
+}
