@@ -11,7 +11,7 @@ import (
 
 func TestCodeAccountRecoveryRetainsPinAndHonorsAllowanceReset(t *testing.T) {
 	f := newCodeFixture(t)
-	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "recover"})
+	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "recover"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

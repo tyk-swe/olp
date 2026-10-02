@@ -63,7 +63,7 @@ func (l *codeTestLedger) ObserveReference(_ context.Context, _, id string) error
 	l.references[id] = true
 	return nil
 }
-func (l *codeTestLedger) BindConnection(_ context.Context, _ codemode.Route, key string, _ codemode.Identity) (resources.CodePermit, error) {
+func (l *codeTestLedger) BindConnection(_ context.Context, _ codemode.Route, key string, _ codemode.Identity, _ string) (resources.CodePermit, error) {
 	return resources.CodePermit{Authority: access.Authority{ID: key, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}}, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Binding: codemode.Binding{ID: "binding", AccountID: "account", Principal: "principal"}}, nil
 }
 func (l *codeTestLedger) Settle(_ context.Context, _ string, u codemode.Usage) error {

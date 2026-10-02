@@ -60,13 +60,17 @@ func (s *CodeStore) Admit(ctx context.Context, in CodeAdmission) (CodePermit, er
 	return s.admit(ctx, in, false)
 }
 
-// BindConnection pins a model-independent WebSocket connection without
-// authorizing inference or creating token reservations.
-func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, key string, identity codemode.Identity) (CodePermit, error) {
+// BindConnection pins a WebSocket connection without authorizing inference.
+func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, key string, identity codemode.Identity, model string) (CodePermit, error) {
 	if len(route.Models) == 0 {
 		return CodePermit{}, codemode.Refuse(403, "code_model_denied")
 	}
-	return s.admit(ctx, CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "connect", Model: route.Models[0], Identity: identity}}, true)
+	operation := "connect_model"
+	if model == "" {
+		model = route.Models[0]
+		operation = "connect"
+	}
+	return s.admit(ctx, CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: operation, Model: model, Identity: identity}}, true)
 }
 
 func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool) (CodePermit, error) {
@@ -237,6 +241,9 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 	} else {
 		account, err := codeAccount(ctx, tx, in, "")
 		if err != nil {
+			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
+				return b, codemode.Refuse(400, "code_connection_model_required")
+			}
 			return b, err
 		}
 		b.AccountID = account.ID
@@ -253,6 +260,9 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (c
 	required := []string{in.Operation.Model}
 	if in.Operation.Name == "connect" {
 		required = in.Route.Models
+	}
+	if id != "" && (in.Operation.Name == "connect" || in.Operation.Name == "connect_model") {
+		required = []string{}
 	}
 	requiredJSON, err := json.Marshal(required)
 	if err != nil {
