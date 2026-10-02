@@ -16,6 +16,7 @@ import (
 func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	s.registerCodeMode(mux)
 	public := map[string]PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
 		"GET /api/v1/auth/capabilities":   s.capabilities,

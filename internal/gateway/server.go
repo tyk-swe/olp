@@ -83,8 +83,10 @@ type Runtime interface {
 
 // Server serves the native OpenAI surface from pinned runtime releases.
 type Server struct {
-	Runtime Runtime
-	Sink    Sink
+	CodeLedger    CodeLedger
+	CodeTransport CodeTransport
+	Runtime       Runtime
+	Sink          Sink
 	// Admission enforces the budgets shared by every replica. A nil Admission
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
@@ -152,6 +154,9 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
+	if s.CodeTransport != nil {
+		s.CodeTransport.RegisterCode(mux, s)
+	}
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
