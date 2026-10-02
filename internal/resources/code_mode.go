@@ -23,12 +23,33 @@ func (s *CodeStore) ObserveAllowance(ctx context.Context, account string, allowa
 	if err := allowance.Validate(); err != nil {
 		return err
 	}
-	document, err := json.Marshal(allowance)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1 AND (allowance IS NULL OR (allowance->>'observed_at')::timestamptz<=$3)`, account, document, allowance.ObservedAt)
-	return err
+	defer tx.Rollback(ctx)
+	var document []byte
+	if err = tx.QueryRow(ctx, `SELECT allowance FROM olp.code_accounts WHERE id=$1 FOR UPDATE`, account).Scan(&document); err != nil {
+		return err
+	}
+	var current codemode.Allowance
+	if len(document) > 0 {
+		if err = json.Unmarshal(document, &current); err != nil {
+			return err
+		}
+	}
+	merged := mergeCodeAllowance(current, allowance)
+	if err = merged.Validate(); err != nil {
+		return err
+	}
+	document, err = json.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, account, document); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 type CodeAdmission struct {
