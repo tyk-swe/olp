@@ -93,6 +93,22 @@ func TestAllowanceRejectsAmbiguousAndInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestAllowanceIgnoresEmptyHeaderWindowsButKeepsReportedZeroUsage(t *testing.T) {
+	now := time.Now().UTC()
+	headers := http.Header{"X-Codex-Primary-Used-Percent": {"0"}, "X-Codex-Primary-Window-Minutes": {"0"}}
+	if a := Allowance(headers, now); a != nil {
+		t.Fatal("empty HTTP window could clear an observed exhaustion")
+	}
+	headers.Set("X-Codex-Primary-Window-Minutes", "300")
+	if a := Allowance(headers, now); a == nil || len(a.Windows) != 1 || a.Windows[0].RemainingPercent != 100 {
+		t.Fatal("reported zero usage with a window duration was lost")
+	}
+	o := Observe([]byte(`{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":0}}}`), false)
+	if o.Allowance == nil || len(o.Allowance.Windows) != 1 || o.Allowance.Windows[0].RemainingPercent != 100 {
+		t.Fatal("explicit WebSocket zero usage was lost")
+	}
+}
+
 func TestOutcomeAndSuccessRemainSeparateFromUsage(t *testing.T) {
 	for _, tc := range []struct {
 		body              string
