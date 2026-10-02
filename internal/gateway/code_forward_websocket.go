@@ -44,9 +44,9 @@ func codeWrite(ctx context.Context, conn *websocket.Conn, kind websocket.Message
 	return conn.Write(ctx, kind, body)
 }
 
-func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route) {
+func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, keyID string) {
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
-		codeWriteError(w, codemode.Refuse(400, "code_protocol_unsupported"))
+		codeRefuse(s, w, r, route, keyID, codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
@@ -86,9 +86,8 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 		if !errors.As(err, &refusal) {
 			refusal = &codemode.Refusal{Code: "code_service_unavailable"}
 		}
-		authority, _ := s.authenticate(r, "inference")
 		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		_ = s.CodeLedger.RecordRefusal(finishCtx, route, authority.ID, refusal.Code)
+		_ = s.CodeLedger.RecordRefusal(finishCtx, route, keyID, refusal.Code)
 		finishCancel()
 		_ = client.Close(websocket.StatusPolicyViolation, refusal.Code)
 	}

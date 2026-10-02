@@ -50,8 +50,12 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	route, ok := release.Snapshot.CodeRoutes[r.PathValue("slug")]
-	if !ok || !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+	if !ok {
 		codeWriteError(w, codemode.Refuse(404, "code_route_unavailable"))
+		return
+	}
+	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+		codeRefuse(s, w, r, route, authority.ID, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
 	refuse := func(err error) { codeRefuse(s, w, r, route, authority.ID, err) }
@@ -65,7 +69,7 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		f.websocket(s, w, r, release, route)
+		f.websocket(s, w, r, release, route, authority.ID)
 		return
 	}
 	if r.Method != http.MethodPost || path != "responses" && path != "responses/compact" {
