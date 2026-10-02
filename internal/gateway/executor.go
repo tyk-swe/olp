@@ -117,6 +117,17 @@ type execution struct {
 	firstByte  *time.Duration // request start to the first payload byte the client received
 	lease      *limits.Lease  // the API key reservation, settled once the request ends
 	dispatched bool           // at least one attempt was handed to a provider
+	// responseMetadata is the key's response_metadata policy: the response says
+	// how the gateway served it.
+	responseMetadata bool
+	// attemptCount and attemptVendor describe the attempt now being made, and
+	// so the one that serves the response if it succeeds: how many attempts the
+	// request has made including this one, and the vendor of its provider. They
+	// are recorded as the attempt opens because a stream commits its response
+	// before the attempt's fact is appended. A job call, which has no stream,
+	// records them with its fact, and a list of jobs once all its polls are in.
+	attemptCount  int
+	attemptVendor string
 	// grantGeneration belongs to the token read for the current attempt.
 	grantGeneration int64
 	// sensitive holds every credential value applied to an upstream request
@@ -465,6 +476,7 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		StartedAt:          s.now(),
 	}
 	x.recordEstimate(&fact, a)
+	x.attemptCount, x.attemptVendor = ordinal, a.VendorID
 	if slot.CredentialID != nil {
 		fact.CredentialID = *slot.CredentialID
 	}

@@ -5,7 +5,11 @@
 // decide atomically from the server's own TIME, so a rejection mutates no
 // counter, a granted reservation stays refundable and reconcilable by lease ID,
 // and any stored state a script cannot interpret fails the request closed
-// instead of admitting it on a zero.
+// instead of admitting it on a zero. A caller that asks, with Request.ReportRate,
+// has the rate script's answer also state what is left of the request and token
+// allowances, for a grant and for a rejection alike, so it can report them with
+// no second round trip. A caller that does not ask is answered with the decision
+// alone and pays nothing for them.
 //
 // A cost budget is measured against two quantities. The accrued spend is
 // PostgreSQL's, installed by ApplyCostSnapshot and never lowered. The pending
@@ -89,7 +93,7 @@ const (
 	// rate and cost scripts share with this package. A different version means
 	// the deployed script is not this one. They advance independently: a change
 	// to what the rate script answers must not invalidate the cost scripts.
-	limitsResponseVersion = 1
+	limitsResponseVersion = 2
 	costResponseVersion   = 1
 	fixedWindowMS         = int64(60_000)
 	dayMS                 = int64(86_400_000)
@@ -165,6 +169,13 @@ type ExceededError struct {
 	// this request's estimate. Lowering the estimate, or waiting for requests in
 	// flight to end, can admit it; neither helps a budget that is exhausted.
 	Estimate bool
+	// Rate is the request and token allowance the rate script measured the request
+	// against, for a rejection that script made of a Request that asked for it
+	// with ReportRate: nothing was reserved, so it is what the window still holds.
+	// It is zero when a cost budget refused the request, because the script never
+	// ran, when the request did not ask, and for a key that limits neither
+	// requests nor tokens.
+	Rate RateState
 }
 
 func (e *ExceededError) Error() string {
@@ -208,6 +219,13 @@ type Request struct {
 	// CostGrace is how long past LeaseTTL the reservation survives if nothing
 	// settles it. Zero means DefaultCostGrace.
 	CostGrace time.Duration
+	// ReportRate asks the rate script to state the request and token allowance it
+	// measured the request against, which the lease's RateState and the refusal's
+	// Rate then report. Only a caller that reads them asks, since the answer is
+	// larger: a reservation that does not, such as a provider's quota that nothing
+	// reports on, is answered with the decision alone, and so is a request that
+	// limits neither requests nor tokens, which has no allowance to state.
+	ReportRate bool
 }
 
 // HasHardLimits reports whether any budget applies. A request without one needs
@@ -228,6 +246,13 @@ func (r Request) HasCostBudget() bool {
 // only by a cost budget never does.
 func (r Request) HasRateLimits() bool {
 	return r.RequestsPerMinute != nil || r.TokensPerMinute != nil || r.MaxConcurrency != nil
+}
+
+// reportsRate reports whether the rate script is asked for the allowance: the
+// caller wants it, and a request or token limit gives it something to state.
+// Validation has made every limit that is set a positive one.
+func (r Request) reportsRate() bool {
+	return r.ReportRate && (r.RequestsPerMinute != nil || r.TokensPerMinute != nil)
 }
 
 // costGrace is the time a cost reservation outlives the request.
@@ -548,22 +573,33 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	}
 	lease.windowID = granted.windowID
 	lease.concurrencyExpiresAtMS = granted.leaseExpiresAtMS
+	if r.reportsRate() {
+		lease.rate = &rateAnswer{state: granted.rate, at: time.Now()}
+	}
 	return lease, nil
 }
 
 // reserveRate counts the request against the rate and concurrency limits.
 func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, lease *Lease) (scriptResult, error) {
+	stated := r.reportsRate()
 	value, err := l.eval(ctx, reserveLimitsScript,
 		[]string{scriptKeys.rate, scriptKeys.concurrency},
 		optionalLimit(r.RequestsPerMinute), optionalLimit(r.TokensPerMinute),
 		strconv.FormatInt(r.RequestedTokens, 10), optionalLimit(r.MaxConcurrency),
-		lease.id, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10))
+		lease.id, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10), switchArg(stated))
 	if err != nil {
 		return scriptResult{}, err
 	}
-	result, err := parseReservation(value)
+	result, err := parseReservation(value, stated)
 	if err != nil {
 		return scriptResult{}, err
+	}
+	// The script echoes the limits it was given with the allowance, and an answer
+	// that names other limits was not made for this request.
+	if stated && (result.kind == resultGranted || result.kind == resultRejected) &&
+		(result.rate.RequestLimit != limitValue(r.RequestsPerMinute) ||
+			result.rate.TokenLimit != limitValue(r.TokensPerMinute)) {
+		return scriptResult{}, ErrUnexpectedResponse
 	}
 	switch result.kind {
 	case resultGranted:
@@ -577,6 +613,7 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, l
 		return scriptResult{}, &ExceededError{
 			Dimension:  result.dimension,
 			RetryAfter: time.Duration(result.retryAfterMS) * time.Millisecond,
+			Rate:       result.rate,
 		}
 	case resultMalformed:
 		return scriptResult{}, ErrMalformedState
@@ -653,10 +690,76 @@ func ambiguousFailure(err error) bool {
 
 // optionalLimit renders an absent limit as the script's "unlimited" zero.
 func optionalLimit(limit *int64) string {
-	if limit == nil {
-		return "0"
+	return strconv.FormatInt(limitValue(limit), 10)
+}
+
+// switchArg renders a switch as the script's "0" or "1".
+func switchArg(on bool) string {
+	if on {
+		return "1"
 	}
-	return strconv.FormatInt(*limit, 10)
+	return "0"
+}
+
+// limitValue is an absent limit as the script's "unlimited" zero.
+func limitValue(limit *int64) int64 {
+	if limit == nil {
+		return 0
+	}
+	return *limit
+}
+
+// RateState is what remains of a lookup's per-minute request and token
+// allowances in the fixed UTC minute a reservation was measured in. Only a
+// dimension with a limit is stated: a limit of zero means that dimension is
+// unlimited and its remaining count is zero.
+//
+// The counts are the ones the rate script held when it answered, not a live
+// reading. A granted request's own reservation is already counted in them, and
+// its token reservation is the admission estimate, which Reconcile later
+// replaces with the tokens actually used. A rejected request reserved nothing,
+// so its counts are what the window still holds. The zero value states no
+// allowance, and is what a reservation reports that was not asked to state one.
+type RateState struct {
+	// RequestLimit and TokenLimit are the per-minute limits.
+	RequestLimit int64
+	TokenLimit   int64
+	// RequestRemaining and TokenRemaining are what those limits still allow
+	// within the minute, never below zero.
+	RequestRemaining int64
+	TokenRemaining   int64
+	// ResetAfter is the time the script measured to the end of the minute, when
+	// both counters start again, and ResetAt that boundary. Valkey's clock is the
+	// only one either is read from.
+	ResetAfter time.Duration
+	ResetAt    time.Time
+}
+
+// Limited reports whether the state carries an allowance: a request or a token
+// limit applies.
+func (s RateState) Limited() bool { return s.RequestLimit > 0 || s.TokenLimit > 0 }
+
+// LimitsRequests reports whether the requests per minute are limited.
+func (s RateState) LimitsRequests() bool { return s.RequestLimit > 0 }
+
+// LimitsTokens reports whether the tokens per minute are limited.
+func (s RateState) LimitsTokens() bool { return s.TokenLimit > 0 }
+
+// rateState builds the allowance a rate reservation reply states for the fixed
+// window with that ID. A reply that limits neither requests nor tokens states
+// none, whatever the window.
+func rateState(window, requestLimit, requestRemaining, tokenLimit, tokenRemaining, resetMS int64) RateState {
+	if requestLimit == 0 && tokenLimit == 0 {
+		return RateState{}
+	}
+	return RateState{
+		RequestLimit:     requestLimit,
+		RequestRemaining: requestRemaining,
+		TokenLimit:       tokenLimit,
+		TokenRemaining:   tokenRemaining,
+		ResetAfter:       time.Duration(resetMS) * time.Millisecond,
+		ResetAt:          time.UnixMilli((window + 1) * fixedWindowMS).UTC(),
+	}
 }
 
 // Lease is a granted reservation. Exactly one of Refund, Reconcile or Release
@@ -677,6 +780,10 @@ type Lease struct {
 	hasRequest             bool
 	hasRate                bool
 	concurrencyExpiresAtMS int64
+	// rate is the allowance the rate script answered the reservation with. Only a
+	// request that asked for one holds it, so that no other lease is made larger
+	// by it.
+	rate *rateAnswer
 	// group is the lease taken on the budget group's shared cost budget.
 	group *Lease
 	// costReserved says this lease holds an estimate in its owner's pending
@@ -688,6 +795,45 @@ type Lease struct {
 	costID       string
 	costGrace    time.Duration
 	actualCost   string
+}
+
+// RateState reports the request and token allowance this reservation was
+// measured against, as the rate script answered it. It is the lookup's own: a
+// lease attached with Attach, which carries a budget group's cost, adds
+// nothing to it. It is the zero state, which is not Limited, for a nil lease, for
+// one that reserved no request or token limit, and for one whose Request did not
+// ask for the allowance with ReportRate.
+func (le *Lease) RateState() RateState {
+	if le == nil || le.rate == nil {
+		return RateState{}
+	}
+	return le.rate.state
+}
+
+// RateReset is how long the minute RateState was measured in still has to run:
+// the reset the script measured less the time that has passed since its answer
+// arrived, which is the monotonic clock of this process and not Valkey's. A
+// response that is written long after admission, as a stream's first byte or a
+// slow completion is, can then report the time that is left rather than the time
+// there was. It is a whole number of milliseconds, like the script's own
+// reading, rounded up so that a minute with any time left never reads as over.
+// It is zero once the minute is over, and for a lease that states no allowance.
+func (le *Lease) RateReset() time.Duration {
+	if le == nil || le.rate == nil || !le.rate.state.Limited() {
+		return 0
+	}
+	left := le.rate.state.ResetAfter - time.Since(le.rate.at)
+	if left <= 0 {
+		return 0
+	}
+	return (left + time.Millisecond - 1).Truncate(time.Millisecond)
+}
+
+// rateAnswer is the allowance a lease was answered with and when this process
+// received the answer.
+type rateAnswer struct {
+	state RateState
+	at    time.Time
 }
 
 // Attach makes group part of this lease, so that finishing the request finishes

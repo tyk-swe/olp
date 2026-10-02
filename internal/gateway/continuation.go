@@ -203,6 +203,10 @@ func (s *Server) commitToolDelivery(ctx context.Context, x *execution, state *in
 	}
 	return s.Resources.CompleteContinuation(ctx, c.resource, payload)
 }
+
+// replayContinuation answers a request from the delivery already committed for
+// it. That is before admission: the replay makes no attempt and holds no
+// reservation, so it has no allowance or metadata to state.
 func (s *Server) replayContinuation(w http.ResponseWriter, x *execution) (int, error) {
 	delivery := x.continuation.replay
 	w.Header().Set("Cache-Control", "no-store")
@@ -240,7 +244,7 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 
 // recoverContinuation serves already committed client delivery only. It performs
 // current authority checks and never enters admission, provider dispatch or a
-// second inference retry engine.
+// second inference retry engine, so like a replay it adds no response headers.
 func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	x, authority, done := s.stateBegin(w, r, openai.FamilyChat)
 	if done {

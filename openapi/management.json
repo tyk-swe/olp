@@ -162,6 +162,10 @@
               "null"
             ]
           },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "type": "boolean"
+          },
           "revoked_at": {
             "format": "date-time",
             "type": [
@@ -205,7 +209,8 @@
           "budget",
           "etag",
           "created_at",
-          "allowed_attribution_keys"
+          "allowed_attribution_keys",
+          "response_metadata"
         ],
         "type": "object"
       },
@@ -1947,6 +1952,10 @@
               "integer",
               "null"
             ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "type": "boolean"
           },
           "scopes": {
             "items": {
@@ -10204,6 +10213,10 @@
               "integer",
               "null"
             ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "type": "boolean"
           },
           "scopes": {
             "items": {

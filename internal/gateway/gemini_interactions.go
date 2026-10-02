@@ -47,6 +47,7 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 		x.authority = authority
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 		x.budgetGroupID = authority.BudgetGroupID
+		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.attribution, e = s.parseAttribution(r, authority)
 	}
 	if e != nil {
@@ -268,6 +269,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}
 	s.recordGeminiInteractionUsage(x, result.Source.Root())
 	w.Header().Set("Content-Type", "application/json")
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(response.StatusCode)
 	n, writeErr := w.Write(projection)
 	if n > 0 {
@@ -495,6 +497,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 			err := s.Resources.DeleteInteractionContract(commitCtx, authority.ID, localID)
 			stopCommit()
 			if err == nil {
+				x.responseHeaders(w.Header(), false)
 				w.WriteHeader(http.StatusOK)
 				if len(x.facts) > 0 {
 					x.facts[len(x.facts)-1].Committed = true
@@ -520,6 +523,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 			fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The deleted Interaction could not be tombstoned."))
 			return
 		}
+		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		if len(x.facts) > 0 {
 			x.facts[len(x.facts)-1].Committed = true
@@ -580,6 +584,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(response.StatusCode)
 	if len(x.facts) > 0 {
 		x.facts[len(x.facts)-1].Committed = true
@@ -696,6 +701,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		if !committed {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-store")
+			x.responseHeaders(w.Header(), true)
 			w.WriteHeader(http.StatusOK)
 			committed = true
 			if len(x.facts) > 0 {

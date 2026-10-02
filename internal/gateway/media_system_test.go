@@ -183,6 +183,13 @@ func videoCapabilities() []runtime.Capability {
 // key. authMode none means no credential; "api_key" pins a sealed credential.
 func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *mediaFixture {
 	t.Helper()
+	return seedVendorMediaFixture(t, authMode, withCredential, "")
+}
+
+// seedVendorMediaFixture is seedMediaFixture with a provider whose vendor is
+// named, which a job call states to a key that asks to be told.
+func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, vendor string) *mediaFixture {
+	t.Helper()
 	f := &mediaFixture{t: t, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	f.pool = systemPool(t)
 	f.upstream = newVideoUpstream(t)
@@ -284,7 +291,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	f.generationID = uuid.NewString()
 	routeID := uuid.NewString()
 	provider := runtime.Provider{
-		ID: f.providerID, Name: "media-provider", Kind: "openai", Enabled: true,
+		ID: f.providerID, Name: "media-provider", Kind: "openai", Enabled: true, VendorID: vendor,
 		RevisionID: f.revisionID, Endpoint: endpoint, AuthMode: authMode,
 		Capabilities: videoCapabilities(),
 		Slots: []runtime.Slot{{

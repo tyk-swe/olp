@@ -87,6 +87,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		fail(e)
 		return
@@ -180,6 +181,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		contentType = "application/json"
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(result)
 	x.delivered(s.now())
@@ -347,6 +349,7 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		contentType = "application/vnd.amazon.eventstream"
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), true)
 	w.WriteHeader(http.StatusOK)
 	x.delivered(s.now())
 	rc := http.NewResponseController(w)

@@ -1437,10 +1437,13 @@ type ApiKeyDetailResponse struct {
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	ProjectName       nullable.Nullable[string]             `json:"project_name"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
-	RevokedAt         nullable.Nullable[time.Time]          `json:"revoked_at,omitempty"`
-	RotatedAt         nullable.Nullable[time.Time]          `json:"rotated_at,omitempty"`
-	Scopes            []string                              `json:"scopes"`
-	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	ResponseMetadata bool                         `json:"response_metadata"`
+	RevokedAt        nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
+	RotatedAt        nullable.Nullable[time.Time] `json:"rotated_at,omitempty"`
+	Scopes           []string                     `json:"scopes"`
+	TokensPerMinute  nullable.Nullable[int64]     `json:"tokens_per_minute,omitempty"`
 }
 
 // ApiKeyListResponse defines model for ApiKeyListResponse.
@@ -1977,8 +1980,11 @@ type CreateApiKeyRequest struct {
 	// ProjectId Owning project; omit or null for an installation-wide key. Required for assigned principals.
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
-	Scopes            *[]string                             `json:"scopes,omitempty"`
-	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
+	Scopes           *[]string                `json:"scopes,omitempty"`
+	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
 }
 
 // CreateApiKeyResponse defines model for CreateApiKeyResponse.
@@ -4729,8 +4735,11 @@ type UpdateApiKeyRequest struct {
 	MonthlyCostLimit  nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
 	Name              *string                               `json:"name,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
-	Scopes            *[]string                             `json:"scopes,omitempty"`
-	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
+	Scopes           *[]string                `json:"scopes,omitempty"`
+	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
 }
 
 // UpdateBudgetGroupRequest A merge patch: every field is optional, an omitted field keeps the stored

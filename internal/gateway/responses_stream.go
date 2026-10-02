@@ -287,6 +287,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if !committed {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-store")
+			x.responseHeaders(w.Header(), true)
 			w.WriteHeader(http.StatusOK)
 			committed = true
 		}

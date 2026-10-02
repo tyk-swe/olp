@@ -214,6 +214,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 		return fail(serverError(500, "internal_error", "The result could not be written."))
 	}
 	w.Header().Set("Content-Type", "application/json")
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	out := &outcome{committed: true}
 	fact := &x.facts[len(x.facts)-1]

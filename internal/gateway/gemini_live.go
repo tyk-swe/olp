@@ -129,6 +129,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), geminiLiveSession)
 	defer cancel()
+	// Like a realtime upgrade, this one carries no allowance or metadata headers.
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		e := serverError(http.StatusBadRequest, "websocket_upgrade_failed", "The Live WebSocket upgrade failed.")

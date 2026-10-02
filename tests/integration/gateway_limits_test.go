@@ -30,6 +30,9 @@ type glFixture struct {
 	limiter  *limits.Limiter
 	provider string
 	path     string
+	// routeRevision is the revision ID the fixture's route was activated as, which
+	// is what a response says served it.
+	routeRevision string
 	// valkey and namespace are where the fixture's limiter keeps its counters,
 	// for a test that reads them directly. They are set by glSeedIn.
 	valkey    *coordination.Client
@@ -111,7 +114,8 @@ func glSeedFidelity(t *testing.T, limiter *limits.Limiter, policy limits.OutageP
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
-	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
+	activated := h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
+	f.routeRevision, _ = activated["revision_id"].(string)
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return policy }, slog.New(slog.DiscardHandler))
 	if price != (glPrice{}) {
 		h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{

@@ -144,7 +144,10 @@ func retryHint(dimension limits.Dimension, retryAfter time.Duration) time.Durati
 	return max(retryAfter, time.Second)
 }
 
-// keyRequest describes the API key budgets as one admission decision.
+// keyRequest describes the API key budgets as one admission decision. It is the
+// one reservation whose allowance the caller is told, in the rate-limit headers,
+// so it is the one that asks the rate script to state it: the quotas of a
+// provider are not the caller's, and are answered with the decision alone.
 func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) limits.Request {
 	policy := authority.Policy
 	return limits.Request{
@@ -157,6 +160,7 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 		MonthlyCostLimit:  policy.MonthlyCostLimit,
 		RequestedTokens:   estimate,
 		LeaseTTL:          ttl,
+		ReportRate:        true,
 	}
 }
 
@@ -235,7 +239,12 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
 		settleKey(ctx, group, false, nil, a.logger())
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		// Only the key's own request and token limits state an allowance, and
+		// only its rejection reports it: a budget group has none, and the quota
+		// of a provider is not the caller's.
+		e := rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		e.rate = exceeded.Rate
+		return nil, e
 	}
 	if e := a.outage(authority.ID, request.HasCostBudget(), err); e != nil {
 		settleKey(ctx, group, false, nil, a.logger())

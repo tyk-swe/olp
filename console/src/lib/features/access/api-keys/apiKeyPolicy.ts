@@ -20,6 +20,7 @@ export type ApiKeyFormState = {
   monthlyCostLimit: string;
   expiresAt: string;
   allowProviderState: boolean;
+  responseMetadata: boolean;
   allowedAttributionKeys: string[];
 };
 
@@ -41,6 +42,7 @@ export function createApiKeyFormState(
       ? dateTimeLocalValue(editing.expires_at)
       : '',
     allowProviderState: editing?.allow_provider_state ?? false,
+    responseMetadata: editing?.response_metadata ?? false,
     allowedAttributionKeys: editing ? [...editing.allowed_attribution_keys] : []
   };
 }
@@ -87,6 +89,7 @@ export function buildApiKeyPolicyInput(
       ? new Date(state.expiresAt).toISOString()
       : null,
     allow_provider_state: state.allowProviderState,
+    response_metadata: state.responseMetadata,
     allowed_attribution_keys: state.allowedAttributionKeys
   };
   if (expiryUnchanged(state, editing)) delete input.expires_at;

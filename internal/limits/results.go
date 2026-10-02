@@ -18,7 +18,8 @@ const (
 // scriptResult is a parsed reservation reply. windowID and leaseExpiresAtMS are
 // only meaningful for a granted reservation, and estimate for a rejected cost
 // reservation: it says the budget refused the request's estimate, not that it
-// has been spent.
+// has been spent. rate is the allowance a granted or rejected rate reservation
+// answered with, when it was asked to state one.
 type scriptResult struct {
 	kind             resultKind
 	dimension        Dimension
@@ -26,6 +27,7 @@ type scriptResult struct {
 	windowID         int64
 	leaseExpiresAtMS int64
 	estimate         bool
+	rate             RateState
 }
 
 // replyItems asserts an array reply of exactly size elements.
@@ -59,6 +61,12 @@ func tuple(value any, wantVersion int64) (status int64, detail string, retry, fi
 	if !ok {
 		return 0, "", 0, 0, 0, false
 	}
+	return head(items, wantVersion)
+}
+
+// head decodes the six fields every reservation reply begins with, from an array
+// of at least six.
+func head(items []any, wantVersion int64) (status int64, detail string, retry, first, second int64, ok bool) {
 	version, okVersion := replyInt(items[0])
 	status, okStatus := replyInt(items[1])
 	detail, okDetail := replyString(items[2])
@@ -72,37 +80,112 @@ func tuple(value any, wantVersion int64) (status int64, detail string, retry, fi
 	return status, detail, retry, first, second, true
 }
 
-// parseReservation decodes a reserve_limits reply.
-func parseReservation(value any) (scriptResult, error) {
-	status, detail, retry, window, expiry, ok := tuple(value, limitsResponseVersion)
+// maxWindowID bounds the fixed window a rate reply may name: the end of every
+// window below it, in milliseconds, is a counter the scripts represent exactly.
+const maxWindowID = maxLuaInteger / fixedWindowMS
+
+// A reserve_limits reply begins with replyHeadFields fields, which every reply
+// has. A grant or a rejection that was asked to state the allowance appends the
+// allowanceFields fields that state it, and nothing else does: a failure
+// measured nothing, and a request that did not ask is not made to carry fields
+// that nothing reads.
+const (
+	replyHeadFields = 6
+	allowanceFields = 5
+)
+
+// parseReservation decodes a reserve_limits reply. stated is whether the request
+// asked for the allowance, and the reply has to be the shape that was asked for:
+// a script that answered otherwise is not the one this package runs. A stated
+// allowance has to be consistent with itself and with the decision it came with,
+// since a remaining count beyond its limit, or a window that outlasts the minute,
+// describes some other script.
+func parseReservation(value any, stated bool) (scriptResult, error) {
+	items, ok := value.([]any)
+	if !ok || len(items) < replyHeadFields {
+		return scriptResult{}, ErrUnexpectedResponse
+	}
+	status, detail, retry, window, expiry, ok := head(items, limitsResponseVersion)
 	if !ok {
 		return scriptResult{}, ErrUnexpectedResponse
 	}
+	var result scriptResult
 	switch {
 	case status == 1 && detail == "ok" && retry == 0 && window > 0:
-		return scriptResult{kind: resultGranted, windowID: window, leaseExpiresAtMS: expiry}, nil
+		result = scriptResult{kind: resultGranted, windowID: window, leaseExpiresAtMS: expiry}
 	case status == 0 && (detail == "rpm" || detail == "tpm") &&
 		retry >= 1 && retry <= fixedWindowMS && window > 0 && expiry == 0:
 		dimension := DimensionRequests
 		if detail == "tpm" {
 			dimension = DimensionTokens
 		}
-		return scriptResult{kind: resultRejected, dimension: dimension, retryAfterMS: retry}, nil
+		result = scriptResult{kind: resultRejected, dimension: dimension, retryAfterMS: retry}
 	case status == 0 && detail == "concurrency" && retry >= 1 && window > 0 && expiry == 0:
-		return scriptResult{
-			kind:         resultRejected,
-			dimension:    DimensionConcurrency,
-			retryAfterMS: retry,
-		}, nil
+		result = scriptResult{kind: resultRejected, dimension: DimensionConcurrency, retryAfterMS: retry}
 	case status == -1 && (detail == "malformed_rate_state" || detail == "malformed_concurrency_state") &&
 		retry == 0 && window > 0 && expiry == 0:
-		return scriptResult{kind: resultMalformed}, nil
+		result = scriptResult{kind: resultMalformed}
 	case status == -1 && (detail == "invalid_arguments" || detail == "invalid_server_time") &&
 		retry == 0 && window == 0 && expiry == 0:
-		return scriptResult{kind: resultScriptFailure}, nil
+		result = scriptResult{kind: resultScriptFailure}
 	default:
 		return scriptResult{}, ErrUnexpectedResponse
 	}
+	if !stated || status == -1 {
+		// A failure states nothing whatever was asked, since it can come before
+		// the script has read what was asked.
+		if len(items) != replyHeadFields {
+			return scriptResult{}, ErrUnexpectedResponse
+		}
+		return result, nil
+	}
+	if len(items) != replyHeadFields+allowanceFields {
+		return scriptResult{}, ErrUnexpectedResponse
+	}
+	rate, ok := parseAllowance(items[replyHeadFields:], window, result)
+	if !ok {
+		return scriptResult{}, ErrUnexpectedResponse
+	}
+	result.rate = rate
+	return result, nil
+}
+
+// parseAllowance decodes the fields a stated reply appends to a decision and
+// reports whether they fit it.
+func parseAllowance(items []any, window int64, decision scriptResult) (RateState, bool) {
+	var fields [allowanceFields]int64
+	for index := range fields {
+		counter, ok := replyInt(items[index])
+		if !ok || !luaSafe(counter) {
+			return RateState{}, false
+		}
+		fields[index] = counter
+	}
+	requestLimit, requestRemaining, tokenLimit, tokenRemaining, reset := fields[0], fields[1], fields[2], fields[3], fields[4]
+	// A request or token limit is what gives the counts a window to be read in.
+	limited := requestLimit > 0 || tokenLimit > 0
+	inWindow := reset >= 1 && reset <= fixedWindowMS
+	if requestRemaining > requestLimit || tokenRemaining > tokenLimit ||
+		limited && (!inWindow || window >= maxWindowID) || !limited && reset != 0 {
+		return RateState{}, false
+	}
+	switch {
+	case decision.kind == resultGranted:
+		// This request's own reservation is already counted, so a limit that
+		// applies has room for it and no more than the limit minus that.
+		if requestLimit > 0 && requestRemaining >= requestLimit || tokenLimit > 0 && tokenRemaining >= tokenLimit {
+			return RateState{}, false
+		}
+	case decision.dimension == DimensionRequests:
+		if requestLimit == 0 || requestRemaining != 0 || decision.retryAfterMS != reset {
+			return RateState{}, false
+		}
+	case decision.dimension == DimensionTokens:
+		if tokenLimit == 0 || decision.retryAfterMS != reset {
+			return RateState{}, false
+		}
+	}
+	return rateState(window, requestLimit, requestRemaining, tokenLimit, tokenRemaining, reset), true
 }
 
 // parseCostReservation decodes a reserve_cost reply, whose last two fields are

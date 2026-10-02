@@ -167,6 +167,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
@@ -828,6 +829,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *execution, out *mediaOut
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(out.status)
 	out.committed = true
 	err := write()
@@ -954,7 +956,7 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaO
 // reservation. Only a terminal event proves that the response completed.
 func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*openai.Usage, bool, *attemptFailure) {
 	defer result.Body.Close()
-	sw := &streamWriter{w: w, family: x.family}
+	sw := &streamWriter{w: w, family: x.family, x: x}
 	var usage *openai.Usage
 	var sequence uint64
 	terminal := errors.New("media stream completed")

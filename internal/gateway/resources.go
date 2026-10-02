@@ -292,6 +292,7 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family opena
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)
@@ -1169,6 +1170,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		if res.Kind == resources.KindStrictFile {
 			w.Header().Set("X-OLP-Content-SHA256", artifact.Digest)
 		}
+		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		x.delivered(s.now())
 		written, copyErr := io.Copy(w, opened.File)
@@ -1238,6 +1240,7 @@ func gateError(gate gateResult) *Error {
 
 func (s *Server) writeStateJSON(w http.ResponseWriter, x *execution, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 	x.delivered(s.now())

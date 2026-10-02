@@ -228,7 +228,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay")
+	h.Set("Access-Control-Expose-Headers", exposedHeaders)
 }
 
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
@@ -462,6 +462,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 		x.budgetGroupID = authority.BudgetGroupID
+		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
 		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
@@ -561,7 +562,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		if parsed.Stream {
-			sw := &streamWriter{w: w, family: family}
+			sw := &streamWriter{w: w, family: family, x: x}
 			x.emit = func(frame []byte) error {
 				err := sw.emit(frame)
 				if err == nil {
@@ -607,6 +608,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		out.completion.Body = enforced
 		status = http.StatusOK
+		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
 		x.facts[len(x.facts)-1].Committed = true
@@ -848,8 +850,11 @@ func writeJSON(w http.ResponseWriter, body any) {
 // applies a per-frame write deadline so slow readers cannot pin upstream
 // work forever.
 type streamWriter struct {
-	w         http.ResponseWriter
-	family    openai.Family
+	w      http.ResponseWriter
+	family openai.Family
+	// x is the request being streamed, whose response headers are added as the
+	// stream is committed. A writer that only reports an error has none.
+	x         *execution
 	committed bool
 }
 
@@ -869,6 +874,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 			h.Set("Content-Type", "application/vnd.amazon.eventstream")
 		}
 		h.Set("X-Accel-Buffering", "no")
+		if sw.x != nil {
+			sw.x.responseHeaders(h, true)
+		}
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
 	}

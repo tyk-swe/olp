@@ -61,11 +61,16 @@ var (
 	refusedReply = &coordination.CommandError{Cause: errors.New("connection refused")}
 
 	costGranted  = reply(int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000))
-	rateGranted  = reply(int64(1), int64(1), "ok", int64(0), int64(5), int64(0))
-	rateRefused  = reply(int64(1), int64(0), "rpm", int64(1000), int64(5), int64(0))
 	costSettled  = reply(int64(1), int64(1), "ok", int64(1), int64(0))
 	costRefusing = reply(int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(20_000), int64(24_000))
 	costUnopened = reply(int64(1), int64(-1), "uninitialized_daily_cost_state", int64(0), int64(20_000), int64(24_000))
+)
+
+// The rate replies answer costRequest(true), which limits requests to ten and
+// does not ask for the allowance, so they are the decision alone.
+var (
+	rateGranted = headReply(1, "ok", 0, 5, 0)
+	rateRefused = headReply(0, "rpm", 1000, 5, 0)
 )
 
 func allScripts() map[string]script {
@@ -320,6 +325,390 @@ func TestReserveGivesBackTheEstimateWhenTheRateScriptFails(t *testing.T) {
 			}
 			if got := server.ran(settleCostScript); got != test.wantReleases {
 				t.Fatalf("the estimate was released %d times, want %d", got, test.wantReleases)
+			}
+		})
+	}
+}
+
+// rateRequest limits the requests and tokens one lookup may use in a minute, and
+// asks to be told what is left of them.
+func rateRequest() Request {
+	return Request{
+		CostOwnerID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", LookupID: "lookup_one_abc",
+		RequestsPerMinute: pointer(int64(10)), TokensPerMinute: pointer(int64(1000)),
+		RequestedTokens: 5, LeaseTTL: 5 * time.Second, ReportRate: true,
+	}
+}
+
+// reserveAnswered reserves request against a server whose rate script answers with
+// answer.
+func reserveAnswered(t *testing.T, request Request, answer any) (*Lease, error) {
+	t.Helper()
+	server := &scripted{answer: answering(t, map[string][2]any{"reserve_limits": {answer, nil}})}
+	return (&Limiter{client: server, namespace: "olp:test"}).Reserve(t.Context(), request)
+}
+
+// TestReserveAsksForTheAllowanceOnlyWhereItIsReported proves a reservation is
+// answered with the allowance only when its caller reads it and a request or token
+// limit gives it something to state: the answer is larger, and the quota of a
+// provider, or a key that limits neither, is not made to receive it. What the
+// script is asked is what the reply is held to, so one that answers more or less
+// is refused, whichever way it errs.
+func TestReserveAsksForTheAllowanceOnlyWhereItIsReported(t *testing.T) {
+	t.Parallel()
+	asked := func(r Request, mutate func(*Request)) Request { mutate(&r); return r }
+	provider := func(r *Request) { r.ReportRate = false }
+	concurrency := func(r *Request) {
+		r.RequestsPerMinute, r.TokensPerMinute, r.RequestedTokens, r.MaxConcurrency = nil, nil, 0, pointer(int64(3))
+	}
+	requestsOnly := func(r *Request) { r.TokensPerMinute, r.RequestedTokens = nil, 0 }
+	tokensOnly := func(r *Request) { r.RequestsPerMinute = nil }
+	for _, test := range []struct {
+		name    string
+		request Request
+		stated  bool
+	}{
+		{"a key with requests and tokens", rateRequest(), true},
+		{"a key with requests only", asked(rateRequest(), requestsOnly), true},
+		{"a key with tokens only", asked(rateRequest(), tokensOnly), true},
+		{"a key with concurrency only", asked(rateRequest(), concurrency), false},
+		{"a provider quota with requests and tokens", asked(rateRequest(), provider), false},
+		{"a provider quota with requests only", asked(asked(rateRequest(), provider), requestsOnly), false},
+		{"a provider quota with concurrency only", asked(asked(rateRequest(), provider), concurrency), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			expiry := int64(0)
+			if test.request.MaxConcurrency != nil {
+				expiry = 1_789_383_605_000
+			}
+			full := allowance{
+				limitValue(test.request.RequestsPerMinute), limitValue(test.request.RequestsPerMinute) - 1,
+				limitValue(test.request.TokensPerMinute), limitValue(test.request.TokensPerMinute) - 5, 30_000,
+			}
+			if full.requestLimit == 0 {
+				full.requestRemaining = 0
+			}
+			if full.tokenLimit == 0 {
+				full.tokenRemaining = 0
+			}
+			if full.requestLimit == 0 && full.tokenLimit == 0 {
+				full.resetMS = 0
+			}
+			right, wrong := headReply(1, "ok", 0, testWindow, expiry), rateReply(1, "ok", 0, testWindow, expiry, full)
+			if test.stated {
+				right, wrong = wrong, right
+			}
+
+			server := &scripted{answer: answering(t, map[string][2]any{"reserve_limits": {right, nil}})}
+			limiter := &Limiter{client: server, namespace: "olp:test"}
+			lease, err := limiter.Reserve(t.Context(), test.request)
+			if err != nil {
+				t.Fatalf("Reserve: %v", err)
+			}
+			sent := server.commands()
+			if len(sent) != 1 || len(sent[0]) != 12 {
+				t.Fatalf("commands = %q, want the rate script called once with seven arguments", sent)
+			}
+			want := "0"
+			if test.stated {
+				want = "1"
+			}
+			if got := sent[0][len(sent[0])-1]; got != want {
+				t.Fatalf("report_allowance = %q, want %q", got, want)
+			}
+			if got := lease.RateState().Limited(); got != test.stated {
+				t.Fatalf("RateState = %+v, want it stated = %t", lease.RateState(), test.stated)
+			}
+			if (lease.rate != nil) != test.stated {
+				t.Fatalf("a lease holds an allowance = %t, want %t", lease.rate != nil, test.stated)
+			}
+
+			// The same request answered the other way is not the script that was run.
+			lease, err = reserveAnswered(t, test.request, wrong)
+			if lease != nil || !isUnexpected(err) {
+				t.Fatalf("Reserve answered the other way = %v, %v, want an unexpected response", lease, err)
+			}
+		})
+	}
+}
+
+// TestRejectionStatesTheAllowanceOnlyWhereItIsReported proves a refusal carries
+// the allowance of a request that asked for it, and none for one that did not,
+// which is answered with the decision alone.
+func TestRejectionStatesTheAllowanceOnlyWhereItIsReported(t *testing.T) {
+	t.Parallel()
+	provider := rateRequest()
+	provider.ReportRate = false
+	for _, test := range []struct {
+		name    string
+		request Request
+		reply   []any
+		want    RateState
+	}{
+		{
+			"a key", rateRequest(),
+			rateReply(0, "rpm", 20_000, testWindow, 0, allowance{10, 0, 1000, 900, 20_000}),
+			RateState{
+				RequestLimit: 10, TokenLimit: 1000, TokenRemaining: 900,
+				ResetAfter: 20 * time.Second, ResetAt: time.UnixMilli(testWindowEndMS).UTC(),
+			},
+		},
+		{"a provider quota", provider, headReply(0, "rpm", 20_000, testWindow, 0), RateState{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			lease, err := reserveAnswered(t, test.request, test.reply)
+			exceeded, ok := errors.AsType[*ExceededError](err)
+			if lease != nil || !ok || exceeded.Dimension != DimensionRequests || exceeded.Rate != test.want {
+				t.Fatalf("Reserve = %v, %v, want a requests rejection stating %+v", lease, err, test.want)
+			}
+		})
+	}
+}
+
+// TestLeaseStatesTheAllowanceTheRateScriptAnswered proves a gateway can read the
+// request and token allowance off the lease, and only for the dimensions its key
+// limits: a lease that reserved no request or token limit states none, so a
+// non-nil lease is not by itself a reason to send rate-limit headers.
+func TestLeaseStatesTheAllowanceTheRateScriptAnswered(t *testing.T) {
+	t.Parallel()
+	windowEnd := time.UnixMilli(1_789_383_660_000).UTC()
+	for _, test := range []struct {
+		name    string
+		request func() Request
+		reply   allowance
+		want    RateState
+	}{
+		{
+			"requests and tokens", rateRequest,
+			allowance{10, 9, 1000, 995, 30_000},
+			RateState{
+				RequestLimit: 10, RequestRemaining: 9, TokenLimit: 1000, TokenRemaining: 995,
+				ResetAfter: 30 * time.Second, ResetAt: windowEnd,
+			},
+		},
+		{
+			"requests only", func() Request { r := rateRequest(); r.TokensPerMinute, r.RequestedTokens = nil, 0; return r },
+			allowance{requestLimit: 10, requestRemaining: 9, resetMS: 1},
+			RateState{RequestLimit: 10, RequestRemaining: 9, ResetAfter: time.Millisecond, ResetAt: windowEnd},
+		},
+		{
+			"tokens only", func() Request { r := rateRequest(); r.RequestsPerMinute = nil; return r },
+			allowance{tokenLimit: 1000, tokenRemaining: 995, resetMS: 60_000},
+			RateState{TokenLimit: 1000, TokenRemaining: 995, ResetAfter: time.Minute, ResetAt: windowEnd},
+		},
+		{
+			"concurrency only", func() Request {
+				r := rateRequest()
+				r.RequestsPerMinute, r.TokensPerMinute, r.RequestedTokens, r.MaxConcurrency = nil, nil, 0, pointer(int64(3))
+				return r
+			},
+			allowance{}, RateState{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			request := test.request()
+			expiry := int64(0)
+			if request.MaxConcurrency != nil {
+				expiry = 1_789_383_605_000
+			}
+			// A key that limits neither requests nor tokens is not answered with an
+			// allowance, since there is none to state.
+			answer := rateReply(1, "ok", 0, 29_823_060, expiry, test.reply)
+			if !request.reportsRate() {
+				answer = headReply(1, "ok", 0, 29_823_060, expiry)
+			}
+			lease, err := reserveAnswered(t, request, answer)
+			if err != nil {
+				t.Fatalf("Reserve: %v", err)
+			}
+			got := lease.RateState()
+			if got != test.want {
+				t.Fatalf("RateState = %+v, want %+v", got, test.want)
+			}
+			if got.Limited() != (test.want != RateState{}) ||
+				got.LimitsRequests() != (request.RequestsPerMinute != nil) ||
+				got.LimitsTokens() != (request.TokensPerMinute != nil) {
+				t.Fatalf("RateState %+v does not report the dimensions %+v limits", got, request)
+			}
+		})
+	}
+}
+
+func TestRateStateIsEmptyWhereTheRateScriptNeverRan(t *testing.T) {
+	t.Parallel()
+	var none *Lease
+	if got := none.RateState(); got != (RateState{}) || got.Limited() {
+		t.Fatalf("a nil lease states %+v", got)
+	}
+	server := &scripted{answer: answering(t, map[string][2]any{"reserve_cost": {costGranted, nil}})}
+	lease, err := (&Limiter{client: server, namespace: "olp:test"}).Reserve(t.Context(), costRequest(false))
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if got := lease.RateState(); got != (RateState{}) || got.Limited() {
+		t.Fatalf("a lease bound by cost alone states %+v", got)
+	}
+	// A group's lease carries a cost budget and its own allowance, and the key's
+	// states only the key's.
+	group := &Lease{rate: &rateAnswer{state: RateState{RequestLimit: 1, RequestRemaining: 1}}}
+	lease.Attach(group)
+	if got := lease.RateState(); got != (RateState{}) {
+		t.Fatalf("an attached lease changed the key's allowance to %+v", got)
+	}
+	if got := group.RateState(); got.RequestLimit != 1 {
+		t.Fatalf("attaching changed the group's allowance to %+v", got)
+	}
+}
+
+// TestRateResetCountsTheMinuteDownFromTheScriptsReading proves a response written
+// long after admission reports the time left in the minute, not the time that was
+// left when the script measured it.
+func TestRateResetCountsTheMinuteDownFromTheScriptsReading(t *testing.T) {
+	t.Parallel()
+	var none *Lease
+	if got := none.RateReset(); got != 0 {
+		t.Fatalf("a nil lease has %s left", got)
+	}
+	if got := (&Lease{}).RateReset(); got != 0 {
+		t.Fatalf("a lease that states no allowance has %s left", got)
+	}
+	lease, err := reserveAnswered(t, rateRequest(), rateReply(1, "ok", 0, testWindow, 0, allowance{10, 9, 1000, 995, 30_000}))
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	// An answer that has just arrived is the reading itself.
+	if got := lease.RateReset(); got > 30*time.Second || got < 29*time.Second {
+		t.Fatalf("RateReset = %s just after the script measured 30s", got)
+	}
+	// One that arrived ten seconds ago has ten seconds fewer to run, never more
+	// than the script measured, and none once the minute is over.
+	lease.rate.at = time.Now().Add(-10 * time.Second)
+	if got := lease.RateReset(); got > 20*time.Second || got < 19*time.Second {
+		t.Fatalf("RateReset = %s ten seconds after the script measured 30s", got)
+	}
+	lease.rate.at = time.Now().Add(-time.Minute)
+	if got := lease.RateReset(); got != 0 {
+		t.Fatalf("RateReset = %s after the minute is over", got)
+	}
+	// The state itself stays what the script measured.
+	if got := lease.RateState().ResetAfter; got != 30*time.Second {
+		t.Fatalf("ResetAfter = %s, want what the script measured", got)
+	}
+}
+
+// TestRateResetIsAWholeNumberOfMilliseconds proves the countdown is written the way
+// the script's own reading is, whatever fraction of a millisecond has passed, and
+// that it is rounded up, so a reading is never less than the time that is left
+// and never states more than the script measured.
+func TestRateResetIsAWholeNumberOfMilliseconds(t *testing.T) {
+	t.Parallel()
+	lease, err := reserveAnswered(t, rateRequest(), rateReply(1, "ok", 0, testWindow, 0, allowance{10, 9, 1000, 995, 30_000}))
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	for _, passed := range []time.Duration{
+		0, time.Nanosecond, 499 * time.Microsecond, time.Millisecond, 1500 * time.Microsecond,
+		37*time.Millisecond + 496893*time.Nanosecond, 10*time.Second + 123456789*time.Nanosecond, 29 * time.Second,
+	} {
+		answered := time.Now().Add(-passed)
+		lease.rate.at = answered
+		got := lease.RateReset()
+		// The clock keeps running while the reading is taken: it was at least
+		// what the script measured less the time that had passed by its end, and at
+		// most what remained at its start, rounded up.
+		earliest := 30*time.Second - time.Since(answered)
+		latest := 30*time.Second - passed
+		if got%time.Millisecond != 0 || got > latest+time.Millisecond-1 || got < earliest || got > 30*time.Second {
+			t.Errorf("%s after the answer: RateReset = %s (%d ns), want a whole number of milliseconds between %s and %s", passed, got, got.Nanoseconds(), earliest, latest)
+		}
+	}
+}
+
+// TestExceededErrorStatesTheAllowanceOfARateRejection proves a request refused by
+// its rate limits tells the caller what the window still holds, because a refusal
+// is a response too, and that a refusal by a cost budget, which never reached the
+// rate script, states none.
+func TestExceededErrorStatesTheAllowanceOfARateRejection(t *testing.T) {
+	t.Parallel()
+	windowEnd := time.UnixMilli(1_789_383_660_000).UTC()
+	for _, test := range []struct {
+		name      string
+		reply     allowance
+		detail    string
+		dimension Dimension
+		want      RateState
+	}{
+		{
+			"requests", allowance{10, 0, 1000, 900, 20_000}, "rpm", DimensionRequests,
+			RateState{
+				RequestLimit: 10, TokenLimit: 1000, TokenRemaining: 900,
+				ResetAfter: 20 * time.Second, ResetAt: windowEnd,
+			},
+		},
+		{
+			"tokens", allowance{10, 2, 1000, 3, 20_000}, "tpm", DimensionTokens,
+			RateState{
+				RequestLimit: 10, RequestRemaining: 2, TokenLimit: 1000, TokenRemaining: 3,
+				ResetAfter: 20 * time.Second, ResetAt: windowEnd,
+			},
+		},
+		{
+			"concurrency", allowance{10, 2, 1000, 3, 30_000}, "concurrency", DimensionConcurrency,
+			RateState{
+				RequestLimit: 10, RequestRemaining: 2, TokenLimit: 1000, TokenRemaining: 3,
+				ResetAfter: 30 * time.Second, ResetAt: windowEnd,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			retry := int64(20_000)
+			if test.dimension == DimensionConcurrency {
+				retry = 4_000
+			}
+			lease, err := reserveAnswered(t, rateRequest(), rateReply(0, test.detail, retry, 29_823_060, 0, test.reply))
+			exceeded, ok := errors.AsType[*ExceededError](err)
+			if lease != nil || !ok || exceeded.Dimension != test.dimension {
+				t.Fatalf("Reserve = %v, %v, want a %s rejection", lease, err, test.dimension)
+			}
+			if exceeded.Rate != test.want {
+				t.Fatalf("Rate = %+v, want %+v", exceeded.Rate, test.want)
+			}
+		})
+	}
+	server := &scripted{answer: answering(t, map[string][2]any{"reserve_cost": {costRefusing, nil}})}
+	_, err := (&Limiter{client: server, namespace: "olp:test"}).Reserve(t.Context(), costRequest(true))
+	exceeded, ok := errors.AsType[*ExceededError](err)
+	if !ok || exceeded.Rate != (RateState{}) || server.ran(reserveLimitsScript) != 0 {
+		t.Fatalf("a cost rejection = %+v, %v, want none from a rate script that never ran", exceeded, err)
+	}
+}
+
+// TestReserveRefusesAnAnswerForOtherLimits proves the limits the script echoes are
+// checked against the ones it was asked to enforce: an answer that states other
+// limits was made for another request, and admitting or refusing on it would be a
+// guess.
+func TestReserveRefusesAnAnswerForOtherLimits(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		reply []any
+	}{
+		{"a granted request limited otherwise", rateReply(1, "ok", 0, 5, 0, allowance{20, 9, 1000, 995, 30_000})},
+		{"a granted token limit limited otherwise", rateReply(1, "ok", 0, 5, 0, allowance{10, 9, 2000, 995, 30_000})},
+		{"a granted request limit that is none", rateReply(1, "ok", 0, 5, 0, allowance{0, 0, 1000, 995, 30_000})},
+		{"a granted token limit that is none", rateReply(1, "ok", 0, 5, 0, allowance{10, 9, 0, 0, 30_000})},
+		{"a refused request limited otherwise", rateReply(0, "rpm", 1000, 5, 0, allowance{20, 0, 1000, 995, 1000})},
+		{"a refused token limit limited otherwise", rateReply(0, "tpm", 1000, 5, 0, allowance{10, 5, 2000, 0, 1000})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			lease, err := reserveAnswered(t, rateRequest(), test.reply)
+			if lease != nil || !isUnexpected(err) {
+				t.Fatalf("Reserve = %v, %v, want an unexpected response", lease, err)
 			}
 		})
 	}

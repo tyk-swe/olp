@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // reserved is what admission reserves for a request sent to a model.
@@ -240,6 +241,27 @@ func TestAdmissionRejectionMapping(t *testing.T) {
 // admissionAuthority builds a key with the limits a case needs.
 func admissionAuthority(policy access.KeyPolicy) access.Authority {
 	return access.Authority{ID: uuid.Must(uuid.NewV7()).String(), LookupID: "lookupid0123", Policy: policy}
+}
+
+// TestOnlyTheKeysRequestAsksForTheAllowance proves the request that describes a
+// key's budgets asks the rate script to state the allowance the response headers
+// report, and the ones that describe a provider's connection or credential quota
+// do not: they are reserved on every attempt and nothing reads what they have
+// left.
+func TestOnlyTheKeysRequestAsksForTheAllowance(t *testing.T) {
+	rpm, tokens := int64(10), int64(100)
+	key := keyRequest(admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm, TokensPerMinute: &tokens}), 5, time.Second)
+	if !key.ReportRate {
+		t.Fatal("the key's request does not ask for its allowance")
+	}
+	provider := &runtime.Provider{ID: uuid.NewString(), Limits: &runtime.Limits{RequestsPerMinute: &rpm, TokensPerMinute: &tokens}}
+	if connectionRequest(provider, 5, time.Second).ReportRate {
+		t.Fatal("a provider connection's request asks for an allowance nothing reports")
+	}
+	slot := &runtime.Slot{ID: uuid.NewString(), RequestsPerMinute: &rpm, TokensPerMinute: &tokens}
+	if slotRequest(slot, 5, time.Second).ReportRate {
+		t.Fatal("a credential slot's request asks for an allowance nothing reports")
+	}
 }
 
 func TestAdmissionWithoutLimiter(t *testing.T) {

@@ -84,7 +84,9 @@ a published route slug. Model list/get expose only those routes the key may use.
 
 Each request receives an `X-Request-Id` (a client-supplied value is kept when it
 is a safe token), a no-store cache policy, and CORS headers for explicitly
-allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). JSON endpoint
+allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). Responses also carry
+the key's [rate-limit headers](#response-headers) and, for a key that opted in,
+gateway metadata. JSON endpoint
 bodies must be `application/json`, optionally gzip-compressed, and within the
 JSON body limit before and after inflation; the media endpoints also accept raw
 and `multipart/form-data` bodies bounded by `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and
@@ -159,10 +161,120 @@ the response has been flushed.
 | 408 | `request_timeout` | Request body not received within 15 seconds. |
 | 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
 | 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
-| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
+| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds, and a limit of a key that has a request or token limit adds that key's [rate-limit headers](#rate-limit-headers). |
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
+
+## Response headers
+
+Beside `X-Request-Id`, a response can carry two more sets of headers: the
+caller key's remaining allowance, which every key with a request or token limit
+receives, and metadata about how the gateway served the request, which only a key
+that opts in receives. Both are written before the response is committed, from
+what admission and the attempt loop already hold, so they cost no Valkey round
+trip, and a request that needs neither allocates nothing for them. The allowance
+comes with the answer of the reservation that admits the key: the rate script
+states it only to a key with a request or token limit, so a key bound by
+concurrency alone, and a provider's connection or credential quota, which is
+reserved on every attempt, are answered with the decision and no more.
+
+### Rate-limit headers
+
+Each surface gets the family its own SDKs already read.
+
+| Surface | Requests | Tokens |
+| --- | --- | --- |
+| OpenAI (`/v1/...`) | `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests` | `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens` |
+| Anthropic (`/anthropic/...`) | `anthropic-ratelimit-requests-limit`, `-remaining`, `-reset` | `anthropic-ratelimit-tokens-limit`, `-remaining`, `-reset` |
+
+Gemini, Bedrock and native-operation endpoints send none: their clients read no
+such headers.
+
+- **Only what the key limits.** A key limited to requests per minute gets the
+  request headers alone, and one limited to tokens the token headers alone. A key
+  with neither limit gets none, including a key bound only by concurrency or by a
+  cost budget. So does a request admitted without a reservation, which is one that
+  failed open while Valkey was unavailable.
+- **The key's own window.** The values are what the admission reservation
+  measured in the fixed UTC minute the request was counted in. `limit` is the
+  per-minute limit and `remaining` what the limit leaves once this request's
+  reservation is counted, never below zero. The token reservation is the
+  admission estimate, a prompt plus the largest reply for every attempt the request
+  may dispatch, and not usage: settlement replaces it with the tokens the provider
+  reported, so the next response can show more remaining than this one implied.
+  The counts are not read again when the response is written, so a stream that
+  commits after a long wait states the window as it was admitted.
+- **Reset.** Both dimensions reset when the minute ends. OpenAI's headers give the
+  time left in the notation of a Go duration, such as `20ms`, `1s`, `8.64s` or
+  `1m0s`, counted down from the reservation to the moment the headers are written
+  and stated in whole milliseconds, rounded up.
+  Anthropic's give the instant the minute ends as an RFC 3339 time in UTC, such as
+  `2026-10-02T09:31:00Z`. The minute is Valkey's, so every replica and client
+  agrees on it whatever its own clock says.
+- **Rejections.** A request refused by the key's requests, tokens or concurrency
+  limit gets the same headers beside `Retry-After`, describing the window that
+  refused it. The refused request reserved nothing, so `remaining` is what the
+  window still holds. A concurrency refusal's `Retry-After` is the short wait for
+  a slot, while the reset is still the end of the minute. A refusal by a cost
+  budget, a provider's connection or credential quota, an upstream's rate limit or
+  admission overload states no allowance, because none of them is the key's
+  requests or tokens.
+
+### Gateway metadata
+
+The key policy `response_metadata` (off by default; see
+[access](access.md#key-response-metadata)) adds these headers to its successful
+responses.
+
+| Header | Value |
+| --- | --- |
+| `X-OLP-Attempts` | The attempts the request had made when the response was committed, counting one a connection or credential quota refused locally. `2` after a failover. |
+| `X-OLP-Route-Revision` | The `revision_id` of the route revision that served the request, the identifier `GET /api/v1/routes/{route_id}/revisions/{revision_id}` takes. A call on a retained resource reports the route's current revision, not the one that created the resource, and a video job read, download, delete or list, which is answered from the jobs' own records, reports none. |
+| `X-OLP-Provider` | The vendor of the provider that served the request, as its configuration names it. A provider with no vendor, as a plugin provider has none, is not named. Callers address routes, not upstreams, so this is the one way a response names one. |
+| `X-OLP-Cost` | The cost of a unary response in the installation currency, as a plain decimal such as `0.000064`. |
+
+A stream records its serving attempt before its first frame is committed, so
+`X-OLP-Attempts` and `X-OLP-Provider` describe the attempt that is streaming, and a
+failover before the first byte is counted. A stream cannot carry a cost, since its
+usage is not known until it ends; the request history API has it afterwards.
+
+A call on one video job is its one attempt. A video list refreshes every job that
+is still queued or running with a poll of its provider, and those polls are its
+attempts: `X-OLP-Attempts` counts them all, and `X-OLP-Provider` names a provider
+only when every poll went to the same one. A list with no job to poll made no
+attempt and carries no metadata.
+
+`X-OLP-Cost` is the cost accounting will record for the request, priced from the
+gateway's pinned price list and the usage the provider reported. It is left out
+when the request would be recorded as unpriced: an attempt that was billed or may
+have been billed has no price or no rate for something it used, or a provider
+answered successfully and reported no usage. A price of zero is a cost of `0`.
+Failed attempts that reported nothing add nothing.
+
+### Which responses carry them
+
+Every success response of an inference endpoint is covered: Chat Completions,
+Responses, Messages, Gemini generation, embeddings, rerank, moderation, token
+counting, the media endpoints, Bedrock, the native operations, and calls on
+retained provider resources (files, batches, stored responses, interactions and
+video jobs), whose one pinned attempt is counted, and a video list, whose polls
+are. Error responses carry neither set, except the rate-limit headers of a limit
+rejection, and a response that made no attempt, such as a file list answered from
+the gateway's own records, has no metadata to give. These do not carry either
+set:
+
+- WebSocket upgrades (Realtime and Gemini Live). The provider is dialled only
+  after the session is accepted, so there is no attempt to describe, and a
+  WebSocket client does not read an HTTP API's rate-limit headers.
+- A replayed or recovered continuation delivery, which is answered from stored
+  state before admission and makes no attempt.
+- Model listings, which are served without admission, and the console playground,
+  which answers a signed-in member and not a key.
+
+For browser clients, the headers above, `Retry-After`, `X-Should-Retry` and
+`X-OLP-Delivery-Replay` are listed in `Access-Control-Expose-Headers` for the
+origins in `OLP_GATEWAY_CORS_ALLOWED_ORIGINS`.
 
 ## Content policy
 
@@ -268,7 +380,8 @@ lease is sized by the route's overall deadline; it is the backstop for a replica
 that dies mid-request, not the request deadline. An estimate larger than the
 key's tokens-per-minute limit is refused immediately with
 `400 request_exceeds_token_limit` rather than sent to retry into a window it can
-never fit.
+never fit. The windows each response leaves the key with are reported in its
+[rate-limit headers](#rate-limit-headers).
 
 ### How the prompt is estimated
 

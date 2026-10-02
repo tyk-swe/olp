@@ -109,6 +109,21 @@ share that boundary. Writes require key-management permission and project write
 access. Group limits supplement individual key limits and share their
 [initialization and recovery rules](operations.md#spend-budget-reconciliation).
 
+## Key response metadata
+
+The key policy `response_metadata` is off by default. Set it when creating a key,
+with `PATCH /api/v1/api-keys/{id}`, or in the console key form to opt the key
+into the `X-OLP-Attempts`, `X-OLP-Route-Revision`, `X-OLP-Provider` and
+`X-OLP-Cost` response headers described in
+[gateway](gateway.md#gateway-metadata). Callers address routes, not upstreams, so
+provider identity is exposed only to keys that opt in. Rotation keeps the
+setting, and a change takes effect on each gateway's next authority refresh.
+
+The remaining-allowance headers need no opt-in. A key with a requests-per-minute
+or tokens-per-minute limit receives the
+[rate-limit headers](gateway.md#rate-limit-headers) of its surface for the
+dimensions it limits, and a key with neither receives none.
+
 ## Management tokens and provisioning
 
 Owners create management tokens from the Access console tab or

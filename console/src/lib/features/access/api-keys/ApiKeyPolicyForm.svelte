@@ -266,6 +266,22 @@
         access. Provider state may retain user content at the upstream provider.
       </p>
     </fieldset>
+    <fieldset class="checks">
+      <legend>Response metadata</legend>
+      <label
+        ><input
+          type="checkbox"
+          bind:checked={form.responseMetadata}
+          disabled={!canManage}
+        />
+        Add gateway metadata headers</label
+      >
+      <p class="section-help">
+        Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost
+        to inference responses. Provider identity is exposed only with this
+        opt-in.
+      </p>
+    </fieldset>
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>
       <p>

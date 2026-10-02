@@ -106,6 +106,40 @@ func (x *execution) settledCost() usage.Cost {
 	return total
 }
 
+// responseCost is what the request cost as the response to a caller can state it,
+// and false when it cannot: that is when accounting would record the request as
+// unpriced, or as having cost nothing it could be charged for. Every attempt that
+// was billed or may have been has to be priced for the answer to be the cost of the
+// request, as it has to be for the request's spend to be one a budget can count. An
+// attempt that reached a provider with no price list, or whose price lacks a rate
+// for what it used, is unpriced, and so is a success that reported no usage. An
+// attempt that may have been billed without reporting usage is priced, and adds
+// nothing until its usage arrives, as it adds nothing in the accounting tables.
+func (x *execution) responseCost() (usage.Cost, bool) {
+	var total usage.Cost
+	billable := false
+	operation := x.operationName()
+	for index := range x.facts {
+		fact := &x.facts[index]
+		if !fact.UsageObserved && !fact.BillingUncertain {
+			continue
+		}
+		billable = true
+		if fact.Price == nil || !fact.UsageObserved && fact.Class == classSuccess {
+			return usage.Cost{}, false
+		}
+		if !fact.UsageObserved {
+			continue
+		}
+		cost, ok := fact.Price.Cost(attemptUsage(fact, operation))
+		if !ok {
+			return usage.Cost{}, false
+		}
+		total = total.Add(cost)
+	}
+	return total, billable
+}
+
 // settleAdmission finishes the reservations a request holds once it has ended,
 // whether it succeeded, failed or its client went away. A request that was handed
 // to a provider replaces the cost it reserved with the cost it incurred; one that
