@@ -203,6 +203,9 @@ that permits the official Codex sandbox to run. CI checks sandbox startup before
 starting the integration suite. See the [official sandbox prerequisites](https://developers.openai.com/codex/concepts/sandboxing#prerequisites)
 for distribution-specific setup; qualification does not disable the sandbox or
 change host security policy.
+The integration job uses Ubuntu 26.04 for its distribution-provided bubblewrap
+support. Native release image checks continue to run on Ubuntu 24.04 for both
+architectures.
 The client harness creates each private home under the user cache and removes it
 after the test. Codex refuses helper aliases under the system temporary directory;
 those aliases are required by distribution bubblewrap versions without `--argv0`.
