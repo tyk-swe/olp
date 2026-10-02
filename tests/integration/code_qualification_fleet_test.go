@@ -286,6 +286,7 @@ func (f *codeFleet) memberKey(t *testing.T) (map[string]any, string) {
 	addMember(f.h, f.owner, f.project, memberID, "manager")
 	key := f.h.want(member, "POST", "/api/v1/api-keys", map[string]any{"name": "Member key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("member-key"), 201)
 	f.keyID, f.key = key["id"].(string), key["secret"].(string)
+	key = f.h.want(member, "GET", "/api/v1/api-keys/"+f.keyID, nil, nil, 200)
 	f.pool = f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput([]string{f.keyID}), etagHeader(f.pool), 200)
 	if err := f.gateways[0].Kill(); err != nil {
 		t.Fatal(err)

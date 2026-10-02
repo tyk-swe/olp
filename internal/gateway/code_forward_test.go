@@ -33,12 +33,16 @@ type codeTestLedger struct {
 	refusals   []string
 	refuse     string
 	done       chan codemode.Usage
+	references map[string]bool
 }
 
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.inputs = append(l.inputs, in)
+	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
+		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
+	}
 	if l.refuse != "" {
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
@@ -49,6 +53,18 @@ func (l *codeTestLedger) MarkDispatched(_ context.Context, id string) error {
 	defer l.mu.Unlock()
 	l.marks = append(l.marks, id)
 	return nil
+}
+func (l *codeTestLedger) ObserveReference(_ context.Context, _, id string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.references == nil {
+		l.references = map[string]bool{}
+	}
+	l.references[id] = true
+	return nil
+}
+func (l *codeTestLedger) BindConnection(_ context.Context, _ codemode.Route, key string, _ codemode.Identity) (resources.CodePermit, error) {
+	return resources.CodePermit{Authority: access.Authority{ID: key, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}}, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Binding: codemode.Binding{ID: "binding", AccountID: "account", Principal: "principal"}}, nil
 }
 func (l *codeTestLedger) Settle(_ context.Context, _ string, u codemode.Usage) error {
 	l.mu.Lock()

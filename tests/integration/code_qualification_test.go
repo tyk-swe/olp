@@ -24,6 +24,7 @@ type codePublicFixture struct {
 	upstream            *pluginUpstream
 	authority           *testutil.OAuthServer
 	peer                *codexfixture.Upstream
+	codexAuthorities    []*codexAuthority
 }
 
 func newCodePublicFixture(t *testing.T) *codePublicFixture {
@@ -35,23 +36,42 @@ func newCodePublicFixtureWithPeer(t *testing.T, peer *codexfixture.Upstream) *co
 	h := newAccessHarness(t)
 	owner := h.owner()
 	f := &codePublicFixture{h: h, owner: owner, project: createProject(h, owner, "Code qualification"), peer: peer}
-	f.authority = testutil.NewOAuthServer(t)
-	f.upstream = newGrantUpstream(t, f.authority)
+	var digest string
 	if peer != nil {
-		f.upstream.Config.Handler = peer
+		digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/codex"))
+	} else {
+		f.authority = testutil.NewOAuthServer(t)
+		f.upstream = newGrantUpstream(t, f.authority)
+		digest = installGrantPlugin(t, h, owner, f.upstream, "0.1.0")
 	}
-	digest := installGrantPlugin(t, h, owner, f.upstream, "0.1.0")
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Code key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("code-key"), 201)
 	f.keyID, f.key = key["id"].(string), key["secret"].(string)
 	for i := range 2 {
-		f.authority.SignInAs(testutil.OAuthIdentity{Subject: fmt.Sprintf("controlled-%d@example.test", i), Account: fmt.Sprintf("controlled-%d", i)})
+		configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "reference-grant-chat", "profile_revision": digest}
+		if peer == nil {
+			f.authority.SignInAs(testutil.OAuthIdentity{Subject: fmt.Sprintf("controlled-%d@example.test", i), Account: fmt.Sprintf("controlled-%d", i)})
+		} else {
+			authority := newCodexAuthorityWithPeer(t, fmt.Sprintf("controlled-%d", i), peer)
+			authority.approved.Store(true)
+			f.codexAuthorities = append(f.codexAuthorities, authority)
+			configuration["profile_id"] = "codex-subscription"
+			configuration["options"] = map[string]any{"network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}
+		}
 		provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 			"name": fmt.Sprintf("Controlled code account %d", i), "project_id": f.project, "model": vendorModel,
-			"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "reference-grant-chat", "profile_revision": digest},
+			"configuration": configuration,
 		}, idem(fmt.Sprintf("code-provider-%d", i)), 201)
 		path := "/api/v1/providers/" + provider["id"].(string)
 		enrollment := startGrantEnrollment(t, h, owner, path)
-		completed := continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
+		var completed map[string]any
+		if peer == nil {
+			completed = continueGrantEnrollment(h, owner, path, enrollment, signIn(t, enrollment).String(), 201)
+		} else {
+			pollDue(t, h, enrollment)
+			status := pollGrantEnrollment(h, owner, path, enrollment, 200)
+			wantStatus(t, status, "completed")
+			completed = status["completion"].(map[string]any)
+		}
 		account := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
 			"project_id": f.project, "provider_id": provider["id"], "credential_id": completed["credential_id"], "name": "Controlled fixture only", "enabled": true, "models": []string{"gpt-5.4"},
 		}, idem(fmt.Sprintf("code-account-%d", i)), 201)
@@ -69,7 +89,8 @@ func (f *codePublicFixture) noSyntheticInference(t *testing.T) {
 	if f.peer != nil && len(f.peer.Requests()) != 0 {
 		t.Fatal("lifecycle generated traffic to controlled peer")
 	}
-	if n := len(f.upstream.receivedPaths()); n != 0 {
+	if f.upstream != nil && len(f.upstream.receivedPaths()) != 0 {
+		n := len(f.upstream.receivedPaths())
 		t.Fatalf("lifecycle generated %d upstream requests before user inference", n)
 	}
 }

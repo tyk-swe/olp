@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+mode=${1:-all}
+case "$mode" in all|shell|code) ;; *) echo 'usage: integration.sh [all|shell|code]' >&2; exit 2 ;; esac
 scratch=$(mktemp -d)
 export OLP_TEST_TLS_DIR="$scratch/tls"
 mkdir -p "$OLP_TEST_TLS_DIR"
@@ -29,7 +31,8 @@ chmod 644 "$OLP_TEST_TLS_DIR/server.key"
 # Registry pulls flake often enough to fail the suite before it starts; retry
 # them, including the standalone restore Valkey image reused below.
 for attempt in {1..3}; do
-  if "${compose[@]}" pull --quiet && docker pull --quiet valkey/valkey:9-alpine >/dev/null; then break; fi
+  if "${compose[@]}" pull --quiet --policy "${OLP_TEST_PULL_POLICY:-always}" &&
+    { [[ ${OLP_TEST_PULL_POLICY:-always} == missing ]] && docker image inspect valkey/valkey:9-alpine >/dev/null 2>&1 || docker pull --quiet valkey/valkey:9-alpine >/dev/null; }; then break; fi
   if (( attempt == 3 )); then exit 1; fi
   sleep $((attempt * 10))
 done
@@ -47,13 +50,21 @@ export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make build
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
+export OLP_CODEX_BINARY
+OLP_CODEX_BINARY=$(./scripts/code-mode-qualification.sh install)
+if [[ "$mode" == code ]]; then
+  go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=15m -v -run '^TestCode' ./tests/integration
+  ./scripts/code-mode-qualification.sh cli
+  exit
+fi
 # Recovery tests use a separately provisioned Valkey, never a logical database
 # within the original service.
 restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
-go test -race -tags=integration,oidctest,pythonsdk -count=1 -timeout=30m -v ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v ./tests/integration
+./scripts/code-mode-qualification.sh cli
 go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media ./internal/usage
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
@@ -62,6 +73,7 @@ OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
 # Pinned coding agents, agent SDKs and frameworks against a scripted upstream.
 # It starts its own gateway and uses none of the services above.
 ./tests/clients/run.sh
+if [[ "$mode" == shell ]]; then exit; fi
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.

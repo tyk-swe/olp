@@ -1,19 +1,19 @@
 {
   "evidence_class": "controlled-fixture-only",
   "client": "official OpenAI Codex CLI",
-  "version": "0.153.2",
-  "source_tag": "rust-v0.153.2",
-  "source_commit": "657a993cbee87acf52d14b758ce49dbd46d1b8eb",
+  "version": "0.160.0",
+  "source_tag": "rust-v0.160.0",
+  "source_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
   "source_repository": "https://github.com/openai/codex",
   "configuration_reference": "https://developers.openai.com/codex/config-reference",
   "packages": {
     "linux-x64": {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.153.2-linux-x64.tgz",
-      "integrity": "sha512-CPUPhFmykKRdIcgwiOfKvFKHBP62dPfaiP+pzQ2bVNAfLTW+i0Kasd7hQryoxZUmTPvw0h9HyM2NgsnQ9AJlTw=="
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.0-linux-x64.tgz",
+      "integrity": "sha512-KI/73OqGrHmR18s7ya7E1NqV6rT0y3lxr0s8S1qR2m6zU6QRF/HlR529jALLh5vjdUnsRT4Ahoxt0axb4kY99g=="
     },
     "linux-arm64": {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.153.2-linux-arm64.tgz",
-      "integrity": "sha512-QDkOdJzIdMGaOCViY2dqGqr8WhQv81WfmJkAghC3doFedsOfHt87RuAO4yFN7m0FSR3y5UsScSDUT4zOCcmEVA=="
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.0-linux-arm64.tgz",
+      "integrity": "sha512-VnVdsS06YlDsL8OwaJjQ3xdqdJNG4i+eBJBV3LytddknzSaF/urijLzVg3ptkwvoj8C7Gn7iWpVE+y8WEaPiCg=="
     }
   },
   "native_model": "gpt-5.4",

@@ -5,8 +5,8 @@ It uses a route-specific URL such as `https://olp.example/code/team-coding` and
 keeps the native model in the request. Ordinary inference routes continue to
 use OLP route slugs as model names.
 
-**Qualification status:** the management and durable-ledger foundation exists.
-The pinned official Codex CLI has controlled-fixture qualification. This is not
+**Qualification status:** management, durable ledger and raw transports are wired
+into OLP. The pinned official Codex CLI has controlled-fixture qualification. This is not
 yet a release claim for a real Codex subscription. See the
 [support matrix and release gates](../qualification/code-mode.md) before rollout.
 
@@ -35,8 +35,8 @@ and retirement, and `If-Match` on updates and publication.
    route before that connection can serve it.
 5. Give the developer an OLP inference key and the supported route configuration.
    Keep grant access/refresh tokens and account authorization in OLP. The generated
-   configuration surface must state the exact qualified client version, model
-   list and gaps; its public endpoint is an integration release gate.
+   configuration surface states the exact client version, model list and gaps.
+   In the console's Code mode page, set the public gateway URL before copying it.
 6. Inspect account eligibility, bindings, attempts, refusals and token windows.
    Retire a binding to stop its entire tree. A retired or unavailable conversation
    fails; the caller must explicitly start a new conversation to choose again.
@@ -55,6 +55,7 @@ activation checks.
 | Update one resource | `PUT /api/v1/code/{collection}/{id}` |
 | Publish an immutable route revision | `POST /api/v1/code/routes/{id}/publish` |
 | Inspect route history | `GET /api/v1/code/routes/{id}/revisions` |
+| Generate official client TOML | `GET /api/v1/code/routes/{id}/client-config?gateway_url=...&model=...` |
 | Inspect metadata | `GET /api/v1/code/{bindings,attempts,refusals,token-windows}` |
 | Retire the root of a conversation tree | `POST /api/v1/code/bindings/{id}/retire` |
 
@@ -65,7 +66,7 @@ ship together; a backend-only deployment does not meet the complete product cont
 
 ## Official Codex configuration
 
-The controlled suite runs the unmodified official Codex CLI **0.153.2**. This
+The controlled suite runs the unmodified official Codex CLI **0.160.0**. This
 example demonstrates its tested provider configuration, not a real-account
 qualification or a substitute for OLP's generated configuration:
 
@@ -74,12 +75,14 @@ model = "gpt-5.4"
 model_provider = "olp"
 
 [model_providers.olp]
-name = "OLP"
+name = "OpenAI"
 base_url = "https://olp.example/code/team-coding"
 env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = true
+request_max_retries = 0
+stream_max_retries = 0
 ```
 
 Supply only the OLP key as `OLP_API_KEY`. No workstation ChatGPT login is used in
@@ -87,9 +90,10 @@ the controlled tests. `gpt-5.4` is a native model identifier, not the route slug
 and not proof that a particular account is entitled to it. Select only a model
 allowed by the published route and enrolled account.
 
-The qualification runner disables client retries to count dispatches precisely.
-That test setting is separate from OLP's invariant: OLP never retries or replays
-inference. A retry initiated by Codex remains on the original account.
+The generated configuration and qualification runner disable automatic client
+retries; that behavior remains a qualification gap. OLP itself never retries or
+replays inference. A fresh attempt initiated by Codex remains on the original
+account.
 
 ## Conversations and authority
 
@@ -134,6 +138,10 @@ enabling a hard guarantee.
 Provider-reported allowance is separate metadata with observation/reset times.
 Never infer subscription allowance from a local budget, monetary estimate or a
 successful fixture request. Stale allowance observations cannot replace newer ones.
+Observed exhausted allowance refuses admission until its reported reset.
+Temporary transport/quota failures impose a one-minute cooldown; the next
+client request can test recovery on the same pinned account. OLP schedules no
+synthetic health inference and never automatically replays the failed request.
 
 ## Fidelity and privacy
 
@@ -145,6 +153,16 @@ Unqualified paths and operation types refuse before upstream dispatch.
 
 Exceptions are upstream authentication replacing the OLP credential, OLP-only
 controls, hop-by-hop headers and protocol-required framing/upgrade handling.
+Request authentication fields consumed locally are `Authorization`,
+`ChatGPT-Account-ID`, `Cookie`, `X-API-Key` and `X-Goog-API-Key`; only the
+qualified adapter's `Authorization` and `ChatGPT-Account-ID` replace them.
+All `X-OLP-*` fields are consumed. Hop-by-hop exclusions are `Connection`,
+its named fields, `Proxy-Connection`, `Keep-Alive`, `Proxy-Authenticate`,
+`Proxy-Authorization`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`.
+Trailers retain end-to-end values through the downstream framing mechanism.
+WebSocket keys, versions, accept values and extensions are negotiated on each
+leg; subprotocol requests refuse and compression is disabled. Upstream authority
+and HTTP framing are recomputed without reserializing bodies.
 The contract does not claim identical TCP segmentation, WebSocket frame
 fragmentation, TLS fingerprint, source IP or timing. It cannot guarantee that
 an upstream provider accepts an account's use.

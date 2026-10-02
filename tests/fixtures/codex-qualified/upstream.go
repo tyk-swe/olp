@@ -29,13 +29,30 @@ type Request struct {
 // Captures are memory-only and contain synthetic values. Do not point this peer
 // at real user traffic or serialize its captures into application diagnostics.
 type Upstream struct {
-	mu       sync.Mutex
-	requests []Request
-	mode     string
-	Canceled chan struct{}
+	mu        sync.Mutex
+	requests  []Request
+	mode      string
+	responder func(context.Context, http.Header, []byte) [][]byte
+	Canceled  chan struct{}
 }
 
 func New() *Upstream { return &Upstream{Canceled: make(chan struct{}, 32)} }
+
+func (u *Upstream) SetResponder(responder func(context.Context, http.Header, []byte) [][]byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.responder = responder
+}
+
+func (u *Upstream) reply(r *http.Request, body []byte) [][]byte {
+	u.mu.Lock()
+	responder := u.responder
+	u.mu.Unlock()
+	if responder == nil {
+		return nil
+	}
+	return responder(r.Context(), r.Header, body)
+}
 
 func (u *Upstream) Mode(mode string) {
 	u.mu.Lock()
@@ -82,6 +99,14 @@ func (u *Upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			mode := u.record(r, body, true)
+			if events := u.reply(r, body); events != nil {
+				for _, event := range events {
+					if err := conn.Write(r.Context(), websocket.MessageText, event); err != nil {
+						return
+					}
+				}
+				continue
+			}
 			var request struct {
 				Generate *bool `json:"generate"`
 			}
@@ -127,6 +152,13 @@ func (u *Upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("X-Controlled-Multi", "second")
 	w.Header().Set("X-Request-Id", "controlled-upstream-request")
 	w.WriteHeader(200)
+	if events := u.reply(r, body); events != nil {
+		for _, event := range events {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+			w.(http.Flusher).Flush()
+		}
+		return
+	}
 	if mode == "hold" || mode == "disconnect" {
 		fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-controlled\"}}\n\n")
 		w.(http.Flusher).Flush()

@@ -4,16 +4,16 @@ cd "$(dirname "$0")/.."
 
 mode=${1:-cli}
 case "$mode" in cli|process|all|install) ;; *) echo 'usage: code-mode-qualification.sh [cli|process|all|install]' >&2; exit 2;; esac
-version=0.153.2
+version=0.160.0
 case "$(uname -sm)" in
   'Linux x86_64')
     platform=linux-x64
     target=x86_64-unknown-linux-musl
-    digest='CPUPhFmykKRdIcgwiOfKvFKHBP62dPfaiP+pzQ2bVNAfLTW+i0Kasd7hQryoxZUmTPvw0h9HyM2NgsnQ9AJlTw==' ;;
+    digest='KI/73OqGrHmR18s7ya7E1NqV6rT0y3lxr0s8S1qR2m6zU6QRF/HlR529jALLh5vjdUnsRT4Ahoxt0axb4kY99g==' ;;
   'Linux aarch64')
     platform=linux-arm64
     target=aarch64-unknown-linux-musl
-    digest='QDkOdJzIdMGaOCViY2dqGqr8WhQv81WfmJkAghC3doFedsOfHt87RuAO4yFN7m0FSR3y5UsScSDUT4zOCcmEVA==' ;;
+    digest='VnVdsS06YlDsL8OwaJjQ3xdqdJNG4i+eBJBV3LytddknzSaF/urijLzVg3ptkwvoj8C7Gn7iWpVE+y8WEaPiCg==' ;;
   *) echo 'Qualification installer supports Linux amd64/arm64 only.' >&2; exit 2 ;;
 esac
 cache="$PWD/.local/codecli/$version-$platform"
