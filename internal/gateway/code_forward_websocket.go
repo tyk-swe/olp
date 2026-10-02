@@ -46,6 +46,12 @@ func codeWrite(ctx context.Context, conn *websocket.Conn, kind websocket.Message
 	return conn.Write(ctx, kind, body)
 }
 
+func codeClosePeer(peer *websocket.Conn, err error) {
+	if close, ok := errors.AsType[websocket.CloseError](err); ok {
+		_ = peer.Close(close.Code, close.Reason)
+	}
+}
+
 func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, keyID string) {
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
 		codeRefuse(s, w, r, route, keyID, codemode.Refuse(400, "code_protocol_unsupported"))
@@ -56,7 +62,12 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 		codeRefuse(s, w, r, route, keyID, err)
 		return
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity)
+	models := r.Header.Values("X-OLP-Code-Model")
+	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
+		codeRefuse(s, w, r, route, keyID, codemode.Refuse(400, "code_model_invalid"))
+		return
+	}
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"))
 	if err != nil {
 		codeRefuse(s, w, r, route, keyID, err)
 		return
@@ -160,6 +171,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 			return
 		case message, open := <-clientMessages:
 			if !open || message.err != nil {
+				codeClosePeer(upstream, message.err)
 				return
 			}
 			if message.kind != websocket.MessageText {
@@ -204,15 +216,14 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if message.err != nil {
-				status := websocket.CloseStatus(message.err)
-				if status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
-					_ = client.Close(status, "")
-				}
+				codeClosePeer(client, message.err)
 				return
 			}
 			observation := codexwire.Observe(message.body, false)
 			if active != nil {
 				active.observe(observation)
+			} else if observation.Allowance != nil {
+				connection.allowance(ctx, *observation.Allowance)
 			}
 			if err := codeWrite(ctx, client, message.kind, message.body); err != nil {
 				return

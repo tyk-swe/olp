@@ -157,15 +157,16 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 }
 
 type codeAttempt struct {
-	server      *Server
-	permit      resources.CodePermit
-	config      runtime.Configuration
-	auth        codemode.Authorization
-	lease       *limits.Lease
-	dispatched  bool
-	usage       codemode.Usage
-	terminal    bool
-	conflicting bool
+	server        *Server
+	permit        resources.CodePermit
+	config        runtime.Configuration
+	auth          codemode.Authorization
+	lease         *limits.Lease
+	providerLease *limits.Lease
+	dispatched    bool
+	usage         codemode.Usage
+	terminal      bool
+	conflicting   bool
 }
 
 func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Release, route codemode.Route, observation codexwire.Request) (*codeAttempt, error) {
@@ -207,6 +208,10 @@ func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Rel
 		return nil, codemode.Refuse(503, "code_connection_unpublished")
 	}
 	a.config = configuration
+	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, configuration, observation.Estimate, codeGenerationTimeout+time.Minute)
+	if failure != nil {
+		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
+	}
 	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), configuration, permit.Account)
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
@@ -255,9 +260,7 @@ func (a *codeAttempt) observe(o codexwire.Observation) {
 		a.response(context.Background(), o.Status, nil)
 	}
 	if o.Allowance != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, *o.Allowance)
-		cancel()
+		a.allowance(context.Background(), *o.Allowance)
 	}
 	if !o.Terminal {
 		return
@@ -288,6 +291,13 @@ func (a *codeAttempt) finish(ctx context.Context) {
 		a.server.log.Warn("code accounting unavailable", "attempt_id", a.permit.Attempt.ID)
 	}
 	settleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
+	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
+}
+
+func (a *codeAttempt) allowance(ctx context.Context, allowance codemode.Allowance) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
@@ -306,9 +316,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 		a.health(ctx, "healthy")
 	}
 	if allowance := codexwire.Allowance(headers, a.server.now()); allowance != nil {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		defer cancel()
-		_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, *allowance)
+		a.allowance(ctx, *allowance)
 	}
 }
 
