@@ -58,6 +58,7 @@ CREATE TABLE olp.code_route_revisions (
     route_id uuid NOT NULL REFERENCES olp.code_routes,
     revision integer NOT NULL,
     document jsonb NOT NULL,
+    connections jsonb NOT NULL,
     published_at timestamptz NOT NULL DEFAULT now(),
     created_by uuid NOT NULL REFERENCES olp.users,
     UNIQUE(route_id,revision)

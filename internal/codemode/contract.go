@@ -5,11 +5,18 @@ package codemode
 import (
 	"fmt"
 	"math"
+	"net/http"
 	"regexp"
 	"time"
 )
 
 const BasePath = "/code/"
+
+// Authorization contains only the qualified adapter's upstream auth headers.
+type Authorization struct {
+	Headers   http.Header
+	Principal string
+}
 
 type Refusal struct {
 	Status int

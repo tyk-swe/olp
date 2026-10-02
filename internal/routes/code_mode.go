@@ -133,7 +133,9 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 		return access.Reply{}, err
 	}
 	document, _ = json.Marshal(route)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at) VALUES($1,$2,$3,$4,$5,$6)`, route.RevisionID, id, route.Revision, document, p.UserID(), now); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at,connections)
+		VALUES($1,$2,$3,$4,$5,$6,COALESCE((SELECT jsonb_object_agg(p.id::text,p.configuration) FROM olp.providers p
+		WHERE EXISTS(SELECT 1 FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id WHERE pa.pool_id=$7 AND a.provider_id=p.id)),'{}'::jsonb))`, route.RevisionID, id, route.Revision, document, p.UserID(), now, route.PoolID); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2,etag=$3,draft=$4 WHERE id=$1`, id, route.RevisionID, route.ETag, document); err != nil {
