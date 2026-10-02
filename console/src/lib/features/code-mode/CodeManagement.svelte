@@ -246,7 +246,20 @@
             <dd>{account.provider_id} / {account.credential_id}</dd>
             <dt>Provider-reported allowance</dt>
             <dd>
-              {#if account.allowance}Tokens: {tokenCount(
+              {#if account.allowance?.windows?.length}
+                {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
+                  <p>
+                    {window.limit_id} / {window.window}: {window.used_percent}%
+                    used · {window.remaining_percent}% remaining<br />
+                    Window: {window.window_minutes == null
+                      ? 'Unknown'
+                      : window.window_minutes + ' minutes'} · Reset {window.resets_at
+                      ? formatDate(window.resets_at)
+                      : 'Unknown'}<br />
+                    Observed {formatDate(window.observed_at)}
+                  </p>
+                {/each}
+              {:else if account.allowance}Tokens: {tokenCount(
                   account.allowance.remaining_tokens
                 )} · Requests: {tokenCount(
                   account.allowance.remaining_requests
@@ -258,6 +271,19 @@
                   ? formatDate(account.allowance.resets_at)
                   : 'Unknown'}{:else}Unknown — no provider observation{/if}
             </dd>
+            {#if account.allowance?.credits}
+              <dt>Provider-reported credits</dt>
+              <dd>
+                Has credits: {account.allowance.credits.has_credits
+                  ? 'Yes'
+                  : 'No'} · Unlimited: {account.allowance.credits.unlimited
+                  ? 'Yes'
+                  : 'No'} · Balance: {account.allowance.credits.balance ??
+                  'Unknown'}<br />
+                Observed {formatDate(account.allowance.credits.observed_at)}.
+                Credits do not override exhausted subscription windows.
+              </dd>
+            {/if}
           </dl>
         </article>
       {/each}

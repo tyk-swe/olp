@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { ApiProblem } from '$lib/api/http';
+import { formatDate } from '$lib/format';
 import {
   listProjectMemberships,
   listAllProjectMembers
@@ -418,6 +419,105 @@ it('renders only adapter-generated client configuration and its qualification ga
     'Fixture gap: no real subscription tested'
   );
   expect(host.textContent).toContain('Provider connections are frozen');
+});
+
+it('shows each allowance limit and reset independently with provider credits', async () => {
+  vi.mocked(api.listCodeAccounts).mockResolvedValue({
+    items: [
+      {
+        ...account,
+        allowance: {
+          remaining_tokens: null,
+          remaining_requests: null,
+          remaining_percent: 80,
+          resets_at: '2026-10-02T11:00:00Z',
+          observed_at: '2026-10-01T10:00:00Z',
+          windows: [
+            {
+              limit_id: 'codex',
+              window: 'primary',
+              used_percent: 20,
+              remaining_percent: 80,
+              window_minutes: 300,
+              resets_at: '2026-10-02T11:00:00Z',
+              observed_at: '2026-10-01T10:00:00Z'
+            },
+            {
+              limit_id: 'codex',
+              window: 'secondary',
+              used_percent: 100,
+              remaining_percent: 0,
+              window_minutes: 10080,
+              resets_at: '2026-10-07T12:00:00Z',
+              observed_at: '2026-10-01T10:00:01Z'
+            },
+            {
+              limit_id: 'codex_other',
+              window: 'primary',
+              used_percent: 45,
+              remaining_percent: 55,
+              window_minutes: null,
+              resets_at: null,
+              observed_at: '2026-10-01T10:00:02Z'
+            }
+          ],
+          credits: {
+            has_credits: true,
+            unlimited: false,
+            balance: '12.50',
+            observed_at: '2026-10-01T10:00:03Z'
+          }
+        }
+      }
+    ],
+    nextCursor: null
+  });
+  await render();
+  const text = host.textContent?.replace(/\s+/g, ' ');
+  expect(text).toContain('codex / primary: 20% used · 80% remaining');
+  expect(text).toContain('codex / secondary: 100% used · 0% remaining');
+  expect(text).toContain('codex_other / primary: 45% used · 55% remaining');
+  expect(text).toContain('300 minutes');
+  expect(text).toContain('10080 minutes');
+  expect(text).toContain(formatDate('2026-10-02T11:00:00Z'));
+  expect(text).toContain(formatDate('2026-10-07T12:00:00Z'));
+  expect(text).toContain('Window: Unknown · Reset Unknown');
+  expect(text).toContain('Has credits: Yes · Unlimited: No · Balance: 12.50');
+  expect(text).toContain(
+    'Credits do not override exhausted subscription windows'
+  );
+});
+
+it('distinguishes upstream rejection statuses from interruptions and unknown consumption', async () => {
+  vi.mocked(api.listCodeAttempts).mockResolvedValue({
+    items: [
+      ...[401, 429, 500].map((status) => ({
+        ...attempt,
+        id: String(status),
+        upstream_status: status,
+        outcome_origin: 'upstream' as const,
+        outcome: 'rejected' as const,
+        outcome_observed_at: '2026-10-01T10:03:00Z'
+      })),
+      {
+        ...attempt,
+        upstream_status: 200,
+        outcome_origin: 'gateway',
+        outcome: 'interrupted',
+        outcome_observed_at: '2026-10-01T10:03:00Z'
+      }
+    ],
+    nextCursor: null
+  });
+  await render();
+  await click('Attempts');
+  const text = host.textContent?.replace(/\s+/g, ' ');
+  for (const status of [401, 429, 500, 200])
+    expect(text).toContain(String(status));
+  expect(text).toContain('upstream / rejected');
+  expect(text).toContain('gateway / interrupted');
+  expect(text).toContain('uncertain');
+  expect(text).toContain('Unknown');
 });
 
 it('reuses grant enrollment and associates the observed credential without requesting raw secrets', async () => {

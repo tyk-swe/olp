@@ -73,6 +73,10 @@ export const binding: CodeBinding = {
   retired_at: null
 };
 export const attempt: CodeAttempt = {
+  upstream_status: null,
+  outcome_origin: null,
+  outcome: null,
+  outcome_observed_at: null,
   id: '01980000-0000-7000-8000-000000000060',
   project_id: projectId,
   route_id: route.id,

@@ -213,6 +213,87 @@ func (e CodeAccountHealth) Valid() bool {
 	}
 }
 
+// Defines values for CodeAllowanceWindowWindow.
+const (
+	Primary   CodeAllowanceWindowWindow = "primary"
+	Secondary CodeAllowanceWindowWindow = "secondary"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowWindow enum.
+func (e CodeAllowanceWindowWindow) Valid() bool {
+	switch e {
+	case Primary:
+		return true
+	case Secondary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptOutcome.
+const (
+	CodeAttemptOutcomeCanceled       CodeAttemptOutcome = "canceled"
+	CodeAttemptOutcomeCompleted      CodeAttemptOutcome = "completed"
+	CodeAttemptOutcomeFailed         CodeAttemptOutcome = "failed"
+	CodeAttemptOutcomeHeaders        CodeAttemptOutcome = "headers"
+	CodeAttemptOutcomeIncomplete     CodeAttemptOutcome = "incomplete"
+	CodeAttemptOutcomeInterrupted    CodeAttemptOutcome = "interrupted"
+	CodeAttemptOutcomeLessThannil    CodeAttemptOutcome = "<nil>"
+	CodeAttemptOutcomeRejected       CodeAttemptOutcome = "rejected"
+	CodeAttemptOutcomeTransportError CodeAttemptOutcome = "transport_error"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptOutcome enum.
+func (e CodeAttemptOutcome) Valid() bool {
+	switch e {
+	case CodeAttemptOutcomeCanceled:
+		return true
+	case CodeAttemptOutcomeCompleted:
+		return true
+	case CodeAttemptOutcomeFailed:
+		return true
+	case CodeAttemptOutcomeHeaders:
+		return true
+	case CodeAttemptOutcomeIncomplete:
+		return true
+	case CodeAttemptOutcomeInterrupted:
+		return true
+	case CodeAttemptOutcomeLessThannil:
+		return true
+	case CodeAttemptOutcomeRejected:
+		return true
+	case CodeAttemptOutcomeTransportError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptOutcomeOrigin.
+const (
+	CodeAttemptOutcomeOriginClient      CodeAttemptOutcomeOrigin = "client"
+	CodeAttemptOutcomeOriginGateway     CodeAttemptOutcomeOrigin = "gateway"
+	CodeAttemptOutcomeOriginLessThannil CodeAttemptOutcomeOrigin = "<nil>"
+	CodeAttemptOutcomeOriginUpstream    CodeAttemptOutcomeOrigin = "upstream"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptOutcomeOrigin enum.
+func (e CodeAttemptOutcomeOrigin) Valid() bool {
+	switch e {
+	case CodeAttemptOutcomeOriginClient:
+		return true
+	case CodeAttemptOutcomeOriginGateway:
+		return true
+	case CodeAttemptOutcomeOriginLessThannil:
+		return true
+	case CodeAttemptOutcomeOriginUpstream:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAttemptState.
 const (
 	Aborted        CodeAttemptState = "aborted"
@@ -1881,36 +1962,69 @@ type CodeAccountWrite struct {
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
 type CodeAllowance struct {
+	// Credits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.
+	Credits           *CodeCredits                 `json:"credits,omitempty"`
 	ObservedAt        time.Time                    `json:"observed_at"`
 	RemainingPercent  nullable.Nullable[float32]   `json:"remaining_percent"`
 	RemainingRequests nullable.Nullable[int64]     `json:"remaining_requests"`
 	RemainingTokens   nullable.Nullable[int64]     `json:"remaining_tokens"`
 	ResetsAt          nullable.Nullable[time.Time] `json:"resets_at"`
+
+	// Windows Independent provider windows keyed by limit_id and window. Partial observations merge without replacing newer observations for another window.
+	Windows *[]CodeAllowanceWindow `json:"windows,omitempty"`
 }
+
+// CodeAllowanceWindow defines model for CodeAllowanceWindow.
+type CodeAllowanceWindow struct {
+	LimitId          string                       `json:"limit_id"`
+	ObservedAt       time.Time                    `json:"observed_at"`
+	RemainingPercent float32                      `json:"remaining_percent"`
+	ResetsAt         nullable.Nullable[time.Time] `json:"resets_at"`
+	UsedPercent      float32                      `json:"used_percent"`
+	Window           CodeAllowanceWindowWindow    `json:"window"`
+	WindowMinutes    nullable.Nullable[int64]     `json:"window_minutes"`
+}
+
+// CodeAllowanceWindowWindow defines model for CodeAllowanceWindow.Window.
+type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId       openapi_types.UUID           `json:"account_id"`
-	ApiKeyId        openapi_types.UUID           `json:"api_key_id"`
-	BindingId       openapi_types.UUID           `json:"binding_id"`
-	BoundEvidence   nullable.Nullable[string]    `json:"bound_evidence"`
-	CachedTokens    nullable.Nullable[int64]     `json:"cached_tokens"`
-	CreatedAt       time.Time                    `json:"created_at"`
-	FinishedAt      nullable.Nullable[time.Time] `json:"finished_at"`
-	Id              openapi_types.UUID           `json:"id"`
-	InputTokens     nullable.Nullable[int64]     `json:"input_tokens"`
-	Model           string                       `json:"model"`
-	Operation       string                       `json:"operation"`
-	OutputTokens    nullable.Nullable[int64]     `json:"output_tokens"`
-	ProjectId       openapi_types.UUID           `json:"project_id"`
-	ReasoningTokens nullable.Nullable[int64]     `json:"reasoning_tokens"`
-	Refusal         nullable.Nullable[string]    `json:"refusal"`
-	ReportedTokens  nullable.Nullable[int64]     `json:"reported_tokens"`
-	ReservedTokens  int64                        `json:"reserved_tokens"`
-	RouteId         openapi_types.UUID           `json:"route_id"`
-	RouteRevisionId openapi_types.UUID           `json:"route_revision_id"`
-	State           CodeAttemptState             `json:"state"`
+	AccountId     openapi_types.UUID           `json:"account_id"`
+	ApiKeyId      openapi_types.UUID           `json:"api_key_id"`
+	BindingId     openapi_types.UUID           `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string]    `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]     `json:"cached_tokens"`
+	CreatedAt     time.Time                    `json:"created_at"`
+	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
+	Id            openapi_types.UUID           `json:"id"`
+	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
+	Model         string                       `json:"model"`
+	Operation     string                       `json:"operation"`
+
+	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
+	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
+	OutcomeObservedAt nullable.Nullable[time.Time]                `json:"outcome_observed_at"`
+	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin] `json:"outcome_origin"`
+	OutputTokens      nullable.Nullable[int64]                    `json:"output_tokens"`
+	ProjectId         openapi_types.UUID                          `json:"project_id"`
+	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
+	Refusal           nullable.Nullable[string]                   `json:"refusal"`
+	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
+	ReservedTokens    int64                                       `json:"reserved_tokens"`
+	RouteId           openapi_types.UUID                          `json:"route_id"`
+	RouteRevisionId   openapi_types.UUID                          `json:"route_revision_id"`
+	State             CodeAttemptState                            `json:"state"`
+
+	// UpstreamStatus Observed upstream HTTP or WebSocket error status; null when not observed.
+	UpstreamStatus nullable.Nullable[int] `json:"upstream_status"`
 }
+
+// CodeAttemptOutcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
+type CodeAttemptOutcome string
+
+// CodeAttemptOutcomeOrigin defines model for CodeAttempt.OutcomeOrigin.
+type CodeAttemptOutcomeOrigin string
 
 // CodeAttemptState defines model for CodeAttempt.State.
 type CodeAttemptState string
@@ -1979,6 +2093,14 @@ type CodeClientConfiguration struct {
 	NativeModels      []string `json:"native_models"`
 	QualificationGaps []string `json:"qualification_gaps"`
 	RouteSlug         string   `json:"route_slug"`
+}
+
+// CodeCredits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.
+type CodeCredits struct {
+	Balance    nullable.Nullable[string] `json:"balance"`
+	HasCredits bool                      `json:"has_credits"`
+	ObservedAt time.Time                 `json:"observed_at"`
+	Unlimited  bool                      `json:"unlimited"`
 }
 
 // CodePool defines model for CodePool.

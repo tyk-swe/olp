@@ -11734,6 +11734,52 @@
         "additionalProperties": false,
         "description": "Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.",
         "properties": {
+          "upstream_status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 100,
+            "maximum": 599,
+            "description": "Observed upstream HTTP or WebSocket error status; null when not observed."
+          },
+          "outcome_origin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "upstream",
+              "gateway",
+              "client",
+              null
+            ]
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "headers",
+              "completed",
+              "incomplete",
+              "failed",
+              "rejected",
+              "interrupted",
+              "canceled",
+              "transport_error",
+              null
+            ],
+            "description": "Bounded transport or generation result, independent of usage settlement and durable uncertainty."
+          },
+          "outcome_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "account_id": {
             "format": "uuid",
             "type": "string"
@@ -11857,6 +11903,10 @@
           }
         },
         "required": [
+          "upstream_status",
+          "outcome_origin",
+          "outcome",
+          "outcome_observed_at",
           "id",
           "project_id",
           "route_id",
@@ -12638,6 +12688,17 @@
         "additionalProperties": false,
         "description": "Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.",
         "properties": {
+          "windows": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/CodeAllowanceWindow"
+            },
+            "description": "Independent provider windows keyed by limit_id and window. Partial observations merge without replacing newer observations for another window."
+          },
+          "credits": {
+            "$ref": "#/components/schemas/CodeCredits"
+          },
           "remaining_tokens": {
             "type": [
               "integer",
@@ -12681,6 +12742,94 @@
           "remaining_requests",
           "remaining_percent",
           "resets_at",
+          "observed_at"
+        ]
+      },
+      "CodeAllowanceWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.]{0,99}$",
+            "maxLength": 100
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary"
+            ]
+          },
+          "used_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "remaining_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "window_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "resets_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "limit_id",
+          "window",
+          "used_percent",
+          "remaining_percent",
+          "window_minutes",
+          "resets_at",
+          "observed_at"
+        ]
+      },
+      "CodeCredits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.",
+        "properties": {
+          "has_credits": {
+            "type": "boolean"
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "balance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]{1,20}(\\.[0-9]{1,12})?$",
+            "maxLength": 34
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "has_credits",
+          "unlimited",
+          "balance",
           "observed_at"
         ]
       }
