@@ -81,8 +81,7 @@ env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = true
-request_max_retries = 0
-stream_max_retries = 0
+http_headers = { "X-OLP-Code-Model" = "gpt-5.4" }
 ```
 
 Supply only the OLP key as `OLP_API_KEY`. No workstation ChatGPT login is used in
@@ -90,10 +89,19 @@ the controlled tests. `gpt-5.4` is a native model identifier, not the route slug
 and not proof that a particular account is entitled to it. Select only a model
 allowed by the published route and enrolled account.
 
-The generated configuration and qualification runner disable automatic client
-retries; that behavior remains a qualification gap. OLP itself never retries or
-replays inference. A fresh attempt initiated by Codex remains on the original
-account.
+The generated configuration retains Codex's default request and stream retries.
+Controlled tests cover interrupted-stream retries, WebSocket reconnect and HTTP
+fallback. OLP itself never retries or replays inference. Every client retry gets
+fresh admission on the original account. A 503 can quarantine that account;
+automatic retries then fail without dispatch until the cooldown expires.
+
+`X-OLP-Code-Model` is an OLP-only selection hint for the initial WebSocket
+handshake, before the native body arrives. It is removed upstream. It cannot
+change an existing account pin or bypass the model check on each generation.
+Generate configuration again with `model=<chosen-native-model>` when changing
+models. Codex 0.160.0's `-m` changes the body but **does not update** this static
+header; an override alone can pin an incompatible account. Arbitrary `-m`
+overrides are not qualified for disjoint-model pools.
 
 ## Conversations and authority
 
@@ -102,6 +110,17 @@ atomically persists its binding. Concurrent first turns on different replicas
 must resolve to that same binding. Resumes, reconnects, children, compaction and
 client retries retain the root's account. A child with an unresolved parent is
 refused instead of receiving a new account.
+
+Fresh `codex exec review` is a child-first workflow. With the generated
+WebSocket-enabled configuration, controlled tests observe a root handshake
+establishing its pin before the review child, without parent inference. This
+also works when the upstream rejects WebSockets with 426 and Codex falls back
+to HTTP after OLP has established the root. Disabling WebSockets from the outset
+leaves the parent unresolved and correctly returns `code_parent_unresolved`.
+The official app-server can also review a thread after a real user task on that
+thread, over either transport. Do not send a dummy inference merely to acquire
+a parent pin. Parent establishment must reach OLP; an external proxy that blocks
+the root handshake before OLP is not qualified by the fallback test.
 
 Every generation rechecks key/project/route/pool permission, account eligibility,
 grant state and limits. A WebSocket upgrade is not lasting authorization to
