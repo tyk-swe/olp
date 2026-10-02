@@ -1,0 +1,21 @@
+<script lang="ts">
+  import {
+    QueryClientProvider,
+    type QueryClient
+  } from '@tanstack/svelte-query';
+  import type { ComponentProps } from 'svelte';
+  import CodeModePage from '../CodeModePage.svelte';
+  let {
+    client,
+    loadClientConfiguration
+  }: {
+    client: QueryClient;
+    loadClientConfiguration?: ComponentProps<
+      typeof CodeModePage
+    >['loadClientConfiguration'];
+  } = $props();
+</script>
+
+<QueryClientProvider {client}
+  ><CodeModePage {loadClientConfiguration} /></QueryClientProvider
+>
