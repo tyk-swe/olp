@@ -13,12 +13,12 @@ func TestCodexClientConfigurationPreservesNativeModelsAndUsesOnlyOLPKey(t *testi
 	if err != nil || config.BaseURL != "https://gateway.example/olp/code/team-code" || config.ClientVersion != "0.160.0" || len(config.NativeModels) != 2 {
 		t.Fatalf("configuration: %+v %v", config, err)
 	}
-	for _, want := range []string{`model = "gpt-5.3-codex"`, `env_key = "OLP_API_KEY"`, `requires_openai_auth = false`, `supports_websockets = true`, `name = "OpenAI"`, `request_max_retries = 0`, `stream_max_retries = 0`} {
+	for _, want := range []string{`model = "gpt-5.3-codex"`, `env_key = "OLP_API_KEY"`, `requires_openai_auth = false`, `supports_websockets = true`, `name = "OpenAI"`, `http_headers = { "X-OLP-Code-Model" = "gpt-5.3-codex" }`} {
 		if !strings.Contains(config.Configuration, want) {
 			t.Fatalf("missing client setting %s", want)
 		}
 	}
-	for _, forbidden := range []string{"refresh_token", "chatgpt.com", "OPENAI_API_KEY", "Authorization", "http_headers"} {
+	for _, forbidden := range []string{"refresh_token", "chatgpt.com", "OPENAI_API_KEY", "Authorization", "request_max_retries", "stream_max_retries"} {
 		if strings.Contains(config.Configuration, forbidden) {
 			t.Fatalf("configuration contains upstream credential material or first-party headers: %s", forbidden)
 		}
