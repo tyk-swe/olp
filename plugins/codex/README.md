@@ -49,7 +49,7 @@ Audited release: **Codex 0.160.0**, tag `rust-v0.160.0`, commit
 Build the confined plugin from the repository root:
 
 ```sh
-GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -o codex.wasm ./plugins/codex
+GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -buildmode=c-shared -o codex.wasm ./plugins/codex
 ```
 
 Install through `POST /api/v1/plugins` with `Content-Type: application/wasm` and
@@ -95,7 +95,9 @@ published model.
 Save the returned TOML as `$CODEX_HOME/config.toml`, set `OLP_API_KEY` to the
 developer's authorized OLP inference key, and run Codex 0.160.0. The client needs
 neither an OpenAI login nor upstream credentials. The generated provider uses
-Responses and supports WebSockets, with request/stream retries set to zero.
+Responses and supports WebSockets, retaining Codex's default client retries.
+Regenerate the configuration when changing models so the native model and
+`X-OLP-Code-Model` selection hint agree.
 OLP transport independently must never replay inference; client retry policy
 does not establish that server guarantee.
 
