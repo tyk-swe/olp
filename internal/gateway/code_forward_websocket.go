@@ -154,6 +154,9 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 		}
 	}()
 	refuse := func(err error) {
+		if active != nil {
+			active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
+		}
 		var refusal *codemode.Refusal
 		if !errors.As(err, &refusal) {
 			refusal = &codemode.Refusal{Code: "code_service_unavailable"}
@@ -171,6 +174,9 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 			return
 		case message, open := <-clientMessages:
 			if !open || message.err != nil {
+				if active != nil {
+					active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
+				}
 				codeClosePeer(upstream, message.err)
 				return
 			}
@@ -207,6 +213,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if err := codeWrite(ctx, upstream, message.kind, message.body); err != nil {
+				active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
 				return
 			}
 			generationTimer = time.NewTimer(codeGenerationTimeout)
@@ -216,6 +223,9 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if message.err != nil {
+				if active != nil && ctx.Err() == nil {
+					active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+				}
 				codeClosePeer(client, message.err)
 				return
 			}
@@ -226,6 +236,9 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				connection.allowance(ctx, *observation.Allowance)
 			}
 			if err := codeWrite(ctx, client, message.kind, message.body); err != nil {
+				if active != nil {
+					active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
+				}
 				return
 			}
 			if observation.Terminal && active != nil {

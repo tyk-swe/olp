@@ -34,6 +34,17 @@ type codeTestLedger struct {
 	refuse     string
 	done       chan codemode.Usage
 	references map[string]bool
+	outcomes   []codemode.Outcome
+}
+
+func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome codemode.Outcome) error {
+	if err := outcome.Validate(); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.outcomes = append(l.outcomes, outcome)
+	return nil
 }
 
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {

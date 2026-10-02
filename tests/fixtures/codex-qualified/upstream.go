@@ -185,6 +185,17 @@ func (u *Upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := u.record(r, body, false)
+	if mode == "transport_error" {
+		if connection, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			_ = connection.Close()
+		}
+		return
+	}
+	if status := map[string]int{"unauthorized": 401, "quota": 429, "error": 500}[mode]; status != 0 {
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"error":{"code":"controlled_rejection"}}`)
+		return
+	}
 	if mode == "unavailable" {
 		w.WriteHeader(503)
 		fmt.Fprint(w, `{"error":{"code":"controlled_unavailable"}}`)

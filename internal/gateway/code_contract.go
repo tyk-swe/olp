@@ -20,6 +20,7 @@ type CodeLedger interface {
 	ObserveHealth(context.Context, string, string) error
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
 	ObserveReference(context.Context, string, string) error
+	ObserveOutcome(context.Context, string, codemode.Outcome) error
 	RecordRefusal(context.Context, codemode.Route, string, string) error
 }
 
