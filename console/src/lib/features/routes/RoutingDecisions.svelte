@@ -51,6 +51,8 @@
               row.performance.observed_at
             ).toLocaleTimeString()}){:else}Not enough recent measurements{/if}
         </dd>
+        {#if row.estimate}<dt>Estimated input</dt>
+          <dd>{row.estimate}</dd>{/if}
         <dt>Model facts observed</dt>
         <dd>
           {row.metadataObservedAt

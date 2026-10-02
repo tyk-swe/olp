@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -87,7 +88,8 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 			return
 		}
 		x.family = openai.Family(request.Op)
-		x.estimate = (int64(len(body))+3)/4 + 1
+		sized := estimate.HeuristicBytesTokens(len(body))
+		x.estimate, x.sizedInput = sized+1, &sized
 		s.serveMedia(r.Context(), w, x, authority, request)
 	}
 }
@@ -486,7 +488,7 @@ type mediaOutcome struct {
 // retains its absolute attempt deadline and side-effect ambiguity rules.
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
-		estimate: func(*runtime.Provider) int64 { return x.estimate },
+		estimate: func(runtime.Attempt, *runtime.Provider) int64 { return x.estimate },
 		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, ordinal)
 		},

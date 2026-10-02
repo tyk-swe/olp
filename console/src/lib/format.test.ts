@@ -6,6 +6,7 @@ import {
   formatCost,
   formatDay,
   formatInteger,
+  formatSignedPercent,
   formatTime,
   statusLabel,
   statusTone
@@ -32,6 +33,17 @@ describe('shared formatting', () => {
     expect(formatInteger(null)).toBe('—');
     expect(formatInteger(undefined)).toBe('—');
     expect(formatInteger('4096')).toContain('4');
+  });
+
+  it('signs percentages and never turns a missing ratio into zero', () => {
+    expect(formatSignedPercent(0.032)).toBe('+3.2%');
+    expect(formatSignedPercent(-0.004)).toBe('-0.4%');
+    expect(formatSignedPercent(-0.0004)).toBe('0.0%');
+    expect(formatSignedPercent(0)).toBe('0.0%');
+    expect(formatSignedPercent(null)).toBe('—');
+    expect(formatSignedPercent(undefined)).toBe('—');
+    expect(formatSignedPercent(Number.NaN)).toBe('—');
+    expect(formatSignedPercent(Number.POSITIVE_INFINITY)).toBe('—');
   });
 
   it('keeps error classes more informative than status codes', () => {

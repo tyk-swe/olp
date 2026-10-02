@@ -291,6 +291,22 @@ breakdown by one key's values (the key filter is required and rows without it
 are omitted). Request list and detail expose each request's stored labels.
 Project-scoped readers see only their own projects' rows in every report.
 
+Each attempt also records the admission estimate of its input, how it was
+produced (`tokenizer`, `calibrated` or `heuristic`) and the tokenizer family it
+was counted for; [how the gateway estimates](gateway.md#how-the-prompt-is-estimated)
+describes the three methods. Reports total `estimated_input_tokens` beside
+`reported_input_tokens` over only the attempts that had both an estimate and
+reported input usage, so the two compare directly: the estimation error is
+estimated minus reported over reported, positive when admission over-estimated.
+Routes show it through the route breakdown, and `dimension=model_family` and
+`dimension=estimate_provenance` group it by family and by method. An attempt
+that was never estimated (a stored-response call, a realtime session, a job
+poll, an upload or a video creation) has no provenance and appears under `none`,
+and it still has its model's family, so it is in the family's row without
+adding to its error; `unknown` is only the attempts recorded before families
+were. The console usage page shows the signed error in its totals and in the
+breakdown table.
+
 Pricing can also come from managed sources rather than hand-entered revisions.
 `GET/POST /api/v1/pricing/sources` and `GET/PATCH /api/v1/pricing/sources/{id}`
 register an external price document; `POST /api/v1/pricing/sources/{id}/refresh`

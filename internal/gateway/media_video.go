@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -444,6 +445,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		ProviderID:         record.ProviderID,
 		ProviderRevisionID: record.ProviderRevisionID,
 		UpstreamModel:      record.UpstreamModel,
+		ModelFamily:        string(estimate.FamilyOf(record.UpstreamModel)),
 		Mode:               "unary",
 		StartedAt:          s.now(),
 	}

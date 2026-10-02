@@ -61,6 +61,14 @@ type Totals struct {
 	Currency                *string `json:"currency"`
 	UnpricedCount           int64   `json:"unpriced_count"`
 	IncompleteCount         int64   `json:"incomplete_count"`
+	// EstimatedInputTokens and ReportedInputTokens cover only the attempts that
+	// had both an admission estimate and observed usage, and EstimatedAttemptCount
+	// is how many those were. They are summed over the same attempts so the two
+	// compare: the estimation error is (estimated - reported) / reported, and
+	// the all-attempt InputTokens would not do for the denominator.
+	EstimatedInputTokens  string `json:"estimated_input_tokens"`
+	ReportedInputTokens   string `json:"reported_input_tokens"`
+	EstimatedAttemptCount int64  `json:"estimated_attempt_count"`
 }
 
 // Summary is the totals for a range plus everything known about how much of the
@@ -119,6 +127,12 @@ const (
 	DimensionAPIKey      = "api_key"
 	DimensionOperation   = "operation"
 	DimensionAttribution = "attribution"
+	// DimensionModelFamily groups by the tokenizer family each attempt's input
+	// estimate was counted for, and DimensionEstimateProvenance by how that
+	// estimate was produced; together with a route they show where estimation
+	// error comes from.
+	DimensionModelFamily        = "model_family"
+	DimensionEstimateProvenance = "estimate_provenance"
 )
 
 // Time series bucket sizes accepted by the reports API.
@@ -236,12 +250,19 @@ func (f Filters) dimensions(q *filterQuery) {
 	}
 }
 
+// estimatePaired selects the fact rows whose estimation error is knowable: an
+// attempt that had an estimate and whose provider reported its input. An
+// attempt that failed before reporting, or was never estimated, says nothing
+// about how close the estimate was and must not dilute it.
+const estimatePaired = "usage_observed AND input_tokens IS NOT NULL AND estimated_input_tokens IS NOT NULL"
+
 // usageRows opens the statement with the CTE both sources feed. Live facts are
 // filtered on the exact range; retained hourly rows are included only where a
 // whole bucket lies inside it, so no aggregate is ever cut in half.
 func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.push("WITH usage_rows AS (SELECT observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, attribution, CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
+		" api_key_id, operation, surface, attribution, model_family, estimate_provenance," +
+		" CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
 		" COALESCE(input_tokens, 0)::numeric AS input_tokens," +
 		" COALESCE(output_tokens, 0)::numeric AS output_tokens," +
 		" COALESCE(cached_input_tokens, 0)::numeric AS cached_input_tokens," +
@@ -251,15 +272,21 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
-		" currency::text AS currency FROM olp.attempt_usage_facts WHERE true")
+		" currency::text AS currency," +
+		" CASE WHEN " + estimatePaired + " THEN estimated_input_tokens ELSE 0 END::numeric AS estimated_input_tokens," +
+		" CASE WHEN " + estimatePaired + " THEN input_tokens ELSE 0 END::numeric AS estimate_reported_input_tokens," +
+		" CASE WHEN " + estimatePaired + " THEN 1 ELSE 0 END::bigint AS estimate_attempt_count" +
+		" FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
 	q.push(" UNION ALL SELECT bucket AS observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, attribution, " + scope.hourlyCount + ", input_tokens, output_tokens," +
+		" api_key_id, operation, surface, attribution, model_family, estimate_provenance, " +
+		scope.hourlyCount + ", input_tokens, output_tokens," +
 		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
 		" cache_write_1h_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
-		scope.hourlyIncomplete + ", currency::text AS currency FROM olp.attempt_usage_hourly WHERE true")
+		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
+		" estimate_reported_input_tokens, estimate_attempt_count FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
 	f.dimensions(q)
@@ -281,19 +308,24 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(unpriced_count), 0)::bigint," +
 	" COALESCE(SUM(incomplete_count), 0)::bigint," +
 	" COALESCE(MAX(btrim(currency))," +
-	" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton))"
+	" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton))," +
+	" COALESCE(SUM(estimated_input_tokens), 0)::text," +
+	" COALESCE(SUM(estimate_reported_input_tokens), 0)::text," +
+	" COALESCE(SUM(estimate_attempt_count), 0)::bigint"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
 	return []any{&t.RequestCount, &t.InputTokens, &t.OutputTokens, &t.CachedInputTokens,
 		&t.CacheWriteInputTokens, &t.CacheWrite5MInputTokens, &t.CacheWrite1HInputTokens,
-		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency}
+		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency,
+		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount}
 }
 
 // valid rejects stored counts that cannot be true, so a corrupt aggregate
 // surfaces as an error instead of an understated total.
 func (t Totals) valid() bool {
-	return t.RequestCount >= 0 && t.UnpricedCount >= 0 && t.IncompleteCount >= 0
+	return t.RequestCount >= 0 && t.UnpricedCount >= 0 && t.IncompleteCount >= 0 &&
+		t.EstimatedAttemptCount >= 0
 }
 
 // ReadSummary totals one range and reports how complete that total is.
@@ -381,6 +413,16 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		expression = "COALESCE(api_key_id::text, 'unknown')"
 	case DimensionOperation:
 		expression = "operation"
+	case DimensionModelFamily:
+		// Requests count once under the family of their first attempt, so the
+		// rows still sum to the range's requests, while tokens follow each
+		// attempt into its own family. Every attempt is recorded with the family
+		// of its model, estimated or not, so unknown is only the rows recorded
+		// before families were, and stays apart from the catch-all family
+		// "other".
+		expression = "COALESCE(NULLIF(model_family, ''), 'unknown')"
+	case DimensionEstimateProvenance:
+		expression = "COALESCE(NULLIF(estimate_provenance, ''), 'none')"
 	case DimensionAttribution:
 		if f.AttributionKey == nil {
 			return Breakdown{}, access.Fail(400, "invalid_filter",
@@ -389,7 +431,7 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		expression = "attribution->>$attribution_key$"
 	default:
 		return Breakdown{}, access.Fail(400, "invalid_dimension",
-			"Dimension must be route, provider, model, api_key, operation, or attribution.")
+			"Dimension must be route, provider, model, model_family, estimate_provenance, api_key, operation, or attribution.")
 	}
 	if limit < 1 {
 		limit = 1

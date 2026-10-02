@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -12,16 +13,27 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
+// reserved is what admission reserves for a request sent to a model.
+func reserved(parsed *openai.Request, model string, defaults map[string]json.RawMessage) int64 {
+	return estimate.Walk(parsed).Estimate(estimate.ForModel(model), defaults).Tokens()
+}
+
 // TestAdmissionEstimate pins the reservation estimate against the shapes a
 // caller can ask for. Every expectation is a literal: an estimate recomputed
-// the way the implementation computes it would assert nothing.
+// the way the implementation computes it would assert nothing. The cases that
+// name no model are sent to one the tokenizer registry does not know, which is
+// charged four characters to a token; the ones that name an OpenAI model are
+// counted by its tokenizer, with the numbers OpenAI's tiktoken gives and the
+// framing the cookbook documents.
 func TestAdmissionEstimate(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		family openai.Family
+		model  string
 		body   string
 		want   int64
 	}{
@@ -30,7 +42,7 @@ func TestAdmissionEstimate(t *testing.T) {
 			family: openai.FamilyChat,
 			// "hello" is five characters, so two tokens.
 			body: `{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`,
-			want: 2 + defaultOutputTokens,
+			want: 2 + estimate.DefaultOutputTokens,
 		},
 		{
 			name:   "max_tokens bounds the reply",
@@ -55,13 +67,13 @@ func TestAdmissionEstimate(t *testing.T) {
 			name:   "an image part costs a flat charge",
 			family: openai.FamilyChat,
 			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAAAAAAAAAAAAAA"}}]}]}`,
-			want:   1 + imageTokens + 1,
+			want:   1 + estimate.ImageTokens + 1,
 		},
 		{
 			name:   "audio and files cost more than an image",
 			family: openai.FamilyChat,
 			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`,
-			want:   mediaTokens + 1,
+			want:   estimate.MediaTokens + 1,
 		},
 		{
 			name:   "tool calls and their results are prompt text",
@@ -90,7 +102,7 @@ func TestAdmissionEstimate(t *testing.T) {
 			name:   "responses input items are walked like messages",
 			family: openai.FamilyResponses,
 			body:   `{"model":"model-a","max_output_tokens":5,"input":[{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`,
-			want:   1 + imageTokens + 5,
+			want:   1 + estimate.ImageTokens + 5,
 		},
 		{
 			name:   "an absurd request saturates instead of overflowing",
@@ -98,19 +110,70 @@ func TestAdmissionEstimate(t *testing.T) {
 			body:   `{"model":"model-a","max_completion_tokens":9007199254740991,"n":1024,"messages":[{"role":"user","content":"hi"}]}`,
 			want:   maxEstimate,
 		},
+		{
+			name:   "an OpenAI model counts the text exactly and frames the message",
+			family: openai.FamilyChat,
+			model:  "gpt-4o",
+			// "hello" and the role "user" are one token each, the message costs
+			// three and the reply is primed with three.
+			body: `{"model":"model-a","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
+			want: 1 + 1 + 3 + 3 + 10,
+		},
+		{
+			name:   "the same request on a model without a public tokenizer",
+			family: openai.FamilyChat,
+			model:  "claude-sonnet-4-5",
+			body:   `{"model":"model-a","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`,
+			want:   2 + 10,
+		},
+		{
+			name:   "a script the four-character rule undercharges is counted exactly",
+			family: openai.FamilyChat,
+			model:  "gpt-4",
+			// Five tokens in cl100k_base, against the one the heuristic charges.
+			body: `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":"日本語で"}]}`,
+			want: 5 + 1 + 3 + 3 + 1,
+		},
+		{
+			name:   "an image costs its flat charge next to exact text",
+			family: openai.FamilyChat,
+			model:  "gpt-4o",
+			body:   `{"model":"model-a","max_tokens":1,"messages":[{"role":"user","content":[{"type":"text","text":"hello"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`,
+			want:   1 + estimate.ImageTokens + 1 + 3 + 3 + 1,
+		},
+		{
+			name:   "responses instructions and input are messages of their own",
+			family: openai.FamilyResponses,
+			model:  "gpt-4.1",
+			body:   `{"model":"model-a","max_output_tokens":10,"instructions":"Be concise and kind.","input":"What is 2+2?"}`,
+			// Seven and five tokens of text, "user" and "system", two messages
+			// and the reply priming.
+			want: 7 + 5 + 1 + 1 + 3 + 3 + 3 + 10,
+		},
+		{
+			name:   "embeddings are counted by the model's own encoding",
+			family: openai.FamilyEmbeddings,
+			model:  "text-embedding-3-small",
+			body:   `{"model":"model-a","input":["hello","日本語で"]}`,
+			want:   1 + 5,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := openai.Parse(tc.family, []byte(tc.body))
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			if got := estimateTokens(parsed); got != tc.want {
+			model := tc.model
+			if model == "" {
+				model = modelA
+			}
+			if got := reserved(parsed, model, nil); got != tc.want {
 				t.Fatalf("estimate = %d, want %d", got, tc.want)
 			}
 		})
 	}
-	if got := estimateTokens(nil); got != defaultOutputTokens {
-		t.Fatalf("estimate without a parsed request = %d, want %d", got, defaultOutputTokens)
+	if got := reserved(nil, modelA, nil); got != estimate.DefaultOutputTokens {
+		t.Fatalf("estimate without a parsed request = %d, want %d", got, estimate.DefaultOutputTokens)
 	}
 }
 
@@ -125,8 +188,8 @@ func TestAdmissionEstimateIgnoresInlineMediaSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	got := estimateTokens(parsed)
-	if want := int64(1 + imageTokens + 4096); got != want {
+	got := reserved(parsed, modelA, nil)
+	if want := int64(1 + estimate.ImageTokens + 4096); got != want {
 		t.Fatalf("estimate = %d, want %d", got, want)
 	}
 	if len(body) < 1_000_000 || got > 100_000 {

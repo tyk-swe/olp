@@ -4349,19 +4349,27 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt              nullable.Nullable[int]                `json:"attempt,omitempty"`
-	ContextLength        nullable.Nullable[int64]              `json:"context_length,omitempty"`
-	CredentialSlotId     nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
-	Eligible             bool                                  `json:"eligible"`
-	EstimatedInputTokens nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
+	Attempt          nullable.Nullable[int]                `json:"attempt,omitempty"`
+	ContextLength    nullable.Nullable[int64]              `json:"context_length,omitempty"`
+	CredentialSlotId nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
+	Eligible         bool                                  `json:"eligible"`
+
+	// EstimateProvenance How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.
+	EstimateProvenance nullable.Nullable[string] `json:"estimate_provenance,omitempty"`
+
+	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
+	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 
 	// Incompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
 	// Interaction Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification.
-	Interaction           *InteractionInspection          `json:"interaction,omitempty"`
-	MaxOutputTokens       nullable.Nullable[int64]        `json:"max_output_tokens,omitempty"`
-	MetadataObservedAt    nullable.Nullable[time.Time]    `json:"metadata_observed_at,omitempty"`
+	Interaction        *InteractionInspection       `json:"interaction,omitempty"`
+	MaxOutputTokens    nullable.Nullable[int64]     `json:"max_output_tokens,omitempty"`
+	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
+
+	// ModelFamily The family of models that share the tokenizer estimated_input_tokens was counted with: openai-o200k, openai-cl100k, anthropic, gemini or other. Null when the caller supplied the estimate or no request was inspected.
+	ModelFamily           nullable.Nullable[string]       `json:"model_family,omitempty"`
 	Performance           nullable.Nullable[Measurement]  `json:"performance,omitempty"`
 	Price                 nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
 	Priority              int32                           `json:"priority"`
@@ -4532,17 +4540,21 @@ type SimulateRouteRequest struct {
 	ClientContract *string `json:"client_contract,omitempty"`
 
 	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
-	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
+	Dialect *SimulationDialect `json:"dialect,omitempty"`
+
+	// EstimatedInputTokens Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
-	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
-	Mode                 string                   `json:"mode"`
-	Operation            string                   `json:"operation"`
-	Preferences          *RoutingPreferences      `json:"preferences,omitempty"`
+
+	// MaxOutputTokens Reply bound to weigh the context windows by. It replaces the bound the request names.
+	MaxOutputTokens nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
+	Mode            string                   `json:"mode"`
+	Operation       string                   `json:"operation"`
+	Preferences     *RoutingPreferences      `json:"preferences,omitempty"`
 
 	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
 	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
 
-	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated.
+	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
 	Request *map[string]interface{} `json:"request,omitempty"`
 	Seed    string                  `json:"seed"`
 
@@ -4558,7 +4570,7 @@ type SimulationDialect string
 type SimulationOperation struct {
 	Operation *string `json:"operation,omitempty"`
 
-	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract.
+	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
 	Request *map[string]interface{} `json:"request,omitempty"`
 
 	// Route Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported.
@@ -4576,12 +4588,16 @@ type SimulationRequest struct {
 	ClientContract *string `json:"client_contract,omitempty"`
 
 	// Dialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
-	Dialect              *SimulationDialect       `json:"dialect,omitempty"`
+	Dialect *SimulationDialect `json:"dialect,omitempty"`
+
+	// EstimatedInputTokens Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
-	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
-	Mode                 TransportMode            `json:"mode"`
-	Operation            SimulationOperation      `json:"operation"`
-	Preferences          *RoutingPreferences      `json:"preferences,omitempty"`
+
+	// MaxOutputTokens Reply bound to weigh the context windows by. It replaces the bound the request names.
+	MaxOutputTokens nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
+	Mode            TransportMode            `json:"mode"`
+	Operation       SimulationOperation      `json:"operation"`
+	Preferences     *RoutingPreferences      `json:"preferences,omitempty"`
 
 	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
 	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
@@ -4796,13 +4812,22 @@ type UsageBreakdownItem struct {
 	CachedInputTokens       string                    `json:"cached_input_tokens"`
 	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
 	Dimension               string                    `json:"dimension"`
-	EstimatedCost           nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	IncompleteCount         int64                     `json:"incomplete_count"`
-	InputTokens             string                    `json:"input_tokens"`
-	MediaUnits              string                    `json:"media_units"`
-	OutputTokens            string                    `json:"output_tokens"`
-	RequestCount            int64                     `json:"request_count"`
-	UnpricedCount           int64                     `json:"unpriced_count"`
+
+	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
+	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
+	EstimatedCost         nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+
+	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
+	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	IncompleteCount      int64  `json:"incomplete_count"`
+	InputTokens          string `json:"input_tokens"`
+	MediaUnits           string `json:"media_units"`
+	OutputTokens         string `json:"output_tokens"`
+
+	// ReportedInputTokens Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.
+	ReportedInputTokens string `json:"reported_input_tokens"`
+	RequestCount        int64  `json:"request_count"`
+	UnpricedCount       int64  `json:"unpriced_count"`
 }
 
 // UsageBreakdownResponse defines model for UsageBreakdownResponse.
@@ -4834,13 +4859,22 @@ type UsagePointResponse struct {
 	CacheWriteInputTokens   string                    `json:"cache_write_input_tokens"`
 	CachedInputTokens       string                    `json:"cached_input_tokens"`
 	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
-	EstimatedCost           nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	IncompleteCount         int64                     `json:"incomplete_count"`
-	InputTokens             string                    `json:"input_tokens"`
-	MediaUnits              string                    `json:"media_units"`
-	OutputTokens            string                    `json:"output_tokens"`
-	RequestCount            int64                     `json:"request_count"`
-	UnpricedCount           int64                     `json:"unpriced_count"`
+
+	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
+	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
+	EstimatedCost         nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+
+	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
+	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	IncompleteCount      int64  `json:"incomplete_count"`
+	InputTokens          string `json:"input_tokens"`
+	MediaUnits           string `json:"media_units"`
+	OutputTokens         string `json:"output_tokens"`
+
+	// ReportedInputTokens Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.
+	ReportedInputTokens string `json:"reported_input_tokens"`
+	RequestCount        int64  `json:"request_count"`
+	UnpricedCount       int64  `json:"unpriced_count"`
 }
 
 // UsageRangeCoverageResponse defines model for UsageRangeCoverageResponse.
@@ -4852,18 +4886,27 @@ type UsageRangeCoverageResponse struct {
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
 type UsageSummaryResponse struct {
-	CacheWrite1hInputTokens string                                `json:"cache_write_1h_input_tokens"`
-	CacheWrite5mInputTokens string                                `json:"cache_write_5m_input_tokens"`
-	CacheWriteInputTokens   string                                `json:"cache_write_input_tokens"`
-	CachedInputTokens       string                                `json:"cached_input_tokens"`
-	Complete                bool                                  `json:"complete"`
-	Coverage                UsageRangeCoverageResponse            `json:"coverage"`
-	Currency                nullable.Nullable[string]             `json:"currency,omitempty"`
-	EstimatedCost           nullable.Nullable[string]             `json:"estimated_cost,omitempty"`
-	IncompleteCount         int64                                 `json:"incomplete_count"`
-	InputTokens             string                                `json:"input_tokens"`
-	MediaUnits              string                                `json:"media_units"`
-	OutputTokens            string                                `json:"output_tokens"`
+	CacheWrite1hInputTokens string                     `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string                     `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string                     `json:"cache_write_input_tokens"`
+	CachedInputTokens       string                     `json:"cached_input_tokens"`
+	Complete                bool                       `json:"complete"`
+	Coverage                UsageRangeCoverageResponse `json:"coverage"`
+	Currency                nullable.Nullable[string]  `json:"currency,omitempty"`
+
+	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
+	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
+	EstimatedCost         nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+
+	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
+	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	IncompleteCount      int64  `json:"incomplete_count"`
+	InputTokens          string `json:"input_tokens"`
+	MediaUnits           string `json:"media_units"`
+	OutputTokens         string `json:"output_tokens"`
+
+	// ReportedInputTokens Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.
+	ReportedInputTokens     string                                `json:"reported_input_tokens"`
 	RequestCount            int64                                 `json:"request_count"`
 	RequestMetadataConsumer RequestMetadataConsumerStatusResponse `json:"request_metadata_consumer"`
 
@@ -5656,7 +5699,7 @@ type UsageBreakdownParams struct {
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
 
-	// Dimension Break down by route, provider, model, api_key, operation, or attribution (requires attribution_key).
+	// Dimension Break down by route, provider, model, model_family, estimate_provenance, api_key, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt.
 	Dimension string `form:"dimension" json:"dimension"`
 
 	// Limit Maximum number of breakdown rows

@@ -99,6 +99,16 @@ type AttemptFact struct {
 	UsageObserved    bool
 	UsageComplete    bool
 	BillingUncertain bool
+	// EstimateProvenance says how the admission estimate of this attempt's
+	// input was produced: usage.EstimateTokenizer, usage.EstimateCalibrated or
+	// usage.EstimateHeuristic. It is empty when no estimate was made, as for a
+	// stored-response call, a realtime session or a job poll, and
+	// EstimatedInputTokens, the input alone without the allowed output, is
+	// recorded only when it is not. ModelFamily is the tokenizer family of the
+	// attempt's model, recorded whether or not an estimate was.
+	EstimatedInputTokens int64
+	EstimateProvenance   string
+	ModelFamily          string
 }
 
 // recordEvidence records what the attempt proves about upstream billing.

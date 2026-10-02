@@ -576,6 +576,19 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if items := health["items"].([]any); len(items) != 1 || items[0].(map[string]any)["attempt_count"].(float64) < 3 {
 		t.Fatalf("health %v", health)
 	}
+	// Each attempt carries the estimate it was admitted under through the event
+	// stream into storage: the fixture model has no public tokenizer, so its
+	// input is counted by the four-characters rule, and the family and method
+	// say so.
+	var attempts, estimated int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),
+	    count(*) FILTER (WHERE estimate_provenance = 'heuristic' AND model_family = 'other' AND estimated_input_tokens > 0)
+	    FROM olp.attempt_usage_facts`).Scan(&attempts, &estimated); err != nil {
+		t.Fatal(err)
+	}
+	if attempts < 3 || estimated != attempts {
+		t.Fatalf("%d of %d attempts recorded their estimate", estimated, attempts)
+	}
 
 	// Draft edits never change serving traffic until activation.
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)

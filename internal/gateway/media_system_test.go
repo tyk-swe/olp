@@ -485,6 +485,11 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 		env.Attempts[0].ProviderID != f.providerID || !env.Attempts[0].Committed {
 		t.Fatalf("create accounting evidence %+v", env)
 	}
+	// Creating a video reserves a flat charge and reads no prompt, so its attempt
+	// records no estimate, and the family of its model all the same.
+	if a := f.sink.last(t).Attempts[0]; a.EstimateProvenance != "" || a.EstimatedInputTokens != 0 || a.ModelFamily != "other" {
+		t.Fatalf("a video creation recorded %d tokens from %q for %q, want no estimate for the other family", a.EstimatedInputTokens, a.EstimateProvenance, a.ModelFamily)
+	}
 
 	resp = f.call(t, http.MethodGet, "/v1/videos?limit=20&order=desc", "", nil)
 	listed := decodeJSON(t, resp)
@@ -509,6 +514,11 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	got := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK || got["status"] != "completed" {
 		t.Fatalf("get: status %d body %v", resp.StatusCode, got)
+	}
+	// A job poll reads no prompt either, and records the family of the model the
+	// job was created on.
+	if env := f.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].EstimateProvenance != "" || env.Attempts[0].ModelFamily != "other" {
+		t.Fatalf("a job poll recorded %+v, want no estimate for the other family", env.Attempts)
 	}
 
 	resp = f.call(t, http.MethodGet, "/v1/videos/"+videoID+"/content", "", nil)

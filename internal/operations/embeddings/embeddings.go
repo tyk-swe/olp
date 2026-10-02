@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
 
 var identity = oif.Identity{ID: "embeddings", Revision: operations.Revision}
@@ -325,7 +326,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		return r, err
 	}
 	for _, text := range texts {
-		r.estimate += int64((len(text.Value) + 3) / 4)
+		r.estimate += estimate.HeuristicBytesTokens(len(text.Value))
 	}
 	if id == "openai-embeddings" || strings.HasPrefix(id, "tei-") {
 		r.estimate += tokenIDs(input)

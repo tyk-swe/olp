@@ -160,6 +160,19 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		output := milliseconds(*fact.FirstOutput)
 		attempt.Routing.FirstOutputMS = &output
 	}
+	// The estimate is a diagnostic annotation, recorded only when it is whole:
+	// a provenance names how a number was made and there is no number without
+	// one. One the event contract would refuse is left off rather than costing
+	// the request its billing record.
+	var estimated *int64
+	if fact.EstimateProvenance != "" {
+		tokens := max(fact.EstimatedInputTokens, 0)
+		estimated = &tokens
+	}
+	if usage.ValidEstimate(estimated, fact.EstimateProvenance, fact.ModelFamily) {
+		attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily =
+			estimated, fact.EstimateProvenance, fact.ModelFamily
+	}
 	return attempt
 }
 

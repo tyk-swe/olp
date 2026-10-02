@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -106,6 +107,7 @@ type Server struct {
 	admission   *observability.Pool
 	health      *healthTracker
 	now         func() time.Time
+	counted     func(estimate.Family)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -125,6 +127,12 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	}
 	auth := connectors.NewAuth(policy)
 	auth.Signer = cfg.Signer
+	// The tokenizers parse their rank tables on first use, which would land on
+	// the first request that needs one. A table that cannot be read leaves its
+	// family on the heuristic, which says so in every estimate it makes.
+	if err := estimate.Preload(); err != nil {
+		log.Warn("tokenizer unavailable; its models are estimated by the four-characters-per-token rule", "error", err.Error())
+	}
 	return &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
@@ -180,6 +188,9 @@ type request struct {
 	release   *runtime.Release
 	// trace is the request's observability span; a no-op when tracing is off.
 	trace *telemetry.RequestTrace
+	// counted, when set, hears each time the request's prompt is counted for a
+	// model family. Tests use it to see that a family is counted once.
+	counted func(estimate.Family)
 }
 
 // accountingID is the identity durable records are stored under: the request
@@ -206,7 +217,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h.Set("X-Request-Id", id)
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
-	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
+	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -662,10 +673,15 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
 	options := s.selectionOptions(x)
-	options.Parameters, options.TokenDemand = source.parameters, source.demand
+	// A target's context window is weighed against the request as the model that
+	// would serve it counts it, so the demand follows the target.
+	options.Parameters = source.parameters
+	options.Demand = func(_ runtime.Provider, t runtime.Target) *runtime.TokenDemand {
+		return x.sourceDemand(t.ProviderModel)
+	}
 	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
 		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
-			return source.parameters, source.demand
+			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
 		prepared, err := x.preparedProvider(&p, t.ProviderModel)
 		if err != nil {

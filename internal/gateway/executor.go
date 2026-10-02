@@ -97,6 +97,11 @@ type execution struct {
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
 	estimate        int64
+	// sizedInput is the input estimate of a request the gateway reads only the
+	// size of: four bytes to a token over its body, as media, Bedrock invoke and
+	// Gemini interaction requests are reserved. It is nil for every other
+	// request, which is walked, and for lifecycle calls that carry no prompt.
+	sizedInput *int64
 
 	historicalSnapshot *runtime.Snapshot
 	responseContract   *storedResponseContract
@@ -316,9 +321,7 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
-		estimate: func(provider *runtime.Provider) int64 {
-			return x.providerEstimate(provider)
-		},
+		estimate: x.attemptReservation,
 		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, ordinal)
 		},
@@ -449,6 +452,7 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		Mode:               x.mode,
 		StartedAt:          s.now(),
 	}
+	x.recordEstimate(&fact, a)
 	if slot.CredentialID != nil {
 		fact.CredentialID = *slot.CredentialID
 	}

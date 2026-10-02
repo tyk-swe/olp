@@ -83,3 +83,38 @@ func TestDecisionsExposeDemandAndObservedLimits(t *testing.T) {
 		t.Fatalf("undeclared facts must stay nil: %+v", unknown)
 	}
 }
+
+// TestDemandIsWeighedPerTarget lets a request count differently on each model:
+// the same prompt fits one target's window and not another's, and each
+// decision records the demand its own target was weighed by.
+func TestDemandIsWeighedPerTarget(t *testing.T) {
+	s, slug, ids := planningFixture()
+	withMetadata(&s, ids[0], "wire-model", ModelMetadata{ContextLength: ptr(int64(100))})
+	withMetadata(&s, ids[1], "wire-model", ModelMetadata{ContextLength: ptr(int64(100))})
+
+	weighed := map[string]int{}
+	plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{
+		// A per-target demand stands in for the request-wide one.
+		TokenDemand: &TokenDemand{EstimatedInputTokens: 1},
+		Demand: func(p Provider, _ Target) *TokenDemand {
+			weighed[p.ID]++
+			if p.ID == ids[0] {
+				return &TokenDemand{EstimatedInputTokens: 150}
+			}
+			return &TokenDemand{EstimatedInputTokens: 40, MaxOutputTokens: ptr(int64(10))}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := decisionsByProvider(plan, ids)
+	if d := decisions[ids[0]]; d.Eligible || d.Reason == nil || *d.Reason != "context_length_exceeded" || d.EstimatedInputTokens == nil || *d.EstimatedInputTokens != 150 {
+		t.Fatalf("the target the demand does not fit: %+v", d)
+	}
+	if d := decisions[ids[1]]; !d.Eligible || d.EstimatedInputTokens == nil || *d.EstimatedInputTokens != 40 || d.RequestedOutputTokens == nil || *d.RequestedOutputTokens != 10 {
+		t.Fatalf("the target it fits: %+v", d)
+	}
+	if weighed[ids[0]] != 1 || weighed[ids[1]] != 1 {
+		t.Fatalf("demand asked %v times, want once for each target", weighed)
+	}
+}

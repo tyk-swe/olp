@@ -362,6 +362,17 @@ The route editor's dry run and playground use the execution selection engine.
 `POST /api/v1/routing/simulate` accepts a canonical operation, surface, mode,
 preferences, optional API-key ID, and seed. It returns exclusions even when
 nothing is eligible, attempt order, slot IDs, prices, and measurement freshness.
+When the simulation carries a native request, each decision also reports the
+input tokens that request has on the target's model, how they were counted
+(`estimate_provenance`: `tokenizer`, `calibrated` or `heuristic`), and the model
+family (`model_family`). That is the input estimate [planning](gateway.md#how-the-prompt-is-estimated)
+uses for the target, and each target's context window is checked against it.
+Where a target is sent a request of its own, as a strict contract prepares it,
+the count is of that request; admission's reservation also adds the reply bound
+and takes the larger of the caller's request and the provider's, which a
+simulation does not. An `estimated_input_tokens` the caller supplies stands for
+every target instead, with no provenance, and a `max_output_tokens` replaces the
+reply bound the request names.
 The playground accepts the same preferences in its `routing` field and shows the
 resulting decision. Runtime health and available capacity can change between a
 preview and a dispatch.

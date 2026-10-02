@@ -86,9 +86,10 @@
       aria-describedby="simulation-request-help"></textarea>
     <small id="simulation-request-help">
       Optional. An empty field checks target eligibility only. Paste a native
-      request naming this route to inspect the exact prepared plan. Content
-      stays in this browser and is redacted from the result. No inference is
-      sent and no job or tool is run.
+      request naming this route to inspect the exact prepared plan; it is also
+      counted for each target's model, and each context window is checked
+      against that count. Content stays in this browser and is redacted from the
+      result. No inference is sent and no job or tool is run.
     </small>
     <button
       class="button button-secondary"

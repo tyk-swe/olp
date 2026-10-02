@@ -141,6 +141,28 @@ the final browser stages were rerun separately after fixing their helpers.
 Deadline and cancellation tests additionally passed ten race-enabled repeats,
 and the concurrent log-budget fixture passed 100 repeats.
 
+## Token oracle fixtures
+
+`fixtures/tokens/` holds the ground truth for the token estimator in
+`internal/operations/tokenization/estimate`: the token ids OpenAI's reference
+`tiktoken` produces for English prose, code, JSON and tool definitions,
+multilingual text, identifiers, digits, whitespace, special-token text, long
+unbroken runs, a 50 KB document and 320 seeded fuzz strings, for `o200k_base`
+and `cl100k_base`, plus chat-message counts by the OpenAI Cookbook formula.
+`TestOracleFixtures` requires every id to match, and the framing test the
+cookbook counts.
+
+`generate.py` is the only thing that writes them. `tiktoken` is pinned in
+`pyproject.toml` and `uv.lock`, and the script serves it the rank bytes embedded
+in the estimator, after checking them against the hashes tiktoken pins, so that
+the oracle and the estimator cannot disagree about the data. It runs offline and
+is deterministic, so a clean rerun leaves no diff:
+
+```sh
+uv sync --project tests/fixtures/tokens --frozen
+uv run --project tests/fixtures/tokens --frozen python tests/fixtures/tokens/generate.py
+```
+
 ## SDK and live-provider tests
 
 ```sh

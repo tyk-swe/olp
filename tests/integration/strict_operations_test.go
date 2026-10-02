@@ -433,6 +433,11 @@ func TestStrictClassificationAndNativeCountPublic(t *testing.T) {
 			if len(envelope.Attempts) != 1 || envelope.Attempts[0].Interaction == nil || envelope.Operation != test.operation || envelope.Usage != nil {
 				t.Fatalf("native counts/scores entered generation usage: %+v", envelope)
 			}
+			// A native operation is estimated from the size of its document, whatever
+			// model it is sent to, and says so.
+			if a := envelope.Attempts[0]; a.EstimateProvenance != "heuristic" || a.EstimatedInputTokens <= 0 || a.ModelFamily != "other" {
+				t.Fatalf("native operation recorded %d tokens from %q for %q", a.EstimatedInputTokens, a.EstimateProvenance, a.ModelFamily)
+			}
 		})
 	}
 }

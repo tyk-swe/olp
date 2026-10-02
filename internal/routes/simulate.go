@@ -14,7 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -52,6 +54,75 @@ func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
 		demand.EstimatedInputTokens = *estimated
 	}
 	return demand, nil
+}
+
+// simulatedDemand is the token demand a simulation weighs each target's context
+// window against. The caller's own estimate is one number for every target.
+// Without one, and with a request to read, each target is weighed by the count
+// of its own model, the input estimate the gateway's planning uses for that
+// target; it is recorded by target, so the decision can say how it was made. A
+// reply bound the caller names replaces the one the request names, whatever
+// supplies the input.
+type simulatedDemand struct {
+	fixed     *runtime.TokenDemand
+	prompt    *estimate.Prompt
+	output    *int64
+	estimates map[string]estimate.Estimate
+}
+
+func newSimulatedDemand(parsed *openai.Request, input simulationInput, fixed *runtime.TokenDemand) *simulatedDemand {
+	d := &simulatedDemand{fixed: fixed, output: input.MaxOutputTokens}
+	if parsed != nil && input.EstimatedInputTokens == nil {
+		d.prompt, d.estimates = estimate.Walk(parsed), map[string]estimate.Estimate{}
+	}
+	return d
+}
+
+// outputBound is the reply bound a target's own request is weighed by: the one
+// the caller named for the simulation, or else the one the request carries.
+func (d *simulatedDemand) outputBound(request *openai.Request) *int64 {
+	if d.output != nil {
+		return d.output
+	}
+	return runtime.EffectiveOutputLimit(request)
+}
+
+// sourceDemand is the planner's per-target demand, or nil when the caller's
+// number stands for every target.
+func (d *simulatedDemand) sourceDemand() func(runtime.Provider, runtime.Target) *runtime.TokenDemand {
+	if d.prompt == nil {
+		return nil
+	}
+	return func(_ runtime.Provider, target runtime.Target) *runtime.TokenDemand { return d.source(target) }
+}
+
+// source is the demand of the caller's request on a target's model.
+func (d *simulatedDemand) source(target runtime.Target) *runtime.TokenDemand {
+	if d.prompt == nil {
+		return d.fixed
+	}
+	return d.measure(target, d.prompt)
+}
+
+// prepared is the demand once the target has its own request, as a strict
+// contract prepares it: that request's input, counted for the target's model.
+func (d *simulatedDemand) prepared(target runtime.Target, request *openai.Request) *runtime.TokenDemand {
+	if d.prompt == nil {
+		return d.fixed
+	}
+	prompt := estimate.Walk(request)
+	prompt.Follow(d.prompt)
+	return d.measure(target, prompt)
+}
+
+func (d *simulatedDemand) measure(target runtime.Target, prompt *estimate.Prompt) *runtime.TokenDemand {
+	e := prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
+	d.estimates[target.ID] = e
+	demand := &runtime.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	if d.output != nil {
+		demand.MaxOutputTokens = d.output
+	}
+	return demand
 }
 
 func validTuple(operation, surface, mode string) error {
@@ -266,6 +337,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	inspection := simulationInput{
 		Operation: operation, Surface: input.Surface, Mode: input.Mode, Seed: input.Seed,
 		Preferences: input.Preferences, Request: input.Operation["request"],
+		EstimatedInputTokens: input.EstimatedInputTokens, MaxOutputTokens: input.MaxOutputTokens,
 		Dialect: input.Dialect, ClientContract: input.ClientContract,
 		SemanticHeaders: input.SemanticHeaders, QuerySettings: input.QuerySettings,
 	}
@@ -294,7 +366,8 @@ func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, inpu
 			return nil, err
 		}
 	}
-	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
+	counted := newSimulatedDemand(parsed, input, demand)
+	accept, effective, inspections := inspectionAccept(route, parsed, context, counted)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
 	}
@@ -302,7 +375,7 @@ func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, inpu
 		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
 	}
 	options := runtime.SelectionOptions{
-		KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand,
+		KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
 		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
 		Accept: accept, Effective: effective,
 	}
@@ -319,7 +392,7 @@ func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, inpu
 		return nil, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
-	return inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections), nil
+	return inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates), nil
 }
 
 // Register mounts the route surface.

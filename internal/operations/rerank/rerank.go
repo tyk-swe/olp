@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
 
 var identity = oif.Identity{ID: "rerank", Revision: operations.Revision}
@@ -131,9 +132,9 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		if doc.Kind() != oif.String && (id != "rerank" || doc.Kind() != oif.Object) {
 			return r, operations.Invalid(name, "This dialect cannot execute the requested document representation.")
 		}
-		r.estimate += int64((len(doc.Raw()) + 3) / 4)
+		r.estimate += estimate.HeuristicBytesTokens(len(doc.Raw()))
 	}
-	r.estimate += int64((len(operations.String(operations.Member(root, "query"))) + 3) / 4)
+	r.estimate += estimate.HeuristicBytesTokens(len(operations.String(operations.Member(root, "query"))))
 	topName := "top_n"
 	returnName := "return_documents"
 	if id == "voyage-rerank" {

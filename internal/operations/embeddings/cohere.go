@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
 
 var cohereInputTypes = []string{"search_document", "search_query", "classification", "clustering", "image"}
@@ -196,14 +197,14 @@ func liftCohereRequest(source oif.Request) (Request, error) {
 			if item.Kind() != oif.String {
 				return r, operations.Invalid("texts", "Native text inputs must be strings.")
 			}
-			r.estimate += int64((len(operations.String(item)) + 3) / 4)
+			r.estimate += estimate.HeuristicBytesTokens(len(operations.String(item)))
 		case operations.Member(root, "images").Kind() != oif.Absent:
 			n, err := cohereImage(item)
 			if err != nil {
 				return r, err
 			}
 			imageBytes += n
-			r.estimate += 2000
+			r.estimate += estimate.MediaTokens
 		default:
 			content := operations.Member(item, "content")
 			if item.Kind() != oif.Object || content.Kind() != oif.Array || len(content.Elements()) == 0 {
@@ -216,14 +217,14 @@ func liftCohereRequest(source oif.Request) (Request, error) {
 					if text.Kind() != oif.String {
 						return r, operations.Invalid("inputs", "Native text content requires a string.")
 					}
-					r.estimate += int64((len(operations.String(text)) + 3) / 4)
+					r.estimate += estimate.HeuristicBytesTokens(len(operations.String(text)))
 				case "image_url":
 					n, err := cohereImage(operations.Member(operations.Member(part, "image_url"), "url"))
 					if err != nil {
 						return r, err
 					}
 					imageBytes += n
-					r.estimate += 2000
+					r.estimate += estimate.MediaTokens
 				default:
 					return r, operations.Invalid("inputs", "Native content must be text or an original image URL part.")
 				}

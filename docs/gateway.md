@@ -260,16 +260,98 @@ configured quota is skipped rather than used unmetered.
 
 A request is admitted once it is authenticated, parsed, and routed, and before
 any provider is called. The gateway estimates the tokens the request may use —
-text at four characters per token across messages, tool calls, and tool schemas,
-a flat charge per inline image or media part, plus the largest reply the caller
-allowed (`max_completion_tokens`, `max_tokens`, or `max_output_tokens`, 4096 by
-default, times `n`) — for every attempt the request permits, and reserves the
-key's requests-per-minute, tokens-per-minute, and concurrency windows and its
-cost budgets together. The lease is sized by the route's overall deadline; it is
-the backstop for a replica that dies mid-request, not the request deadline. An
-estimate larger than the key's tokens-per-minute limit is refused immediately
-with `400 request_exceeds_token_limit` rather than sent to retry into a window
-it can never fit.
+its prompt, plus the largest reply the caller allowed (`max_completion_tokens`,
+`max_tokens`, or `max_output_tokens`, 4096 by default, times `n`) — for every
+attempt the request permits, and reserves the key's requests-per-minute,
+tokens-per-minute, and concurrency windows and its cost budgets together. The
+lease is sized by the route's overall deadline; it is the backstop for a replica
+that dies mid-request, not the request deadline. An estimate larger than the
+key's tokens-per-minute limit is refused immediately with
+`400 request_exceeds_token_limit` rather than sent to retry into a window it can
+never fit.
+
+### How the prompt is estimated
+
+The request is walked once into its text and its media parts: message content,
+tool calls and their results, the names and arguments a call travels with, and
+every tool schema, in any of the client dialects. Each inline image costs a flat
+1,000 tokens and each audio or file part 2,000, whatever the bytes the part
+carries. The same walk serves every target. It keeps the first 36 KiB of the
+text and only the size of the rest, which is all a count reads, so a request of
+megabytes is not held twice while its upstream answers. What the text costs
+depends on the model that will read it, and the gateway counts it for the
+upstream model of each target, once for each family, however many attempts,
+credential slots or translated targets use that family. A route that fails over
+from an OpenAI model to a Claude model counts the prompt twice, once for each
+family, and a request in the Anthropic dialect sent to an OpenAI target is
+counted by OpenAI's tokenizer, because the family follows the target model and
+not the client's dialect.
+
+| Family | Models | Counted by | Provenance |
+| --- | --- | --- | --- |
+| `openai-o200k` | GPT-4o, GPT-4.1, GPT-5, o-series, gpt-oss | OpenAI's `o200k_base` byte-pair encoding | `tokenizer` |
+| `openai-cl100k` | GPT-4, GPT-3.5 Turbo, `text-embedding-3` | OpenAI's `cl100k_base` encoding | `tokenizer` |
+| `anthropic` | Claude, including Bedrock and Vertex names | four characters per token | `heuristic` |
+| `gemini` | Gemini | four characters per token | `heuristic` |
+| `other` | everything the registry does not recognize | four characters per token | `heuristic` |
+
+The OpenAI encodings are in the binary, and their counts match OpenAI's own
+`tiktoken` token for token. A model name decides the family by OpenAI's own
+rules (an exact name or a prefix, with a provider path, a `ft:` prefix or a
+`:` variant removed); a name that does not say, such as an Azure deployment
+name, is never assumed to be an OpenAI model, because a wrong tokenizer
+miscounts without saying so. OpenAI chat models also read each message's role,
+three tokens of framing around each message, one more for a name, and three that
+prime the reply; these are the figures of the OpenAI Cookbook, and an OpenAI
+count includes them. A request in another dialect is framed by what that dialect
+calls a message: each entry of the Anthropic, Bedrock or Gemini conversation,
+and each system prompt, and the instructions of a Responses request. The other
+families charge text only, four characters per
+token with every field rounded up, and that charge is scaled by a per-family
+factor that is 1 until the [reference catalog](roadmap/m02-provider-catalog.md)
+carries measured ones.
+
+Each estimate carries its provenance. `tokenizer` is an exact count of the text
+and of the message framing OpenAI documents, for a prompt that is nothing else.
+`calibrated` is a count that is partly a ratio or a guess. A prompt past 32 KiB
+of text is counted exactly up to that point and the rest is charged at the
+tokens per byte the exact part measured, which keeps a 100,000-token prompt from
+costing milliseconds of CPU on every request; the ratio is within a quarter of a
+percent for a prompt of one kind of text, and can be tens of percent off when
+the first 32 KiB is unlike the rest, such as a short instruction ahead of a long
+document in another script. A count that charged an image or media part at a
+flat rate is calibrated, because the flat rate is a guess next to an exact count
+of the text, and so is the count of a request with a tool catalogue or tool
+calls, which a model reads in a rendering of its own that no provider documents.
+`heuristic` is the four-characters rule. It is also the count of a long prompt
+whose tail came after less than 4 KiB of exact text, too little to measure a
+ratio from, and is charged at four bytes to a token. Requests that reach an upstream through a native
+operation contract (the embeddings, rerank, classification and token-counting
+endpoints of a strict route), and Bedrock invoke, Gemini interaction creation
+and JSON media requests (speech and image generation), are estimated from the
+size of their documents, four bytes to a token, and are always `heuristic`.
+Stored-response lifecycle calls, realtime sessions, job polls, multipart media
+uploads (image edits and variations, transcription and translation) and video
+creation read no prompt, or reserve a flat charge, and record no estimate; their
+attempts still record the family of their model.
+
+Planning uses the same counts. A target whose context window cannot hold the
+estimate is excluded before any provider is called, and each target is weighed
+by the count of its own model: a prompt that is a hundred tokens to the
+four-characters rule may be three hundred to an OpenAI tokenizer, and the target
+that serves it is chosen by the second figure. Where a target is sent a request
+of its own, because a provider profile, a strict contract or a content policy
+rewrote it, the estimate is the larger of the caller's request and that one, each
+counted for the target's family, and the input the attempt records is the larger
+of the two with the less trustworthy provenance of the two counts. A request that
+reads the same as the caller's is not counted again.
+
+Every attempt records the estimate it was admitted under: the input alone, not
+the reply the reservation also holds, its provenance, and the model family. The
+[usage reports](operations.md#accounting-delivery-and-shutdown) compare the estimate with the
+input the provider reported, by route and by model family, and
+[route simulation](provider-routing.md#explain-and-observe) shows it for each
+target.
 
 Each attempt then reserves the provider connection quota and the credential slot
 quota, with concurrency leases covering the remaining overall route deadline. An

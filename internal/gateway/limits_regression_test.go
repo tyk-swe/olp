@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -25,7 +26,7 @@ func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 			`{"max_tokens":100}`, 7},
 		{"explicit null opts out of default", openai.FamilyChat,
 			`{"model":"m","messages":[{"role":"user","content":""}],"max_tokens":null}`,
-			`{"max_completion_tokens":100}`, defaultOutputTokens},
+			`{"max_completion_tokens":100}`, estimate.DefaultOutputTokens},
 		{"responses instructions", openai.FamilyResponses,
 			`{"model":"m","input":"abcd","instructions":"abcdefgh","max_output_tokens":7}`,
 			`{}`, 10},
@@ -34,7 +35,7 @@ func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 			`{"instructions":"abcdefgh","max_output_tokens":7}`, 10},
 		{"null output is not one token", openai.FamilyResponses,
 			`{"model":"m","input":"abcd","max_output_tokens":null}`,
-			`{}`, 1 + defaultOutputTokens},
+			`{}`, 1 + estimate.DefaultOutputTokens},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := openai.Parse(tc.family, []byte(tc.body))
@@ -48,7 +49,7 @@ func TestEstimateUsesTheEffectiveProviderRequest(t *testing.T) {
 			if _, err := parsed.Encode("upstream", defaults); err != nil {
 				t.Fatal(err)
 			}
-			if got := estimateTokens(parsed, defaults); got != tc.want {
+			if got := reserved(parsed, modelA, defaults); got != tc.want {
 				t.Fatalf("estimate = %d, want %d", got, tc.want)
 			}
 		})
@@ -101,7 +102,7 @@ func TestPreparedRoutingKeepsTargetDefaultsDistinctThroughReservation(t *testing
 		}}}},
 		attempts: []runtime.Attempt{{ProviderID: first.ID, UpstreamModel: modelA}, {ProviderID: second.ID, UpstreamModel: modelA}},
 	}
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		provider *runtime.Provider
 		bound    int64
 	}{
@@ -114,7 +115,7 @@ func TestPreparedRoutingKeepsTargetDefaultsDistinctThroughReservation(t *testing
 		if prepared.demand.MaxOutputTokens == nil || *prepared.demand.MaxOutputTokens != tc.bound {
 			t.Fatalf("provider %s routing bound = %v, want %d", tc.provider.ID, prepared.demand.MaxOutputTokens, tc.bound)
 		}
-		if got := x.providerEstimate(tc.provider); got != tc.bound+1 {
+		if got := x.attemptReservation(x.attempts[i], tc.provider); got != tc.bound+1 {
 			t.Fatalf("provider %s reservation = %d, want %d", tc.provider.ID, got, tc.bound+1)
 		}
 	}

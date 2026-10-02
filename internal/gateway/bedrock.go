@@ -128,7 +128,8 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	// Bedrock inference is metered like any other generation: the request
 	// size bounds the reservation and the reported usage settles it.
-	x.estimate = max(resourceEstimate, int64(len(body))/4)
+	sized := int64(len(body)) / 4
+	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
 	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *runtime.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})

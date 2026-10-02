@@ -74,7 +74,12 @@ API-generation tools, GLIDE's native archive and native notices are inventoried
 separately. `scripts/check-dependencies.sh` checks reachable Go vulnerabilities,
 licenses and production JavaScript packages. Candidate image qualification also
 scans runtime/build-stage SBOMs and retains the native linking/license
-inventory.
+inventory. The token estimator embeds OpenAI's public `o200k_base` and
+`cl100k_base` rank files as data; their MIT notice is pinned beside them, ships
+in the image, and the tests check the embedded data against the SHA-256 that
+tiktoken publishes for each file. The pinned tiktoken that generates the
+estimator's oracle fixtures is a test-only Python dependency under
+`tests/fixtures/tokens`.
 
 TypeScript stays on the newest 6.0 patch. The
 [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/)
