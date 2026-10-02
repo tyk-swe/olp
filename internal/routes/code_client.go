@@ -85,7 +85,7 @@ func CodexClientConfiguration(route codemode.Route, gatewayURL, model string) (c
 	}
 	out.Configuration = fmt.Sprintf(`# Codex %s. Save as $CODEX_HOME/config.toml (default: ~/.codex/config.toml).
 # Set OLP_API_KEY to your OLP inference key. No OpenAI login or upstream token is needed.
-# Use --model with a native model allowed by this route.
+# To select another model, regenerate with model=... so the WebSocket hint agrees.
 model_provider = "olp"
 model = %s
 
@@ -96,8 +96,7 @@ env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = true
-request_max_retries = 0
-stream_max_retries = 0
-`, codexauth.ClientVersion, strconv.Quote(model), strconv.Quote(out.BaseURL))
+http_headers = { "X-OLP-Code-Model" = %s }
+`, codexauth.ClientVersion, strconv.Quote(model), strconv.Quote(out.BaseURL), strconv.Quote(model))
 	return out, nil
 }

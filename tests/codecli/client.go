@@ -48,8 +48,6 @@ env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = %t
-request_max_retries = 0
-stream_max_retries = 0
 stream_idle_timeout_ms = 5000
 `, Model, baseURL, websocket)
 	if err := os.WriteFile(filepath.Join(c.Home, "config.toml"), []byte(config), 0600); err != nil {
