@@ -25,11 +25,7 @@ type CodeLedger interface {
 // it only when an implementation is supplied; no inference is simulated here.
 type CodeTransport interface{ RegisterCode(*http.ServeMux, *Server) }
 
-// CodeAuthorization contains only the qualified adapter's upstream auth headers.
-type CodeAuthorization struct {
-	Headers   http.Header
-	Principal string
-}
+type CodeAuthorization = codemode.Authorization
 
 type CodeAuthorizer interface {
 	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (CodeAuthorization, error)

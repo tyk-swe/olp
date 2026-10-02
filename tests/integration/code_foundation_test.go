@@ -333,7 +333,8 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	if err := json.Unmarshal(document, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.CodeRoutes["coding"].RevisionID != f.route.RevisionID || snapshot.CodeConnections[f.provider].Endpoint != "https://fixture.invalid" {
+	connection, ok := snapshot.CodeConnection(f.route, f.provider)
+	if !ok || snapshot.CodeRoutes["coding"].RevisionID != f.route.RevisionID || connection.Endpoint != "https://fixture.invalid" {
 		t.Fatal("code publication missing")
 	}
 	before, err := snapshot.Digest()
@@ -346,6 +347,20 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	after, err := snapshot.Digest()
 	if err != nil || before == after {
 		t.Fatal("code policy missing from digest")
+	}
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{endpoint}','"https://unpublished.invalid"') WHERE id=$1`, f.provider)
+	tx, err := f.h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := runtime.Compile(t.Context(), tx)
+	_ = tx.Rollback(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, ok = compiled.CodeConnection(f.route, f.provider)
+	if !ok || connection.Endpoint != "https://fixture.invalid" {
+		t.Fatal("provider draft leaked into code runtime")
 	}
 	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{"project_id": f.project, "slug": "coding", "pool_id": f.pool, "models": []string{"native-model"}, "enabled": false}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
 	if _, err = f.store.Admit(t.Context(), f.input("still-published", "", nil)); err != nil {
