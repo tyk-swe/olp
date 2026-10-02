@@ -1,0 +1,28 @@
+{
+  "evidence_class": "controlled-fixture-only",
+  "client": "official OpenAI Codex CLI",
+  "version": "0.153.2",
+  "source_tag": "rust-v0.153.2",
+  "source_commit": "657a993cbee87acf52d14b758ce49dbd46d1b8eb",
+  "source_repository": "https://github.com/openai/codex",
+  "configuration_reference": "https://developers.openai.com/codex/config-reference",
+  "packages": {
+    "linux-x64": {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.153.2-linux-x64.tgz",
+      "integrity": "sha512-CPUPhFmykKRdIcgwiOfKvFKHBP62dPfaiP+pzQ2bVNAfLTW+i0Kasd7hQryoxZUmTPvw0h9HyM2NgsnQ9AJlTw=="
+    },
+    "linux-arm64": {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.153.2-linux-arm64.tgz",
+      "integrity": "sha512-QDkOdJzIdMGaOCViY2dqGqr8WhQv81WfmJkAghC3doFedsOfHt87RuAO4yFN7m0FSR3y5UsScSDUT4zOCcmEVA=="
+    }
+  },
+  "native_model": "gpt-5.4",
+  "subscription_account_qualified": false,
+  "hard_token_bound_qualified": false,
+  "notes": [
+    "No live subscription credential is used by these fixtures.",
+    "gpt-5.4 is a native client model identifier, not an account entitlement claim.",
+    "The client generates real request bytes; the fixture generates synthetic Responses events.",
+    "Generic reference-plugin enrollment exercises management, not Codex account authorization."
+  ]
+}
