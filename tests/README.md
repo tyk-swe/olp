@@ -23,6 +23,34 @@ behavior. Component tests use jsdom and browser exports.
 
 ## Focused runs
 
+### Code-mode qualification
+
+`./scripts/code-mode-qualification.sh cli` installs the exact-integrity official
+Codex 0.153.2 package and runs controlled HTTP/SSE and WebSocket journeys without
+a provider account. It passes only an OLP fixture key into an isolated client
+home; local tool execution, continuation/resume and cancellation are exercised
+by the real CLI. The fixtures are not live subscription qualification.
+
+With integration PostgreSQL configured, public management checks run with:
+
+```sh
+go test -race -tags=integration -count=1 -timeout=5m -v \
+  -run '^TestCodeQualificationPublic' ./tests/integration
+```
+
+After the supported transport/authorizer and Codex enrollment fixture are
+integrated, `./scripts/code-mode-qualification.sh process` runs the real gateway
+fleet suite. It requires `OLP_TEST_DATABASE_URL`, `OLP_TEST_VALKEY_URL` and
+`OLP_TEST_BINARY`; missing prerequisites fail rather than skip. It uses the
+additional `codecli` build tag. `all` runs both CLI and process suites.
+
+See [qualification evidence and integration prerequisites](../docs/qualification/code-mode.md)
+for the exact upstream source/package pins and unrun release gates. The foundation
+alone returns 404 at the code transport seam; a successful compile is not a
+passing fleet test. These shell suites do not run browser tests.
+
+### Other focused suites
+
 Run individual suites or pass runner arguments through Make:
 
 ```sh
