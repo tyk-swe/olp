@@ -159,7 +159,7 @@ the response has been flushed.
 | 408 | `request_timeout` | Request body not received within 15 seconds. |
 | 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
 | 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
-| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted; or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
+| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
@@ -360,8 +360,9 @@ rejected slot refunds the connection reservation it already took, the attempt is
 recorded as a rate-limit failure with its `Retry-After`, and failover continues
 to the next target. When a request ends, a reservation that dispatched nothing
 is refunded in full; otherwise the token reservation is reconciled against the
-usage the upstream reported and the concurrency lease is released. Settlement
-ignores client cancellation, so a caller that hangs up still returns its slot.
+usage the upstream reported, the concurrency lease is released, and the cost
+reservation becomes the cost incurred. Settlement ignores client cancellation, so
+a caller that hangs up still returns its slot.
 
 Credential failures record a version-scoped cooldown in Valkey; rate limits
 record a logical-slot cooldown that survives rotation. Shared cooldown state is
@@ -371,10 +372,83 @@ shared cooldown is treated as absent.
 
 Cost budgets compare attributed spend with daily/monthly thresholds, using UTC
 windows and exact decimals. A request must satisfy both its key and any assigned
-budget group. Concurrent accepted work can exceed a threshold; unpriced attempts
-accrue zero. Exhaustion returns `429 budget_exhausted`. Missing, malformed, or
+budget group. Exhaustion returns `429 budget_exhausted`; so does a budget with room
+left that cannot hold the request's estimate beside what is spent and in flight,
+and its message says which it was. Missing, malformed, or
 wrong-window snapshots return `503 distributed_limits_unavailable` until
 [authoritative initialization](operations.md#spend-budget-reconciliation) completes.
+
+### Cost reservation
+
+A budget is measured against the spend already accrued and also against what
+requests in flight may still spend, so a burst cannot all be admitted against
+the same unspent balance. A priced request reserves an estimate of its cost in the
+same Valkey call that checks the balance, and is admitted only if the accrued
+spend, plus what other requests hold, plus its own estimate, fits every window
+the key and its group have. A request that exactly fills a window is admitted.
+A rejection reserves nothing. It keeps the code `budget_exhausted` in both
+cases, but only a budget whose accrued spend has reached its limit is called
+exhausted. When the budget has room and the request's estimate does not fit
+beside the spend and the requests in flight, the message says so and names what
+helps (a lower `max_tokens`, waiting for requests in flight, or a larger
+budget); `Retry-After` is one second when waiting can admit the request, and the
+end of the window when nothing short of a larger budget can.
+
+The estimate is the most one request could cost across the attempts it may
+dispatch, priced from the gateway's pinned price list, the revision accounting
+pins the request to. Input is charged at the highest input-side rate the price
+has, whether input, cached input or any cache write, because nothing says
+beforehand whether the provider will read or write its cache. The reply is
+charged at the output rate for the tokens the request allows, which is
+4,096 when it names no bound, times the candidates it asks for. Each division by a
+million rounds up. When a route can fail over, the estimate is the dearest
+attempt, not their sum, and settlement corrects a request that is billed more than
+once.
+
+A request that ends replaces its estimate with the cost of the attempts that
+reported usage, priced exactly as accounting will price them; one that was never
+dispatched, or whose upstream reported nothing, releases it. When accounting
+records the request, it installs the spend and removes the reservation in one
+step, so the budget never counts a request twice, and delivering the same event
+again removes nothing more. Settlement ignores client cancellation, as the other
+reservations do. Replacing the estimate with a cost is a single attempt that
+gives up after 100 milliseconds, because losing it only leaves the estimate for
+accounting or the lapse to remove; giving an estimate back, for a request that
+was never dispatched or whose cost is nothing, is retried like every other
+release, since no spend is coming to remove it. A reservation that nothing
+removes, because its event was lost or accounting stalled, lapses at the route
+deadline plus five minutes, after which the budget counts accrued spend alone
+again. Lapsed reservations are retired as later reservations and settlements
+find them, a bounded page at a time, so that a backlog left by a long stall
+cannot hold Valkey while it is cleared: until a backlog has been worked through,
+what is left of it still counts, which can hold a budget back for a short while
+and never lets it overspend.
+
+Reservations are advisory and derived. The accrued balance is the authority and
+fails closed; a damaged reservation, including one whose two keys no longer
+agree because only one of them was deleted or evicted, is discarded rather than
+allowed to block accounting, and deleting the reservation keys loses only the
+protection for requests in flight. They live beside the balances, in `cost:pending` and
+`cost:expiry` ([Valkey keys](operations.md#shared-state-in-valkey)).
+
+What is not reserved, and is judged on accrued spend alone: an attempt whose
+model has no price, or a price without a rate the request needs; any request
+while the gateway's price list is more than a minute old; and media, audio and
+video requests, realtime sessions, Gemini Live and Interactions, Bedrock invoke
+and stored-response lifecycle calls, whose cost is not known before they run. A
+background response is reserved while its creating request runs and released when
+it returns; its spend counts when its final usage arrives. The reservation is
+therefore not an invoice cap. Overspend remains possible from token counts that
+are heuristic for a family without a public tokenizer, failover that bills more
+than once, accounting that lags beyond the lapse above, unpriced spend, and every
+request that reserves nothing.
+
+Because reserved cost counts, a key can be refused while its spend reads below its
+limit, and a small budget on an expensive model can be refused at zero spend
+when the request names no `max_tokens`: the default reply alone may cost more than
+the budget. A refusal for in-flight reservations carries `Retry-After: 1`; one
+for a request that could not fit even alone carries the time until the window
+ends, though no wait will admit it, so bound the reply or raise the budget.
 
 When Valkey is configured but unreachable, `limits.valkey_unavailable` controls
 rate/concurrency-only keys: `fail_closed` returns

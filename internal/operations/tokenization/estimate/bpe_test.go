@@ -234,19 +234,24 @@ func TestTokensConcatenateToInput(t *testing.T) {
 	}
 }
 
-// fastest is the shortest of several runs of Count over text, which leaves out
-// the time a busy machine took from the others.
-func fastest(t *testing.T, e *Encoding, text string) time.Duration {
+// fastestPair is the shortest of several runs of Count over each of two texts,
+// run alternately so that a spike of load on a shared machine lands on both of
+// them and not on one, and leaves out the time it took from either.
+func fastestPair(t *testing.T, e *Encoding, small, large string) (time.Duration, time.Duration) {
 	t.Helper()
-	best := time.Duration(math.MaxInt64)
-	for range 5 {
+	fastest := func(text string, best *time.Duration) {
 		start := time.Now()
 		if _, err := e.Count(text); err != nil {
 			t.Fatal(err)
 		}
-		best = min(best, time.Since(start))
+		*best = min(*best, time.Since(start))
 	}
-	return best
+	bestSmall, bestLarge := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+	for range 5 {
+		fastest(small, &bestSmall)
+		fastest(large, &bestLarge)
+	}
+	return bestSmall, bestLarge
 }
 
 // TestLongRunsAreNotQuadratic is the reason for the heap: one unbroken piece
@@ -254,11 +259,14 @@ func fastest(t *testing.T, e *Encoding, text string) time.Duration {
 // How long a count takes says nothing across machines, or under the race
 // detector, so a piece is timed against one an eighth of its size. An eighth of
 // the size is an eighth of the time, a little more for the heap, and sixty four
-// times the time for a pass per merge: the limit is four times linear. The
-// guard runs under -short too. The full run also counts the largest piece the
-// merge takes at once, which only has to finish.
+// times the time for a pass per merge: the limit is four times linear. A machine
+// that is busy can still push one comparison past it, so the comparison is made
+// again, up to three times, and fails only when every one exceeds the limit: a
+// pass per merge exceeds it every time. The guard runs under -short too. The
+// full run also counts the largest piece the merge takes at once, which only has
+// to finish.
 func TestLongRunsAreNotQuadratic(t *testing.T) {
-	const size, ratio = 1 << 16, 8
+	const size, ratio, comparisons = 1 << 16, 8, 3
 	for name, build := range map[string]func(n int) string{
 		"letters": func(n int) string { return strings.Repeat("a", n) },
 		"spaces":  func(n int) string { return strings.Repeat(" ", n) },
@@ -270,10 +278,16 @@ func TestLongRunsAreNotQuadratic(t *testing.T) {
 				if _, err := e.Count("warm the encoding up"); err != nil {
 					t.Fatal(err)
 				}
-				small, large := fastest(t, e, build(size/ratio)), fastest(t, e, build(size))
+				var small, large time.Duration
+				for range comparisons {
+					small, large = fastestPair(t, e, build(size/ratio), build(size))
+					if large <= 4*ratio*small {
+						break
+					}
+				}
 				if large > 4*ratio*small {
-					t.Errorf("%d bytes took %v and %d bytes took %v: %.0f times as long for %d times the text",
-						size/ratio, small, size, large, float64(large)/float64(small), ratio)
+					t.Errorf("%d bytes took %v and %d bytes took %v: %.0f times as long for %d times the text, in each of %d comparisons",
+						size/ratio, small, size, large, float64(large)/float64(small), ratio, comparisons)
 				}
 				if testing.Short() {
 					return

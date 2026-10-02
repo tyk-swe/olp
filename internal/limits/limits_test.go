@@ -115,6 +115,9 @@ func TestParseCostReservationRejectsMalformedResponses(t *testing.T) {
 		{"daily retry beyond a day", reply(int64(1), int64(0), "daily_cost", dayMS+1, int64(20_000), int64(24_000))},
 		{"monthly retry beyond a month", reply(int64(1), int64(0), "monthly_cost", maxMonthMS+1, int64(20_000), int64(24_000))},
 		{"rejection without a retry hint", reply(int64(1), int64(0), "daily_cost", int64(0), int64(20_000), int64(24_000))},
+		{"estimate rejection without a retry hint", reply(int64(1), int64(0), "daily_cost_estimate", int64(0), int64(20_000), int64(24_000))},
+		{"estimate rejection beyond a day", reply(int64(1), int64(0), "daily_cost_estimate", dayMS+1, int64(20_000), int64(24_000))},
+		{"estimate rejection of an unknown window", reply(int64(1), int64(0), "yearly_cost_estimate", int64(1), int64(20_000), int64(24_000))},
 		{"uninitialized with a retry hint", reply(int64(1), int64(-1), "uninitialized_daily_cost_state", int64(1), int64(20_000), int64(24_000))},
 		{"unknown reason", reply(int64(1), int64(-1), "exploded", int64(0), int64(20_000), int64(24_000))},
 		{"short array", reply(int64(1), int64(1), "ok", int64(0), int64(20_000))},
@@ -149,6 +152,16 @@ func TestParseCostReservationAcceptsTheScriptContract(t *testing.T) {
 			"monthly budget exhausted",
 			reply(int64(1), int64(0), "monthly_cost", maxMonthMS, int64(20_000), int64(24_000)),
 			scriptResult{kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: maxMonthMS},
+		},
+		{
+			"daily budget cannot hold the estimate",
+			reply(int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(20_000), int64(24_000)),
+			scriptResult{kind: resultRejected, dimension: DimensionDailyCost, retryAfterMS: 1000, estimate: true},
+		},
+		{
+			"monthly budget cannot hold the estimate",
+			reply(int64(1), int64(0), "monthly_cost_estimate", maxMonthMS, int64(20_000), int64(24_000)),
+			scriptResult{kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: maxMonthMS, estimate: true},
 		},
 		{
 			"monthly state awaits reconciliation",
@@ -210,12 +223,21 @@ func TestParseReconciliation(t *testing.T) {
 	}
 }
 
+// everyBudget is a request bound by a rate limit and a cost budget, which is what
+// it takes to be given every key.
+func everyBudget(lookup, owner string) Request {
+	return Request{
+		CostOwnerID: owner, LookupID: lookup,
+		RequestsPerMinute: pointer(int64(1)), DailyCostLimit: pointer("1"),
+	}
+}
+
 func TestKeysShareOneClusterHashTag(t *testing.T) {
 	t.Parallel()
 	limiter := &Limiter{namespace: "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
 	const apiKeyID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
-	first := limiter.keysFor("lookup_one_abc", apiKeyID)
-	second := limiter.keysFor("lookup_two_abc", apiKeyID)
+	first := limiter.keysFor(everyBudget("lookup_one_abc", apiKeyID))
+	second := limiter.keysFor(everyBudget("lookup_two_abc", apiKeyID))
 
 	if got, want := first.rate, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:rate"; got != want {
 		t.Fatalf("rate key = %q, want %q", got, want)
@@ -498,6 +520,11 @@ func TestCostSnapshotValidation(t *testing.T) {
 	if err := base.validate(); err != nil {
 		t.Fatalf("the base snapshot is invalid: %v", err)
 	}
+	named := base
+	named.RequestID = "0192CF87-D4AB-7F2E-A8B1-C2D3E4F50608"
+	if err := named.validate(); err != nil {
+		t.Fatalf("a snapshot that names its request is invalid: %v", err)
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*CostSnapshot)
@@ -509,6 +536,7 @@ func TestCostSnapshotValidation(t *testing.T) {
 		{"monthly accrued is negative", func(s *CostSnapshot) { s.MonthlyAccrued = "-0.5" }},
 		{"unpriced attempts are negative", func(s *CostSnapshot) { s.UnpricedAttempts = -1 }},
 		{"unpriced attempts beyond the Lua range", func(s *CostSnapshot) { s.UnpricedAttempts = maxLuaInteger + 1 }},
+		{"request is not a UUID", func(s *CostSnapshot) { s.RequestID = "request" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -518,6 +546,218 @@ func TestCostSnapshotValidation(t *testing.T) {
 				t.Fatal("validate() accepted a snapshot Valkey cannot store exactly")
 			}
 		})
+	}
+}
+
+func TestParseSettlement(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		value   any
+		want    bool
+		wantErr bool
+	}{
+		{"settled", reply(int64(1), int64(1), "ok", int64(1), int64(0)), true, false},
+		{"nothing left to settle", reply(int64(1), int64(1), "ok", int64(0), int64(0)), false, false},
+		{"unknown version", reply(int64(2), int64(1), "ok", int64(1), int64(0)), false, true},
+		{"invalid arguments", reply(int64(1), int64(-1), "invalid_arguments", int64(0), int64(0)), false, true},
+		{"count out of range", reply(int64(1), int64(1), "ok", int64(2), int64(0)), false, true},
+		{"spare field in use", reply(int64(1), int64(1), "ok", int64(1), int64(1)), false, true},
+		{"unknown detail", reply(int64(1), int64(1), "done", int64(1), int64(0)), false, true},
+		{"six fields", reply(int64(1), int64(1), "ok", int64(1), int64(0), int64(0)), false, true},
+		{"not an array", int64(1), false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseSettlement(test.value)
+			if (err != nil) != test.wantErr || got != test.want {
+				t.Fatalf("parseSettlement() = (%t, %v), want (%t, error %t)", got, err, test.want, test.wantErr)
+			}
+			if test.wantErr && !errors.Is(err, ErrUnexpectedResponse) {
+				t.Fatalf("parseSettlement() error = %v, want ErrUnexpectedResponse", err)
+			}
+		})
+	}
+}
+
+// TestReplyVersionsAdvanceIndependently proves a script family's reply is judged
+// against its own version, so changing what one family answers cannot make the
+// other family's scripts look foreign.
+func TestReplyVersionsAdvanceIndependently(t *testing.T) {
+	t.Parallel()
+	value := reply(int64(2), int64(1), "ok", int64(0), int64(1), int64(0))
+	if _, _, _, _, _, ok := tuple(value, 2); !ok {
+		t.Fatal("a reply at the requested version was refused")
+	}
+	if _, _, _, _, _, ok := tuple(value, 1); ok {
+		t.Fatal("a reply at another version was accepted")
+	}
+}
+
+// TestCostPendingHelpersAreIdentical holds the three scripts that share the
+// reservation helpers to one copy of them. The scripts are run by Valkey one at
+// a time and cannot import each other, so each carries the block; a drifted copy
+// would settle or release reservations by rules the other scripts do not share.
+func TestCostPendingHelpersAreIdentical(t *testing.T) {
+	t.Parallel()
+	block := func(name, script string) string {
+		begin := strings.Index(script, "-- BEGIN cost_pending")
+		end := strings.Index(script, "-- END cost_pending")
+		if begin < 0 || end < begin {
+			t.Fatalf("%s carries no cost_pending block", name)
+		}
+		return script[begin : end+len("-- END cost_pending")]
+	}
+	reserve := block("reserve_cost.lua", reserveCostSource)
+	for name, source := range map[string]string{
+		"settle_cost.lua": settleCostSource, "reconcile_cost.lua": reconcileCostSource,
+	} {
+		if got := block(name, source); got != reserve {
+			t.Fatalf("%s carries a different cost_pending block than reserve_cost.lua", name)
+		}
+	}
+}
+
+func TestCostReservationRequestValidation(t *testing.T) {
+	t.Parallel()
+	const request = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	base := func() Request {
+		return Request{
+			CostOwnerID:    "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607",
+			LookupID:       "lookup_one_abc",
+			DailyCostLimit: pointer("10"),
+			LeaseTTL:       5 * time.Second,
+			CostEstimate:   "0.25",
+			RequestID:      request,
+		}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatalf("the base request is invalid: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Request)
+	}{
+		{"estimate without a cost budget", func(r *Request) { r.DailyCostLimit = nil }},
+		{"estimate that is zero", func(r *Request) { r.CostEstimate = "0.000" }},
+		{"estimate that is negative", func(r *Request) { r.CostEstimate = "-1" }},
+		{"estimate in scientific notation", func(r *Request) { r.CostEstimate = "1e3" }},
+		{"estimate with too many fractional digits", func(r *Request) { r.CostEstimate = "0.0000000000001" }},
+		{"estimate with too many integer digits", func(r *Request) { r.CostEstimate = "1000000000000" }},
+		{"estimate without a request", func(r *Request) { r.RequestID = "" }},
+		{"estimate under a request that is not a UUID", func(r *Request) { r.RequestID = "request" }},
+		{"negative grace", func(r *Request) { r.CostGrace = -time.Second }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			request := base()
+			test.mutate(&request)
+			var invalid *InvalidRequestError
+			if err := request.Validate(); !errors.As(err, &invalid) {
+				t.Fatalf("Validate() error = %v, want InvalidRequestError", err)
+			}
+		})
+	}
+	// Without an estimate nothing about the reservation applies.
+	unpriced := base()
+	unpriced.CostEstimate, unpriced.RequestID = "", ""
+	if err := unpriced.Validate(); err != nil {
+		t.Fatalf("a request without an estimate is invalid: %v", err)
+	}
+	if grace := unpriced.costGrace(); grace != DefaultCostGrace {
+		t.Fatalf("default grace = %v, want %v", grace, DefaultCostGrace)
+	}
+	unpriced.CostGrace = time.Second
+	if grace := unpriced.costGrace(); grace != time.Second {
+		t.Fatalf("grace = %v, want one second", grace)
+	}
+}
+
+func TestRequestReportsRateLimits(t *testing.T) {
+	t.Parallel()
+	var none Request
+	if none.HasRateLimits() {
+		t.Fatal("an empty request reports rate limits it does not have")
+	}
+	if (Request{DailyCostLimit: pointer("1")}).HasRateLimits() {
+		t.Fatal("a cost budget was reported as a rate limit")
+	}
+	for name, request := range map[string]Request{
+		"requests":    {RequestsPerMinute: pointer(int64(1))},
+		"tokens":      {TokensPerMinute: pointer(int64(1))},
+		"concurrency": {MaxConcurrency: pointer(int64(1))},
+	} {
+		if !request.HasRateLimits() {
+			t.Fatalf("a %s limit was not reported as a rate limit", name)
+		}
+	}
+}
+
+func TestPendingKeysShareTheBalancesHashTag(t *testing.T) {
+	t.Parallel()
+	limiter := &Limiter{namespace: "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
+	const owner = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	first := limiter.keysFor(everyBudget("lookup_one_abc", owner))
+	second := limiter.keysFor(everyBudget("lookup_two_abc", owner))
+	if got, want := first.pending, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{0192cf87d4ab7f2ea8b1c2d3e4f50608}:cost:pending"; got != want {
+		t.Fatalf("pending key = %q, want %q", got, want)
+	}
+	if got, want := first.expiry, strings.TrimSuffix(first.pending, "pending")+"expiry"; got != want {
+		t.Fatalf("expiry key = %q, want %q", got, want)
+	}
+	// The script reads the balances and the reservations together, which a
+	// cluster allows only under one hash tag, whichever lookup spends.
+	for _, key := range []string{first.pending, first.expiry, first.monthlyCost} {
+		if hashTag(key) != hashTag(first.dailyCost) {
+			t.Fatalf("%q does not share the hash tag of %q", key, first.dailyCost)
+		}
+	}
+	if first.pending != second.pending || first.expiry != second.expiry {
+		t.Fatal("pending keys differ between lookups of one owner")
+	}
+}
+
+// TestLeasesForwardToTheAttachedGroupLease covers what needs no Valkey: a
+// request admitted against a budget group finishes both its leases through the
+// one handle it keeps, and a request that holds no lease finishes nothing.
+func TestLeasesForwardToTheAttachedGroupLease(t *testing.T) {
+	t.Parallel()
+	var none *Lease
+	none.Attach(&Lease{})
+	none.SetActualCost("1")
+	if none.HasCostReservation() {
+		t.Fatal("no lease reports a cost reservation")
+	}
+	for name, err := range map[string]error{
+		"refund": none.Refund(t.Context()), "reconcile": none.Reconcile(t.Context(), 1),
+		"release": none.Release(t.Context()), "settle": none.SettleCost(t.Context()),
+	} {
+		if err != nil {
+			t.Fatalf("a missing lease failed to %s: %v", name, err)
+		}
+	}
+
+	group := &Lease{costReserved: true}
+	key := &Lease{}
+	if key.HasCostReservation() {
+		t.Fatal("a lease with no estimate reports one")
+	}
+	key.Attach(nil)
+	key.Attach(group)
+	if !key.HasCostReservation() {
+		t.Fatal("the attached group's estimate is not reported")
+	}
+	key.SetActualCost("0.5")
+	if group.actualCost != "0.5" || key.actualCost != "0.5" {
+		t.Fatalf("actual cost = %q / %q, want both leases told", key.actualCost, group.actualCost)
+	}
+	// A lease without an estimate and a reconcile without a token budget touch
+	// nothing, so no Valkey connection is needed to finish them.
+	plain := &Lease{}
+	plain.Attach(&Lease{})
+	if err := errors.Join(plain.Reconcile(t.Context(), 5), plain.Release(t.Context()),
+		plain.Refund(t.Context()), plain.SettleCost(t.Context())); err != nil {
+		t.Fatalf("finishing leases that hold nothing failed: %v", err)
 	}
 }
 

@@ -92,9 +92,14 @@ lease expiry, and rejection hints. Bursts across boundaries are possible. Tokens
 are estimated before dispatch and reconciled against reported usage; concurrency
 leases release on completion and expire after abandoned work.
 
-Cost limits compare previously attributed spend with the threshold. Concurrent
-accepted work can exceed it. Exhausted windows return HTTP 429
-`budget_exhausted` with `Retry-After` to the UTC boundary. Missing, malformed,
+Cost limits compare attributed spend, plus the estimated cost of requests still
+in flight and of the request itself, with the threshold
+([cost reservation](gateway.md#cost-reservation)); work whose cost is not known
+beforehand is judged on spend alone, so the limit is not an invoice cap.
+Exhausted windows return HTTP 429
+`budget_exhausted` with `Retry-After` to the UTC boundary, or to the second
+reservation clears when in-flight requests are what stand in the way; the message
+of a refusal tells a spent budget from a request whose estimate does not fit. Missing, malformed,
 or wrong-window spend state returns HTTP 503 until an authoritative PostgreSQL
 snapshot initializes it. A key or group cost budget always fails closed.
 Unpriced attempts accrue no money and remain visible separately.

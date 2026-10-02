@@ -169,6 +169,15 @@ type outcome struct {
 // provider, capped by its requested budget. Each target may be tried through
 // each of its usable credential slots.
 func (s *Server) dispatchableAttempts(x *execution) int {
+	return s.walkDispatchable(x, nil)
+}
+
+// walkDispatchable visits the attempts this request can hand to a provider in
+// the order the attempt loop tries them, once for each usable credential slot of
+// each, until the request's attempt budget is met. It returns how many it
+// visited. Admission walks the same attempts the loop will, so what it reserves
+// covers what can be dispatched and no more.
+func (s *Server) walkDispatchable(x *execution, visit func(runtime.Attempt)) int {
 	remaining := x.budget
 	available := 0
 	for _, attempt := range x.attempts {
@@ -179,6 +188,9 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 		for i := range provider.Slots {
 			if s.slotAvailable(x, attempt, &provider.Slots[i]) {
 				available++
+				if visit != nil {
+					visit(attempt)
+				}
 			}
 			if available == remaining {
 				return available

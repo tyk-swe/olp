@@ -74,6 +74,15 @@ are set.
 Standalone `pnpm --dir console test:e2e` requires the same service and secret
 setup; use `make integration` to provision it automatically.
 
+The Valkey cost of a priced request on a key with a cost budget, which is the
+time the server spends inside the three cost scripts on the one thread every
+replica shares, is measured by a benchmark that reports it as `valkey-us/op`. It
+needs only a Valkey, named by `OLP_TEST_VALKEY_URL`:
+
+```sh
+go test -tags=integration -run '^$' -bench LimitsPricedRequest ./tests/integration
+```
+
 With that configuration already provided, focused browser selections are:
 
 ```sh

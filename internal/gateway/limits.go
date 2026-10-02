@@ -100,8 +100,10 @@ func limitsUnavailable() *Error {
 	return serverError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
 }
 
-// rateLimited renders the rejection a shared budget produced.
-func rateLimited(dimension limits.Dimension, retryAfter time.Duration) *Error {
+// rateLimited renders the rejection a shared budget produced. estimate says a
+// cost budget refused the request although it is not spent: the request's own
+// estimated cost does not fit beside what is accrued and in flight.
+func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
 	switch dimension {
 	case limits.DimensionRequests:
@@ -111,10 +113,16 @@ func rateLimited(dimension limits.Dimension, retryAfter time.Duration) *Error {
 	case limits.DimensionConcurrency:
 		message = "The API key concurrency limit was exceeded."
 	case limits.DimensionDailyCost, limits.DimensionMonthlyCost:
-		// Both budgets answer with the one message the API contract pins,
-		// including why spend a dashboard reports as under the limit can still
-		// exhaust it: an attempt nobody could price is charged nothing.
-		code, message = "budget_exhausted", "The API key cost budget was exhausted. Unpriced attempts accrue 0."
+		// Both budgets keep one code. An exhausted budget says why spend a
+		// dashboard reports as under the limit can still exhaust it: an attempt
+		// nobody could price is charged nothing. A budget with room left says it
+		// is the request that does not fit, which is what a client can change.
+		code = "budget_exhausted"
+		if estimate {
+			message = "The API key cost budget cannot cover this request's estimated cost beside the spend and requests already counted against it. Lower max_tokens, wait for requests in flight to finish, or raise the budget."
+		} else {
+			message = "The API key cost budget was exhausted. Unpriced attempts accrue 0."
+		}
 	}
 	return &Error{
 		Status:     http.StatusTooManyRequests,
@@ -171,26 +179,39 @@ func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request
 // a nil error admits the request without one: either the key bounds nothing,
 // or the limiter is unreachable and the installation chose to fail open.
 func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
-	if group := groupRequest(authority, ttl); group != nil {
+	return a.reserveKeyCosted(ctx, authority, estimate, ttl, costReservation{})
+}
+
+// reserveKeyCosted admits one request against the API key budgets and, for a
+// request that can be priced, reserves its estimated cost against the cost
+// budgets of the key and its budget group beside the spend already accrued. The
+// group's budget is taken first, since it is shared; its lease is attached to the
+// key's, so the one handle the request keeps finishes both. A budget that
+// refuses the request after the group's was taken gives the group's back.
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+	var group *limits.Lease
+	if request := groupRequest(authority, ttl); request != nil {
 		if !a.ready() {
 			return nil, limitsUnavailable()
 		}
+		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
-		_, err := a.limiter.Reserve(decision, *group)
+		lease, err := a.limiter.Reserve(decision, *request)
 		cancel()
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				a.recordRejection(exceeded.Dimension)
-				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 			}
 			return nil, a.outage(authority.ID, true, err)
 		}
+		group = lease
 	}
 	request := keyRequest(authority, estimate, ttl)
 	if !request.HasHardLimits() {
 		// Nothing to enforce, so nothing to store: a key without hard limits
-		// never reaches Valkey.
-		return nil, nil
+		// reaches Valkey only for the group it belongs to.
+		return group, nil
 	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
@@ -198,19 +219,31 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 	if request.TokensPerMinute != nil && estimate > *request.TokensPerMinute {
 		// No window will ever hold this request: answer now rather than make
 		// the caller retry into a limit it cannot satisfy.
+		settleKey(ctx, group, false, nil, a.logger())
 		return nil, invalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
+	}
+	if request.HasCostBudget() {
+		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(decision, request)
 	if err == nil {
+		lease.Attach(group)
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+		settleKey(ctx, group, false, nil, a.logger())
+		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, a.outage(authority.ID, request.HasCostBudget(), err)
+	if e := a.outage(authority.ID, request.HasCostBudget(), err); e != nil {
+		settleKey(ctx, group, false, nil, a.logger())
+		return nil, e
+	}
+	// Failing open admits the request without the key's own reservation, but the
+	// group's was taken and still has to be settled.
+	return group, nil
 }
 
 // outage decides what happens to a request whose budgets cannot be consulted.
@@ -230,7 +263,13 @@ func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
 // settleKey finishes the key reservation. A request that never dispatched an
 // attempt consumed nothing and is refunded in full; any other request keeps
 // the request and token it spent but must return the concurrency slot, and
-// reports the tokens it actually used when the provider disclosed them.
+// reports the tokens it actually used when the provider disclosed them. The cost
+// it reserved becomes the cost it recorded. That is settled last, and a cost is
+// settled once, because it is the step whose loss costs least: the reservation
+// then lapses on its own and is removed sooner by the spend accounting records
+// for the request. A request that never dispatched, and one that recorded no cost
+// because its usage is still to come, have no spend to remove their reservation,
+// so it is given back by a release, which is retried like the others.
 //
 // The caller's context may already be cancelled — the client may have hung up,
 // which is exactly when the slot has to come back — so cancellation is dropped
@@ -253,6 +292,9 @@ func settleKey(ctx context.Context, lease *limits.Lease, dispatched bool, actual
 	}
 	if err := lease.Release(ctx); err != nil {
 		log.Warn("limit reservation release failed", "error", err.Error())
+	}
+	if err := lease.SettleCost(ctx); err != nil {
+		log.Warn("cost reservation settlement failed", "error", err.Error())
 	}
 }
 

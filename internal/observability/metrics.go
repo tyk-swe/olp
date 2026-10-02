@@ -149,7 +149,7 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 		"# TYPE olp_distributed_limiter_available gauge\n" +
 		"# HELP olp_limits_fail_open_total Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.\n" +
 		"# TYPE olp_limits_fail_open_total counter\n" +
-		"# HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted.\n" +
+		"# HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted or could not hold the request's estimated cost.\n" +
 		"# TYPE olp_key_budget_rejections_total counter\n" +
 		"# HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n" +
 		"# TYPE olp_open_target_circuits gauge\n" +

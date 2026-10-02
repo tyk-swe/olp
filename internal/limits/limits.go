@@ -2,15 +2,25 @@
 // cost budgets that every replica shares through Valkey.
 //
 // Valkey is the only clock and the only authority: the Lua scripts in scripts/
-// decide atomically from the server's own TIME, so a rejection mutates nothing,
-// a granted reservation stays refundable and reconcilable by lease ID, and any
-// stored state a script cannot interpret fails the request closed instead of
-// admitting it on a zero.
+// decide atomically from the server's own TIME, so a rejection mutates no
+// counter, a granted reservation stays refundable and reconcilable by lease ID,
+// and any stored state a script cannot interpret fails the request closed
+// instead of admitting it on a zero.
+//
+// A cost budget is measured against two quantities. The accrued spend is
+// PostgreSQL's, installed by ApplyCostSnapshot and never lowered. The pending
+// spend is what requests still in flight may cost: each priced request reserves
+// its estimate at admission, replaces it with what it cost when it ends, and has
+// it removed in the same step that installs its accrued spend. Pending state is
+// advisory and derived, so a reservation lapses on its own and a damaged one is
+// discarded rather than allowed to block accounting.
 package limits
 
 import (
 	"context"
+	"crypto/sha1"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"strings"
@@ -21,28 +31,53 @@ import (
 )
 
 //go:embed scripts/reserve_limits.lua
-var reserveLimitsScript string
+var reserveLimitsSource string
 
 //go:embed scripts/reconcile_limits.lua
-var reconcileLimitsScript string
+var reconcileLimitsSource string
 
 //go:embed scripts/refund_limits.lua
-var refundLimitsScript string
+var refundLimitsSource string
 
 //go:embed scripts/release_concurrency.lua
-var releaseConcurrencyScript string
+var releaseConcurrencySource string
 
 //go:embed scripts/reserve_cost.lua
-var reserveCostScript string
+var reserveCostSource string
 
 //go:embed scripts/reconcile_cost.lua
-var reconcileCostScript string
+var reconcileCostSource string
+
+//go:embed scripts/settle_cost.lua
+var settleCostSource string
 
 //go:embed scripts/provider_usage.lua
-var providerUsageScript string
+var providerUsageSource string
 
 //go:embed scripts/provider_cooldown.lua
-var providerCooldownScript string
+var providerCooldownSource string
+
+// script is an embedded Lua script with the SHA-1 digest Valkey caches it under.
+// A call names the digest and sends the source only to a server that does not
+// hold it yet: the cost scripts are far larger than the arguments they run with.
+type script struct{ source, digest string }
+
+func newScript(source string) script {
+	sum := sha1.Sum([]byte(source))
+	return script{source: source, digest: hex.EncodeToString(sum[:])}
+}
+
+var (
+	reserveLimitsScript      = newScript(reserveLimitsSource)
+	reconcileLimitsScript    = newScript(reconcileLimitsSource)
+	refundLimitsScript       = newScript(refundLimitsSource)
+	releaseConcurrencyScript = newScript(releaseConcurrencySource)
+	reserveCostScript        = newScript(reserveCostSource)
+	reconcileCostScript      = newScript(reconcileCostSource)
+	settleCostScript         = newScript(settleCostSource)
+	providerUsageScript      = newScript(providerUsageSource)
+	providerCooldownScript   = newScript(providerCooldownSource)
+)
 
 const (
 	// MaxCounter is the largest integer Lua 5.1 represents exactly. Every
@@ -50,9 +85,12 @@ const (
 	// beyond it are rejected before they reach Valkey.
 	MaxCounter    = int64(1)<<53 - 1
 	maxLuaInteger = MaxCounter
-	// scriptResponseVersion is the reply contract the scripts and this package
-	// share. A different version means the deployed script is not this one.
-	scriptResponseVersion = 1
+	// limitsResponseVersion and costResponseVersion are the reply contracts the
+	// rate and cost scripts share with this package. A different version means
+	// the deployed script is not this one. They advance independently: a change
+	// to what the rate script answers must not invalidate the cost scripts.
+	limitsResponseVersion = 1
+	costResponseVersion   = 1
 	fixedWindowMS         = int64(60_000)
 	dayMS                 = int64(86_400_000)
 	// maxMonthMS bounds a monthly retry hint by the longest civil month.
@@ -66,6 +104,19 @@ const (
 	cleanupBackoff  = 25 * time.Millisecond
 	// nilUUID stands in for an absent credential version in a cooldown scope.
 	nilUUID = "00000000-0000-0000-0000-000000000000"
+	// DefaultCostGrace is how long a cost reservation outlives the request that
+	// made it when the caller names no grace. Accounting normally removes it
+	// within seconds; this is the bound when it cannot, sized to cover a consumer
+	// that crashed and was recovered or a PostgreSQL failover.
+	DefaultCostGrace = 5 * time.Minute
+	// settleTimeout bounds the one attempt SettleCost makes to replace an estimate
+	// with a cost. That runs as a request ends and is the cheapest step to lose:
+	// the reservation made at admission still lapses on its own, and the spend
+	// accounting records for the request removes it sooner. Giving an estimate
+	// back, because the request cost nothing or never ran, is not that: nothing
+	// else is coming to remove it, so it is retried within cleanupTimeout like
+	// every other release.
+	settleTimeout = 100 * time.Millisecond
 )
 
 // Dimension names the budget that rejected a reservation.
@@ -109,6 +160,11 @@ func (e *ServiceError) Unwrap() error { return e.Err }
 type ExceededError struct {
 	Dimension  Dimension
 	RetryAfter time.Duration
+	// Estimate is set when a cost budget refused the request although it is not
+	// spent: what has accrued and what requests in flight hold leave no room for
+	// this request's estimate. Lowering the estimate, or waiting for requests in
+	// flight to end, can admit it; neither helps a budget that is exhausted.
+	Estimate bool
 }
 
 func (e *ExceededError) Error() string {
@@ -139,6 +195,19 @@ type Request struct {
 	RequestedTokens int64
 	// LeaseTTL bounds how long a concurrency slot survives without a release.
 	LeaseTTL time.Duration
+	// CostEstimate is the most this request may cost, a canonical decimal string,
+	// reserved against the cost budget beside the spend already accrued. Empty
+	// reserves nothing and judges the request on accrued spend alone, which is
+	// what a request nobody can price gets.
+	CostEstimate string
+	// RequestID names the cost reservation. It is the identifier accounting later
+	// carries on the spend it records for the request, which is how that spend
+	// replaces the reservation instead of counting beside it. Required with a
+	// CostEstimate.
+	RequestID string
+	// CostGrace is how long past LeaseTTL the reservation survives if nothing
+	// settles it. Zero means DefaultCostGrace.
+	CostGrace time.Duration
 }
 
 // HasHardLimits reports whether any budget applies. A request without one needs
@@ -152,6 +221,21 @@ func (r Request) HasHardLimits() bool {
 // reservation depend on PostgreSQL-reconciled state.
 func (r Request) HasCostBudget() bool {
 	return r.DailyCostLimit != nil || r.MonthlyCostLimit != nil
+}
+
+// HasRateLimits reports whether a request, token or concurrency limit applies,
+// which is what makes the reservation touch the rate script. A request bound
+// only by a cost budget never does.
+func (r Request) HasRateLimits() bool {
+	return r.RequestsPerMinute != nil || r.TokensPerMinute != nil || r.MaxConcurrency != nil
+}
+
+// costGrace is the time a cost reservation outlives the request.
+func (r Request) costGrace() time.Duration {
+	if r.CostGrace == 0 {
+		return DefaultCostGrace
+	}
+	return r.CostGrace
 }
 
 // Validate rejects a request the scripts could not enforce exactly. It returns
@@ -207,6 +291,22 @@ func (r Request) Validate() error {
 	if r.LeaseTTL.Milliseconds() < 1 {
 		return &InvalidRequestError{Reason: "lease TTL must be at least one millisecond"}
 	}
+	if r.CostGrace < 0 {
+		return &InvalidRequestError{Reason: "cost grace cannot be negative"}
+	}
+	if r.CostEstimate != "" {
+		if !r.HasCostBudget() {
+			return &InvalidRequestError{Reason: "a cost estimate needs a cost budget to reserve against"}
+		}
+		if !ValidCostLimit(r.CostEstimate) {
+			return &InvalidRequestError{
+				Reason: "cost estimate must be a positive decimal with at most 12 integer and 12 fractional digits",
+			}
+		}
+		if _, err := uuid.Parse(r.RequestID); err != nil {
+			return &InvalidRequestError{Reason: "a cost estimate needs the request ID it will be accounted under"}
+		}
+	}
 	return nil
 }
 
@@ -253,16 +353,23 @@ func validLookup(lookup string) bool {
 	return true
 }
 
+// Commander runs one Valkey command. A *coordination.Client is the one a process
+// uses; a test substitutes its own to fail a command the way an outage does.
+type Commander interface {
+	Do(ctx context.Context, args ...string) (any, error)
+}
+
 // Limiter reserves shared budgets through one Valkey connection.
 type Limiter struct {
-	client    *coordination.Client
+	client    Commander
 	namespace string
 }
 
 // New builds a limiter over client. The namespace prefixes every key and must
 // not introduce a second Valkey Cluster hash tag.
-func New(client *coordination.Client, namespace string) (*Limiter, error) {
-	if client == nil {
+func New(client Commander, namespace string) (*Limiter, error) {
+	// A nil *coordination.Client inside the interface is as unusable as none.
+	if concrete, ok := client.(*coordination.Client); client == nil || (ok && concrete == nil) {
 		return nil, errors.New("limits: a Valkey client is required")
 	}
 	if len(namespace) < 1 || len(namespace) > 128 {
@@ -280,20 +387,32 @@ func New(client *coordination.Client, namespace string) (*Limiter, error) {
 	return &Limiter{client: client, namespace: namespace}, nil
 }
 
-// keys holds the four keys one request can touch. The rate and concurrency keys
-// share the lookup as their cluster hash tag so one script sees both; the cost
-// keys share the cost owner ID so every lookup of one owner meets the same balance.
+// keys holds the keys one request can touch. The rate and concurrency keys share
+// the lookup as their cluster hash tag so one script sees both; the cost keys
+// share the cost owner ID so every lookup of one owner meets the same balance
+// and the same reservations.
 type keys struct {
 	rate        string
 	concurrency string
 	dailyCost   string
 	monthlyCost string
+	pending     string
+	expiry      string
 }
 
-func (l *Limiter) keysFor(lookupID, costOwnerID string) keys {
-	rate, concurrency := l.rateKeys(lookupID)
-	daily, monthly := l.costKeys(costOwnerID)
-	return keys{rate: rate, concurrency: concurrency, dailyCost: daily, monthlyCost: monthly}
+// keysFor names only the keys the request's budgets use, so a request pays
+// nothing for a budget it was not given.
+func (l *Limiter) keysFor(r Request) keys {
+	var k keys
+	if r.HasRateLimits() {
+		k.rate, k.concurrency = l.rateKeys(r.LookupID)
+	}
+	if r.HasCostBudget() {
+		prefix := l.costPrefix(r.CostOwnerID)
+		k.dailyCost, k.monthlyCost = prefix+":day", prefix+":month"
+		k.pending, k.expiry = prefix+":pending", prefix+":expiry"
+	}
+	return k
 }
 
 // rateKeys addresses the counters one lookup shares across replicas.
@@ -350,80 +469,127 @@ func canonicalUUID(value string) string {
 }
 
 // eval runs a script and reports transport failures as ServiceError, which is
-// what separates "rejected" from "unknown".
-func (l *Limiter) eval(ctx context.Context, script string, scriptKeys []string, args ...string) (any, error) {
+// what separates "rejected" from "unknown". It names the script by its digest and
+// sends the source only when the server answers that it holds no such script.
+func (l *Limiter) eval(ctx context.Context, s script, scriptKeys []string, args ...string) (any, error) {
 	command := make([]string, 0, 3+len(scriptKeys)+len(args))
-	command = append(command, "EVAL", script, strconv.Itoa(len(scriptKeys)))
+	command = append(command, "EVALSHA", s.digest, strconv.Itoa(len(scriptKeys)))
 	command = append(command, scriptKeys...)
 	command = append(command, args...)
 	value, err := l.client.Do(ctx, command...)
+	if noScript(err) {
+		// A server that has just started, or that a failover has put in charge, has
+		// not cached the script. The refusal comes before anything runs, so sending
+		// the call again cannot run it twice, and EVAL caches the script for the
+		// calls that follow.
+		command[0], command[1] = "EVAL", s.source
+		value, err = l.client.Do(ctx, command...)
+	}
 	if err != nil {
 		return nil, &ServiceError{Err: err}
 	}
 	return value, nil
 }
 
+// noScript reports whether the server refused a call because it holds no script
+// with that digest. The client reports it in the words of the server or of its
+// own driver, and only as text.
+func noScript(err error) bool {
+	command, ok := errors.AsType[*coordination.CommandError](err)
+	if !ok || command.Ambiguous || command.Cause == nil {
+		return false
+	}
+	text := command.Cause.Error()
+	return strings.Contains(text, "NOSCRIPT") || strings.Contains(text, "NoScriptError")
+}
+
 // Reserve admits one request against every configured budget. Cost is settled
 // first because it is the budget a caller cannot undo by refunding a lease.
 // It returns ExceededError when a budget rejects the request, ErrUninitializedCost
 // when cost state is not reconciled yet, ErrMalformedState when stored state is
-// unusable, and ServiceError when Valkey is unreachable.
+// unusable, and ServiceError when Valkey is unreachable. A request refused after
+// its cost was reserved gives the reservation back before returning.
 func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	scriptKeys := l.keysFor(r.LookupID, r.CostOwnerID)
+	scriptKeys := l.keysFor(r)
+	lease := &Lease{
+		limiter:        l,
+		rateKey:        scriptKeys.rate,
+		concurrencyKey: scriptKeys.concurrency,
+		reservedTokens: r.RequestedTokens,
+		hasToken:       r.TokensPerMinute != nil,
+		hasRequest:     r.RequestsPerMinute != nil,
+		hasRate:        r.HasRateLimits(),
+	}
 	if r.HasCostBudget() {
-		if err := l.reserveCost(ctx, r, scriptKeys); err != nil {
+		reserved, err := l.reserveCost(ctx, r, scriptKeys)
+		if err != nil {
 			return nil, err
 		}
+		if reserved {
+			lease.costReserved = true
+			lease.pendingKey, lease.expiryKey = scriptKeys.pending, scriptKeys.expiry
+			lease.costID = canonicalUUID(r.RequestID)
+			lease.costGrace = r.costGrace()
+		}
 	}
-	leaseID := uuid.Must(uuid.NewV7()).String()
+	if !r.HasRateLimits() {
+		// Nothing for the rate script to count, so it is not asked.
+		return lease, nil
+	}
+	lease.id = uuid.Must(uuid.NewV7()).String()
+	granted, err := l.reserveRate(ctx, r, scriptKeys, lease)
+	if err != nil {
+		_, outage := errors.AsType[*ServiceError](err)
+		lease.abandonCost(ctx, outage)
+		return nil, err
+	}
+	lease.windowID = granted.windowID
+	lease.concurrencyExpiresAtMS = granted.leaseExpiresAtMS
+	return lease, nil
+}
+
+// reserveRate counts the request against the rate and concurrency limits.
+func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, lease *Lease) (scriptResult, error) {
 	value, err := l.eval(ctx, reserveLimitsScript,
 		[]string{scriptKeys.rate, scriptKeys.concurrency},
 		optionalLimit(r.RequestsPerMinute), optionalLimit(r.TokensPerMinute),
 		strconv.FormatInt(r.RequestedTokens, 10), optionalLimit(r.MaxConcurrency),
-		leaseID, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10))
+		lease.id, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10))
 	if err != nil {
-		return nil, err
+		return scriptResult{}, err
 	}
 	result, err := parseReservation(value)
 	if err != nil {
-		return nil, err
+		return scriptResult{}, err
 	}
 	switch result.kind {
 	case resultGranted:
 		// A concurrency lease is reported exactly when one was requested. Any
 		// other pairing means the reply does not describe this request.
 		if (r.MaxConcurrency != nil) != (result.leaseExpiresAtMS > 0) {
-			return nil, ErrUnexpectedResponse
+			return scriptResult{}, ErrUnexpectedResponse
 		}
-		return &Lease{
-			limiter:                l,
-			id:                     leaseID,
-			rateKey:                scriptKeys.rate,
-			concurrencyKey:         scriptKeys.concurrency,
-			windowID:               result.windowID,
-			reservedTokens:         r.RequestedTokens,
-			hasToken:               r.TokensPerMinute != nil,
-			hasRequest:             r.RequestsPerMinute != nil,
-			concurrencyExpiresAtMS: result.leaseExpiresAtMS,
-		}, nil
+		return result, nil
 	case resultRejected:
-		return nil, &ExceededError{
+		return scriptResult{}, &ExceededError{
 			Dimension:  result.dimension,
 			RetryAfter: time.Duration(result.retryAfterMS) * time.Millisecond,
 		}
 	case resultMalformed:
-		return nil, ErrMalformedState
+		return scriptResult{}, ErrMalformedState
 	default:
-		return nil, ErrUnexpectedResponse
+		return scriptResult{}, ErrUnexpectedResponse
 	}
 }
 
-// reserveCost checks the daily and monthly balances. It never writes an accrued
-// total: only PostgreSQL reconciliation may do that.
-func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) error {
+// reserveCost checks the daily and monthly balances against what is accrued and
+// what requests in flight may still spend, and records this request's estimate
+// as one of them. It never writes an accrued total: only PostgreSQL
+// reconciliation may do that. It reports whether an estimate was recorded.
+func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (bool, error) {
 	daily, monthly := "", ""
 	if r.DailyCostLimit != nil {
 		daily = *r.DailyCostLimit
@@ -431,30 +597,58 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) e
 	if r.MonthlyCostLimit != nil {
 		monthly = *r.MonthlyCostLimit
 	}
+	amount, leaseID, ttl := "0", "", "0"
+	if r.CostEstimate != "" {
+		amount, leaseID = r.CostEstimate, canonicalUUID(r.RequestID)
+		ttl = strconv.FormatInt((r.LeaseTTL + r.costGrace()).Milliseconds(), 10)
+	}
 	value, err := l.eval(ctx, reserveCostScript,
-		[]string{scriptKeys.dailyCost, scriptKeys.monthlyCost}, daily, monthly, "0")
-	if err != nil {
-		return err
-	}
-	result, err := parseCostReservation(value)
-	if err != nil {
-		return err
-	}
-	switch result.kind {
-	case resultGranted:
-		return nil
-	case resultRejected:
-		return &ExceededError{
-			Dimension:  result.dimension,
-			RetryAfter: time.Duration(result.retryAfterMS) * time.Millisecond,
+		[]string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry},
+		daily, monthly, "0", amount, leaseID, ttl)
+	if err == nil {
+		result, parseErr := parseCostReservation(value)
+		if parseErr == nil {
+			switch result.kind {
+			case resultGranted:
+				return r.CostEstimate != "", nil
+			case resultRejected:
+				return false, &ExceededError{
+					Dimension:  result.dimension,
+					RetryAfter: time.Duration(result.retryAfterMS) * time.Millisecond,
+					Estimate:   result.estimate,
+				}
+			case resultUninitialized:
+				return false, ErrUninitializedCost
+			case resultMalformed:
+				return false, ErrMalformedState
+			}
+			parseErr = ErrUnexpectedResponse
 		}
-	case resultUninitialized:
-		return ErrUninitializedCost
-	case resultMalformed:
-		return ErrMalformedState
-	default:
-		return ErrUnexpectedResponse
+		err = parseErr
 	}
+	// A command that timed out may still have run, and a reply this package cannot
+	// read may describe a reservation that was made. Nothing will settle either, so
+	// the estimate is given back; releasing a lease that is not there does nothing.
+	// A command that never reached Valkey reserved nothing, and during an outage is
+	// not asked again.
+	if r.CostEstimate != "" && ambiguousFailure(err) {
+		(&Lease{
+			limiter: l, costReserved: true, pendingKey: scriptKeys.pending, expiryKey: scriptKeys.expiry,
+			costID: canonicalUUID(r.RequestID),
+		}).abandonCost(ctx, true)
+	}
+	return false, err
+}
+
+// ambiguousFailure reports whether a failed cost reservation may nonetheless have
+// been made: the command may have run, or its reply cannot be read. A refusal
+// that never reached Valkey cannot have.
+func ambiguousFailure(err error) bool {
+	if _, ok := errors.AsType[*ServiceError](err); !ok {
+		return true
+	}
+	command, ok := errors.AsType[*coordination.CommandError](err)
+	return !ok || command.Ambiguous
 }
 
 // optionalLimit renders an absent limit as the script's "unlimited" zero.
@@ -468,6 +662,10 @@ func optionalLimit(limit *int64) string {
 // Lease is a granted reservation. Exactly one of Refund, Reconcile or Release
 // finishes it, and each may be called repeatedly: the scripts are idempotent
 // per lease.
+//
+// A request admitted against a budget group holds two leases, one per cost
+// owner. Attach makes the group's lease part of the key's, so one handle
+// finishes both.
 type Lease struct {
 	limiter                *Limiter
 	id                     string
@@ -477,12 +675,126 @@ type Lease struct {
 	reservedTokens         int64
 	hasToken               bool
 	hasRequest             bool
+	hasRate                bool
 	concurrencyExpiresAtMS int64
+	// group is the lease taken on the budget group's shared cost budget.
+	group *Lease
+	// costReserved says this lease holds an estimate in its owner's pending
+	// reservations under costID, which is the request's accounting identifier.
+	// actualCost is what the request cost, once it is known.
+	costReserved bool
+	pendingKey   string
+	expiryKey    string
+	costID       string
+	costGrace    time.Duration
+	actualCost   string
+}
+
+// Attach makes group part of this lease, so that finishing the request finishes
+// both. A nil group changes nothing.
+func (le *Lease) Attach(group *Lease) {
+	if le != nil && group != nil {
+		le.group = group
+	}
+}
+
+// HasCostReservation reports whether this lease, or the one attached to it, holds
+// an estimate against a cost budget.
+func (le *Lease) HasCostReservation() bool {
+	return le != nil && (le.costReserved || le.group.HasCostReservation())
+}
+
+// SetActualCost records what the request cost, a canonical decimal string, for
+// SettleCost to replace its estimate with. The attached lease is a reservation
+// of the same request and takes the same amount.
+func (le *Lease) SetActualCost(amount string) {
+	if le == nil {
+		return
+	}
+	le.actualCost = amount
+	le.group.SetActualCost(amount)
+}
+
+// SettleCost replaces the estimate with the recorded actual cost. It does nothing
+// for a lease that holds no estimate or has no actual cost recorded.
+//
+// A request that cost nothing, which is also one whose usage is still to come, gives
+// its estimate back: that is a release, retried like Refund's, because nothing
+// else removes it before it lapses. Replacing the estimate with a cost is one
+// attempt, bounded by settleTimeout for each lease, because a settlement that is
+// lost leaves the reservation made at admission: it lapses on its own, and the
+// spend accounting records for the request removes it sooner.
+func (le *Lease) SettleCost(ctx context.Context) error {
+	if le == nil {
+		return nil
+	}
+	err := le.group.SettleCost(ctx)
+	if !le.costReserved || le.actualCost == "" {
+		return err
+	}
+	if zeroAmount(le.actualCost) {
+		return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
+			return le.settleCost(ctx, "0", "0")
+		}))
+	}
+	grace := strconv.FormatInt(max(le.costGrace.Milliseconds(), 1), 10)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
+	return errors.Join(err, le.settleCost(ctx, le.actualCost, grace))
+}
+
+// zeroAmount reports whether a decimal is nothing, however it is written.
+func zeroAmount(amount string) bool {
+	digits := strings.Replace(amount, ".", "", 1)
+	return digits != "" && strings.Trim(digits, "0") == ""
+}
+
+// settleCost runs the settlement script once, within whatever time ctx allows.
+// The caller sets the bound: SettleCost holds a replacement to settleTimeout, and
+// the releases that retry hold each attempt to cleanupTimeout.
+func (le *Lease) settleCost(ctx context.Context, amount, ttl string) error {
+	value, err := le.limiter.eval(ctx, settleCostScript, []string{le.pendingKey, le.expiryKey}, le.costID, amount, ttl)
+	if err != nil {
+		return err
+	}
+	_, err = parseSettlement(value)
+	return err
+}
+
+// abandonCost gives back an estimate that nothing will settle. When the failure
+// that led here left the outcome of the script unknown, one bounded attempt is
+// made, so that an outage is not made to wait longer; otherwise the release is
+// retried like every other cleanup.
+func (le *Lease) abandonCost(ctx context.Context, ambiguous bool) {
+	if !le.costReserved {
+		return
+	}
+	release := func(ctx context.Context) error { return le.settleCost(ctx, "0", "0") }
+	if ambiguous {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		_ = release(ctx)
+		return
+	}
+	_ = cleanup(ctx, release)
 }
 
 // Refund returns an admission that never dispatched. It only applies inside the
-// minute that granted it, so it can never take capacity from a later window.
+// minute that granted it, so it can never take capacity from a later window, and
+// it releases the cost estimate, which a request that spent nothing never owed.
 func (le *Lease) Refund(ctx context.Context) error {
+	if le == nil {
+		return nil
+	}
+	err := le.group.Refund(ctx)
+	if le.costReserved {
+		err = errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
+			return le.settleCost(ctx, "0", "0")
+		}))
+	}
+	if !le.hasRate {
+		return err
+	}
 	tokens := int64(0)
 	if le.hasToken {
 		tokens = le.reservedTokens
@@ -491,46 +803,54 @@ func (le *Lease) Refund(ctx context.Context) error {
 	if le.hasRequest {
 		requests = "1"
 	}
-	return cleanup(ctx, func(ctx context.Context) error {
+	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, refundLimitsScript,
 			[]string{le.rateKey, le.concurrencyKey},
 			strconv.FormatInt(le.windowID, 10), requests,
 			strconv.FormatInt(tokens, 10), le.id)
 		return err
-	})
+	}))
 }
 
 // Reconcile settles the token reservation against the tokens actually used. It
 // is a no-op without a token budget, and the script ignores a window that has
 // already rolled over.
 func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
-	if !le.hasToken {
+	if le == nil {
 		return nil
 	}
+	err := le.group.Reconcile(ctx, actualTokens)
+	if !le.hasToken {
+		return err
+	}
 	if actualTokens < 0 || actualTokens > maxLuaInteger {
-		return &InvalidRequestError{Reason: "actual tokens must be a non-negative Lua-safe integer"}
+		return errors.Join(err, &InvalidRequestError{Reason: "actual tokens must be a non-negative Lua-safe integer"})
 	}
 	adjustment := actualTokens - le.reservedTokens
 	if adjustment == 0 {
-		return nil
+		return err
 	}
-	return cleanup(ctx, func(ctx context.Context) error {
+	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, reconcileLimitsScript, []string{le.rateKey},
 			strconv.FormatInt(le.windowID, 10), strconv.FormatInt(adjustment, 10), le.id)
 		return err
-	})
+	}))
 }
 
 // Release frees the concurrency slot. Requests and tokens stay consumed: the
 // attempt did happen.
 func (le *Lease) Release(ctx context.Context) error {
-	if le.concurrencyExpiresAtMS == 0 {
+	if le == nil {
 		return nil
 	}
-	return cleanup(ctx, func(ctx context.Context) error {
+	err := le.group.Release(ctx)
+	if le.concurrencyExpiresAtMS == 0 {
+		return err
+	}
+	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, releaseConcurrencyScript, []string{le.concurrencyKey}, le.id)
 		return err
-	})
+	}))
 }
 
 // cleanup runs a lease mutation that must outlive the request it belongs to:

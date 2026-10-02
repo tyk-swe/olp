@@ -217,6 +217,18 @@ func (f *mediaFixture) awaitCompleted(t *testing.T, minimum int64) {
 // mediaLimiter uses the disposable service provisioned by make integration.
 func mediaLimiter(t *testing.T) *limits.Limiter {
 	t.Helper()
+	client, namespace := mediaValkey(t)
+	limiter, err := limits.New(client, namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return limiter
+}
+
+// mediaValkey connects to the disposable service provisioned by make integration
+// and names a namespace in it that is emptied when the test ends.
+func mediaValkey(t *testing.T) (*coordination.Client, string) {
+	t.Helper()
 	endpoint := os.Getenv("OLP_TEST_VALKEY_URL")
 	if endpoint == "" {
 		t.Fatal("OLP_TEST_VALKEY_URL is required; run make integration")
@@ -245,11 +257,7 @@ func mediaLimiter(t *testing.T) *limits.Limiter {
 			}
 		}
 	})
-	limiter, err := limits.New(client, namespace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return limiter
+	return client, namespace
 }
 
 func TestIntegrationMediaKeySettlementChargesDispatchedRequests(t *testing.T) {

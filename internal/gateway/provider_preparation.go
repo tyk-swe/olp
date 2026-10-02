@@ -29,10 +29,13 @@ type preparedProvider struct {
 // tokens held for it, the input and the largest reply the request allows. Input
 // is the input alone, which is what an attempt records beside the usage its
 // upstream reports, so that reports compare like with like; the reply bound is
-// no estimate of anything the upstream will say.
+// no estimate of anything the upstream will say. Reply is that bound by itself,
+// which is what the cost budget prices the output at, and is zero only for a
+// request that has no reply to bound, such as an embedding or a native operation.
 type admittedEstimate struct {
 	reserve    int64
 	input      int64
+	reply      int64
 	provenance estimate.Provenance
 	family     estimate.Family
 }
@@ -197,6 +200,7 @@ func (x *execution) preparedEstimate(model string, effective requestSummary, cat
 	admitted := admittedEstimate{
 		reserve:    max(from.Tokens(), to.Tokens()),
 		input:      max(from.Input, to.Input),
+		reply:      max(from.Reply(), to.Reply()),
 		provenance: estimate.Weaker(from.Provenance, to.Provenance),
 		family:     to.Family,
 	}
@@ -235,7 +239,7 @@ func (x *execution) attemptEstimate(provider *runtime.Provider, model string) (a
 	}
 	if x.automatic(provider) {
 		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
-		return admittedEstimate{reserve: e.Tokens(), input: e.Input, provenance: e.Provenance, family: e.Family}, nil
+		return admittedEstimate{reserve: e.Tokens(), input: e.Input, reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}
 	prepared, err := x.preparedProvider(provider, model)
 	if err != nil {

@@ -139,11 +139,22 @@ func (e Estimate) Tokens() int64 {
 	if !e.generation {
 		return max(e.Input, 1)
 	}
+	return max(addBounded(e.Input, e.Reply()), 1)
+}
+
+// Reply is the largest reply the request allows: for a generation, the bound it
+// or its provider named for one candidate, or DefaultOutputTokens when neither
+// did, multiplied by the candidates it asked for. A request that is not a
+// generation has no reply.
+func (e Estimate) Reply() int64 {
+	if !e.generation {
+		return 0
+	}
 	bound := int64(DefaultOutputTokens)
 	if e.Output != nil {
 		bound = *e.Output
 	}
-	return max(addBounded(e.Input, multiplyBounded(max(bound, 1), max(e.Candidates, 1))), 1)
+	return multiplyBounded(max(bound, 1), max(e.Candidates, 1))
 }
 
 // Estimate prices the request for the counter of the model it is sent to. A

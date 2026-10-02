@@ -438,7 +438,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			// The budgets this request reserved are settled even when the
 			// client is gone: a concurrency slot nobody releases is a slot
 			// every replica keeps counting.
-			settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
+			s.settleAdmission(r.Context(), x)
 		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
@@ -555,7 +555,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		ctx, cancel := context.WithTimeout(r.Context(), overall)
 		defer cancel()
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		if x.lease, e = s.Admission.reserveKey(ctx, authority, reservationEstimate, overall); e != nil {
+		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return

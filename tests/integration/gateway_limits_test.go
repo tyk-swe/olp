@@ -3,8 +3,10 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // glFixture is a provisioned installation whose gateway enforces its budgets
@@ -27,18 +30,64 @@ type glFixture struct {
 	limiter  *limits.Limiter
 	provider string
 	path     string
+	// valkey and namespace are where the fixture's limiter keeps its counters,
+	// for a test that reads them directly. They are set by glSeedIn.
+	valkey    *coordination.Client
+	namespace string
 }
 
 // glSeed provisions one provider, one route, and the admission that enforces
 // the budgets the scenario sets.
 func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, targetTimeout ...int) *glFixture {
 	t.Helper()
+	return glSeedPriced(t, limiter, policy, glPrice{}, targetTimeout...)
+}
+
+// glSeedIn is glSeedPriced over a limiter in a namespace of its own, which the
+// fixture remembers so that a test can read the counters the limiter keeps.
+func glSeedIn(t *testing.T, label string, price glPrice) *glFixture {
+	t.Helper()
+	return glSeedInFidelity(t, label, price, "transformed")
+}
+
+// glSeedInFidelity is glSeedIn with the fidelity mode of the route named.
+func glSeedInFidelity(t *testing.T, label string, price glPrice, fidelity string) *glFixture {
+	t.Helper()
+	c := limClient(t)
+	namespace := limNamespace(t, c, label)
+	f := glSeedFidelity(t, limLimiter(t, c, namespace), limits.FailClosed, price, fidelity)
+	f.valkey, f.namespace = c, namespace
+	return f
+}
+
+// glPrice is what the fixture model costs per million tokens, as decimal text.
+// The zero value publishes no price list, so nothing a request does is priced.
+type glPrice struct{ input, output string }
+
+// glSeedPriced is glSeed with a price list for the fixture model, which is what
+// lets admission reserve a request's cost before it is dispatched.
+func glSeedPriced(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, price glPrice, targetTimeout ...int) *glFixture {
+	t.Helper()
+	return glSeedFidelity(t, limiter, policy, price, "transformed", targetTimeout...)
+}
+
+// glSeedFidelity is glSeedPriced with the fidelity mode of the route named: a
+// strict route sends a target exactly what the caller sent, which is the mode a
+// route has unless it says otherwise.
+func glSeedFidelity(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, price glPrice, fidelity string, targetTimeout ...int) *glFixture {
+	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
+	configuration := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"}
+	if fidelity == "strict" {
+		// A strict route sends the target exactly what the caller sent, so the
+		// provider has to declare a versioned profile that says what it accepts.
+		configuration["profile_id"], configuration["profile_revision"] = "compatible-chat", "1"
+	}
 	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": "Fixture vendor", "model": vendorModel, "credential": vendorSecret,
-		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
+		"configuration": configuration,
 	}, map[string]string{"Idempotency-Key": "provider"}, 201)
 	f := &glFixture{h: h, owner: owner, vendor: up, limiter: limiter, provider: created["id"].(string)}
 	f.path = "/api/v1/providers/" + f.provider
@@ -57,14 +106,34 @@ func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, t
 		timeout = targetTimeout[0]
 	}
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
+		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": fidelity},
 		"targets": []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": timeout}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
 	h.want(owner, "POST", draftPath+"/activate", nil, withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return policy }, slog.New(slog.DiscardHandler))
+	if price != (glPrice{}) {
+		h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{
+			"effective_at": time.Now().UTC().Format(time.RFC3339Nano),
+			"prices": []any{map[string]any{
+				"provider_kind": "openai_compatible", "provider_id": f.provider, "model": vendorModel,
+				"operation": "generation", "currency": "USD",
+				"input_per_million": price.input, "output_per_million": price.output,
+			}},
+		}, map[string]string{"Idempotency-Key": "pricing"}, 201)
+	}
 	h.refresh()
+	if price != (glPrice{}) {
+		// The gateway reads prices from routing inputs that refresh at most every
+		// few seconds, so a list published after the first load would not be seen
+		// yet. It is published before it here; this only proves it was.
+		glEventually(t, "the price list to reach the gateway", func() bool {
+			h.refresh()
+			inputs := h.Runtime.RoutingInputs()
+			return inputs != nil && len(inputs.Prices) > 0
+		})
+	}
 	return f
 }
 
@@ -101,6 +170,23 @@ func (f *glFixture) chat(key string) (int, string, http.Header) {
 	return status, f.h.gatewayCode(status, body), header
 }
 
+// chatWith is chat with more fields in the request, such as a reply bound.
+func (f *glFixture) chatWith(key string, fields map[string]any) (int, string, http.Header) {
+	f.h.t.Helper()
+	body := map[string]any{"model": routeSlug, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	for name, value := range fields {
+		body[name] = value
+	}
+	// Prices come from routing inputs that expire a minute after they were read,
+	// so a test that runs for long refreshes them as the serving loop does.
+	f.h.refresh()
+	status, reply, header := f.h.gateway("POST", "/v1/chat/completions", key, body)
+	if status == http.StatusOK {
+		return status, "", header
+	}
+	return status, f.h.gatewayCode(status, reply), header
+}
+
 // glRetryAfter reads the retry hint a rejection advertised.
 func glRetryAfter(t *testing.T, header http.Header) int {
 	t.Helper()
@@ -130,6 +216,55 @@ func glStream(ctx context.Context, h *accessHarness, key string) (int, error) {
 	defer resp.Body.Close()
 	_, err = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, err
+}
+
+// glStreamWith is glStream with more fields in the request.
+func glStreamWith(ctx context.Context, h *accessHarness, key string, fields map[string]any) (int, error) {
+	body := map[string]any{"model": routeSlug, "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	for name, value := range fields {
+		body[name] = value
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, err
+}
+
+// glAccounting runs the fixture's usage events through the pipeline a process
+// runs: the gateway emits them, the writer appends them to the stream, and a
+// consumer prices and stores them and applies the spend they recorded to the
+// same limiter that admits requests. It is what turns a settled reservation into
+// accrued spend.
+func glAccounting(t *testing.T, f *glFixture) {
+	t.Helper()
+	valkey, _, stream := acctKeyspace(t)
+	emitter := usage.NewEmitter(64)
+	f.h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter, Next: f.h.Gateway.Sink}
+	ctx, cancel := context.WithCancel(t.Context())
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		emitter.RunWriter(ctx, valkey, stream, slog.New(slog.DiscardHandler))
+	}()
+	t.Cleanup(func() {
+		emitter.Close()
+		<-written
+		cancel()
+	})
+	acctConsumer(t, f.h.Pool, acctValkey(t), stream, "gateway-accounting", f.limiter, 30*time.Second)
 }
 
 // glEventually waits for a condition that a settlement outside the request

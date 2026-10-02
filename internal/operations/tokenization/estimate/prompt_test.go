@@ -718,3 +718,41 @@ func TestPromptFieldsNamesEveryFieldTheWalkerReads(t *testing.T) {
 		}
 	}
 }
+
+// TestReplyIsTheReservationBeyondTheInput holds Reply to what Tokens reserves
+// past the prompt, so that a budget pricing the reply and a window counting its
+// tokens read the one bound.
+func TestReplyIsTheReservationBeyondTheInput(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		family openai.Family
+		body   string
+		want   int64
+	}{
+		{"unbounded output is the default", openai.FamilyChat,
+			`{"model":"m","messages":[{"role":"user","content":"hello"}]}`, DefaultOutputTokens},
+		{"max_tokens bounds one reply", openai.FamilyChat,
+			`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`, 10},
+		{"every candidate may be as long", openai.FamilyChat,
+			`{"model":"m","max_completion_tokens":7,"n":3,"messages":[{"role":"user","content":"hi"}]}`, 21},
+		{"an embedding has no reply", openai.FamilyEmbeddings, `{"model":"m","input":"hello"}`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Walk(mustParse(t, tc.family, tc.body)).Estimate(Counter{}, nil)
+			if got := e.Reply(); got != tc.want {
+				t.Fatalf("Reply = %d, want %d", got, tc.want)
+			}
+			if got, want := e.Tokens(), max(e.Input+e.Reply(), 1); got != want {
+				t.Fatalf("Tokens = %d, want the input and the reply, %d", got, want)
+			}
+		})
+	}
+	if got := Walk(nil).Estimate(Counter{}, nil).Reply(); got != DefaultOutputTokens {
+		t.Fatalf("a request that named nothing replies %d, want the default", got)
+	}
+	// A reply bound beyond what the limiter stores saturates instead of wrapping.
+	huge := mustParse(t, openai.FamilyChat, `{"model":"m","max_tokens":9007199254740991,"n":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if got := Walk(huge).Estimate(Counter{}, nil).Reply(); got != MaxTokens {
+		t.Fatalf("Reply = %d, want it saturated at %d", got, MaxTokens)
+	}
+}

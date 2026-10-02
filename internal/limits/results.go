@@ -16,13 +16,16 @@ const (
 )
 
 // scriptResult is a parsed reservation reply. windowID and leaseExpiresAtMS are
-// only meaningful for a granted reservation.
+// only meaningful for a granted reservation, and estimate for a rejected cost
+// reservation: it says the budget refused the request's estimate, not that it
+// has been spent.
 type scriptResult struct {
 	kind             resultKind
 	dimension        Dimension
 	retryAfterMS     int64
 	windowID         int64
 	leaseExpiresAtMS int64
+	estimate         bool
 }
 
 // replyItems asserts an array reply of exactly size elements.
@@ -49,8 +52,9 @@ func replyString(value any) (string, bool) {
 func luaSafe(value int64) bool { return value >= 0 && value <= maxLuaInteger }
 
 // tuple decodes the {version, status, detail, retry_after_ms, a, b} shape that
-// both reservation scripts answer with.
-func tuple(value any) (status int64, detail string, retry, first, second int64, ok bool) {
+// both reservation scripts answer with. Each script family versions its replies
+// on its own, so a change to one family's contract never invalidates the other.
+func tuple(value any, wantVersion int64) (status int64, detail string, retry, first, second int64, ok bool) {
 	items, ok := replyItems(value, 6)
 	if !ok {
 		return 0, "", 0, 0, 0, false
@@ -62,7 +66,7 @@ func tuple(value any) (status int64, detail string, retry, first, second int64, 
 	first, okFirst := replyInt(items[4])
 	second, okSecond := replyInt(items[5])
 	if !okVersion || !okStatus || !okDetail || !okRetry || !okFirst || !okSecond ||
-		version != scriptResponseVersion || !luaSafe(retry) || !luaSafe(first) || !luaSafe(second) {
+		version != wantVersion || !luaSafe(retry) || !luaSafe(first) || !luaSafe(second) {
 		return 0, "", 0, 0, 0, false
 	}
 	return status, detail, retry, first, second, true
@@ -70,7 +74,7 @@ func tuple(value any) (status int64, detail string, retry, first, second int64, 
 
 // parseReservation decodes a reserve_limits reply.
 func parseReservation(value any) (scriptResult, error) {
-	status, detail, retry, window, expiry, ok := tuple(value)
+	status, detail, retry, window, expiry, ok := tuple(value, limitsResponseVersion)
 	if !ok {
 		return scriptResult{}, ErrUnexpectedResponse
 	}
@@ -104,7 +108,7 @@ func parseReservation(value any) (scriptResult, error) {
 // parseCostReservation decodes a reserve_cost reply, whose last two fields are
 // the day and month windows the script measured against.
 func parseCostReservation(value any) (scriptResult, error) {
-	status, detail, retry, day, month, ok := tuple(value)
+	status, detail, retry, day, month, ok := tuple(value, costResponseVersion)
 	if ok && status == -1 && retry == 0 && day == 0 && month == 0 &&
 		(detail == "invalid_arguments" || detail == "invalid_server_time") {
 		return scriptResult{kind: resultScriptFailure}, nil
@@ -115,10 +119,16 @@ func parseCostReservation(value any) (scriptResult, error) {
 	switch {
 	case status == 1 && detail == "ok" && retry == 0:
 		return scriptResult{kind: resultGranted}, nil
-	case status == 0 && detail == "daily_cost" && retry >= 1 && retry <= dayMS:
-		return scriptResult{kind: resultRejected, dimension: DimensionDailyCost, retryAfterMS: retry}, nil
-	case status == 0 && detail == "monthly_cost" && retry >= 1 && retry <= maxMonthMS:
-		return scriptResult{kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: retry}, nil
+	case status == 0 && (detail == "daily_cost" || detail == "daily_cost_estimate") && retry >= 1 && retry <= dayMS:
+		return scriptResult{
+			kind: resultRejected, dimension: DimensionDailyCost, retryAfterMS: retry,
+			estimate: detail == "daily_cost_estimate",
+		}, nil
+	case status == 0 && (detail == "monthly_cost" || detail == "monthly_cost_estimate") && retry >= 1 && retry <= maxMonthMS:
+		return scriptResult{
+			kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: retry,
+			estimate: detail == "monthly_cost_estimate",
+		}, nil
 	case status == -1 && retry == 0 &&
 		(detail == "uninitialized_daily_cost_state" || detail == "uninitialized_monthly_cost_state"):
 		return scriptResult{kind: resultUninitialized}, nil
@@ -143,7 +153,7 @@ func parseReconciliation(value any) (bool, bool, error) {
 	daily, okDaily := replyInt(items[3])
 	monthly, okMonthly := replyInt(items[4])
 	if !okVersion || !okStatus || !okDetail || !okDaily || !okMonthly ||
-		version != scriptResponseVersion {
+		version != costResponseVersion {
 		return false, false, ErrUnexpectedResponse
 	}
 	switch {
@@ -156,4 +166,28 @@ func parseReconciliation(value any) (bool, bool, error) {
 	default:
 		return false, false, ErrUnexpectedResponse
 	}
+}
+
+// parseSettlement decodes a settle_cost reply and reports whether the script
+// found the lease it was asked to settle. A lease that is no longer there, because
+// accounting already removed it or it expired, is a settlement that correctly did
+// nothing, not a failure.
+func parseSettlement(value any) (bool, error) {
+	items, ok := replyItems(value, 5)
+	if !ok {
+		return false, ErrUnexpectedResponse
+	}
+	version, okVersion := replyInt(items[0])
+	status, okStatus := replyInt(items[1])
+	detail, okDetail := replyString(items[2])
+	settled, okSettled := replyInt(items[3])
+	spare, okSpare := replyInt(items[4])
+	if !okVersion || !okStatus || !okDetail || !okSettled || !okSpare ||
+		version != costResponseVersion || spare != 0 {
+		return false, ErrUnexpectedResponse
+	}
+	if status == 1 && detail == "ok" && (settled == 0 || settled == 1) {
+		return settled == 1, nil
+	}
+	return false, ErrUnexpectedResponse
 }

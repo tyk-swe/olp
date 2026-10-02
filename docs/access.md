@@ -101,7 +101,8 @@ A project, or a resource in one, outside the caller's scope answers 404 exactly
 as if it did not exist; a visible project the caller cannot change answers 403.
 
 `GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
-manage shared accrued-cost budgets. A group requires a positive daily or monthly
+manage shared cost budgets, measured against accrued spend and the estimated cost
+of the members' requests in flight. A group requires a positive daily or monthly
 limit, uses the installation currency, and belongs to one project or the
 unassigned boundary. Attach a key through `budget_group_id`; key and group must
 share that boundary. Writes require key-management permission and project write

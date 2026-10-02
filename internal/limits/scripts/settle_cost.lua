@@ -1,10 +1,20 @@
+-- Settle one request's pending cost reservation: replace its amount with what
+-- the request actually cost, or drop it when that is zero. A lease that is not
+-- there (already accrued, expired, or never recorded) is left alone and never
+-- recreated, which is what keeps a late or repeated settlement from counting
+-- spend twice.
+-- Response v1: {version, status, detail, settled, 0}
+-- status: 1 = ok (settled: 1 when a lease was found), -1 = invalid arguments.
+-- KEYS: pending reservations, reservation expiries (same cost owner hash tag).
+-- ARGV: lease_id, actual amount ("0" releases), ttl_ms: the most the lease may
+--       outlive this call while PostgreSQL prices the request. It only ever
+--       shortens the lease granted at admission.
+
 local RESPONSE_VERSION = 1
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
-local DAY_MS = 86400000
-local PENDING_RETRY_MS = 1000
 
 local function failure(reason)
-  return {RESPONSE_VERSION, -1, reason, 0, 0, 0}
+  return {RESPONSE_VERSION, -1, reason, 0, 0}
 end
 
 local function parse_safe_unsigned_integer(raw)
@@ -26,32 +36,6 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(normalized)
 end
 
-local function days_from_civil(year, month, day)
-  year = year - (month <= 2 and 1 or 0)
-  local era = math.floor(year / 400)
-  local year_of_era = year - era * 400
-  local adjusted_month = month + (month > 2 and -3 or 9)
-  local day_of_year = math.floor((153 * adjusted_month + 2) / 5) + day - 1
-  local day_of_era = year_of_era * 365 + math.floor(year_of_era / 4)
-    - math.floor(year_of_era / 100) + day_of_year
-  return era * 146097 + day_of_era - 719468
-end
-
-local function civil_month(days)
-  local shifted = days + 719468
-  local era = math.floor(shifted / 146097)
-  local day_of_era = shifted - era * 146097
-  local year_of_era = math.floor((day_of_era - math.floor(day_of_era / 1460)
-    + math.floor(day_of_era / 36524) - math.floor(day_of_era / 146096)) / 365)
-  local year = year_of_era + era * 400
-  local day_of_year = day_of_era
-    - (365 * year_of_era + math.floor(year_of_era / 4) - math.floor(year_of_era / 100))
-  local adjusted_month = math.floor((5 * day_of_year + 2) / 153)
-  local month = adjusted_month + (adjusted_month < 10 and 3 or -9)
-  year = year + (month <= 2 and 1 or 0)
-  return year, month
-end
-
 local function current_time(override)
   if override > 0 then
     return override
@@ -68,21 +52,6 @@ local function current_time(override)
   end
   return seconds * 1000 + math.floor(microseconds / 1000)
 end
-
-local function windows(now_ms)
-  local day = math.floor(now_ms / DAY_MS)
-  local year, month = civil_month(day)
-  local month_id = year * 12 + month - 1
-  local next_year = year + (month == 12 and 1 or 0)
-  local next_month = month == 12 and 1 or month + 1
-  local day_remaining = (day + 1) * DAY_MS - now_ms
-  local month_remaining = days_from_civil(next_year, next_month, 1) * DAY_MS - now_ms
-  if day_remaining < 1 or month_remaining < 1 then
-    return nil
-  end
-  return day, month_id, day_remaining, month_remaining
-end
-
 
 -- BEGIN cost_pending (byte-identical in reserve_cost, settle_cost and reconcile_cost; a Go test enforces it)
 -- Pending reservations live in two keys that share the cost owner's hash tag:
@@ -296,189 +265,42 @@ local function release_lease(pending_key, expiry_key, lease_id)
 end
 -- END cost_pending
 
-local function read_state(key, expected_fields, current_window)
-  local values = redis.pcall("HMGET", key, unpack(expected_fields))
-  -- A key of another type answers with an error, not an array.
-  if values.err ~= nil then
-    return nil
-  end
-  local present = 0
-  for index = 1, #values do
-    if values[index] ~= false then
-      present = present + 1
-    end
-  end
-  if present == 0 then
-    return "missing", 0, 0
-  end
-  if present ~= #values then
-    return nil
-  end
-  local stored_window = parse_safe_unsigned_integer(values[1])
-  local accrued_hi, accrued_lo = parse_amount(values[2])
-  if stored_window == nil or accrued_hi == nil or stored_window > current_window then
-    return nil
-  end
-  if #values == 3 and parse_safe_unsigned_integer(values[3]) == nil then
-    return nil
-  end
-  if stored_window ~= current_window then
-    return "stale", 0, 0
-  end
-  return "current", accrued_hi, accrued_lo
-end
-
--- KEYS: day balance, month balance, pending reservations, reservation expiries
---       (all four carry the cost owner's Valkey Cluster hash tag).
--- ARGV: daily_limit, monthly_limit, server time override (tests only), amount,
---       lease_id, lease_ttl_ms. An empty limit disables that window; an amount
---       of 0 is a request nothing could price, which is judged on accrued spend
---       alone and leaves nothing pending.
-if #KEYS ~= 4 or #ARGV ~= 6 then
+if #KEYS ~= 2 or #ARGV ~= 3 then
   return failure("invalid_arguments")
 end
 
--- A limit is positive and below 10^12, which is as large as the API accepts: past
--- that, an amount could not be told from one that saturates.
-local function parse_limit(raw)
-  local hi, lo = parse_amount(raw)
-  if hi == nil or hi >= UNIT or (hi == 0 and lo == 0) then
-    return nil
-  end
-  return hi, lo
-end
-
-local daily_hi, daily_lo, monthly_hi, monthly_lo
-if ARGV[1] ~= "" then
-  daily_hi, daily_lo = parse_limit(ARGV[1])
-end
-if ARGV[2] ~= "" then
-  monthly_hi, monthly_lo = parse_limit(ARGV[2])
-end
-local override = parse_safe_unsigned_integer(ARGV[3])
-local amount_hi, amount_lo = parse_amount(ARGV[4])
-local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
-local priced = amount_hi ~= nil and (amount_hi > 0 or amount_lo > 0)
-if override == nil or amount_hi == nil or lease_ttl == nil
-    or (priced and (lease_ttl < 1 or not valid_lease(ARGV[5])))
-    or (ARGV[1] ~= "" and daily_hi == nil)
-    or (ARGV[2] ~= "" and monthly_hi == nil) then
+local lease_id = ARGV[1]
+local amount_hi, amount_lo = parse_amount(ARGV[2])
+local ttl = parse_safe_unsigned_integer(ARGV[3])
+local release = amount_hi ~= nil and amount_hi == 0 and amount_lo == 0
+if not valid_lease(lease_id) or amount_hi == nil or ttl == nil or (not release and ttl < 1) then
   return failure("invalid_arguments")
 end
-
-local now_ms = current_time(override)
+local now_ms = current_time(0)
 if now_ms == nil then
   return failure("invalid_server_time")
 end
-local day_window, month_window, day_ttl, month_ttl = windows(now_ms)
-if day_window == nil then
-  return failure("invalid_server_time")
-end
 
-local daily_state, daily_spent_hi, daily_spent_lo = "disabled", 0, 0
-if daily_hi ~= nil then
-  daily_state, daily_spent_hi, daily_spent_lo = read_state(KEYS[1], {"window", "accrued"}, day_window)
-  if daily_state == nil then
-    return {RESPONSE_VERSION, -1, "malformed_daily_cost_state", 0, day_window, month_window}
+local sum_hi, sum_lo = pending_total(KEYS[1], KEYS[2], now_ms)
+local held = redis.call("HGET", KEYS[1], lease_id)
+if held == false then
+  return {RESPONSE_VERSION, 1, "ok", 0, 0}
+end
+-- A lease past its expiry no longer counts, so settling must not revive it even
+-- when the sweep above stopped before reaching it.
+local expiry = redis.call("ZSCORE", KEYS[2], lease_id)
+if expiry ~= false and tonumber(expiry) <= now_ms then
+  remove_lease(KEYS[1], KEYS[2], lease_id, held, sum_hi, sum_lo)
+  return {RESPONSE_VERSION, 1, "ok", 0, 0}
+end
+if release then
+  remove_lease(KEYS[1], KEYS[2], lease_id, held, sum_hi, sum_lo)
+else
+  local held_hi, held_lo = parse_amount(held)
+  if held_hi ~= nil then
+    sum_hi, sum_lo = sub_amount(sum_hi, sum_lo, held_hi, held_lo)
   end
+  sum_hi, sum_lo = add_amount(sum_hi, sum_lo, amount_hi, amount_lo)
+  store_lease(KEYS[1], KEYS[2], lease_id, amount_hi, amount_lo, sum_hi, sum_lo, now_ms + ttl, true)
 end
-local monthly_state, monthly_spent_hi, monthly_spent_lo = "disabled", 0, 0
-if monthly_hi ~= nil then
-  monthly_state, monthly_spent_hi, monthly_spent_lo = read_state(
-    KEYS[2], {"window", "accrued", "unpriced"}, month_window
-  )
-  if monthly_state == nil then
-    return {RESPONSE_VERSION, -1, "malformed_monthly_cost_state", 0, day_window, month_window}
-  end
-end
-
-if daily_hi ~= nil and compare_amount(daily_spent_hi, daily_spent_lo, daily_hi, daily_lo) >= 0 then
-  return {RESPONSE_VERSION, 0, "daily_cost", day_ttl, day_window, month_window}
-end
-if monthly_hi ~= nil and compare_amount(monthly_spent_hi, monthly_spent_lo, monthly_hi, monthly_lo) >= 0 then
-  return {RESPONSE_VERSION, 0, "monthly_cost", month_ttl, day_window, month_window}
-end
-
--- Only authoritative snapshots may initialize a window. Missing state can
--- also mean eviction or data loss, even while Valkey itself is reachable.
-if daily_hi ~= nil and daily_state ~= "current" then
-  return {RESPONSE_VERSION, -1, "uninitialized_daily_cost_state", 0, day_window, month_window}
-end
-if monthly_hi ~= nil and monthly_state ~= "current" then
-  return {RESPONSE_VERSION, -1, "uninitialized_monthly_cost_state", 0, day_window, month_window}
-end
-
--- A priced request must fit beside what is already spent and what requests in
--- flight may still spend. Retiring expired leases is the only write a
--- rejection makes, and it changes no balance.
-local held_hi, held_lo = 0, 0
-if priced then
-  held_hi, held_lo = pending_total(KEYS[3], KEYS[4], now_ms)
-  -- A lease that is already recorded was granted by an earlier delivery of this
-  -- same reservation: it is not charged again. One that has lapsed, but that the
-  -- bounded sweep has not reached, is retired and reserved afresh instead of
-  -- being granted a second time. The total is known to describe the leases, so
-  -- taking its amount off is exact and needs no second sweep.
-  local recorded = redis.call("ZSCORE", KEYS[4], ARGV[5])
-  if recorded ~= false and tonumber(recorded) > now_ms then
-    return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
-  end
-  if recorded ~= false then
-    local lapsed_hi, lapsed_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
-    if lapsed_hi ~= nil then
-      held_hi, held_lo = sub_amount(held_hi, held_lo, lapsed_hi, lapsed_lo)
-    end
-    release_lease(KEYS[3], KEYS[4], ARGV[5])
-  end
-  local pending_hi, pending_lo = held_hi, held_lo
-  held_hi, held_lo = add_amount(pending_hi, pending_lo, amount_hi, amount_lo)
-
-  -- How long to wait before a window that cannot hold the request may admit it,
-  -- or nil when it can. Waiting only helps when in-flight reservations are what
-  -- stands in the way: spent plus this request alone would still fit.
-  local function wait_for(limit_hi, limit_lo, spent_hi, spent_lo, window_ttl)
-    local total_hi, total_lo = add_amount(spent_hi, spent_lo, held_hi, held_lo)
-    if compare_amount(total_hi, total_lo, limit_hi, limit_lo) <= 0 then
-      return nil
-    end
-    local alone_hi, alone_lo = add_amount(spent_hi, spent_lo, amount_hi, amount_lo)
-    if compare_amount(alone_hi, alone_lo, limit_hi, limit_lo) <= 0 then
-      return math.min(window_ttl, PENDING_RETRY_MS)
-    end
-    return window_ttl
-  end
-  -- The request is admitted only when every refusing window clears, so the hint
-  -- is the longest wait of them, reported under the window that sets it.
-  local refused, retry = nil, 0
-  if daily_hi ~= nil then
-    local wait = wait_for(daily_hi, daily_lo, daily_spent_hi, daily_spent_lo, day_ttl)
-    if wait ~= nil then
-      refused, retry = "daily_cost", wait
-    end
-  end
-  if monthly_hi ~= nil then
-    local wait = wait_for(monthly_hi, monthly_lo, monthly_spent_hi, monthly_spent_lo, month_ttl)
-    if wait ~= nil and (refused == nil or wait > retry) then
-      refused, retry = "monthly_cost", wait
-    end
-  end
-  if refused ~= nil then
-    -- The suffix says the budget is not spent but cannot hold this request beside
-    -- what is, which is not the refusal an exhausted budget makes above.
-    return {RESPONSE_VERSION, 0, refused .. "_estimate", retry, day_window, month_window}
-  end
-end
-
-if daily_hi ~= nil and redis.call("PTTL", KEYS[1]) < 1 then
-  redis.call("PEXPIRE", KEYS[1], day_ttl)
-end
-if monthly_hi ~= nil and redis.call("PTTL", KEYS[2]) < 1 then
-  redis.call("PEXPIRE", KEYS[2], month_ttl)
-end
-if priced then
-  local expires_ms = now_ms + lease_ttl
-  store_lease(KEYS[3], KEYS[4], ARGV[5], amount_hi, amount_lo, held_hi, held_lo, expires_ms, false)
-  outlive(KEYS[3], KEYS[4], expires_ms, now_ms)
-end
-
-return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
+return {RESPONSE_VERSION, 1, "ok", 1, 0}

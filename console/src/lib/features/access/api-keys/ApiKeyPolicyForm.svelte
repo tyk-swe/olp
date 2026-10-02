@@ -423,11 +423,12 @@
     <p class="section-help">
       {#if services.limitsEnforced}Amounts use the installation pricing
         currency. Daily and monthly windows reset at midnight UTC. Budgeted
-        requests are refused when Valkey is unavailable. These are accrued-cost
-        thresholds: accepted concurrent work can exceed them, and unpriced
-        attempts accrue no cost. Leave blank for no cost budget.{:else}Save
-        daily and monthly budget amounts for future enforcement. Spending is not
-        measured or restricted yet.{/if}
+        requests are refused when Valkey is unavailable. A request must fit
+        beside the spend so far and the estimated cost of requests still
+        running; unpriced attempts accrue no cost and some operations are not
+        estimated, so these are not invoice caps. Leave blank for no cost
+        budget.{:else}Save daily and monthly budget amounts for future
+        enforcement. Spending is not measured or restricted yet.{/if}
     </p>
     <div class="form-grid budget-inputs">
       <div class="form-field">

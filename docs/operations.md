@@ -175,8 +175,9 @@ skip is not evidence of successful reconciliation.
 
 Monitor `olp_worker_task_healthy{task="cost_reconciliation"}` and
 `olp_worker_task_runs_total{task="cost_reconciliation",outcome=...}`. Rejections
-use `olp_key_budget_rejections_total{window="daily|monthly"}`; there is no
-per-key Prometheus spend gauge.
+use `olp_key_budget_rejections_total{window="daily|monthly"}`, which counts both a
+budget that is exhausted and one whose room cannot hold the request's estimated
+cost; there is no per-key Prometheus spend gauge.
 
 1. For persistent initialization 503s or spend exceeding a limit while requests
    continue, inspect the consumer, PostgreSQL, Valkey, their clocks, and the
@@ -190,11 +191,28 @@ per-key Prometheus spend gauge.
 4. Review `unpriced_attempts`. Missing usage or prices means budgets cannot
    account for all spend; repair coverage and retain provider-side quotas.
 
-These are accrued-cost thresholds using exact decimal arithmetic and UTC
-boundaries, not reserved invoice caps. Concurrent accepted work can exceed a
-threshold, and unpriced attempts accrue no money. A current-window hash does not
-prove attribution is current; no maximum lag or monetary overshoot is measured.
-See the [limits](../tests/integration/limits_test.go) and
+Admission measures these thresholds with exact decimal arithmetic and UTC
+boundaries against accrued spend plus the estimated cost of requests in flight
+([cost reservation](gateway.md#cost-reservation)), which is not a reserved
+invoice cap: unpriced attempts accrue no money, operations whose cost is unknown
+beforehand reserve nothing, and spend can pass a limit by what the estimates
+under-counted. A reservation that accounting never removes lapses at the route
+deadline plus five minutes, and until it does it counts beside the accrued spend,
+so a stalled consumer shows as extra `429 budget_exhausted` before it shows as
+spend. Each reservation or settlement retires at most a bounded page of lapsed
+reservations, so a large backlog is worked through over the calls that follow
+and keeps counting until then; the message of a refusal says whether the budget
+is exhausted or the request's estimate does not fit beside what is spent and in
+flight. A current-window hash does not prove attribution is current; no maximum
+lag or monetary overshoot is measured. The keys that hold reservations, `cost:pending`
+and `cost:expiry`, are advisory and derived, so deleting them while traffic is
+stopped loses only the protection for requests in flight, and a reservation that
+finds one of the two without the other discards both; the accrued `cost:day`
+and `cost:month` hashes remain the authority and are never lowered or deleted
+for this. During a rolling upgrade a replica still running the previous release
+does not remove reservations made by a newer one, which then lapse on their own.
+See the [limits](../tests/integration/limits_test.go),
+[reservation](../tests/integration/limits_reservation_test.go) and
 [fleet recovery](../tests/integration/fleet_recovery_test.go) tests for evidence.
 
 ### Notifications
@@ -367,6 +385,7 @@ read, acknowledge, or reconcile one another's state.
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
 | `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
 | `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key or budget-group UUID. |
+| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
 | `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
 
@@ -375,6 +394,11 @@ or `ps_<slot uuid>` for a credential slot; the braces are the cluster hash tag,
 so one key's dimensions stay on one slot. Cost keys are tagged by the API key or
 budget-group UUID, so key rotation preserves spend and group members share one
 balance.
+
+The gateway runs its Lua scripts by SHA-1 digest and sends a script's source only
+to a Valkey that answers it holds none, which happens once after a restart, a
+failover or `SCRIPT FLUSH`, and is cached from then on. Flushing the script cache
+is therefore safe; it costs one slower call per script.
 
 ## Routine checks
 

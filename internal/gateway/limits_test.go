@@ -198,27 +198,37 @@ func TestAdmissionEstimateIgnoresInlineMediaSize(t *testing.T) {
 }
 
 func TestAdmissionRejectionMapping(t *testing.T) {
+	const exhausted = "The API key cost budget was exhausted. Unpriced attempts accrue 0."
 	for _, tc := range []struct {
+		name       string
 		dimension  limits.Dimension
+		estimate   bool
 		retryAfter time.Duration
 		code       string
 		message    string
 		want       time.Duration
 	}{
-		{limits.DimensionRequests, 12 * time.Second, "rate_limit_exceeded", "requests per minute", 12 * time.Second},
-		{limits.DimensionTokens, 30 * time.Second, "rate_limit_exceeded", "tokens per minute", 30 * time.Second},
-		{limits.DimensionConcurrency, time.Hour, "rate_limit_exceeded", "concurrency", maxConcurrencyRetryHint},
-		// Both cost budgets answer with the one message the contract pins.
-		{limits.DimensionDailyCost, 90 * time.Second, "budget_exhausted", "The API key cost budget was exhausted. Unpriced attempts accrue 0.", 90 * time.Second},
-		{limits.DimensionMonthlyCost, 0, "budget_exhausted", "The API key cost budget was exhausted. Unpriced attempts accrue 0.", time.Second},
+		{"requests", limits.DimensionRequests, false, 12 * time.Second, "rate_limit_exceeded", "requests per minute", 12 * time.Second},
+		{"tokens", limits.DimensionTokens, false, 30 * time.Second, "rate_limit_exceeded", "tokens per minute", 30 * time.Second},
+		{"concurrency", limits.DimensionConcurrency, false, time.Hour, "rate_limit_exceeded", "concurrency", maxConcurrencyRetryHint},
+		// An exhausted budget answers with the one message the contract pins.
+		{"daily exhausted", limits.DimensionDailyCost, false, 90 * time.Second, "budget_exhausted", exhausted, 90 * time.Second},
+		{"monthly exhausted", limits.DimensionMonthlyCost, false, 0, "budget_exhausted", exhausted, time.Second},
+		// A budget with room left says it is the request's estimate that does not
+		// fit, under the same code, and never claims the budget is exhausted.
+		{"daily estimate", limits.DimensionDailyCost, true, time.Second, "budget_exhausted", "cannot cover this request's estimated cost", time.Second},
+		{"monthly estimate", limits.DimensionMonthlyCost, true, time.Hour, "budget_exhausted", "Lower max_tokens", time.Hour},
 	} {
-		t.Run(string(tc.dimension), func(t *testing.T) {
-			e := rateLimited(tc.dimension, tc.retryAfter)
+		t.Run(tc.name, func(t *testing.T) {
+			e := rateLimited(tc.dimension, tc.retryAfter, tc.estimate)
 			if e.Status != 429 || e.Type != "rate_limit_error" || e.Code != tc.code {
 				t.Fatalf("error = %d %s/%s, want 429 rate_limit_error/%s", e.Status, e.Type, e.Code, tc.code)
 			}
 			if !strings.Contains(e.Message, tc.message) {
 				t.Fatalf("message %q does not mention %q", e.Message, tc.message)
+			}
+			if tc.estimate && strings.Contains(e.Message, "exhausted") {
+				t.Fatalf("message %q calls a budget with room left exhausted", e.Message)
 			}
 			if e.RetryAfter != tc.want {
 				t.Fatalf("retry after = %s, want %s", e.RetryAfter, tc.want)

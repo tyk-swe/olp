@@ -107,10 +107,11 @@
   <p class="eyebrow">Shared budgets</p>
   <h2 id="budget-groups-heading">Budget groups</h2>
   <p class="section-help">
-    {#if services.limitsEnforced}Keys assigned to a group share its accrued-cost
-      budget while keeping their own limits and history. Windows reset at
-      midnight UTC; unpriced attempts accrue 0.{:else}Groups save shared budget
-      policy for future enforcement. Spending is not restricted yet.{/if}
+    {#if services.limitsEnforced}Keys assigned to a group share its cost budget,
+      which counts the spend so far and the estimated cost of members' requests
+      still running, while keeping their own limits and history. Windows reset
+      at midnight UTC; unpriced attempts accrue 0.{:else}Groups save shared
+      budget policy for future enforcement. Spending is not restricted yet.{/if}
   </p>
 
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}

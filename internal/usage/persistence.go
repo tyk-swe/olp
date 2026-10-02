@@ -421,12 +421,17 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
+	// Each snapshot names the request it accounts for, so that installing it in
+	// the distributed counters also removes the cost the gateway reserved for the
+	// request when it was admitted.
+	snapshot.RequestID = ev.RequestID
 	snapshots := []limits.CostSnapshot{snapshot}
 	if ev.BudgetGroupID != nil {
 		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced)
 		if err != nil {
 			return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
 		}
+		group.RequestID = ev.RequestID
 		snapshots = append(snapshots, group)
 	}
 	return snapshots, nil

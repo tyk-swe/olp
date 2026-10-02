@@ -324,7 +324,7 @@ func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
 	admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(rewritten), nil)
 	// The source is eight tokens and ten for the reply; the rewritten request
 	// adds an image.
-	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
+	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, reply: 10, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
 		t.Fatalf("admitted %+v, want %+v", admitted, want)
 	}
 	if demand.EstimatedInputTokens != 8+estimate.ImageTokens || demand.MaxOutputTokens == nil || *demand.MaxOutputTokens != 10 {
@@ -334,7 +334,7 @@ func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
 	// alone counted it, so its provenance stands.
 	x = &execution{parsed: rewritten}
 	admitted, _ = x.preparedEstimate("gpt-4o", x.summarize(source), nil)
-	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
+	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, reply: 10, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
 		t.Fatalf("admitted %+v, want %+v", admitted, want)
 	}
 }

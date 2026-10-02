@@ -113,6 +113,11 @@ type CostSnapshot struct {
 	MonthlyWindowID  int64
 	MonthlyAccrued   string
 	UnpricedAttempts int64
+	// RequestID names the request whose spend this snapshot installed, when one
+	// did: the identifier its cost reservation was made under. Installing the
+	// spend removes the reservation in the same step, so the budget never counts
+	// the request twice. A snapshot rebuilt from the facts as a whole carries none.
+	RequestID string
 }
 
 // validate refuses a snapshot Valkey could not store exactly, which would
@@ -133,6 +138,11 @@ func (s CostSnapshot) validate() error {
 	}
 	if s.UnpricedAttempts < 0 || s.UnpricedAttempts > maxLuaInteger {
 		return fmt.Errorf("unpriced attempt count %d exceeds the Valkey Lua integer range", s.UnpricedAttempts)
+	}
+	if s.RequestID != "" {
+		if _, err := uuid.Parse(s.RequestID); err != nil {
+			return fmt.Errorf("cost snapshot request ID %q is not a UUID", s.RequestID)
+		}
 	}
 	return nil
 }
@@ -164,26 +174,70 @@ func validDecimal(value string) bool {
 	return true
 }
 
+// costPrefix is what the cost keys of one owner share, which is their cluster
+// hash tag: every lookup that spends from the owner meets the same state.
+func (l *Limiter) costPrefix(costOwnerID string) string {
+	return l.namespace + ":{" + simpleUUID(costOwnerID) + "}:cost"
+}
+
 // costKeys addresses the balances of one API key. Both live under the key's own
 // cluster hash tag so every lookup that spends from it meets the same state.
 func (l *Limiter) costKeys(costOwnerID string) (string, string) {
-	prefix := l.namespace + ":{" + simpleUUID(costOwnerID) + "}:cost"
+	prefix := l.costPrefix(costOwnerID)
 	return prefix + ":day", prefix + ":month"
+}
+
+// pendingKeys addresses the reservations of requests in flight against one cost
+// owner: a hash of what each holds, and the set that says when each lapses. They
+// share the balances' hash tag so one script sees accrued and pending together.
+func (l *Limiter) pendingKeys(costOwnerID string) (string, string) {
+	prefix := l.costPrefix(costOwnerID)
+	return prefix + ":pending", prefix + ":expiry"
+}
+
+// Reserved reports the cost that requests in flight hold against one owner, as a
+// canonical decimal string, without retiring any that have lapsed. It is for
+// operators and tests: admission decides from the scripts, never from this.
+func (l *Limiter) Reserved(ctx context.Context, costOwnerID string) (string, error) {
+	if _, err := uuid.Parse(costOwnerID); err != nil {
+		return "", &InvalidRequestError{Reason: "cost owner ID must be a UUID"}
+	}
+	pending, _ := l.pendingKeys(costOwnerID)
+	value, err := l.client.Do(ctx, "HGET", pending, "sum")
+	if err != nil {
+		return "", &ServiceError{Err: err}
+	}
+	switch total := value.(type) {
+	case nil:
+		return "0", nil
+	case string:
+		if validDecimal(total) {
+			return total, nil
+		}
+	}
+	return "", ErrMalformedState
 }
 
 // ApplyCostSnapshot installs PostgreSQL's durable spend in Valkey and reports
 // which windows it reconciled. The script only initialises a window whose
 // identifier matches the current server window and never lowers a counter that
-// is already valid, so a stale or future snapshot cannot widen a budget.
+// is already valid, so a stale or future snapshot cannot widen a budget. A
+// snapshot that names a request also removes that request's cost reservation in
+// the same step, replayed or not.
 func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, bool, error) {
 	if err := s.validate(); err != nil {
 		return false, false, err
 	}
 	daily, monthly := l.costKeys(s.CostOwnerID)
-	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly},
+	pending, expiry := l.pendingKeys(s.CostOwnerID)
+	requestID := ""
+	if s.RequestID != "" {
+		requestID = canonicalUUID(s.RequestID)
+	}
+	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly, pending, expiry},
 		strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued,
 		strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued,
-		strconv.FormatInt(s.UnpricedAttempts, 10), "0")
+		strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID)
 	if err != nil {
 		return false, false, err
 	}

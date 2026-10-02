@@ -110,6 +110,7 @@ func accountingEvent(e Envelope) *usage.Event {
 // explains why this target served and what it reported.
 func accountingAttempt(e Envelope, index int) usage.Attempt {
 	fact := &e.Attempts[index]
+	evidence := attemptUsage(fact, e.Operation)
 	attempt := usage.Attempt{
 		ID: uuid.Must(uuid.NewV7()).String(),
 		// The ordinal is the position in the sequence of attempts made.
@@ -122,11 +123,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		Committed:     fact.Committed,
 		LatencyMS:     milliseconds(fact.Duration),
 		FirstByteMS:   optionalMilliseconds(fact.FirstByte),
-		Usage: &usage.AttemptUsage{
-			Observed:         fact.UsageObserved,
-			Complete:         fact.UsageComplete,
-			BillingUncertain: fact.BillingUncertain,
-		},
+		Usage:         &evidence,
 		Routing: &usage.Routing{
 			Interaction:         fact.Interaction,
 			Mode:                optionalText(fact.Mode),
@@ -147,12 +144,8 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 		attempt.ErrorClass = optionalText(fact.Class)
 	}
 	if fact.UsageObserved {
-		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.CachedInputTokens = accountingTokens(fact)
-		attempt.Usage.CacheWriteInputTokens, attempt.Usage.CacheWrite5MInputTokens, attempt.Usage.CacheWrite1HInputTokens = accountingCacheWrites(fact)
-		attempt.Usage.MediaUnits = accountingMediaUnits(fact)
 		attempt.Routing.StreamedOutputTokens = streamedTokens(fact)
 		if e.Operation == "embeddings" {
-			attempt.Usage.OutputTokens = nil
 			attempt.Routing.StreamedOutputTokens = nil
 		}
 	}
@@ -174,6 +167,27 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 			estimated, fact.EstimateProvenance, fact.ModelFamily
 	}
 	return attempt
+}
+
+// attemptUsage is the billing evidence an attempt carries into its usage event.
+// It is also what the gateway prices an attempt by when it settles the request's
+// cost, so what the budget holds for a request and what accounting later records
+// for it are one reading of the same attempt.
+func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
+	evidence := usage.AttemptUsage{
+		Observed:         fact.UsageObserved,
+		Complete:         fact.UsageComplete,
+		BillingUncertain: fact.BillingUncertain,
+	}
+	if fact.UsageObserved {
+		evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens = accountingTokens(fact)
+		evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens = accountingCacheWrites(fact)
+		evidence.MediaUnits = accountingMediaUnits(fact)
+		if operation == "embeddings" {
+			evidence.OutputTokens = nil
+		}
+	}
+	return evidence
 }
 
 // accountingTokens is the metering an attempt disclosed. A provider that

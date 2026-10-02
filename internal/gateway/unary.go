@@ -197,7 +197,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
 	defer cancel()
-	x.lease, e = s.Admission.reserveKey(ctx, x.authority, keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall)
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.authority, keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)
 	}
